@@ -31,6 +31,8 @@ const GATE = val("--gate");
 const JSON_OUT = argv.includes("--json");
 
 const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+const policy = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8"));
+const defaultCap = policy?.concurrency?.max_in_flight_per_repo ?? 3;
 const repos = (cfg.repos ?? []).filter((r) => !only.length || only.includes(r.name));
 
 if (!repos.length) {
@@ -95,7 +97,7 @@ for (const repo of repos) {
   // already running. Sorted the way §7 sorts: priority asc, then created asc.
   const inFlightPaths = inProgress.flatMap((i) => parseOwnedPaths(i.description ?? ""));
   const sorted = [...ready].sort((a, b) => (a.priority || 99) - (b.priority || 99));
-  const slotsFree = Math.max(0, (repo.max_in_flight ?? 3) - inProgress.length);
+  const slotsFree = Math.max(0, (repo.max_in_flight ?? defaultCap) - inProgress.length);
   const free = [];
   const busyPaths = [...inFlightPaths];
   for (const t of sorted) {
@@ -110,6 +112,10 @@ for (const repo of repos) {
   summary.push({
     repo: repo.name,
     triage: triage.length + notReady.length,
+    // Triage-state only. The stage processes Triage tickets; gating on the
+    // combined count kept the gate open for Todo-without-agent-ready tickets
+    // the stage never touches, spawning a no-op agent every tick.
+    triageState: triage.length,
     ready: ready.length,
     inProgress: inProgress.length,
     inReview: inReview.length,
@@ -149,8 +155,9 @@ if (GATE) {
   // Exit 0 = there is work for this stage, so the supervisor should run it.
   // Exit 1 = idle, skip. Anything else is a real error and stops the loop.
   const has = {
-    // Only spawn a triage agent when something is actually unspecified.
-    triage: (s) => s.triage > 0,
+    // Only spawn a triage agent when a Triage-STATE ticket is waiting — the
+    // stage never touches Todo tickets, ready or not.
+    triage: (s) => s.triageState > 0,
     // Don't dispatch with no free slot or nothing startable — an agent that
     // wakes to find the cap full has burned a run to learn nothing.
     dispatch: (s) => s.slotsFree > 0 && s.startable.length > 0,

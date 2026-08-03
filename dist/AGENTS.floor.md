@@ -55,6 +55,14 @@ for i in $(seq 60); do curl -sf localhost:4222 >/dev/null && break; sleep 2; don
 
 Measured on real runs: single `sleep 180` and `sleep 75` calls, plus a `sleep 60` after starting a dev server that was ready in a fraction of that. Each one is a per-ticket process sitting idle while holding a concurrency slot.
 
+### Shell globs
+
+Quote glob arguments: `grep -rn "..." src --include='*.ts'`, never `--include=*.ts`. zsh expands the unquoted form against the current directory and **errors** when nothing matches there, killing the command before grep runs. Seen repeatedly in real transcripts.
+
+### Linear labels
+
+`type:*` has exactly eight values: `bug feature ui-ux security performance maintenance docs a11y`. Nothing else resolves — `type:chore` fails the mutation. `area:*` values are per-team; check an existing ticket in the same project rather than inventing one.
+
 ### Secrets
 
 Never print, echo, commit, or paste an API key, token, or `.env` file — not into a transcript, a PR, a Linear comment, or a log. Scripts read credentials themselves. If a secret appears in a diff, that's an escalation, not a cleanup.

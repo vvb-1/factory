@@ -18,37 +18,6 @@ Prefer removing the need over documenting the workaround. An env var or a script
 
 ## Open
 
-### F-1 · zsh glob-expands unquoted `--include=*.ts`
-
-**Seen:** 2 occurrences, `bj29-factory-work-20260803-230342`
-**Symptom:** `(eval):1: no matches found: --include=*.ts` — the agent's `grep -rn "..." app/src --include=*.ts` dies before grep runs.
-
-zsh expands `*.ts` against the *current directory* and errors when nothing matches, unlike bash which passes the literal through. Every agent doing a scoped grep hits it.
-
-**Fix options, in order of preference:**
-1. Set `NO_NOMATCH` for agent shells so unmatched globs pass through literally (removes the need entirely).
-2. Or a line in `shared/floor.md`: quote glob arguments — `--include='*.ts'`.
-
-Option 1 is preferred because it cannot be forgotten. Option 2 is a rule; rules decay.
-
-### F-2 · `gh pr merge --delete-branch` fails while the worktree exists
-
-**Seen:** 1 occurrence — recorded early because the cause is structural, not incidental.
-**Symptom:** `failed to delete local branch fix/CLNT-611-blog-banner-image: cannot delete branch ... checked out at <worktree>`
-
-Git refuses to delete a branch that is checked out in a worktree. The merge stage deletes the branch before tearing the worktree down, so it will fail every single time a ticket is merged from a worktree.
-
-**Fix:** merge stage should run `worktree-down.sh <TICKET>` *before* `--delete-branch`, or drop `--delete-branch` and let the janitor handle both. Belongs in `shared/commands/factory-merge.md`.
-
-### F-3 · Non-canonical Linear labels are attempted
-
-**Seen:** 1 occurrence (`type:chore`)
-**Symptom:** `Could not resolve label(s): "type:chore"`
-
-`type:*` has eight canonical values (`bug feature ui-ux security performance maintenance docs a11y`) and `chore` is not one of them. The agent had no list in front of it.
-
-**Fix:** put the canonical `type:*` and `area:*` values in `shared/floor.md`, where every harness sees them, rather than only in `linear.md` which an agent may not have loaded.
-
 ### F-8 · Agents `sleep` to wait for CI instead of watching it
 
 **Seen:** `sleep 150; gh pr checks 166`, `sleep 180; echo done`, `sleep 60; echo done` across multiple runs.
@@ -78,6 +47,18 @@ Raising `--print-timeout` alone would trade a short hang for a long one: a wedge
 ---
 
 ## Fixed
+
+### F-1 · zsh glob-expands unquoted `--include=*.ts` — `fixed` (OPS-41)
+
+`(eval):1: no matches found: --include=*.ts` — zsh expands `*.ts` against the current directory and errors when nothing matches, killing the command before grep runs. Fixed as a floor rule (§Shell globs): quote glob arguments. The preferred fix — `NO_NOMATCH` for agent shells — isn't reachable from the runner: it's a zsh `setopt`, not an environment variable, and the harness's Bash tool starts shells from the user's own profile. If unquoted globs persist in transcripts, the next step is setting it in `~/.zshenv`.
+
+### F-2 · `gh pr merge --delete-branch` fails while the worktree exists — `fixed` (OPS-41)
+
+Git refuses to delete a branch checked out in a worktree, so the flag failed on every worktree-based merge. `factory-merge.md` now orders cleanup explicitly: worktree-down first, then delete the branch, and says not to use `--delete-branch`.
+
+### F-3 · Non-canonical Linear labels are attempted — `fixed` (OPS-41)
+
+`Could not resolve label(s): "type:chore"`. The eight canonical `type:*` values are now in `shared/floor.md` (§Linear labels), where every harness sees them.
 
 ### F-4 · Stale warm cache made every worktree pay a full compile — `fixed`
 

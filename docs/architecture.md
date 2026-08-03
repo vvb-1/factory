@@ -163,7 +163,7 @@ The plugin is a convenience layer, not the safety floor. It reaches Claude Code 
 
 | Failure | Why it is tolerated | Mitigation |
 | :--- | :--- | :--- |
-| Crashed agent holds a ticket | Reaper is not on a timer (§2.7) | Run it by hand; re-enable when runs are unattended |
+| Crashed agent holds a ticket | Reaper is not on a timer (§2.7) | `tick.mjs` un-claims its own failed runs (back to Todo, with a comment); the reaper covers crashes tick can't see — run it by hand |
 | Agents indistinguishable from the human in Linear | Shared API key | OPS-40 — the dispatcher is the natural place to inject per-agent keys |
 | Orphaned worktrees | Merge stage sometimes skipped | `janitor.mjs`, hourly gate |
 | Stale spec against moved code | Runner fetches but never pulls — the main checkout holds uncommitted human work | Warns with commits-behind; rebasing under someone is worse |

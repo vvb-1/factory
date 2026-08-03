@@ -5,6 +5,7 @@ concurrency:
   # Per repo, not global. The ceiling isn't tooling, it's dependency structure:
   # when ticket B needs A's output you cannot parallelize it, and that's most
   # real work. 3-5 genuinely independent streams is realistic.
+  # This is the FALLBACK; a repo's own max_in_flight in repos.yaml wins.
   max_in_flight_per_repo: 3
   # Merging is never parallel. Two PRs landing in one base within seconds
   # produce a base-CI failure that belongs to neither.
@@ -27,7 +28,9 @@ budget:
   # --args): they bound how much of a window one tick can consume.
   per_ticket_usd: 15.00     # generous — a triage run that explores a codebase
                             # legitimately passes $5 notional
-  per_day_usd: 200.00       # advisory only; nothing enforces it across runs yet
+  per_day_usd: 200.00       # enforced by tick.mjs: today's logs are summed on
+                            # every refill; at the cap it drains — running
+                            # tickets finish, nothing new starts
   on_exhausted: drain
 
 limits:
@@ -44,7 +47,8 @@ limits:
 circuit_breaker:
   # Two consecutive environment/build failures (not ticket-specific ones) stop
   # dispatch. A broken worktree template otherwise converts the whole queue into
-  # Blocked in minutes.
+  # Blocked in minutes. Enforced by tick.mjs (worktree-up failures trip it);
+  # factory-work.md carries the same rule for interactive runs.
   consecutive_env_failures: 2
 
 escalation:
