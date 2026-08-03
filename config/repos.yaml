@@ -75,8 +75,11 @@ repos:
     team: CLNT
     project: Legalease
     base: develop
+    worktree_up: bin/worktree-up.sh
+    worktree_down: bin/worktree-down.sh
     worktree_root: ~/Develop/.worktrees/legalease
-    report_only: true            # PC-15 pending — see CLNT-609
+    verify: cd legalease && ../.venv/bin/python manage.py check && ../.venv/bin/python manage.py test main.tests
+    max_in_flight: 3
 
   - name: cashsaas
     path: ~/Develop/cashsaas
