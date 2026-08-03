@@ -163,10 +163,14 @@ function runTicket(t) {
   const log = path.join(LOG_DIR, `${repo.name}-${t.identifier}-${stamp}.jsonl`);
   const out = createWriteStream(log);
   const budget = String(cfg.budget?.per_ticket_usd ?? 15);
+  // Same hard cap as run-agent.sh: a wedged ticket must not hold its slot
+  // forever. TERM at the limit, KILL 30s later.
+  const policy = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8"));
+  const maxMin = policy?.limits?.max_run_minutes ?? 45;
 
   return new Promise((resolve) => {
     const child = spawn("/bin/bash", ["-lc",
-      `env -u ANTHROPIC_API_KEY -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p ` +
+      `timeout -k 30s ${maxMin}m env -u ANTHROPIC_API_KEY -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p ` +
       `"/factory-ticket ${t.identifier}" --output-format stream-json --verbose ` +
       `--max-budget-usd ${budget} --fallback-model sonnet`],
       { cwd: wt, stdio: ["ignore", "pipe", "pipe"] });

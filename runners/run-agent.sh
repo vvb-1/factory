@@ -72,6 +72,16 @@ REPO_TEAM="$(cd "$ROOT" && bun -e '
 ' "$REPO")"
 [[ -d "$REPO_PATH" ]] || { echo "repo path does not exist: $REPO_PATH" >&2; exit 2; }
 
+# Hard cap, from policy. `timeout` sends TERM at the limit and KILL 30s later,
+# so a wedged harness cannot hold a slot indefinitely.
+MAX_MIN="$(cd "$ROOT" && bun -e '
+  const p = Bun.YAML.parse(await Bun.file("config/policy.yaml").text());
+  console.log(p?.limits?.max_run_minutes ?? 45);
+')"
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+[[ -n "$TIMEOUT_BIN" ]] && RUN_CAP="$TIMEOUT_BIN -k 30s ${MAX_MIN}m" || RUN_CAP=""
+[[ -z "$TIMEOUT_BIN" ]] && echo "  ! no timeout(1) on PATH — a wedged run will not be capped"
+
 if [[ -z "$BUDGET" ]]; then
   BUDGET="$(cd "$ROOT" && bun -e '
     const p = Bun.YAML.parse(await Bun.file("config/policy.yaml").text());
@@ -135,7 +145,7 @@ LOG="$LOG_DIR/${REPO}-${COMMAND}-$(date +%Y%m%d-%H%M%S).jsonl"
 
 echo "→ $REPO ($REPO_TEAM)  $PROMPT"
 echo "  cwd:    $REPO_PATH"
-echo "  harness: $HARNESS   auth: $AUTH_NOTE   cap ~\$$BUDGET notional"
+echo "  harness: $HARNESS   auth: $AUTH_NOTE   cap ~\$$BUDGET notional / ${MAX_MIN}m wall"
 
 # Read-only stages (triage) read the MAIN CHECKOUT, so a stale one produces
 # specs against code that moved. Dispatch does not care: worktree-up.sh fetches
@@ -181,7 +191,7 @@ set +e
 if [[ "$HARNESS" == "claude" ]]; then
   (
     cd "$REPO_PATH"
-    $ENV_PREFIX claude -p "$PROMPT" \
+    $RUN_CAP $ENV_PREFIX claude -p "$PROMPT" \
       --output-format stream-json --verbose \
       --max-budget-usd "$BUDGET" \
       --fallback-model sonnet \
@@ -204,10 +214,10 @@ else
     # agy's print mode defaults to a 5-minute timeout, which is far shorter
     # than a real stage: triage explores a codebase, dispatch compiles. Left at
     # the default the run is cut off mid-work and looks like a hang.
-    $ENV_PREFIX "$HARNESS" -p "$BODY" \
+    $RUN_CAP $ENV_PREFIX "$HARNESS" -p "$BODY" \
       --output-format stream-json \
       --dangerously-skip-permissions \
-      --print-timeout 45m \
+      --print-timeout "$(( MAX_MIN - 2 ))m" \
       $MODEL_ARGS
   ) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG" --harness "$HARNESS")
 fi

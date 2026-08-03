@@ -100,6 +100,21 @@ So dispatch was never affected by a main checkout 66 commits behind; only triage
 
 Nothing needs the local branch updated after a merge, either: the next `worktree-up` fetches `origin/<base>` regardless. Updating the local checkout is a convenience for the human, not a correctness requirement for the factory.
 
+### 2.6c Timeouts: the harness's and the factory's are different jobs
+
+A harness timeout produces a **clean error**; a factory timeout **guarantees the slot frees**. Both are needed, and raising one without the other is a trap.
+
+agy's print mode defaults to 5 minutes. A real triage run exceeded it at 231s — 68 tool calls in, mid-sentence — and reported `status: ERROR, "timeout waiting for response"`. The work was actually done; only the closing summary was lost.
+
+The obvious fix (raise it) makes the *stuck* case worse: a wedged run then holds its concurrency slot for the new, longer timeout. So:
+
+| Layer | Value | Purpose |
+| :--- | :--- | :--- |
+| Harness (`--print-timeout`) | `max_run_minutes - 2` | errors cleanly, with a usable transcript |
+| Factory (`timeout -k 30s`) | `limits.max_run_minutes` (45) | backstop — TERM, then KILL 30s later |
+
+Enforced in both `run-agent.sh` and `tick.mjs`, so a per-ticket process cannot hold a slot indefinitely. If `timeout(1)` is missing the runner says so rather than pretending there is a cap.
+
 ### 2.7 Foreground first — nothing is scheduled
 
 Every job in `config/schedule.yaml` is `enabled: false` and `deploy/launchd/` is empty. The factory runs under `orchestrator/run.mjs`, watched, and when it is not running nothing is running.

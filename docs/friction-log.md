@@ -67,6 +67,14 @@ Same shape as F-8 but for local processes, and the guess is worse: boot time var
 
 **Fix:** bounded readiness poll (`for i in $(seq 60); do curl -sf ... && break; sleep 2; done`) documented alongside F-8. A repo-level `bin/wait-for-dev.sh` would be the stronger fix — a default rather than a rule — if this keeps recurring.
 
+### F-10 · A harness timeout is not a slot guarantee
+
+**Seen:** agy triage, `status: ERROR / "timeout waiting for response"` at 231s — its 5-minute print default, 68 tool calls in, cut off mid-summary. Work completed; report lost.
+
+Raising `--print-timeout` alone would trade a short hang for a long one: a wedged run holds its slot for whatever the new timeout is. Two different jobs — the harness timeout should error *cleanly*, the factory timeout should *guarantee the slot frees*.
+
+**Fix:** `limits.max_run_minutes` (45) in `policy.yaml`, enforced with `timeout -k 30s` in both `run-agent.sh` and `tick.mjs`; the harness timeout is set two minutes below it so it reports first. **Status: fixed.**
+
 ---
 
 ## Fixed

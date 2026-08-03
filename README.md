@@ -294,6 +294,27 @@ Where the glob algebra is ambiguous it errs toward *collision*: a false positive
 
 Secrets (injected via launchd env or `op run`), worktrees, agent session logs, and the dispatcher's state — all under `~/.factory/`.
 
+## Where things stand (2026-08-03)
+
+**Wired and working for `bj29` only.** coach-wattz, legalease and cashsaas are `report_only` — the janitor sees their orphaned worktrees but dispatch refuses them until [CW-363](https://linear.app/watt-mind/issue/CW-363) and [CLNT-609](https://linear.app/watt-mind/issue/CLNT-609) land worktree scripts.
+
+| Stage | State |
+| :--- | :--- |
+| `triage` | works on Claude **and** agy; claims tickets so they show in Agents In Flight |
+| `dispatch` | `tick.mjs` — one process per ticket, rolling refill, auto-warm |
+| `merge` | untested end to end by the factory; PRs have been merged from interactive sessions |
+| `janitor`, `warm`, `reaper` | work; reaper cleaned 50 stale markers |
+
+**Nothing is scheduled.** All jobs are `enabled: false`; run through `orchestrator/run.mjs`.
+
+### Immediate next steps
+
+1. **Merge stage is the untested link** — PRs #164/#165 have been sitting in review. `runners/run-agent.sh --repo bj29 --command factory-merge` is the next thing to exercise.
+2. **F-1, F-2, F-3** in the [friction log](docs/friction-log.md) are open and small. F-2 (`--delete-branch` fails while the worktree exists) will bite on every worktree merge.
+3. **e2e is failing on every PR** (CLNT-620, CLNT-622) — that is the gate that makes autonomous merging into `develop` safe, so it is currently not protecting anything.
+4. **Warm cache is ~100 commits behind.** `cd ~/Develop/pets/bj29 && bin/worktree-warm.sh` once, or let a 2+ ticket dispatch trigger it.
+5. **`evals/run.mjs` does not exist** — cases are written, the runner is not. Spec quality has no regression test, which is what would justify keeping triage on sonnet.
+
 ## Related
 
 - [`docs/architecture.md`](docs/architecture.md) — **why** it is shaped this way: the decisions, their reasons, and the ones that were wrong first

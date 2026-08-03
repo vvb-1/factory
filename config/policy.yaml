@@ -30,6 +30,17 @@ budget:
   per_day_usd: 200.00       # advisory only; nothing enforces it across runs yet
   on_exhausted: drain
 
+limits:
+  # Hard wall-clock cap the FACTORY enforces, independent of whatever the
+  # harness does about its own timeouts. A harness timeout produces a clean
+  # error and is set slightly BELOW this; this is the backstop for the case
+  # where the harness itself wedges and never returns.
+  #
+  # Without it, raising a harness timeout to let long work finish also raises
+  # how long a stuck run holds a concurrency slot — that trade is only
+  # acceptable when something else guarantees the slot eventually frees.
+  max_run_minutes: 45
+
 circuit_breaker:
   # Two consecutive environment/build failures (not ticket-specific ones) stop
   # dispatch. A broken worktree template otherwise converts the whole queue into
