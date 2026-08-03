@@ -20,6 +20,12 @@
 # └──────────────────────────────────────────────────────────────────────────┘
 
 defaults:
+  # Which repo the {{repo}} token in every command resolves to when the caller
+  # does not say. One supervisor per repo is the unit of parallelism:
+  #   bun orchestrator/run.mjs --repo bj29     --only triage,dispatch,merge --apply
+  #   bun orchestrator/run.mjs --repo legalease --only triage,dispatch,merge --apply
+  # in two terminals, each stoppable on its own.
+  repo: bj29
   label_prefix: com.wattmind
   log_dir: ~/Library/Logs
   # Don't fire a burst of catch-up runs when the laptop wakes from sleep.
@@ -49,7 +55,7 @@ jobs:
 
   # ============================================================================
   # The loop. Commands are repo-AGNOSTIC verbs; `--repo` supplies the targets,
-  # so adding legalease later is `--repo bj29,legalease` rather than a second
+  # so adding legalease later is `--repo {{repo}},legalease` rather than a second
   # copy of every job. Repo-specific knowledge lives in the repo (AGENTS.md,
   # docs/product-decisions.md) and in config/repos.yaml — never in the command.
   #
@@ -79,9 +85,9 @@ jobs:
   #    it once you have watched a few passes.
   - name: triage
     every: 5m
-    gate_command: bun orchestrator/queue.mjs --repo bj29 --gate triage
-    dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-triage --read-only --args "3"
+    gate_command: bun orchestrator/queue.mjs --repo {{repo}} --gate triage
+    dry_command: bun orchestrator/queue.mjs --repo {{repo}}
+    command: runners/run-agent.sh --repo {{repo}} --command factory-triage --read-only --args "5"
     enabled: false
     why: >
       Turns Triage tickets into ai:agent-ready ones by exploring the codebase,
@@ -95,9 +101,9 @@ jobs:
   #     ~9 minutes of wall clock for three tickets before any code got written.
   - name: warm
     every: 2h
-    gate_command: bun orchestrator/warm.mjs --repo bj29 --gate
-    dry_command: bun orchestrator/warm.mjs --repo bj29
-    command: bun orchestrator/warm.mjs --repo bj29 --apply
+    gate_command: bun orchestrator/warm.mjs --repo {{repo}} --gate
+    dry_command: bun orchestrator/warm.mjs --repo {{repo}}
+    command: bun orchestrator/warm.mjs --repo {{repo}} --apply
     enabled: false
     why: >
       Compiles once so that N worktrees don't. Cheapest thing to run before a
@@ -108,9 +114,9 @@ jobs:
   #    full or nothing is startable, so an agent never wakes to learn nothing.
   - name: dispatch
     every: 5m
-    gate_command: bun orchestrator/queue.mjs --repo bj29 --gate dispatch
-    dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: bun orchestrator/tick.mjs --repo bj29 --apply
+    gate_command: bun orchestrator/queue.mjs --repo {{repo}} --gate dispatch
+    dry_command: bun orchestrator/queue.mjs --repo {{repo}}
+    command: bun orchestrator/tick.mjs --repo {{repo}} --apply
     enabled: false
     why: >
       One OS PROCESS PER TICKET: tick.mjs claims, builds the worktree via
@@ -125,9 +131,9 @@ jobs:
   #     tickets that have also gone quiet, so a live agent keeps its slot.
   - name: reconcile
     every: 10m
-    gate_command: bun orchestrator/reconcile.mjs --repo bj29 --gate
-    dry_command: bun orchestrator/reconcile.mjs --repo bj29
-    command: bun orchestrator/reconcile.mjs --repo bj29 --apply
+    gate_command: bun orchestrator/reconcile.mjs --repo {{repo}} --gate
+    dry_command: bun orchestrator/reconcile.mjs --repo {{repo}}
+    command: bun orchestrator/reconcile.mjs --repo {{repo}} --apply
     enabled: false
     why: >
       Positive evidence, not silence: an open PR means the implementation phase
@@ -141,9 +147,9 @@ jobs:
   #    seconds produce a base-CI failure belonging to neither.
   - name: merge
     every: 10m
-    gate_command: bun orchestrator/queue.mjs --repo bj29 --gate merge
-    dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-merge
+    gate_command: bun orchestrator/queue.mjs --repo {{repo}} --gate merge
+    dry_command: bun orchestrator/queue.mjs --repo {{repo}}
+    command: runners/run-agent.sh --repo {{repo}} --command factory-merge
     enabled: false
     why: >
       Reviews In Review PRs as their CI finishes, fixes what is mechanical,
@@ -157,9 +163,9 @@ jobs:
   #    nothing notices until the disk does. bj29 had 20 of them at 89% full.
   - name: janitor
     every: 1h
-    gate_command: bun orchestrator/janitor.mjs --repo bj29 --gate
-    dry_command: bun orchestrator/janitor.mjs --repo bj29
-    command: bun orchestrator/janitor.mjs --repo bj29 --apply
+    gate_command: bun orchestrator/janitor.mjs --repo {{repo}} --gate
+    dry_command: bun orchestrator/janitor.mjs --repo {{repo}}
+    command: bun orchestrator/janitor.mjs --repo {{repo}} --apply
     enabled: false
     why: >
       Calls the repo's worktree-down.sh WITHOUT --force, so anything holding
