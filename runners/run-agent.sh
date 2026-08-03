@@ -95,7 +95,16 @@ fi
 # it), so this raises the bar rather than sealing it.
 READONLY_ARGS=""
 if [[ "$READONLY" == "1" ]]; then
-  READONLY_ARGS="--disallowedTools Edit Write NotebookEdit"
+  if [[ "$HARNESS" == "claude" ]]; then
+    READONLY_ARGS="--disallowedTools Edit Write NotebookEdit"
+  else
+    # Don't let --read-only look enforced when it isn't. agy has no
+    # per-tool deny list; --sandbox restricts the terminal but would also break
+    # the exploration triage depends on. So the guard here is the prompt plus
+    # the fact that the stage has no reason to write — say so out loud rather
+    # than implying a restriction that does not exist.
+    echo "  ! --read-only is not enforceable on $HARNESS (no per-tool deny list) — relying on the command's instructions"
+  fi
 fi
 
 # ANTHROPIC_API_KEY, if set, takes precedence over the claude.ai login: runs get
