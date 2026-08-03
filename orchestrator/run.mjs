@@ -95,11 +95,43 @@ const running = new Set();
 let completed = 0;
 let failed = 0;
 
-function runJob(job) {
+/**
+ * Run a command, return its exit code. Used for gates, where we want the code
+ * rather than the streaming behaviour of a real job.
+ */
+function probe(cmd) {
+  return new Promise((resolve) => {
+    const child = spawn("/bin/bash", ["-lc", cmd], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    child.on("close", (code) => resolve({ code, out: out.trim() }));
+  });
+}
+
+async function runJob(job) {
   if (running.has(job.name)) {
     console.log(`${c.dim(clock())} ${c.yellow("skip")}  ${job.name} — previous run still going`);
-    return Promise.resolve();
+    return;
   }
+
+  // A gate is what makes frequent polling affordable: checking costs one cheap
+  // query, spawning an agent costs budget. Exit 0 = work exists, 1 = idle,
+  // anything else = a real error worth surfacing rather than silently skipping.
+  if (job.gate_command && APPLY) {
+    const { code, out } = await probe(job.gate_command);
+    if (code === 1) {
+      console.log(`${c.dim(clock())} ${c.dim("idle")}  ${job.name} ${c.dim(`— ${out.split("\n").pop() || "nothing to do"}`)}`);
+      return;
+    }
+    if (code !== 0) {
+      failed++;
+      console.log(`${c.dim(clock())} ${c.red("GATE FAIL")} ${job.name} ${c.dim(`exit ${code}: ${out.split("\n").pop()}`)}`);
+      return;
+    }
+    console.log(`${c.dim(clock())} ${c.green("gate")}  ${job.name} ${c.dim(out.split("\n").pop() || "")}`);
+  }
+
   running.add(job.name);
   const cmd = commandFor(job);
   const started = Date.now();

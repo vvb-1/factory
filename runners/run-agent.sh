@@ -29,6 +29,22 @@ done
 [[ -n "$REPO"    ]] || { echo "--repo is required"    >&2; exit 2; }
 [[ -n "$COMMAND" ]] || { echo "--command is required" >&2; exit 2; }
 
+# --repo takes a list: `--repo bj29,legalease`. The command is a repo-agnostic
+# verb, so targeting more repos is an argument rather than another copy of the
+# job. Repos run SEQUENTIALLY here on purpose — parallelism belongs inside a
+# repo (one ticket, one worktree, Owned Paths keeping them apart), not across
+# repos, where N concurrent sessions would contend for the same machine, the
+# same Linear rate budget and the same daily spend cap.
+if [[ "$REPO" == *,* ]]; then
+  rc=0
+  for r in ${REPO//,/ }; do
+    echo
+    echo "=============================== $r ==============================="
+    "$0" --repo "$r" --command "$COMMAND" ${BUDGET:+--budget "$BUDGET"} ${ARGS:+--args "$ARGS"} $([[ "$DRY" == "1" ]] && echo --dry) || rc=$?
+  done
+  exit $rc
+fi
+
 # Repo facts and budget come from config/, so the runner has no opinions of its
 # own to drift from policy.
 read -r REPO_PATH REPO_TEAM < <(
@@ -60,6 +76,22 @@ command -v claude >/dev/null || { echo "claude CLI not on PATH" >&2; exit 127; }
 
 echo "→ $REPO ($REPO_TEAM)  $PROMPT  budget \$$BUDGET"
 echo "  cwd: $REPO_PATH"
+
+# Stages read the repo to write Source File Pointers, Owned Paths and
+# verification commands, so a stale checkout produces specs against code that
+# moved. Fetch and REPORT — never pull. The main checkout routinely holds
+# someone's uncommitted work, and silently rebasing it under them would be a
+# far worse failure than a slightly stale spec.
+(
+  cd "$REPO_PATH"
+  git fetch --quiet 2>/dev/null || true
+  BASE="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  BEHIND="$(git rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
+  DIRTY="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  echo "  branch: $BASE  behind: $BEHIND  uncommitted: $DIRTY"
+  [[ "$BEHIND" != "0" ]] && echo "  ! checkout is $BEHIND commit(s) behind — specs may reference moved code"
+  [[ "$DIRTY"  != "0" ]] && echo "  ! $DIRTY uncommitted file(s) — not pulling, they would be clobbered"
+) || true
 
 # A session launched from inside a Claude Code session inherits these and the
 # child exits 1 with no useful message. Clearing them makes the runner safe to

@@ -83,6 +83,58 @@ That's deliberate at this maturity: no skill has eval coverage yet, the dispatch
 
 The cost is real and worth naming: **without the reaper, a crashed agent holds its ticket until a human notices.** Acceptable while every run is watched; the first thing to re-enable when that stops being true.
 
+## The loop
+
+```
+Triage ──①triage──▶ ai:agent-ready ──②dispatch──▶ PR ──③merge──▶ Done
+                                                             │
+                             reaper ◀── crashed claims ◀──────┘
+```
+
+**Commands are repo-agnostic verbs; `--repo` supplies the targets.** Adding a repo is `--repo bj29,legalease`, not a second copy of every job. Only `bj29` is targeted today — it's the one repo satisfying `PC-15` (industrialized worktrees), which is what makes concurrent agents safe.
+
+### Why the cadences are short
+
+Every stage has a **`gate_command`**: one cheap Linear query that exits `0` when there's work and `1` when there isn't. Polling costs a single read; spawning an agent costs budget. So the loop checks every ~5 minutes and acts only when something is waiting.
+
+That's what makes it continuous rather than batch — **follow-up work filed during dispatch gets triaged minutes later, not at the next 6-hour boundary.** When idle, the supervisor prints `idle  dispatch — no dispatch work in bj29` and spawns nothing.
+
+Each gate encodes what "work exists" means for that stage:
+
+| Stage | Runs when |
+| :--- | :--- |
+| `triage` | anything is in `Triage`, or `Todo` without `ai:agent-ready` |
+| `dispatch` | a slot is free **and** a ticket is startable (Owned Paths clear) |
+| `merge` | a PR is actually in review |
+
+The dispatch gate matters most: an agent that wakes to find the cap full has burned a run to learn nothing.
+
+### Slots and parallelism
+
+Three levels, each with a different job:
+
+1. **Across repos — sequential.** `--repo a,b` runs repos one after another. Parallelism belongs *inside* a repo; N concurrent sessions across repos contend for the same machine, the same Linear rate budget, and the same daily spend cap.
+2. **Within a repo — `max_in_flight` slots** (3 for bj29, in `config/repos.yaml`). One ticket = one worktree = one agent. The gate reports `slotsFree` and refuses to dispatch at zero.
+3. **Between tickets — `Owned Paths`.** Two tickets run together only if their glob sets are disjoint. This is the real safety property; slots just cap resource use.
+
+**Merging is never parallel**, at any level.
+
+### Where repo-specific instructions go
+
+Not in the command. The layering:
+
+| Knowledge | Lives in |
+| :--- | :--- |
+| How to triage / dispatch / merge — universal | `shared/commands/factory-*.md` |
+| Routing facts: team, base branch, worktree script, verify command, escalation paths | `config/repos.yaml` |
+| Stack rules, product decisions, gotchas | the repo's own `AGENTS.md`, `docs/product-decisions.md` |
+
+The agent runs with `cwd` set to the repo, so it reads that repo's `AGENTS.md` naturally — repo specifics arrive as *context*, not as forked commands. For genuinely stage-specific repo guidance, `run-agent.sh --args` appends to the prompt. Resist adding config surface before a real case demands it.
+
+### Checkout freshness
+
+Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **fetches and reports** — branch, commits behind, uncommitted files — but **never pulls**. The main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. Triage is read-only and needs no worktree; only dispatch creates them.
+
 ### The supervisor — a scheduler you watch
 
 `orchestrator/run.mjs` runs the same jobs in the foreground: it prints every command before running it, streams output live, and dies with Ctrl-C. When it isn't running, nothing is running.

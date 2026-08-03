@@ -48,35 +48,48 @@ jobs:
       watched, and the first thing to re-enable when it isn't.
 
   # ============================================================================
-  # BJ29 loop — the only repo wired end to end today.
+  # The loop. Commands are repo-AGNOSTIC verbs; `--repo` supplies the targets,
+  # so adding legalease later is `--repo bj29,legalease` rather than a second
+  # copy of every job. Repo-specific knowledge lives in the repo (AGENTS.md,
+  # docs/product-decisions.md) and in config/repos.yaml — never in the command.
   #
   #   triage  ->  dispatch  ->  merge
-  #   (Triage -> ai:agent-ready) (agent-ready -> PR) (PR -> Done)
   #
-  # BJ29 first because it is the only repo satisfying PC-15 (industrialized
-  # worktrees), which is what makes concurrent agents safe. coach-wattz and
-  # legalease join once CW-363 and CLNT-609 land.
+  # Only bj29 is targeted today: it is the one repo satisfying PC-15
+  # (industrialized worktrees), which is what makes concurrent agents safe.
+  # coach-wattz and legalease join the --repo list when CW-363/CLNT-609 land.
   #
-  # Every stage's dry_command is the read-only queue view: "what would this do"
-  # never means "spawn an agent and find out".
+  # WHY THE SHORT CADENCES: every stage has a `gate_command` — one cheap Linear
+  # query that exits 0 when there is work and 1 when there isn't. Polling is
+  # nearly free; spawning an agent costs budget. So the loop checks every few
+  # minutes and acts only when something is waiting, which is what makes it feel
+  # continuous instead of batch. Follow-up work filed during dispatch gets
+  # triaged minutes later, not at the next 6-hour boundary.
+  #
+  # dry_command for every stage is the read-only queue view: "what would this
+  # do" never means "spawn an agent and find out".
   # ============================================================================
 
-  # 1. INTAKE. The binding constraint — a deep Triage pile with an empty
+  # 1. INTAKE. Usually the binding constraint — a deep Triage pile with an empty
   #    agent-ready queue means dispatching harder cannot help.
-  - name: bj29-triage
-    every: 6h
+  - name: triage
+    every: 5m
+    gate_command: bun orchestrator/queue.mjs --repo bj29 --gate triage
     dry_command: bun orchestrator/queue.mjs --repo bj29
     command: runners/run-agent.sh --repo bj29 --command factory-triage
     enabled: false
     why: >
       Turns Triage tickets into ai:agent-ready ones by exploring the codebase,
       and batches the genuinely human questions into one notification instead of
-      a ping per ticket.
+      a ping per ticket. Read-only against the repo — it needs the code to write
+      Source File Pointers and Owned Paths, but never a worktree.
 
-  # 2. EXECUTE. Rolling dispatch under the in-flight cap; Owned Paths decide
-  #    what can run together.
-  - name: bj29-dispatch
-    every: 20m
+  # 2. EXECUTE. Rolling dispatch under the per-repo in-flight cap; Owned Paths
+  #    decide what can run together. The gate refuses to spawn when the cap is
+  #    full or nothing is startable, so an agent never wakes to learn nothing.
+  - name: dispatch
+    every: 5m
+    gate_command: bun orchestrator/queue.mjs --repo bj29 --gate dispatch
     dry_command: bun orchestrator/queue.mjs --repo bj29
     command: runners/run-agent.sh --repo bj29 --command factory-work
     enabled: false
@@ -86,8 +99,9 @@ jobs:
 
   # 3. LAND. Merging is always serialized — two PRs landing in one base within
   #    seconds produce a base-CI failure belonging to neither.
-  - name: bj29-merge
-    every: 30m
+  - name: merge
+    every: 10m
+    gate_command: bun orchestrator/queue.mjs --repo bj29 --gate merge
     dry_command: bun orchestrator/queue.mjs --repo bj29
     command: runners/run-agent.sh --repo bj29 --command factory-merge
     enabled: false

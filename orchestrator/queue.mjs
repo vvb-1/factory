@@ -21,10 +21,17 @@ import { parseOwnedPaths, pathsCollide } from "./owned-paths.mjs";
 
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
-const only = val("--repo");
+const only = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
+
+// --gate <stage> turns this into a cheap predicate: exit 0 when that stage has
+// work, 1 when it doesn't. That is what makes the loop continuous without being
+// expensive — polling costs one Linear query, spawning an agent costs budget, so
+// the supervisor checks often and acts only when there is something to do.
+const GATE = val("--gate");
+const JSON_OUT = argv.includes("--json");
 
 const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
-const repos = (cfg.repos ?? []).filter((r) => !only || r.name === only);
+const repos = (cfg.repos ?? []).filter((r) => !only.length || only.includes(r.name));
 
 if (!repos.length) {
   console.error(only ? `no repo named "${only}" in config/repos.yaml` : "no repos configured");
@@ -56,8 +63,10 @@ const QUERY = `
     }
   }`;
 
+const summary = [];
+
 for (const repo of repos) {
-  console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${repo.team} / ${repo.project}  ->  ${repo.base}`));
+  if (!GATE && !JSON_OUT) console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${repo.team} / ${repo.project}  ->  ${repo.base}`));
 
   const nodes = (await gql(QUERY, { team: repo.team, project: repo.project }))?.issues?.nodes ?? [];
   const labels = (i) => (i.labels?.nodes ?? []).map((l) => l.name);
@@ -70,8 +79,10 @@ for (const repo of repos) {
   const inReview = nodes.filter((i) => state(i) === "In Review");
   const blocked = nodes.filter((i) => state(i) === "Blocked");
 
-  const line = (label, n, color = (s) => s) =>
-    console.log(`  ${label.padEnd(22)} ${color(String(n).padStart(3))}`);
+  const quiet = GATE || JSON_OUT;
+  const line = (label, n, color = (s) => s) => {
+    if (!quiet) console.log(`  ${label.padEnd(22)} ${color(String(n).padStart(3))}`);
+  };
 
   line("Triage (unspecified)", triage.length, triage.length > 20 ? c.yellow : (s) => s);
   line("Todo, not ready", notReady.length);
@@ -95,8 +106,22 @@ for (const repo of repos) {
     if (free.length >= (repo.max_in_flight ?? 3) - inProgress.length) break;
   }
 
+  const slotsFree = Math.max(0, (repo.max_in_flight ?? 3) - inProgress.length);
+  summary.push({
+    repo: repo.name,
+    triage: triage.length + notReady.length,
+    ready: ready.length,
+    inProgress: inProgress.length,
+    inReview: inReview.length,
+    blocked: blocked.length,
+    slotsFree,
+    startable: free.map((t) => t.identifier),
+  });
+
+  if (quiet) continue;
+
   if (free.length) {
-    console.log(c.dim(`\n  dispatch would start (cap ${repo.max_in_flight}, ${inProgress.length} running):`));
+    console.log(c.dim(`\n  dispatch would start (cap ${repo.max_in_flight}, ${inProgress.length} running, ${slotsFree} slot(s) free):`));
     for (const t of free) console.log(`    ${c.green(t.identifier.padEnd(10))} ${t.title.slice(0, 60)}`);
   } else if (ready.length) {
     console.log(c.dim(`\n  nothing startable — all ready tickets collide with running work or lack Owned Paths`));
@@ -114,4 +139,37 @@ for (const repo of repos) {
     for (const t of blocked) console.log(`    ${t.identifier.padEnd(10)} ${t.title.slice(0, 60)}`);
   }
 }
+
+if (JSON_OUT) {
+  console.log(JSON.stringify(summary, null, 2));
+  process.exit(0);
+}
+
+if (GATE) {
+  // Exit 0 = there is work for this stage, so the supervisor should run it.
+  // Exit 1 = idle, skip. Anything else is a real error and stops the loop.
+  const has = {
+    // Only spawn a triage agent when something is actually unspecified.
+    triage: (s) => s.triage > 0,
+    // Don't dispatch with no free slot or nothing startable — an agent that
+    // wakes to find the cap full has burned a run to learn nothing.
+    dispatch: (s) => s.slotsFree > 0 && s.startable.length > 0,
+    // Only review when a PR is actually waiting.
+    merge: (s) => s.inReview > 0,
+  }[GATE];
+
+  if (!has) {
+    console.error(`unknown gate "${GATE}" (known: triage, dispatch, merge)`);
+    process.exit(2);
+  }
+
+  const hits = summary.filter(has);
+  if (hits.length) {
+    console.log(hits.map((s) => `${s.repo}: ${GATE} work available`).join("; "));
+    process.exit(0);
+  }
+  console.log(`no ${GATE} work in ${summary.map((s) => s.repo).join(", ")}`);
+  process.exit(1);
+}
+
 console.log();
