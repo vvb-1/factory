@@ -47,34 +47,52 @@ jobs:
       holds its ticket until someone notices — acceptable while every run is
       watched, and the first thing to re-enable when it isn't.
 
-  # ------------------------------------------------------------ spec synth ---
-  # The queue starves at specification, not execution: 147 Triage vs 12
-  # dispatchable when this repo was created. This is the loop that fixes it.
-  # Disabled until the ticket-spec skill has eval coverage -- an auto-specced
-  # ticket that looks complete but whose Verification Command doesn't run costs
-  # a full agent run to discover.
-  - name: spec-synth
+  # ============================================================================
+  # BJ29 loop — the only repo wired end to end today.
+  #
+  #   triage  ->  dispatch  ->  merge
+  #   (Triage -> ai:agent-ready) (agent-ready -> PR) (PR -> Done)
+  #
+  # BJ29 first because it is the only repo satisfying PC-15 (industrialized
+  # worktrees), which is what makes concurrent agents safe. coach-wattz and
+  # legalease join once CW-363 and CLNT-609 land.
+  #
+  # Every stage's dry_command is the read-only queue view: "what would this do"
+  # never means "spawn an agent and find out".
+  # ============================================================================
+
+  # 1. INTAKE. The binding constraint — a deep Triage pile with an empty
+  #    agent-ready queue means dispatching harder cannot help.
+  - name: bj29-triage
     every: 6h
-    command: bash runners/run-agent.sh --skill ticket-spec
-    enabled: false
-    why: Turns Triage into ai:agent-ready without a human. Enable after evals.
-
-  # ------------------------------------------------------------- dispatch ----
-  # Disabled until the worktree scripts exist in the repos it would dispatch to
-  # (CW-363, CLNT-609). Dispatching agents into repos with no port/database
-  # isolation is how two agents end up sharing one dev database.
-  - name: dispatch
-    every: 20m
-    command: bun orchestrator/tick.mjs
-    enabled: false
-    why: Rolling dispatch under the in-flight cap. Needs PC-15 in target repos.
-
-  # --------------------------------------------------------- merge sitter ----
-  - name: merge-babysitter
-    every: 30m
-    command: bash runners/run-agent.sh --command merge
+    dry_command: bun orchestrator/queue.mjs --repo bj29
+    command: runners/run-agent.sh --repo bj29 --command factory-triage
     enabled: false
     why: >
-      Reviews In Review PRs as their CI finishes instead of at end of session.
-      Merging stays serialized -- one PR at a time, base CI + smoke green before
-      the next.
+      Turns Triage tickets into ai:agent-ready ones by exploring the codebase,
+      and batches the genuinely human questions into one notification instead of
+      a ping per ticket.
+
+  # 2. EXECUTE. Rolling dispatch under the in-flight cap; Owned Paths decide
+  #    what can run together.
+  - name: bj29-dispatch
+    every: 20m
+    dry_command: bun orchestrator/queue.mjs --repo bj29
+    command: runners/run-agent.sh --repo bj29 --command factory-work
+    enabled: false
+    why: >
+      Claims agent-ready tickets, works them in per-ticket worktrees
+      (bin/worktree-up.sh), verifies, and opens PRs against develop.
+
+  # 3. LAND. Merging is always serialized — two PRs landing in one base within
+  #    seconds produce a base-CI failure belonging to neither.
+  - name: bj29-merge
+    every: 30m
+    dry_command: bun orchestrator/queue.mjs --repo bj29
+    command: runners/run-agent.sh --repo bj29 --command factory-merge
+    enabled: false
+    why: >
+      Reviews In Review PRs as their CI finishes, fixes what is mechanical,
+      merges what qualifies into develop, and moves tickets to Done once base CI
+      and the dev smoke check are green. Escalation list still applies: payments,
+      auth and migrations never auto-merge in this client repo.

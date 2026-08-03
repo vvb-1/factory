@@ -1,0 +1,45 @@
+# Per-repo facts the loop needs. One entry only, on purpose.
+#
+# BJ29 is the only repo that currently satisfies PC-15 (industrialized
+# worktrees), which is the precondition for dispatching concurrent agents into
+# it. coach-wattz and legalease get entries when CW-363 and CLNT-609 land —
+# adding them now would mean inventing ports and test commands for tooling that
+# doesn't exist yet, and an agent that trusts an invented port collides with
+# another agent's dev server.
+
+repos:
+  - name: bj29
+    path: ~/Develop/pets/bj29
+    github: watt-mind/bakonszegi-coaching
+
+    # Linear routing (linear.md §1-2)
+    team: CLNT
+    project: BJ29 Coaching
+
+    # Branches
+    base: develop            # agents merge here; master is human-only
+    deploy_branch: master
+
+    # Worktrees — MANDATORY here, this repo ships the scripts (W-1..W-12).
+    # Never hand-roll: ports and per-ticket databases come from these.
+    worktree_up: bin/worktree-up.sh
+    worktree_down: bin/worktree-down.sh
+    worktree_root: ~/Develop/.worktrees/bj29
+
+    # What "verified" means. Agents run this before any PR.
+    verify: cd app && npm run lint && npm run typecheck && npm run format:check
+
+    # What "Done" means beyond a merge (linear.md §7).
+    smoke_workflow: smoke-dev.yml
+    smoke_url: https://bj29-dev.projects.watt-mind.com
+
+    # Concurrency. 3 in flight, merges always serialized.
+    max_in_flight: 3
+
+    # Surfaces where a diff is never auto-merged, on top of the global
+    # escalation list in policy.yaml. This is a CLNT revenue-share client
+    # product with live payments.
+    escalate_paths:
+      - app/src/payment/**
+      - app/src/auth/**
+      - app/migrations/**
