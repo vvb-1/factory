@@ -44,15 +44,17 @@ case "$REPO" in
     for r in ${REPO//,/ }; do
       echo
       echo "=============================== $r ==============================="
-      sub="$0 --repo $r --command $COMMAND"
-      [[ -n "$BUDGET"     ]] && sub="$sub --budget $BUDGET"
-      [[ -n "$ARGS"       ]] && sub="$sub --args \"$ARGS\""
-      [[ "$DRY"      == 1 ]] && sub="$sub --dry"
-      [[ "$READONLY" == 1 ]] && sub="$sub --read-only"
-      [[ "$USE_API"  == 1 ]] && sub="$sub --use-api"
-      [[ -n "$MODEL"      ]] && sub="$sub --model $MODEL"
-      [[ "$HARNESS" != "claude" ]] && sub="$sub --harness $HARNESS"
-      eval "$sub" || rc=$?
+      # Rebuild argv with `set --` (bash 3.2 has no arrays under set -u) rather
+      # than eval on a string — an --args value containing a quote must survive.
+      set -- --repo "$r" --command "$COMMAND"
+      [[ -n "$BUDGET"     ]] && set -- "$@" --budget "$BUDGET"
+      [[ -n "$ARGS"       ]] && set -- "$@" --args "$ARGS"
+      [[ "$DRY"      == 1 ]] && set -- "$@" --dry
+      [[ "$READONLY" == 1 ]] && set -- "$@" --read-only
+      [[ "$USE_API"  == 1 ]] && set -- "$@" --use-api
+      [[ -n "$MODEL"      ]] && set -- "$@" --model "$MODEL"
+      [[ "$HARNESS" != "claude" ]] && set -- "$@" --harness "$HARNESS"
+      "$0" "$@" || rc=$?
     done
     exit $rc
     ;;

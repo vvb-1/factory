@@ -30,6 +30,8 @@ Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the mo
 - **FIX** — CI red, merge conflicts, or blocking review findings that are mechanical to fix (a real bug, missing error handling, a failing test).
 - **ESCALATE** — never auto-merge, regardless of CI or review outcome: diffs touching auth/authz, payments/money, credentials/secrets handling, destructive DB migrations, prod infra config, or anything in a `CLNT` repo touching security. Also escalate when the fix would require changing the ticket's intent. Report these to me with the findings, **notify me** rather than only writing it in the final report, and stop there.
 
+  Where the factory checkout is available (`~/Develop/factory`), run the mechanical half first: `bun ~/Develop/factory/orchestrator/escalate.mjs --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. Exit 2 means ESCALATE, no judgment call needed. Exit 0 clears only the path list — the behavior-based judgment below still applies. If the script isn't available, apply the repo's `escalate_paths` from `config/repos.yaml` by hand against the changed-file list.
+
   The test for "touching" is whether the diff **changes security-relevant behavior**, not whether the file sits near security code — read literally as file-adjacency the list swallows most PRs in an app where auth is everywhere, which trains both of us to rubber-stamp. For grey-zone diffs (near those surfaces but apparently behavior-neutral), run `/security-review` on the branch and attach the output; clean output plus green CI supports merging a behavior-neutral diff, but no tool output ever overrides the list. Genuinely ambiguous → escalate; that costs one message, a wrong merge costs a client incident.
 
 ### 3. Fix loop (for FIX)
@@ -42,7 +44,7 @@ Match the repo's existing merge style from `git log` (this workflow's repos gene
 
 **Merge one PR at a time.** Two merges landing in the same base within seconds produce a base-CI failure that belongs to neither PR and costs more to untangle than the parallelism saved.
 
-After each merge: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`, delete the remote branch, and remove the local worktree for that ticket (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too).
+After each merge: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown (`git push origin --delete <branch>`, `git branch -D <branch>`).
 
 If base CI or the smoke check breaks after a merge, stop merging further PRs immediately, notify me, and fix or revert first. On an auto-deploying branch a red smoke check means the environment is down right now, not that a test is flaky.
 

@@ -37,6 +37,7 @@ const ONE = val("--ticket");
 
 const expand = (p) => String(p ?? "").replace(/^~/, homedir());
 const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+const policy = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8"));
 const repo = (cfg.repos ?? []).find((r) => r.name === val("--repo"));
 if (!repo) { console.error(`--repo required; known: ${(cfg.repos ?? []).map((r) => r.name).join(", ")}`); process.exit(2); }
 if (repo.report_only) { console.error(`${repo.name} is report_only — no worktree tooling, dispatch is unsafe here`); process.exit(2); }
@@ -48,7 +49,13 @@ const c = {
 };
 const clock = () => new Date().toTimeString().slice(0, 8);
 const repoPath = expand(repo.path);
-const cap = repo.max_in_flight ?? 3;
+const cap = repo.max_in_flight ?? policy?.concurrency?.max_in_flight_per_repo ?? 3;
+
+// Same probe as run-agent.sh: the wall-clock cap is a safety feature, and a
+// safety feature that crashes every spawn on a machine without coreutils is
+// worse than saying plainly that the cap is off.
+const TIMEOUT_BIN = Bun.which("timeout") ?? Bun.which("gtimeout");
+if (!TIMEOUT_BIN) console.log(c.yellow("  ! no timeout(1)/gtimeout on PATH — a wedged run will not be wall-clock capped"));
 
 const Q = `query($t:String!,$p:String!){ issues(first:250, filter:{
     team:{key:{eq:$t}}, project:{name:{eq:$p}},
@@ -108,6 +115,7 @@ if (!APPLY) {
 const me = (await gql(`query{ viewer{ id name } }`))?.viewer;
 const states = (await gql(`query($t:String!){ team(id:$t){ states(first:50){ nodes{ id name } } } }`, { t: repo.team }))?.team?.states?.nodes ?? [];
 const inProgressId = states.find((s) => s.name.toLowerCase() === "in progress")?.id;
+const todoId = states.find((s) => s.name.toLowerCase() === "todo")?.id;
 const allLabels = (await gql(`query{ issueLabels(first:250){ nodes{ id name } } }`))?.issueLabels?.nodes ?? [];
 const labelId = (n) => allLabels.find((l) => l.name === n)?.id;
 if (!inProgressId) { console.error("no 'In Progress' state on team " + repo.team); process.exit(1); }
@@ -120,6 +128,33 @@ async function claim(t) {
   // Linear has no compare-and-swap; this read-back IS the concurrency control.
   const back = (await gql(`query($id:String!){ issue(id:$id){ assignee{id} } }`, { id: t.id }))?.issue;
   return back?.assignee?.id === me.id;
+}
+
+/**
+ * A failed run must not keep its claim. With the reaper off a timer, a ticket
+ * left In Progress after its process died consumes a cap slot until a human
+ * notices — three failures and dispatch throughput is silently zero.
+ *
+ * Only rolls back tickets that still look like OUR claim (In Progress, assigned
+ * to us, ai:in-progress present). An agent that legitimately moved its ticket —
+ * to Blocked with a question, or to In Review with a PR — keeps that state.
+ */
+async function unclaim(t, why, log) {
+  const cur = (await gql(
+    `query($id:String!){ issue(id:$id){ state{name} assignee{id} labels(first:20){nodes{id name}} } }`,
+    { id: t.id }))?.issue;
+  if (!cur || cur.state?.name !== "In Progress" || cur.assignee?.id !== me.id) return false;
+  if (!(cur.labels?.nodes ?? []).some((l) => l.name === "ai:in-progress")) return false;
+
+  const keep = (cur.labels?.nodes ?? [])
+    .filter((l) => l.name !== "ai:in-progress" && !l.name.startsWith("agent:"))
+    .map((l) => l.id);
+  await gql(`mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
+    { id: t.id, in: { stateId: todoId ?? undefined, assigneeId: null, labelIds: keep } });
+  await gql(`mutation($in:CommentCreateInput!){ commentCreate(input:$in){ success } }`,
+    { in: { issueId: t.id, body: `Dispatch run failed, claim released back to Todo.\n\n**Why:** ${why}${log ? `\n**Log:** \`${log.replace(homedir(), "~")}\`` : ""}` } });
+  console.log(`${c.dim(clock())} ${c.cyan(t.identifier)} ${c.yellow("un-claimed")} ${c.dim(`— ${why}`)}`);
+  return true;
 }
 
 // ------------------------------------------------------------------ warm ----
@@ -149,28 +184,41 @@ mkdirSync(LOG_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 15);
 const results = [];
 
-function runTicket(t) {
+// CIRCUIT BREAKER (policy.circuit_breaker). Environment failures — the
+// worktree template refusing to build — are not ticket-specific: left running,
+// a broken template converts the whole queue into failed claims in minutes.
+const ENV_FAIL_LIMIT = policy?.circuit_breaker?.consecutive_env_failures ?? 2;
+let envFailures = 0;
+let tripped = false;
+
+async function runTicket(t) {
   const up = spawnSync("/bin/bash", [repo.worktree_up, t.identifier], { cwd: repoPath, encoding: "utf8" });
   if (up.status !== 0) {
     const why = (up.stderr || up.stdout || "").trim().split("\n").pop();
     console.log(c.red(`  ${t.identifier} worktree-up failed: ${why}`));
     results.push({ id: t.identifier, ok: false, why: "worktree-up failed" });
-    return Promise.resolve();
+    await unclaim(t, `worktree-up failed: ${why}`);
+    if (++envFailures >= ENV_FAIL_LIMIT && !tripped) {
+      tripped = true;
+      console.log(c.red(`\n  CIRCUIT BREAKER: ${envFailures} consecutive environment failures — no further tickets will be claimed this run. Fix the worktree template first.\n`));
+    }
+    return;
   }
+  envFailures = 0;
   const wt = path.join(expand(repo.worktree_root), t.identifier);
   console.log(`${c.dim(clock())} ${c.cyan(t.identifier)} worktree ready ${c.dim(wt)}`);
 
   const log = path.join(LOG_DIR, `${repo.name}-${t.identifier}-${stamp}.jsonl`);
   const out = createWriteStream(log);
-  const budget = String(cfg.budget?.per_ticket_usd ?? 15);
+  const budget = String(cfg.budget?.per_ticket_usd ?? policy?.budget?.per_ticket_usd ?? 15);
   // Same hard cap as run-agent.sh: a wedged ticket must not hold its slot
   // forever. TERM at the limit, KILL 30s later.
-  const policy = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8"));
   const maxMin = policy?.limits?.max_run_minutes ?? 45;
+  const capPrefix = TIMEOUT_BIN ? `${TIMEOUT_BIN} -k 30s ${maxMin}m ` : "";
 
-  return new Promise((resolve) => {
+  await new Promise((resolve) => {
     const child = spawn("/bin/bash", ["-lc",
-      `timeout -k 30s ${maxMin}m env -u ANTHROPIC_API_KEY -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p ` +
+      `${capPrefix}env -u ANTHROPIC_API_KEY -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT claude -p ` +
       `"/factory-ticket ${t.identifier}" --output-format stream-json --verbose ` +
       `--max-budget-usd ${budget} --fallback-model sonnet`],
       { cwd: wt, stdio: ["ignore", "pipe", "pipe"] });
@@ -192,7 +240,7 @@ function runTicket(t) {
       if (e.type === "result" || "num_turns" in e) {
         const ok = e.subtype === "success" && !e.is_error && (e.num_turns ?? 0) > 0;
         console.log(`${c.dim(clock())} ${tag} ${ok ? c.green("done") : c.red("FAILED")} ${c.dim(`${e.num_turns ?? 0} turns ~$${(e.total_cost_usd ?? 0).toFixed(2)}`)}`);
-        results.push({ id: t.identifier, ok, log });
+        results.push({ id: t.identifier, ok, log, why: ok ? undefined : `run ended ${e.subtype ?? "?"}${e.is_error ? " (error)" : ""}` });
         recorded = true;
       }
     };
@@ -204,7 +252,7 @@ function runTicket(t) {
       for (const line of lines) processLine(line);
     });
     child.stderr.on("data", (d) => out.write(d));
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       // The final "result" line isn't guaranteed a trailing newline, so
       // whatever is still in `buf` when the process exits needs a look too —
       // otherwise a clean exit with no trailing "\n" silently reports nothing.
@@ -218,6 +266,10 @@ function runTicket(t) {
         results.push({ id: t.identifier, ok: false, log, why: `no result emitted (exit ${code})` });
       }
       out.end();
+      // A failed run must not keep its claim (unclaim() checks the ticket
+      // still looks like ours — Blocked/In Review moves are left alone).
+      const r = results.findLast((x) => x.id === t.identifier);
+      if (r && !r.ok) await unclaim(t, r.why ?? "run failed", log).catch(() => {});
       resolve();
     });
   });
@@ -226,13 +278,54 @@ function runTicket(t) {
 // --------------------------------------------------------- rolling loop -----
 const running = new Map();   // identifier -> promise
 const seen = new Set();      // everything we have claimed this run
+const warned = new Set();    // skip-warnings already printed, so refills don't repeat them
 let startedCount = 0;
+let drained = false;
+
+/**
+ * budget.per_day_usd, enforced (it used to say "advisory only"). Sums
+ * total_cost_usd across today's run logs — notional units on subscription
+ * auth, so this is a runaway guard, not a wallet. `on_exhausted: drain`:
+ * running tickets finish, nothing new starts.
+ */
+function todaysSpendUSD() {
+  const today = new Date().toISOString().slice(0, 10);
+  let sum = 0;
+  for (const f of new Bun.Glob("*.jsonl").scanSync(LOG_DIR)) {
+    const full = path.join(LOG_DIR, f);
+    if (new Date(Bun.file(full).lastModified).toISOString().slice(0, 10) !== today) continue;
+    for (const line of readFileSync(full, "utf8").split("\n")) {
+      if (!line.includes('"total_cost_usd"')) continue;
+      try { sum += JSON.parse(line).total_cost_usd ?? 0; } catch {}
+    }
+  }
+  return sum;
+}
 
 async function fill() {
-  if (startedCount >= MAX) return;
+  if (startedCount >= MAX || tripped) return;
+  const perDay = policy?.budget?.per_day_usd;
+  if (perDay) {
+    const spent = todaysSpendUSD();
+    if (spent >= perDay) {
+      if (!drained) console.log(c.yellow(`\n  day budget reached (~$${spent.toFixed(2)} of $${perDay} notional) — draining: running tickets finish, nothing new starts.\n`));
+      drained = true;
+      return;
+    }
+  }
   const state = await fetchState();
   const free = Math.min(cap - state.inProgress.length, MAX - startedCount);
   if (free <= 0) return;
+
+  // Same warning the dry run prints — without it, "READY is high but nothing
+  // starts" is invisible in exactly the mode that matters (see F-7).
+  for (const t of state.ready) {
+    if (warned.has(t.identifier) || seen.has(t.identifier)) continue;
+    if (!parseOwnedPaths(t.description ?? "").length) {
+      warned.add(t.identifier);
+      console.log(c.yellow(`  skip ${t.identifier} — no parseable Owned Paths`));
+    }
+  }
 
   const picked = selectable(state, seen, free);
   if (!picked.length) return;
@@ -270,5 +363,6 @@ while (running.size) {
 console.log(c.bold("\nsummary"));
 for (const r of results) console.log(`  ${r.ok ? c.green("ok  ") : c.red("FAIL")} ${r.id}${r.log ? c.dim("  " + r.log.replace(homedir(), "~")) : ""}${r.why ? c.dim("  " + r.why) : ""}`);
 const failed = results.filter((r) => !r.ok).length;
+if (tripped) console.log(c.red(`circuit breaker tripped — dispatch stopped after ${envFailures} consecutive environment failures.`));
 console.log(c.dim(`\n${results.length - failed} ok, ${failed} failed, ${startedCount} started. Merging is a separate stage.\n`));
-process.exit(failed ? 1 : 0);
+process.exit(failed || tripped ? 1 : 0);
