@@ -1,8 +1,6 @@
----
-description: Dispatch subagents to work agent-ready Linear tickets, land the PRs, report
-argument-hint: [optional: issue IDs, max tickets e.g. "6", concurrency e.g. "3 at a time", or "no-merge"]
-model: sonnet
----
+# factory-work
+
+> Dispatch subagents to work agent-ready Linear tickets, land the PRs, report
 
 Work the agent-dispatchable Linear queue for this repository to completion — claimed, implemented, verified, reviewed, and landed — following `~/Develop/hdkiller/docs/orgs/linear.md` (§7 execution, §14 loops).
 
@@ -33,10 +31,10 @@ For each ticket you start:
 
 ## 3. Land the PRs
 
-Merging is the orchestrator's job, not the subagents'. As each PR's CI finishes — don't wait for the whole run to end — apply `/merge` (`~/.claude/commands/merge.md`) semantics:
+Merging is the orchestrator's job, not the subagents'. As each PR's CI finishes — don't wait for the whole run to end — apply `/factory-merge` semantics:
 
-- **Review the diff yourself even when CI is green**, per `/merge` step 1. Green CI is never the bar.
-- Then classify **MERGE / FIX / ESCALATE** exactly as `/merge` step 2 defines. On `develop` in an `hdkiller`/`watt-mind` repo this is standing authorization from `~/.claude/CLAUDE.md` — merge without asking. Targeting `master`/`main`, or a repo we don't own: stop at review and hand it to me.
+- **Review the diff yourself even when CI is green**, per `/factory-merge` step 1. Green CI is never the bar.
+- Then classify **MERGE / FIX / ESCALATE** exactly as `/factory-merge` step 2 defines. On `develop` in an `hdkiller`/`watt-mind` repo this is standing authorization from `~/.claude/CLAUDE.md` — merge without asking. Targeting `master`/`main`, or a repo we don't own: stop at review and hand it to me.
 - **FIX**: fix findings/CI/conflicts in the branch, re-verify, re-review your own fix diff, max 2 rounds, then escalate rather than looping.
 - **ESCALATE** (auth/authz, payments, secrets, destructive migrations, prod infra, `CLNT` security behavior): never merge, report with findings, and notify me.
 - **Merge one PR at a time.** After each: confirm base CI *and* the post-deploy smoke check are green, move the ticket to `Done`, delete the remote branch, and remove the worktree (`bin/worktree-down.sh <ISSUE-ID>` where the repo has it). If base CI or smoke goes red, stop merging entirely, notify me, and fix or revert before anything else lands.

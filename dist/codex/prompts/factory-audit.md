@@ -1,0 +1,37 @@
+# factory-audit
+
+> Audit this repo against the project-conventions baseline; file the gaps to Linear
+
+Audit a repository against the conventions baseline in `~/Develop/hdkiller/docs/guides/project-conventions.md` and turn the gaps into tracked work.
+
+Default target is the repo I'm currently in. Interpret $ARGUMENTS as a different repo path, specific check IDs to run in isolation, or `all` (every repo in the [linear.md §1](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md) team mapping that exists locally — audit each and report a matrix).
+
+## 1. Grade every check
+
+Work through the **§7 conformance table** — `PC-01` … `PC-20` — in order. That table is the source of truth for what's required; read it fresh each run rather than from memory, since it changes as the baseline grows.
+
+For each check, record **PASS / FAIL / N/A** plus the evidence you actually observed: the command you ran and its relevant output, or the file and line. An unverified PASS is worse than a FAIL — it certifies something nobody checked.
+
+Rules that keep the grade honest:
+
+- **Verify against the live repo and the live GitHub settings**, not against what `AGENTS.md` or this guide claims. `PC-20` exists precisely because docs drift; when a doc and reality disagree, the doc is the finding.
+- **N/A requires a stated reason** grounded in the repo ("no auto-deploy branch", "free private plan blocks branch protection"). Never N/A a check because it's inconvenient or because fixing it is out of scope — that's a FAIL with a filed ticket.
+- **`PC-03` (cloud runners) and `PC-18` (missing secrets) are cheap and high-consequence** — one bills real money, the other means a workflow that looks configured has never once run green. Always check them, even in a partial audit.
+- For `PC-17`, a workflow that exists but is disabled by a stale `if:` gate is a **FAIL, not a PASS** — a gate whose stated precondition has since been met is the most common way a repo loses its strongest test signal without anyone noticing.
+- Read-only. Do not fix anything during grading; grade first, so the report reflects the repo as found.
+
+## 2. Report
+
+A table: check ID, requirement (short), verdict, evidence. Then a summary line — blockers / high / medium outstanding — and the **single highest-leverage fix** for this repo, named explicitly.
+
+Sort failures by what they cost: a check that lets broken code reach production outranks a formatting gate.
+
+## 3. File the gaps
+
+Every FAIL becomes a Linear issue in `Triage` per [linear.md §8](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md): correct team/project from the §1 mapping, `type:maintenance` (or `type:security` where that's the real nature), the matching `area:*`, priority from the severity column, and the check ID plus observed evidence in the description. Search first — a repeat audit must update or skip an existing ticket, never file a duplicate.
+
+Where a fix is small, mechanical, and unambiguous (adding `retention-days: 1`, swapping `ubuntu-latest` for the self-hosted label, adding a missing thin `CLAUDE.md`), write the issue to the full §5 AI-ready template, label it `ai:agent-ready`, and move it to `Todo` so the next `/factory-work` run picks it up without further human involvement. Anything needing a decision, a credential, or a plan upgrade stays in `Triage` with the specific question stated.
+
+## 4. Offer, don't assume
+
+End by asking whether to fix the agent-ready ones now. Do not start implementing during an audit — a run that both grades and rewrites the repo makes it impossible to tell what was found from what was changed.

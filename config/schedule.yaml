@@ -5,6 +5,19 @@
 # regeneration silently reverts your edit.
 #
 # Loops and their rationale: linear.md §14.
+#
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ EVERYTHING IS DISABLED ON PURPOSE (2026-08-03).                          │
+# │                                                                          │
+# │ Standing policy for now: the factory runs in the FOREGROUND, watched.    │
+# │ No launchd job may act on Linear, git, or CI without someone looking at  │
+# │ it. Nothing here has eval coverage yet, per-agent identity doesn't exist │
+# │ (OPS-40), and the reaper has already demonstrated it can act on 31       │
+# │ tickets from one bad predicate. Trust is earned one loop at a time.      │
+# │                                                                          │
+# │ Enabling anything here is a deliberate decision, not a default. Flip one │
+# │ job, watch it for a week, then consider the next.                        │
+# └──────────────────────────────────────────────────────────────────────────┘
 
 defaults:
   label_prefix: com.wattmind
@@ -23,10 +36,15 @@ jobs:
   - name: linear-reaper
     every: 15m
     command: bash ~/Develop/hdkiller/scripts/bin/linear-reaper-cron.sh
+    enabled: false
     why: >
-      Threshold is 45 minutes of silence, so 15m samples it 3x. Runs on launchd
-      rather than Dkron because LINEAR_API_KEY is workspace-wide and should not
-      be copied to a server for a job that cleans up after local agents.
+      Threshold is 45 minutes of silence, so 15m would sample it 3x. Disabled
+      under the foreground policy above — it was loaded on 2026-08-03 and
+      unloaded the same day. Run it by hand instead, and prefer the dry run
+      first: `python3 ~/Develop/hdkiller/scripts/linear-reaper.py` shows what it
+      would reclaim, `--apply` does it. Without this running, a crashed agent
+      holds its ticket until someone notices — acceptable while every run is
+      watched, and the first thing to re-enable when it isn't.
 
   # ------------------------------------------------------------ spec synth ---
   # The queue starves at specification, not execution: 147 Triage vs 12

@@ -6,20 +6,51 @@ The control layer of the Watt Mind agent factory: shared commands, agents, and s
 
 ## Layout
 
+**`shared/` is the source of truth. Everything in `plugins/` and `dist/` is generated — never edit it.**
+
 ```
-.claude-plugin/marketplace.json   catalog — the entry point for target repos
-plugins/core/                     the plugin every repo enables
-  .claude-plugin/plugin.json      manifest ONLY — skills/commands/agents are siblings
-  commands/                       /work /merge /triage /audit
-  agents/                         ux-critic
-  skills/                         ticket-spec
+shared/                           harness-neutral content, the only place to edit
+  floor.md                        the non-negotiables (goes into every AGENTS.md)
+  commands/                       factory-work, factory-merge, factory-triage, factory-audit
+  skills/                         ticket-spec (SKILL.md — a format all harnesses share)
+  agents/                         ux-critic (Claude-only: needs its Task tool)
+build/emit.mjs                    shared/ -> per-harness packaging; --check guards drift
+plugins/core/                     GENERATED — the Claude Code plugin
+dist/{codex,gemini,cursor}/       GENERATED — the other harnesses
+dist/AGENTS.floor.md              GENERATED — paste/sync into each repo's AGENTS.md
 orchestrator/                     dispatch logic (owned-paths collision, tick)
 config/schedule.yaml              ONE source of truth for cadences
 config/policy.yaml                budgets, concurrency, escalation
 deploy/gen.mjs                    schedule.yaml -> launchd plists
-deploy/launchd/                   generated, committed, never hand-edited
 evals/                            prompt regression tests
 ```
+
+## Multi-harness
+
+The **content** is portable; only the **packaging** isn't. `SKILL.md` is a format Claude, Codex, and Gemini all consume, and command bodies are just markdown.
+
+| Harness | Context | Skills | Commands |
+| :--- | :--- | :--- | :--- |
+| Claude Code | `CLAUDE.md` → `AGENTS.md` | plugin `skills/` | plugin `commands/` |
+| Codex | `AGENTS.md` (native) | `~/.codex/skills/` | `~/.codex/prompts/` |
+| Gemini CLI | `GEMINI.md` → `AGENTS.md` | `~/.gemini/skills/` | — |
+| Antigravity | shares `~/.gemini/` | via Gemini | — |
+| Cursor | `.cursor/rules/` | — | `~/.cursor/commands/` |
+
+```bash
+node build/emit.mjs           # regenerate everything
+node build/emit.mjs --check   # CI: fail if the tree drifted from shared/
+node build/emit.mjs --link    # symlink this machine's harnesses at shared/
+```
+
+`--link` symlinks rather than copies, so a `git pull` updates every harness at once and there is no copy to go stale. It refuses to overwrite a real file.
+
+> [!IMPORTANT]
+> **The plugin is a convenience layer, not the safety floor.** It reaches Claude Code only, and a cloud sandbox without GitHub auth for this private repo gets nothing — failing closed without knowing it.
+>
+> So the non-negotiables live in `shared/floor.md` and are committed into each repo's **`AGENTS.md`**, which every harness reads and which travels with the checkout.
+
+**Why `--check` is the important half.** The failure this repo exists to prevent is a rule living in one harness's file and nowhere else — coach-wattz carries "NEVER `prisma db push`" only in `GEMINI.md`, invisible to Claude. Four generated copies are only safer than four hand-written ones if CI proves they still match their source. If the check fails, move the rule into `shared/`; never edit the generated file.
 
 ## Using it from a product repo
 
@@ -33,32 +64,40 @@ evals/                            prompt regression tests
 }
 ```
 
-> [!IMPORTANT]
-> **The plugin is a convenience layer, not the safety floor.** It reaches Claude Code only — Gemini reads `GEMINI.md`, Cursor reads `.cursor/rules/`, Codex reads `AGENTS.md`, and none of them can load a plugin. A cloud sandbox without GitHub auth for this private repo gets nothing either, and fails closed without knowing it.
->
-> So the non-negotiables (queue rule, claim protocol, `Owned Paths`, worktree mandate, verification gate, `Done` definition, escalation list) stay committed in each repo's **`AGENTS.md`**, which every harness reads and which travels with the checkout. This plugin carries the Claude-specific ergonomics on top.
-
 ## Commands
+
+Prefixed `factory-` so they're identifiable as ours and never collide with a repo-local or built-in command of the same name.
 
 | Command | Does |
 | :--- | :--- |
-| `/work` | Claims agent-ready tickets, dispatches them rolling (not batched), lands the PRs |
-| `/merge` | Reviews open PRs, fixes what's mechanical, merges what qualifies |
-| `/triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
-| `/audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
+| `/factory-work` | Claims agent-ready tickets, dispatches them rolling (not batched), lands the PRs |
+| `/factory-merge` | Reviews open PRs, fixes what's mechanical, merges what qualifies |
+| `/factory-triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
+| `/factory-audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
 
-## Scheduling
+## Scheduling — nothing is scheduled
 
-`config/schedule.yaml` is the only place cadences are defined.
+**Standing policy: the factory runs in the foreground, watched.** No launchd job acts on Linear, git, or CI without someone looking at it. Every job in `config/schedule.yaml` is `enabled: false`, and `deploy/launchd/` is empty.
+
+That's deliberate at this maturity: no skill has eval coverage yet, the dispatcher isn't built, per-agent identity doesn't exist (OPS-40) so autonomous actions can't be attributed, and the reaper already demonstrated that one wrong predicate reaches 31 tickets. Foreground-first is how each loop earns the right to run unattended.
+
+The cost is real and worth naming: **without the reaper, a crashed agent holds its ticket until a human notices.** Acceptable while every run is watched; the first thing to re-enable when that stops being true.
+
+Run things by hand instead:
 
 ```bash
-node deploy/gen.mjs             # render plists, show what changed
+python3 ~/Develop/hdkiller/scripts/linear-reaper.py           # dry run — what would it reclaim?
+python3 ~/Develop/hdkiller/scripts/linear-reaper.py --apply   # actually reclaim
+```
+
+`config/schedule.yaml` stays the single source of truth for cadences, so that when a loop does earn promotion it's one flag and a regeneration — not a plist someone writes by hand at 1am.
+
+```bash
+node deploy/gen.mjs             # render enabled jobs (currently: none)
 node deploy/gen.mjs --install   # copy to ~/Library/LaunchAgents and load
 ```
 
 Never hand-edit a generated plist — the next regeneration silently reverts it.
-
-Only `linear-reaper` is enabled today. `spec-synth`, `dispatch`, and `merge-babysitter` ship disabled with the reason recorded inline: dispatch needs `PC-15` (worktree isolation) in its target repos, and spec-synth needs eval coverage before it's trusted to write specs unattended.
 
 ## Why `Owned Paths` and not keyword matching
 

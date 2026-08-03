@@ -1,6 +1,6 @@
 # Setup
 
-## 1. Authenticate the CLI for unattended runs
+## 1. Authenticate the CLI
 
 ```bash
 claude setup-token
@@ -8,23 +8,34 @@ claude setup-token
 
 Do this **before** loading any launchd job. A launchd process inherits no interactive session, so without a long-lived token the job fails on auth in a way that looks like a hang rather than an error.
 
-## 2. Render and load the schedule
+## 2. Distribute to the other harnesses
 
 ```bash
-node deploy/gen.mjs             # review what it would write
-node deploy/gen.mjs --install   # copy to ~/Library/LaunchAgents and load
+node build/emit.mjs           # regenerate plugins/ and dist/
+node build/emit.mjs --link    # symlink ~/.codex, ~/.gemini, ~/.cursor at shared/
+```
+
+Symlinks rather than copies: `git pull` then updates every harness at once, and there's no copy to drift. `--link` refuses to overwrite a real file, so it won't clobber anything you wrote by hand.
+
+## 3. Scheduling — deliberately empty
+
+**Nothing is scheduled.** The factory runs in the foreground where it can be watched; every job in `config/schedule.yaml` is `enabled: false` and `deploy/launchd/` is empty. Enabling a loop is a decision, not a setup step — flip one, watch it for a week, then consider the next.
+
+Run the reaper by hand when you want it:
+
+```bash
+python3 ~/Develop/hdkiller/scripts/linear-reaper.py           # dry run first
+python3 ~/Develop/hdkiller/scripts/linear-reaper.py --apply
 ```
 
 ```bash
-launchctl list | grep wattmind
-tail -20 ~/Library/Logs/linear-reaper.log
-launchctl kickstart -k gui/$(id -u)/com.wattmind.linear-reaper
+launchctl list | grep wattmind    # expect no output
 ```
 
 > [!NOTE]
-> `com.wattmind.linear-reaper` was installed by hand on 2026-08-03 and is functionally identical to the generated one. `--install` adopts it (bootout + bootstrap). The only difference is the generated plist writes stdout to `linear-reaper.out.log`, keeping it clear of the wrapper's own `linear-reaper.log`.
+> `com.wattmind.linear-reaper` was installed by hand on 2026-08-03 and **unloaded the same day** under this policy. Its wrapper and script remain; only the timer is gone. Re-enabling means setting `enabled: true` in `config/schedule.yaml` and running `node deploy/gen.mjs --install` — never writing a plist by hand.
 
-## 3. Enable a product repo
+## 4. Enable a product repo
 
 ```json
 // <repo>/.claude/settings.json
@@ -38,7 +49,7 @@ launchctl kickstart -k gui/$(id -u)/com.wattmind.linear-reaper
 
 This is a **private** repo, so any machine loading the plugin needs GitHub auth — including ephemeral cloud VMs. A sandbox without it fails closed and starts with no floor, which is why the non-negotiables also live in each repo's `AGENTS.md`.
 
-## 4. Verify
+## 5. Verify
 
 ```bash
 node --test orchestrator/owned-paths.test.mjs
