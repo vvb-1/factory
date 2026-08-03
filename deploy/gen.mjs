@@ -1,85 +1,27 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * schedule.yaml -> launchd plists.
  *
- *   node deploy/gen.mjs            # render to deploy/launchd/, show a diff
- *   node deploy/gen.mjs --install  # also copy into ~/Library/LaunchAgents and load
+ *   bun deploy/gen.mjs            # render to deploy/launchd/, show a diff
+ *   bun deploy/gen.mjs --install  # also copy into ~/Library/LaunchAgents and load
  *
  * Generated files are committed so the diff is reviewable: a scheduling change
  * should show up in a PR like any other change.
  *
- * Dependency-free on purpose -- it runs with the system node (3.9-era macOS
- * python and a bare node are all we can assume), so the YAML subset used by
- * schedule.yaml is parsed here rather than pulling in a library.
+ * Schedule parsing lives in lib/schedule.mjs so this and the foreground
+ * supervisor (orchestrator/run.mjs) always read the same jobs from the same
+ * file -- two parsers is how the two execution modes would drift.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { loadSchedule, toSeconds, ROOT } from "../lib/schedule.mjs";
 const OUT = path.join(ROOT, "deploy", "launchd");
 const INSTALL = process.argv.includes("--install");
 
 const expand = (p) => p.replace(/^~/, homedir());
 
-/** Minimal YAML reader for the shape schedule.yaml actually uses. */
-function parseSchedule(text) {
-  const defaults = {};
-  const jobs = [];
-  let inJobs = false;
-  let cur = null;
-  let cont = null; // key currently accumulating a `>` block
-
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\t/g, "  ");
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-
-    if (/^jobs:/.test(line)) { inJobs = true; continue; }
-    if (/^defaults:/.test(line)) { inJobs = false; continue; }
-
-    const indent = line.match(/^\s*/)[0].length;
-    if (cont && indent > cont.indent) {
-      cont.target[cont.key] += (cont.target[cont.key] ? " " : "") + line.trim();
-      continue;
-    }
-    cont = null;
-
-    const item = line.match(/^\s*-\s+(\w+):\s*(.*)$/);
-    if (inJobs && item) {
-      cur = {};
-      jobs.push(cur);
-      assign(cur, item[1], item[2], indent);
-      continue;
-    }
-    const kv = line.match(/^\s*(\w+):\s*(.*)$/);
-    if (!kv) continue;
-    assign(inJobs ? cur : defaults, kv[1], kv[2], indent);
-  }
-
-  function assign(target, key, value, indent) {
-    if (!target) return;
-    if (value === ">" || value === "|") {
-      target[key] = "";
-      cont = { target, key, indent };
-      return;
-    }
-    let v = value.replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
-    if (v === "true") v = true;
-    else if (v === "false") v = false;
-    target[key] = v;
-  }
-
-  return { defaults, jobs };
-}
-
-/** "15m" / "6h" / "90s" -> seconds */
-function toSeconds(every) {
-  const m = String(every).match(/^(\d+)([smh])$/);
-  if (!m) throw new Error(`bad interval: ${every}`);
-  return Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2]];
-}
 
 const xml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -122,7 +64,7 @@ ${args.map((a) => `        <string>${xml(a)}</string>`).join("\n")}
 `;
 }
 
-const { defaults, jobs } = parseSchedule(readFileSync(path.join(ROOT, "config/schedule.yaml"), "utf8"));
+const { defaults, jobs } = loadSchedule();
 mkdirSync(OUT, { recursive: true });
 
 const enabled = jobs.filter((j) => j.enabled !== false);

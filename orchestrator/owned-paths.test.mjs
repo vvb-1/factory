@@ -1,11 +1,13 @@
 /**
- * node --test orchestrator/owned-paths.test.mjs
+ * bun test
  *
  * Collision detection is the one piece of the dispatcher that causes silent
  * data loss when wrong — two agents editing one file — so it gets real tests.
  */
-import { test } from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "bun:test";
+
+const expectEqual = (a, b, msg) => expect(a, msg).toEqual(b);
+const expectTrue = (v, msg) => expect(v, msg).toBeTruthy();
 import { parseOwnedPaths, globsOverlap, pathsCollide, nextDispatchable } from "./owned-paths.mjs";
 
 test("parses the Owned Paths section of a real ticket", () => {
@@ -21,31 +23,31 @@ Something is broken.
 ## Verification Command
 
     npm test`;
-  assert.deepEqual(parseOwnedPaths(desc), ["app/services/api.ts", "app/services/__tests__/*"]);
+  expectEqual(parseOwnedPaths(desc), ["app/services/api.ts", "app/services/__tests__/*"]);
 });
 
 test("missing section yields no paths (caller treats as not-dispatchable)", () => {
-  assert.deepEqual(parseOwnedPaths("## Problem\n\nno paths here"), []);
+  expectEqual(parseOwnedPaths("## Problem\n\nno paths here"), []);
 });
 
 test("identical and nested globs overlap", () => {
-  assert.ok(globsOverlap("app/api.ts", "app/api.ts"));
-  assert.ok(globsOverlap("app/**", "app/services/api.ts"));
-  assert.ok(globsOverlap("bin/worktree-*.sh", "bin/worktree-up.sh"));
-  assert.ok(globsOverlap("AGENTS.md", "AGENTS.md"));
+  expectTrue(globsOverlap("app/api.ts", "app/api.ts"));
+  expectTrue(globsOverlap("app/**", "app/services/api.ts"));
+  expectTrue(globsOverlap("bin/worktree-*.sh", "bin/worktree-up.sh"));
+  expectTrue(globsOverlap("AGENTS.md", "AGENTS.md"));
 });
 
 test("disjoint directories do not overlap", () => {
-  assert.ok(!globsOverlap("app/services/**", "docs/**"));
-  assert.ok(!globsOverlap("bin/worktree-*.sh", "AGENTS.md"));
-  assert.ok(!globsOverlap(".github/workflows/*", "app/src/main.ts"));
+  expectTrue(!globsOverlap("app/services/**", "docs/**"));
+  expectTrue(!globsOverlap("bin/worktree-*.sh", "AGENTS.md"));
+  expectTrue(!globsOverlap(".github/workflows/*", "app/src/main.ts"));
 });
 
 test("the case keyword matching gets wrong", () => {
   // Same vocabulary, unrelated files: must NOT collide.
-  assert.ok(!pathsCollide(["app/ui/LoginButton.tsx"], ["server/auth/middleware.ts"]));
+  expectTrue(!pathsCollide(["app/ui/LoginButton.tsx"], ["server/auth/middleware.ts"]));
   // Different vocabulary, same files: MUST collide.
-  assert.ok(pathsCollide(["app/pages/onboarding/**"], ["app/pages/onboarding/step2.tsx"]));
+  expectTrue(pathsCollide(["app/pages/onboarding/**"], ["app/pages/onboarding/step2.tsx"]));
 });
 
 test("CW-363 and CLNT-609 are concurrent-safe (different repos, same globs)", () => {
@@ -53,7 +55,7 @@ test("CW-363 and CLNT-609 are concurrent-safe (different repos, same globs)", ()
   // dispatcher scopes collision checks per repo; within one repo they'd block.
   const a = ["bin/worktree-*.sh", "AGENTS.md"];
   const b = ["bin/worktree-*.sh", "AGENTS.md"];
-  assert.ok(pathsCollide(a, b), "same repo: must serialize");
+  expectTrue(pathsCollide(a, b), "same repo: must serialize");
 });
 
 test("nextDispatchable skips collisions and tickets without Owned Paths", () => {
@@ -63,9 +65,9 @@ test("nextDispatchable skips collisions and tickets without Owned Paths", () => 
     { id: "C", ownedPaths: [] },                       // not agent-ready
     { id: "D", ownedPaths: ["docs/**"] },              // free
   ];
-  assert.equal(nextDispatchable(candidates, inFlight)?.id, "D");
+  expectEqual(nextDispatchable(candidates, inFlight)?.id, "D");
 });
 
 test("nothing dispatchable returns undefined rather than throwing", () => {
-  assert.equal(nextDispatchable([], []), undefined);
+  expectEqual(nextDispatchable([], []), undefined);
 });

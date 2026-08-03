@@ -1,6 +1,6 @@
 # The one source of truth for every recurring job.
 #
-# `node deploy/gen.mjs` renders these into ~/Library/LaunchAgents/*.plist.
+# `bun deploy/gen.mjs` renders these into ~/Library/LaunchAgents/*.plist.
 # Never hand-edit a generated plist — change it here and regenerate, or the next
 # regeneration silently reverts your edit.
 #
@@ -35,7 +35,10 @@ jobs:
   # Installed by hand 2026-08-03; adopted here so it stops being an orphan.
   - name: linear-reaper
     every: 15m
-    command: bash ~/Develop/hdkiller/scripts/bin/linear-reaper-cron.sh
+    # dry_command is what the foreground supervisor runs WITHOUT --apply.
+    # The reaper changes ticket state, so "what would this do" is the default.
+    dry_command: python3 ~/Develop/hdkiller/scripts/linear-reaper.py
+    command: python3 ~/Develop/hdkiller/scripts/linear-reaper.py --apply
     enabled: false
     why: >
       Threshold is 45 minutes of silence, so 15m would sample it 3x. Disabled
@@ -64,7 +67,7 @@ jobs:
   # isolation is how two agents end up sharing one dev database.
   - name: dispatch
     every: 20m
-    command: node orchestrator/tick.mjs
+    command: bun orchestrator/tick.mjs
     enabled: false
     why: Rolling dispatch under the in-flight cap. Needs PC-15 in target repos.
 

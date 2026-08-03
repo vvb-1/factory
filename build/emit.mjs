@@ -1,10 +1,10 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * shared/ -> per-harness packaging.
  *
- *   node build/emit.mjs           # regenerate plugins/ and dist/
- *   node build/emit.mjs --check   # CI: fail if the tree isn't reproducible
- *   node build/emit.mjs --link    # symlink this machine's harnesses at shared/
+ *   bun build/emit.mjs           # regenerate plugins/ and dist/
+ *   bun build/emit.mjs --check   # CI: fail if the tree isn't reproducible
+ *   bun build/emit.mjs --link    # symlink this machine's harnesses at shared/
  *
  * Why a build step at all: the CONTENT is harness-neutral (SKILL.md is a shared
  * format; command bodies are markdown) but the PACKAGING is not. Claude wants a
@@ -17,7 +17,7 @@
  * generated copies are only safer than four hand-written ones if CI proves they
  * still match their source.
  *
- * Dependency-free: runs with the system node, no install step.
+ * Runs on bun (see lib/schedule.mjs); no npm dependencies.
  */
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, readdirSync, existsSync, statSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
@@ -133,7 +133,7 @@ if (CHECK) {
   if (problems.length) {
     console.error("Generated tree does not match shared/:\n");
     for (const p of problems) console.error("  " + p);
-    console.error(`\nRun \`node build/emit.mjs\` and commit the result.`);
+    console.error(`\nRun \`bun build/emit.mjs\` and commit the result.`);
     console.error("If a harness file has a rule that shared/ doesn't, move the rule into shared/ —");
     console.error("a rule that lives in one harness is a rule the other harnesses silently lack.");
     process.exit(1);

@@ -24,20 +24,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Installs bun rather than assuming the runner has it, so CI doesn't break
+      # the first time this lands on a runner that was never provisioned for it.
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Collision detection tests
-        run: node --test orchestrator/owned-paths.test.mjs
+        run: bun test
 
       - name: Generated tree matches shared/
         # The check that stops a rule from living in one harness and nowhere
         # else. If this fails, the fix is to move the rule into shared/ and
         # regenerate — never to edit the generated file.
-        run: node build/emit.mjs --check
+        run: bun build/emit.mjs --check
 
       - name: Schedule renders
-        run: node deploy/gen.mjs
+        run: bun deploy/gen.mjs
+
+      - name: Supervisor lists jobs
+        # Cheap smoke test: proves schedule.yaml parses and every job is
+        # addressable before anyone tries to run one.
+        run: bun orchestrator/run.mjs --list
 
       - name: Manifests parse
         run: |
           for f in .claude-plugin/marketplace.json plugins/core/.claude-plugin/plugin.json; do
-            python3 -c "import json,sys; json.load(open('$f'))" || exit 1
+            bun -e "JSON.parse(await Bun.file('$f').text())" || exit 1
           done

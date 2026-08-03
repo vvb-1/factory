@@ -11,8 +11,8 @@ Do this **before** loading any launchd job. A launchd process inherits no intera
 ## 2. Distribute to the other harnesses
 
 ```bash
-node build/emit.mjs           # regenerate plugins/ and dist/
-node build/emit.mjs --link    # symlink ~/.codex, ~/.gemini, ~/.cursor at shared/
+bun build/emit.mjs           # regenerate plugins/ and dist/
+bun build/emit.mjs --link    # symlink ~/.codex, ~/.gemini, ~/.cursor at shared/
 ```
 
 Symlinks rather than copies: `git pull` then updates every harness at once, and there's no copy to drift. `--link` refuses to overwrite a real file, so it won't clobber anything you wrote by hand.
@@ -33,7 +33,7 @@ launchctl list | grep wattmind    # expect no output
 ```
 
 > [!NOTE]
-> `com.wattmind.linear-reaper` was installed by hand on 2026-08-03 and **unloaded the same day** under this policy. Its wrapper and script remain; only the timer is gone. Re-enabling means setting `enabled: true` in `config/schedule.yaml` and running `node deploy/gen.mjs --install` — never writing a plist by hand.
+> `com.wattmind.linear-reaper` was installed by hand on 2026-08-03 and **unloaded the same day** under this policy. Its wrapper and script remain; only the timer is gone. Re-enabling means setting `enabled: true` in `config/schedule.yaml` and running `bun deploy/gen.mjs --install` — never writing a plist by hand.
 
 ## 4. Enable a product repo
 
@@ -52,8 +52,8 @@ This is a **private** repo, so any machine loading the plugin needs GitHub auth 
 ## 5. Verify
 
 ```bash
-node --test orchestrator/owned-paths.test.mjs
-node deploy/gen.mjs
+bun test
+bun deploy/gen.mjs
 ```
 
 ## Known gaps

@@ -1,6 +1,6 @@
 # factory
 
-The control layer of the Watt Mind agent factory: shared commands, agents, and skills distributed to every repo as a Claude Code plugin, plus the scheduler and dispatcher that run the standing loops.
+Runs on **bun**. The control layer of the Watt Mind agent factory: shared commands, agents, and skills distributed to every repo as a Claude Code plugin, plus the scheduler and dispatcher that run the standing loops.
 
 **Linear is the control plane, GitHub is the source of truth, CI is the reward signal.** Nothing merges because an agent said it was done — it merges because the tests passed and a reviewer (agent or human) approved.
 
@@ -38,9 +38,9 @@ The **content** is portable; only the **packaging** isn't. `SKILL.md` is a forma
 | Cursor | `.cursor/rules/` | — | `~/.cursor/commands/` |
 
 ```bash
-node build/emit.mjs           # regenerate everything
-node build/emit.mjs --check   # CI: fail if the tree drifted from shared/
-node build/emit.mjs --link    # symlink this machine's harnesses at shared/
+bun build/emit.mjs           # regenerate everything
+bun build/emit.mjs --check   # CI: fail if the tree drifted from shared/
+bun build/emit.mjs --link    # symlink this machine's harnesses at shared/
 ```
 
 `--link` symlinks rather than copies, so a `git pull` updates every harness at once and there is no copy to go stale. It refuses to overwrite a real file.
@@ -83,18 +83,28 @@ That's deliberate at this maturity: no skill has eval coverage yet, the dispatch
 
 The cost is real and worth naming: **without the reaper, a crashed agent holds its ticket until a human notices.** Acceptable while every run is watched; the first thing to re-enable when that stops being true.
 
-Run things by hand instead:
+### The supervisor — a scheduler you watch
+
+`orchestrator/run.mjs` runs the same jobs in the foreground: it prints every command before running it, streams output live, and dies with Ctrl-C. When it isn't running, nothing is running.
 
 ```bash
-python3 ~/Develop/hdkiller/scripts/linear-reaper.py           # dry run — what would it reclaim?
-python3 ~/Develop/hdkiller/scripts/linear-reaper.py --apply   # actually reclaim
+bun orchestrator/run.mjs --list                          # what exists
+bun orchestrator/run.mjs --only linear-reaper --once     # dry run, one pass
+bun orchestrator/run.mjs --only linear-reaper --apply    # for real, on its cadence
+bun orchestrator/run.mjs --all --apply
 ```
 
-`config/schedule.yaml` stays the single source of truth for cadences, so that when a loop does earn promotion it's one flag and a regeneration — not a plist someone writes by hand at 1am.
+Three properties, in order of how much they matter:
+
+1. **Dry by default.** A job declares `dry_command` next to `command`; without `--apply` you get the dry one. The reaper's first real run would have unassigned 31 tickets, so *what would this do* is the default question.
+2. **Explicit selection.** Always `--only` or `--all`. There is no "run whatever is enabled" mode — `enabled:` means *may be installed as an unattended timer*, which is a different decision from *run it now*.
+3. **No overlap.** A job still running when its next tick arrives is skipped, not stacked. Two reapers racing is precisely the failure the reaper exists to clean up.
+
+`config/schedule.yaml` stays the single source of truth for cadences — the supervisor and the launchd generator read it through the same `lib/schedule.mjs`, so the watched and unattended modes can't disagree about what the jobs are. When a loop does earn promotion it's one flag and a regeneration, not a plist someone writes by hand at 1am.
 
 ```bash
-node deploy/gen.mjs             # render enabled jobs (currently: none)
-node deploy/gen.mjs --install   # copy to ~/Library/LaunchAgents and load
+bun deploy/gen.mjs             # render enabled jobs (currently: none)
+bun deploy/gen.mjs --install   # copy to ~/Library/LaunchAgents and load
 ```
 
 Never hand-edit a generated plist — the next regeneration silently reverts it.
@@ -103,7 +113,7 @@ Never hand-edit a generated plist — the next regeneration silently reverts it.
 
 `orchestrator/owned-paths.mjs` decides whether two tickets can run at once by intersecting their `Owned Paths` globs. Every `ai:agent-ready` ticket already carries that section, so the machine-readable answer exists — guessing from title keywords both over-fires ("Fix login button copy" vs "Rewrite auth middleware" share vocabulary but no files) and under-fires ("Onboarding wizard polish" vs "Profile page spacing" share files but no words).
 
-Where the glob algebra is ambiguous it errs toward *collision*: a false positive serializes two tickets, a false negative puts two agents in one file. Tests: `node --test orchestrator/owned-paths.test.mjs`.
+Where the glob algebra is ambiguous it errs toward *collision*: a false positive serializes two tickets, a false negative puts two agents in one file. Tests: `bun test`.
 
 ## What stays out of git
 
