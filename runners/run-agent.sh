@@ -126,19 +126,35 @@ echo "→ $REPO ($REPO_TEAM)  $PROMPT"
 echo "  cwd:    $REPO_PATH"
 echo "  auth:   $AUTH_NOTE   cap ~\$$BUDGET notional"
 
-# Stages read the repo to write file pointers and verification commands, so a
-# stale checkout produces specs against code that moved. Fetch and REPORT —
-# never pull: the main checkout routinely holds uncommitted work, and rebasing
-# under someone is worse than a slightly stale spec.
+# Read-only stages (triage) read the MAIN CHECKOUT, so a stale one produces
+# specs against code that moved. Dispatch does not care: worktree-up.sh fetches
+# and branches from origin/<base>, so ticket work always starts current.
+#
+# Policy: always fetch. Fast-forward only when the tree is CLEAN — --ff-only
+# cannot create a merge commit or lose work, so it is safe to do unattended.
+# When the tree is dirty, do nothing and say so: the main checkout routinely
+# holds uncommitted human work, and touching it to save a slightly stale spec is
+# a far worse trade.
 (
   cd "$REPO_PATH"
   git fetch --quiet 2>/dev/null || true
   BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
   BEHIND="$(git rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
   DIRTY="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
-  echo "  branch: $BRANCH  behind: $BEHIND  uncommitted: $DIRTY"
-  [[ "$BEHIND" != "0" ]] && echo "  ! $BEHIND commit(s) behind — specs may reference moved code"
-  [[ "$DIRTY"  != "0" ]] && echo "  ! $DIRTY uncommitted file(s) — not pulling, they would be clobbered"
+
+  if [[ "$BEHIND" != "0" && "$DIRTY" == "0" ]]; then
+    if git pull --ff-only --quiet 2>/dev/null; then
+      echo "  branch: $BRANCH  fast-forwarded $BEHIND commit(s) — now current"
+      BEHIND=0
+    else
+      echo "  branch: $BRANCH  behind: $BEHIND  ! fast-forward refused (diverged) — fix by hand"
+    fi
+  else
+    echo "  branch: $BRANCH  behind: $BEHIND  uncommitted: $DIRTY"
+  fi
+
+  [[ "$BEHIND" != "0" && "$DIRTY" != "0" ]] && \
+    echo "  ! $DIRTY uncommitted file(s) — not pulling, they would be clobbered; specs may reference moved code"
   true
 )
 echo

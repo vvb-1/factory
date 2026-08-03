@@ -83,6 +83,23 @@ So `tick.mjs` decides, because the arithmetic is mechanical — warming costs on
 
 Warming happens **before any `worktree-up`**, so nothing clones a template being rewritten underneath it. (`worktree-up.sh` would detect the mismatch and rebuild from empty, so that race is a slowness bug rather than corruption — but slowness is what we are removing.)
 
+### 2.6b Freshness: who actually needs current code
+
+Not everyone, which is why there is no global "pull often" rule.
+
+| Consumer | Source | Stale risk |
+| :--- | :--- | :--- |
+| **Ticket worktrees** | `worktree-up.sh` fetches and branches from `origin/<base>` | **None** — every ticket starts from current remote |
+| **Warm cache** | `worktree-warm.sh` resets to `origin/<base>` | Handled by the staleness gate (§2.6) |
+| **Merge stage** | operates on PR branches via `gh` | Per-PR; rebases against the base itself |
+| **Triage** | reads the **main checkout working tree** | **Real** — stale files mean file pointers to code that moved |
+
+So dispatch was never affected by a main checkout 66 commits behind; only triage was.
+
+**Policy: always fetch; fast-forward only when the tree is clean.** `git pull --ff-only` cannot create a merge commit or lose work, so it is safe unattended. When the tree is dirty the runner does nothing and says so — the main checkout routinely holds uncommitted human work, and touching it to save a slightly stale spec is a far worse trade (see R-2 in the friction log).
+
+Nothing needs the local branch updated after a merge, either: the next `worktree-up` fetches `origin/<base>` regardless. Updating the local checkout is a convenience for the human, not a correctness requirement for the factory.
+
 ### 2.7 Foreground first — nothing is scheduled
 
 Every job in `config/schedule.yaml` is `enabled: false` and `deploy/launchd/` is empty. The factory runs under `orchestrator/run.mjs`, watched, and when it is not running nothing is running.
