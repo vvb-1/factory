@@ -96,7 +96,7 @@ jobs:
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo bj29 --gate dispatch
     dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-work --args "2 tickets, 1 in flight"
+    command: runners/run-agent.sh --repo bj29 --command factory-work --args "3 tickets, 3 in flight"
     enabled: false
     why: >
       Claims agent-ready tickets, works them in per-ticket worktrees

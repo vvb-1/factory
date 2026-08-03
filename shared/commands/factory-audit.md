@@ -1,7 +1,7 @@
 ---
 description: Audit this repo against the project-conventions baseline; file the gaps to Linear
 argument-hint: [optional: repo path, "all" for every tracked repo, or check IDs e.g. "PC-15 PC-16"]
-model: opus
+model: sonnet
 ---
 
 Audit a repository against the conventions baseline in `~/Develop/hdkiller/docs/guides/project-conventions.md` and turn the gaps into tracked work.

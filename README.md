@@ -109,6 +109,22 @@ Each gate encodes what "work exists" means for that stage:
 
 The dispatch gate matters most: an agent that wakes to find the cap full has burned a run to learn nothing.
 
+### Models
+
+On a subscription the scarce resource is the **usage window**, and Opus consumes it several times faster than Sonnet. So Opus is spent only where it changes the outcome:
+
+| Stage | Model | Why |
+| :--- | :--- | :--- |
+| `factory-triage` | sonnet | Structured extraction guided by a detailed skill — find the files, write tight globs, write a command that runs |
+| `factory-work` | sonnet **orchestrating opus subagents** | Coordination is cheap; the code is the product |
+| `factory-merge` | **opus** | Review catches what tests don't, and it is the last gate before `develop` auto-deploys |
+| `factory-audit` | sonnet | A mechanical checklist against `PC-01`..`PC-20` |
+| `ux-critic` | sonnet | Exercises the running app and reports |
+
+Set per command in its frontmatter — that's the knob to turn. `run-agent.sh --model X` overrides the whole session and is the blunt instrument.
+
+The judgement call is triage. A bad spec burns a full dispatch run, so there's a real argument for Opus there; the counter is that `evals/` is the right place to catch spec quality dropping, and a 13-ticket triage pass on Opus is a large bite out of a five-hour window. Start on Sonnet, watch the specs, and move it up if quality slips.
+
 ### Slots and parallelism
 
 Three levels, each with a different job:

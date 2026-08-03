@@ -1,7 +1,7 @@
 ---
 description: Find open Linear issues for this repo and triage them toward agent-ready
 argument-hint: [optional: issue IDs, "all" for workspace-wide, or a max count]
-model: opus
+model: sonnet
 ---
 
 Triage the open Linear issues for the repository I'm currently in: turn raw `Triage` tickets into fully specified, agent-dispatchable ones where possible.

@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0 ; USE_API=0
+REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0 ; USE_API=0 ; MODEL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --dry)       DRY=1; shift ;;
     --read-only) READONLY=1; shift ;;
     --use-api)   USE_API=1; shift ;;
+    --model)     MODEL="$2"; shift 2 ;;
     -h|--help)   sed -n '2,10p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -48,6 +49,7 @@ case "$REPO" in
       [[ "$DRY"      == 1 ]] && sub="$sub --dry"
       [[ "$READONLY" == 1 ]] && sub="$sub --read-only"
       [[ "$USE_API"  == 1 ]] && sub="$sub --use-api"
+      [[ -n "$MODEL"      ]] && sub="$sub --model $MODEL"
       eval "$sub" || rc=$?
     done
     exit $rc
@@ -77,6 +79,14 @@ fi
 
 PROMPT="/${COMMAND}${ARGS:+ $ARGS}"
 
+# Left empty, each command's own frontmatter decides its model (triage/audit
+# sonnet, merge opus, work sonnet orchestrating opus subagents). --model
+# overrides the whole session — the blunt instrument; prefer the frontmatter.
+MODEL_ARGS=""
+if [[ -n "$MODEL" ]]; then
+  MODEL_ARGS="--model $MODEL"
+fi
+
 # Read-only stages run in the MAIN checkout — triage needs the code to write
 # file pointers but has no business changing it, and that checkout routinely
 # holds the human's uncommitted work. Bash stays available (exploration needs
@@ -101,7 +111,7 @@ fi
 
 if [[ "$DRY" == "1" ]]; then
   echo "would run in $REPO_PATH:"
-  echo "  claude -p '$PROMPT' --max-budget-usd $BUDGET $READONLY_ARGS"
+  echo "  claude -p '$PROMPT' --max-budget-usd $BUDGET $MODEL_ARGS $READONLY_ARGS"
   echo "  auth: $AUTH_NOTE"
   exit 0
 fi
@@ -147,7 +157,7 @@ set +e
     --output-format stream-json --verbose \
     --max-budget-usd "$BUDGET" \
     --fallback-model sonnet \
-    $READONLY_ARGS
+    $MODEL_ARGS $READONLY_ARGS
 ) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG")
 STATUS=${PIPESTATUS[1]}
 set -e
