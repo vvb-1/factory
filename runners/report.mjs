@@ -16,6 +16,13 @@ import { appendFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const logFile = argv.includes("--log") ? argv[argv.indexOf("--log") + 1] : null;
+// Harnesses stream different schemas for the same events. Claude:
+// {type:"assistant",message:{content:[{type:"tool_use",...}]}} and a final
+// envelope with subtype/result/num_turns. Antigravity (agy):
+// {event:"step_update",step_update:{step_type:"tool",tool_name,state}} and a
+// final {status:"SUCCESS",response,num_turns}. Same information, different
+// shape — normalise here rather than teaching every caller both.
+const HARNESS = argv.includes("--harness") ? argv[argv.indexOf("--harness") + 1] : "claude";
 
 const c = {
   dim: (s) => `\x1b[2m${s}\x1b[0m`, bold: (s) => `\x1b[1m${s}\x1b[0m`,
@@ -69,6 +76,35 @@ function handle(line) {
   let e;
   try { e = JSON.parse(t); } catch { return; }
 
+  // ---- Antigravity (agy) ----------------------------------------------
+  if (HARNESS !== "claude") {
+    if (e.event === "init") {
+      console.log(c.dim(`  ${clock()} conversation ${String(e.conversation_id).slice(0, 8)} · ${(e.init?.tools ?? []).length} tools`));
+      return;
+    }
+    if (e.event === "step_update") {
+      const s = e.step_update ?? {};
+      if (s.step_type === "tool" && s.state === "ACTIVE") {
+        turns++;
+        const name = s.tool_name ?? "tool";
+        toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1);
+        const par = s.tool_info?.parameters ?? {};
+        const brief = oneLine(
+          par.CommandLine ?? par.command ?? par.AbsolutePath ?? par.path ?? par.Query ?? par.query ??
+          (Object.keys(par).length ? JSON.stringify(par) : ""), 90);
+        console.log(`  ${c.dim(clock())} ${c.cyan(name)} ${brief}`);
+      }
+      if (s.step_type === "agent_response" && s.state === "DONE" && s.text) {
+        console.log(`  ${c.dim(clock())} ${oneLine(s.text, 160)}`);
+      }
+      return;
+    }
+    // Final envelope is nested: {event:"result", result:{...}}
+    if (e.event === "result" && e.result) envelope = e.result;
+    else if ("status" in e && "num_turns" in e) envelope = e;
+    return;
+  }
+
   if (e.type === "system" && e.subtype === "init") {
     console.log(c.dim(`  ${clock()} session ${e.session_id?.slice(0, 8)} · model ${e.model ?? "?"} · ${(e.tools ?? []).length} tools`));
     return;
@@ -120,7 +156,20 @@ if (!envelope) {
   process.exit(1);
 }
 
-const result = String(envelope.result ?? "");
+// Normalise the two envelope shapes into one verdict.
+const result = String(envelope.result ?? envelope.response ?? "");
+if (HARNESS !== "claude") {
+  const ok = envelope.status === "SUCCESS" && (envelope.num_turns ?? 0) > 0;
+  if (result) console.log(result + "\n");
+  const toolsUsed = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).map(([n, k]) => `${n}×${k}`).join(" ");
+  console.log("  " + (ok ? c.green("ok") : c.red(`FAILED: ${envelope.status ?? "unknown"}`)) +
+    c.dim(`   ${envelope.num_turns ?? 0} turns   ${(envelope.duration_seconds ?? 0).toFixed(0)}s   ${envelope.usage?.total_tokens ?? 0} tokens`));
+  if (toolsUsed) console.log(c.dim(`  tools: ${toolsUsed}`));
+  if (logFile) console.log(c.dim(`  transcript: ${logFile}`));
+  console.log();
+  process.exit(ok ? 0 : 1);
+}
+
 const unknownCommand = /^Unknown command:/.test(result);
 const didNothing = (envelope.num_turns ?? 0) === 0;
 const ok = envelope.subtype === "success" && !envelope.is_error && !unknownCommand && !didNothing;

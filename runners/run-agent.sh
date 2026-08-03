@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0 ; USE_API=0 ; MODEL=""
+REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0 ; USE_API=0 ; MODEL="" ; HARNESS="claude"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     --read-only) READONLY=1; shift ;;
     --use-api)   USE_API=1; shift ;;
     --model)     MODEL="$2"; shift 2 ;;
+    --harness)   HARNESS="$2"; shift 2 ;;
     -h|--help)   sed -n '2,10p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -50,6 +51,7 @@ case "$REPO" in
       [[ "$READONLY" == 1 ]] && sub="$sub --read-only"
       [[ "$USE_API"  == 1 ]] && sub="$sub --use-api"
       [[ -n "$MODEL"      ]] && sub="$sub --model $MODEL"
+      [[ "$HARNESS" != "claude" ]] && sub="$sub --harness $HARNESS"
       eval "$sub" || rc=$?
     done
     exit $rc
@@ -116,7 +118,7 @@ if [[ "$DRY" == "1" ]]; then
   exit 0
 fi
 
-command -v claude >/dev/null || { echo "claude CLI not on PATH" >&2; exit 127; }
+command -v "$HARNESS" >/dev/null || { echo "$HARNESS CLI not on PATH" >&2; exit 127; }
 
 LOG_DIR="$HOME/.factory/logs"
 mkdir -p "$LOG_DIR"
@@ -124,7 +126,7 @@ LOG="$LOG_DIR/${REPO}-${COMMAND}-$(date +%Y%m%d-%H%M%S).jsonl"
 
 echo "→ $REPO ($REPO_TEAM)  $PROMPT"
 echo "  cwd:    $REPO_PATH"
-echo "  auth:   $AUTH_NOTE   cap ~\$$BUDGET notional"
+echo "  harness: $HARNESS   auth: $AUTH_NOTE   cap ~\$$BUDGET notional"
 
 # Read-only stages (triage) read the MAIN CHECKOUT, so a stale one produces
 # specs against code that moved. Dispatch does not care: worktree-up.sh fetches
@@ -167,14 +169,35 @@ unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 # run shows a blank terminal for minutes and then a wall of text. report.mjs
 # renders each step live and still parses the final envelope for the exit code.
 set +e
-(
-  cd "$REPO_PATH"
-  $ENV_PREFIX claude -p "$PROMPT" \
-    --output-format stream-json --verbose \
-    --max-budget-usd "$BUDGET" \
-    --fallback-model sonnet \
-    $MODEL_ARGS $READONLY_ARGS
-) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG")
+if [[ "$HARNESS" == "claude" ]]; then
+  (
+    cd "$REPO_PATH"
+    $ENV_PREFIX claude -p "$PROMPT" \
+      --output-format stream-json --verbose \
+      --max-budget-usd "$BUDGET" \
+      --fallback-model sonnet \
+      $MODEL_ARGS $READONLY_ARGS
+  ) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG" --harness claude)
+else
+  # Other harnesses do not read .claude/commands, so the slash command would
+  # not resolve. Pass the command BODY as the prompt instead — it is plain
+  # markdown, which is why the content was made harness-neutral in the first
+  # place. This also removes the "command not installed" failure class here.
+  BODY="$(cd "$ROOT" && bun -e '
+    const f = `shared/commands/${process.argv[1]}.md`;
+    let t = await Bun.file(f).text();
+    t = t.replace(/^---\n[\s\S]*?\n---\n/, "");            // drop frontmatter
+    t = t.replaceAll("$ARGUMENTS", process.argv[2] ?? "");
+    console.log(t);
+  ' "$COMMAND" "$ARGS")"
+  (
+    cd "$REPO_PATH"
+    $ENV_PREFIX "$HARNESS" -p "$BODY" \
+      --output-format stream-json \
+      --dangerously-skip-permissions \
+      $MODEL_ARGS
+  ) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG" --harness "$HARNESS")
+fi
 STATUS=${PIPESTATUS[1]}
 set -e
 
