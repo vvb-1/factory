@@ -1,0 +1,54 @@
+# Limits the dispatcher enforces. Changing these changes how much autonomy the
+# factory has, so they live in git and move by PR — not by editing a running box.
+
+concurrency:
+  # Per repo, not global. The ceiling isn't tooling, it's dependency structure:
+  # when ticket B needs A's output you cannot parallelize it, and that's most
+  # real work. 3-5 genuinely independent streams is realistic.
+  max_in_flight_per_repo: 3
+  # Merging is never parallel. Two PRs landing in one base within seconds
+  # produce a base-CI failure that belongs to neither.
+  max_concurrent_merges: 1
+
+budget:
+  # Passed to `claude -p --max-budget-usd`. An unbounded session is the thing
+  # that quietly eats a daily cap at 3am.
+  per_ticket_usd: 5.00
+  per_day_usd: 60.00
+  # When the daily cap is hit: finish what's in flight, claim nothing new.
+  on_exhausted: drain
+
+circuit_breaker:
+  # Two consecutive environment/build failures (not ticket-specific ones) stop
+  # dispatch. A broken worktree template otherwise converts the whole queue into
+  # Blocked in minutes.
+  consecutive_env_failures: 2
+
+escalation:
+  # Never auto-merged, regardless of CI or review outcome. The test is whether
+  # the diff CHANGES security-relevant behavior, not whether a file sits near
+  # security code — read as file-adjacency this list swallows most PRs in an app
+  # where auth is everywhere, which trains everyone to rubber-stamp.
+  never_auto_merge:
+    - auth / authz
+    - payments / money movement
+    - credential and secret handling
+    - destructive DB migrations
+    - production infra config
+    - CLNT security behavior
+  # Base branches an agent may merge into without a human. master/main always
+  # goes through a human, on every repo.
+  auto_merge_base: [develop]
+  auto_merge_owners: [hdkiller, watt-mind]
+
+notify:
+  # Push these. Everything else goes to Linear and the end-of-run report — a
+  # channel that pings on every merge gets muted, and then the blocker
+  # notification is lost with it.
+  on:
+    - ticket_blocked
+    - pr_escalated
+    - base_ci_red
+    - smoke_red
+    - circuit_breaker_tripped
+    - release_candidate_ready

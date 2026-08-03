@@ -1,0 +1,14 @@
+# Runtime state lives in ~/.factory/, never here.
+node_modules/
+*.log
+
+# Dispatcher state: leases, session ids, budget ledger.
+.factory/
+state/
+
+# Secrets are injected at run time (launchd env / op run), never committed.
+.env
+.env.*
+!.env.example
+
+.DS_Store

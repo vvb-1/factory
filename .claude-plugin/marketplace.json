@@ -1,0 +1,18 @@
+{
+  "name": "factory",
+  "owner": {
+    "name": "Watt Mind",
+    "url": "https://github.com/watt-mind"
+  },
+  "metadata": {
+    "description": "Watt Mind agent factory — shared commands, agents, and skills for every repo.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "core",
+      "source": "./plugins/core",
+      "description": "Execution protocol for every repo: /work, /merge, /triage, /audit, the ux-critic agent, and the ticket-spec skill."
+    }
+  ]
+}

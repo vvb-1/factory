@@ -1,0 +1,61 @@
+# The one source of truth for every recurring job.
+#
+# `node deploy/gen.mjs` renders these into ~/Library/LaunchAgents/*.plist.
+# Never hand-edit a generated plist — change it here and regenerate, or the next
+# regeneration silently reverts your edit.
+#
+# Loops and their rationale: linear.md §14.
+
+defaults:
+  label_prefix: com.wattmind
+  log_dir: ~/Library/Logs
+  # Don't fire a burst of catch-up runs when the laptop wakes from sleep.
+  run_at_load: false
+
+jobs:
+  # ---------------------------------------------------------------- reaper ---
+  # Returns crashed agents' Linear claims to Todo. Only touches tickets carrying
+  # ai:in-progress / agent:* -- an In Progress ticket without those labels is a
+  # human's work, and unassigning it would be far worse than the crashed agent
+  # this cleans up after.
+  #
+  # Installed by hand 2026-08-03; adopted here so it stops being an orphan.
+  - name: linear-reaper
+    every: 15m
+    command: bash ~/Develop/hdkiller/scripts/bin/linear-reaper-cron.sh
+    why: >
+      Threshold is 45 minutes of silence, so 15m samples it 3x. Runs on launchd
+      rather than Dkron because LINEAR_API_KEY is workspace-wide and should not
+      be copied to a server for a job that cleans up after local agents.
+
+  # ------------------------------------------------------------ spec synth ---
+  # The queue starves at specification, not execution: 147 Triage vs 12
+  # dispatchable when this repo was created. This is the loop that fixes it.
+  # Disabled until the ticket-spec skill has eval coverage -- an auto-specced
+  # ticket that looks complete but whose Verification Command doesn't run costs
+  # a full agent run to discover.
+  - name: spec-synth
+    every: 6h
+    command: bash runners/run-agent.sh --skill ticket-spec
+    enabled: false
+    why: Turns Triage into ai:agent-ready without a human. Enable after evals.
+
+  # ------------------------------------------------------------- dispatch ----
+  # Disabled until the worktree scripts exist in the repos it would dispatch to
+  # (CW-363, CLNT-609). Dispatching agents into repos with no port/database
+  # isolation is how two agents end up sharing one dev database.
+  - name: dispatch
+    every: 20m
+    command: node orchestrator/tick.mjs
+    enabled: false
+    why: Rolling dispatch under the in-flight cap. Needs PC-15 in target repos.
+
+  # --------------------------------------------------------- merge sitter ----
+  - name: merge-babysitter
+    every: 30m
+    command: bash runners/run-agent.sh --command merge
+    enabled: false
+    why: >
+      Reviews In Review PRs as their CI finishes instead of at end of session.
+      Merging stays serialized -- one PR at a time, base CI + smoke green before
+      the next.
