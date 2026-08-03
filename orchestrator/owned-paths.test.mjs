@@ -71,3 +71,45 @@ test("nextDispatchable skips collisions and tickets without Owned Paths", () => 
 test("nothing dispatchable returns undefined rather than throwing", () => {
   expectEqual(nextDispatchable([], []), undefined);
 });
+
+test("accepts fenced code blocks, not just bullets (real CLNT-616 shape)", () => {
+  const desc = `## Source File Pointers
+
+Read-only reference.
+
+## Owned Paths
+
+\`\`\`
+app/src/landing-page/components/Hero.tsx
+\`\`\`
+
+Plus, only if you add the recommended coverage below:
+
+\`\`\`
+app/src/landing-page/components/Hero.test.tsx
+\`\`\`
+
+## Verification Command
+
+    npm test`;
+  expectEqual(parseOwnedPaths(desc), [
+    "app/src/landing-page/components/Hero.tsx",
+    "app/src/landing-page/components/Hero.test.tsx",
+  ]);
+});
+
+test("prose inside the section is not mistaken for a path", () => {
+  const desc = `## Owned Paths
+
+Only touch these:
+
+- \`app/api.ts\`
+
+Everything else is off limits.`;
+  expectEqual(parseOwnedPaths(desc), ["app/api.ts"]);
+});
+
+test("indented code blocks work too", () => {
+  const desc = "## Owned Paths\n\n    src/main.ts\n    src/**/*.test.ts\n\n## Next";
+  expectEqual(parseOwnedPaths(desc), ["src/main.ts", "src/**/*.test.ts"]);
+});

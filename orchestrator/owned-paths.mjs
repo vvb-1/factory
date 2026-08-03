@@ -24,14 +24,33 @@
 export function parseOwnedPaths(description = "") {
   const section = description.split(/^##\s+/m).find((s) => /^Owned Paths/i.test(s));
   if (!section) return [];
-  return section
-    .split("\n")
-    .slice(1)
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith("-") || l.startsWith("*"))
-    .map((l) => l.replace(/^[-*]\s*/, "").replace(/`/g, "").trim())
+
+  // Real tickets write this section three different ways — bullet lists, fenced
+  // code blocks, and indented code — often mixing them with prose ("Plus, only
+  // if you add coverage below:"). Reading only bullets rejected a perfectly
+  // good spec and made the ticket undispatchable, which looks like a triage
+  // failure and isn't. Accept all three, then filter to things shaped like
+  // paths.
+  const out = [];
+  let inFence = false;
+
+  for (const raw of section.split("\n").slice(1)) {
+    if (/^\s*```/.test(raw)) { inFence = !inFence; continue; }
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (inFence) { out.push(line); continue; }
+    if (/^[-*]\s+/.test(line)) { out.push(line.replace(/^[-*]\s*/, "")); continue; }
+    if (/^ {4,}\S/.test(raw)) out.push(line);           // indented code block
+  }
+
+  return out
+    .map((s) => s.replace(/`/g, "").replace(/[,;]$/, "").trim())
     .filter(Boolean)
-    .filter((l) => !l.startsWith("#"));
+    .filter((s) => !s.startsWith("#"))
+    // A path has no spaces and looks like a path: a separator, a wildcard, or an
+    // extension. This drops the prose that legitimately appears in the section.
+    .filter((s) => !/\s/.test(s) && (s.includes("/") || s.includes("*") || /\.[a-z0-9]+$/i.test(s)));
 }
 
 /** Escape regex metacharacters that are not glob syntax. */
