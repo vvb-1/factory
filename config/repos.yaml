@@ -24,6 +24,7 @@ repos:
     # Never hand-roll: ports and per-ticket databases come from these.
     worktree_up: bin/worktree-up.sh
     worktree_down: bin/worktree-down.sh
+    worktree_warm: bin/worktree-warm.sh
     worktree_root: ~/Develop/.worktrees/bj29
 
     # What "verified" means. Agents run this before any PR.

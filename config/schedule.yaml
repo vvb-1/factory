@@ -89,6 +89,20 @@ jobs:
       a ping per ticket. Read-only against the repo — it needs the code to write
       Source File Pointers and Owned Paths, but never a worktree.
 
+  # 1b. WARM. Worktree creation clones node_modules and the build cache from a
+  #     template. Stale template => the clone is worthless and every ticket pays
+  #     a full compile: at 99 commits behind that was ~3 minutes per worktree,
+  #     ~9 minutes of wall clock for three tickets before any code got written.
+  - name: warm
+    every: 2h
+    gate_command: bun orchestrator/warm.mjs --repo bj29 --gate
+    dry_command: bun orchestrator/warm.mjs --repo bj29
+    command: bun orchestrator/warm.mjs --repo bj29 --apply
+    enabled: false
+    why: >
+      Compiles once so that N worktrees don't. Cheapest thing to run before a
+      dispatch batch; the gate only fires when the cache is >=15 commits behind.
+
   # 2. EXECUTE. Rolling dispatch under the per-repo in-flight cap; Owned Paths
   #    decide what can run together. The gate refuses to spawn when the cap is
   #    full or nothing is startable, so an agent never wakes to learn nothing.
@@ -96,11 +110,13 @@ jobs:
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo bj29 --gate dispatch
     dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-work --args "3 tickets, 3 in flight"
+    command: bun orchestrator/tick.mjs --repo bj29 --apply
     enabled: false
     why: >
-      Claims agent-ready tickets, works them in per-ticket worktrees
-      (bin/worktree-up.sh), verifies, and opens PRs against develop.
+      One OS PROCESS PER TICKET: tick.mjs claims, builds the worktree via
+      bin/worktree-up.sh, then spawns `claude -p /factory-ticket <ID>` in it.
+      Each ticket gets its own log, budget and session id, so one stuck ticket
+      can be killed alone and one failed ticket resumed alone.
 
   # 3. LAND. Merging is always serialized — two PRs landing in one base within
   #    seconds produce a base-CI failure belonging to neither.
