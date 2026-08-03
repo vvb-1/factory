@@ -35,16 +35,14 @@ jobs:
   # Installed by hand 2026-08-03; adopted here so it stops being an orphan.
   - name: linear-reaper
     every: 15m
-    # dry_command is what the foreground supervisor runs WITHOUT --apply.
-    # The reaper changes ticket state, so "what would this do" is the default.
-    dry_command: python3 ~/Develop/hdkiller/scripts/linear-reaper.py
-    command: python3 ~/Develop/hdkiller/scripts/linear-reaper.py --apply
+    dry_command: bun orchestrator/reaper.mjs
+    command: bun orchestrator/reaper.mjs --apply
     enabled: false
     why: >
       Threshold is 45 minutes of silence, so 15m would sample it 3x. Disabled
       under the foreground policy above — it was loaded on 2026-08-03 and
       unloaded the same day. Run it by hand instead, and prefer the dry run
-      first: `python3 ~/Develop/hdkiller/scripts/linear-reaper.py` shows what it
+      first: `bun orchestrator/reaper.mjs` shows what it
       would reclaim, `--apply` does it. Without this running, a crashed agent
       holds its ticket until someone notices — acceptable while every run is
       watched, and the first thing to re-enable when it isn't.

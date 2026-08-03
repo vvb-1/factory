@@ -1,0 +1,385 @@
+#!/usr/bin/env bun
+/**
+ * Reclaim stale agent claims in Linear.
+ *
+ * An agent that crashes mid-ticket leaves the issue in `In Progress` with itself as
+ * assignee, forever. No other agent will touch it (it looks like a live claim) and
+ * no human will notice (it looks like work in flight). This script reaps those.
+ *
+ * Only tickets carrying the claim markers (`ai:in-progress` / `agent:*`) count as
+ * agent claims. A human working a ticket in `In Progress` without commenting is not
+ * a stale claim, and unassigning their work would do far more damage than the
+ * crashed agent this exists to clean up.
+ *
+ * A claim is stale when the newest of {last comment, startedAt} is older than the
+ * threshold. The protocol in docs/orgs/linear.md requires a heartbeat at every phase
+ * change and at least every 20 minutes, so 45 minutes of silence means the agent is
+ * gone.
+ *
+ * Dry-run by default. Nothing is written without --apply.
+ *
+ *     bun orchestrator/reaper.mjs                     # show stale claims
+ *     bun orchestrator/reaper.mjs --apply             # reclaim them
+ *     bun orchestrator/reaper.mjs --minutes 90        # different threshold
+ *     bun orchestrator/reaper.mjs --team CW --apply   # one team
+ *     bun orchestrator/reaper.mjs --any-assignee      # audit unlabeled ones too
+ */
+
+import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+
+export const IN_PROGRESS = "in progress";
+export const RECLAIM_TO = "todo";
+export const HEARTBEAT_LABEL = "ai:in-progress";
+export const AGENT_LABEL_PREFIX = "agent:";
+const LINEAR_API_URL = "https://api.linear.app/graphql";
+
+function loadEnv() {
+  if (process.env.LINEAR_API_KEY) return process.env.LINEAR_API_KEY;
+
+  const envPaths = [
+    path.join(homedir(), "Develop/hdkiller/.env"),
+    path.join(process.cwd(), ".env"),
+  ];
+
+  for (const envPath of envPaths) {
+    if (existsSync(envPath)) {
+      try {
+        const content = readFileSync(envPath, "utf8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+            const idx = trimmed.indexOf("=");
+            const key = trimmed.slice(0, idx).trim();
+            const val = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+            if (!process.env[key]) {
+              process.env[key] = val;
+            }
+          }
+        }
+      } catch {
+        // Ignore read errors
+      }
+    }
+  }
+
+  return process.env.LINEAR_API_KEY || null;
+}
+
+export function getApiKey() {
+  const key = loadEnv();
+  if (!key) {
+    console.error("Linear API error: LINEAR_API_KEY not found in env or ~/Develop/hdkiller/.env");
+    process.exit(1);
+  }
+  return key;
+}
+
+export async function gql(query, variables = {}, retries = 5) {
+  const apiKey = getApiKey();
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: apiKey,
+  };
+  const body = JSON.stringify({ query, variables });
+  let delay = 1000;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(LINEAR_API_URL, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      if (!res.ok) {
+        if ([429, 500, 502, 503, 504].includes(res.status) && attempt < retries - 1) {
+          await new Promise((r) => setTimeout(r, delay));
+          delay *= 2;
+          continue;
+        }
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
+      }
+
+      const data = await res.json();
+      if (data.errors && data.errors.length > 0) {
+        const msg = JSON.stringify(data.errors);
+        if (msg.toUpperCase().includes("RATELIMITED") && attempt < retries - 1) {
+          await new Promise((r) => setTimeout(r, delay));
+          delay *= 2;
+          continue;
+        }
+        throw new Error(msg);
+      }
+
+      return data.data || {};
+    } catch (err) {
+      if (attempt < retries - 1 && !(err.message && err.message.startsWith("HTTP 4"))) {
+        await new Promise((r) => setTimeout(r, delay));
+        delay *= 2;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Exhausted retries");
+}
+
+export function parseTs(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+export async function fetchTeams() {
+  const q = `
+    query {
+      teams(first: 25) {
+        nodes { id key states(first: 30) { nodes { id name } } }
+      }
+    }
+  `;
+  const data = await gql(q);
+  const result = {};
+  for (const t of data.teams?.nodes || []) {
+    const states = {};
+    for (const s of t.states?.nodes || []) {
+      states[s.name.toLowerCase()] = s.id;
+    }
+    result[t.key] = { id: t.id, states };
+  }
+  return result;
+}
+
+export async function fetchInProgress(teamKey = null) {
+  const teamFilter = teamKey ? `, team: { key: { eq: "${teamKey}" } }` : "";
+  const q = `
+    query {
+      issues(first: 250, filter: { state: { name: { eq: "In Progress" } }${teamFilter} }) {
+        nodes {
+          id identifier title url startedAt updatedAt
+          team { key }
+          assignee { id name }
+          labels(first: 20) { nodes { id name } }
+          comments(last: 1) { nodes { createdAt } }
+        }
+      }
+    }
+  `;
+  const data = await gql(q);
+  return data.issues?.nodes || [];
+}
+
+export function isAgentClaim(issue) {
+  const labels = issue.labels?.nodes || [];
+  const names = labels.map((l) => (l.name || "").toLowerCase());
+  return names.some(
+    (n) => n === HEARTBEAT_LABEL || n.startsWith(AGENT_LABEL_PREFIX)
+  );
+}
+
+export function lastActivity(issue) {
+  const stamps = [];
+  const started = parseTs(issue.startedAt);
+  if (started) stamps.push(started);
+
+  const comments = issue.comments?.nodes || [];
+  if (comments.length > 0) {
+    const lastCommentTs = parseTs(comments[comments.length - 1].createdAt);
+    if (lastCommentTs) stamps.push(lastCommentTs);
+  }
+
+  if (stamps.length > 0) {
+    return new Date(Math.max(...stamps.map((d) => d.getTime())));
+  }
+
+  return parseTs(issue.updatedAt);
+}
+
+export async function reclaim(issue, todoStateId, minutes, apply) {
+  const labels = issue.labels?.nodes || [];
+  const keep = labels
+    .filter((l) => {
+      const name = (l.name || "").toLowerCase();
+      return name !== HEARTBEAT_LABEL && !name.startsWith(AGENT_LABEL_PREFIX);
+    })
+    .map((l) => l.id);
+
+  if (!apply) return;
+
+  await gql(
+    `
+    mutation($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) { success }
+    }
+    `,
+    {
+      id: issue.id,
+      input: {
+        stateId: todoStateId,
+        assigneeId: null,
+        labelIds: keep,
+      },
+    }
+  );
+
+  const who = issue.assignee?.name || "an agent";
+  const body =
+    `**Reclaimed by the stale-claim reaper.**\n\n` +
+    `This ticket was held by ${who} in \`In Progress\` with no heartbeat ` +
+    `for over ${minutes} minutes, so the claim was presumed abandoned. ` +
+    `It has been unassigned and returned to \`Todo\`.\n\n` +
+    `If the agent is still working, it must re-claim the ticket before ` +
+    `continuing — see the claim protocol in \`docs/orgs/linear.md\`.`;
+
+  await gql(
+    `
+    mutation($input: CommentCreateInput!) {
+      commentCreate(input: $input) { success }
+    }
+    `,
+    {
+      input: {
+        issueId: issue.id,
+        body,
+      },
+    }
+  );
+}
+
+export function parseArgs(argv = process.argv.slice(2)) {
+  let apply = false;
+  let minutes = 45;
+  let team = null;
+  let anyAssignee = false;
+  let help = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--apply") {
+      apply = true;
+    } else if (arg === "--minutes") {
+      const val = parseInt(argv[++i], 10);
+      if (!isNaN(val) && val > 0) minutes = val;
+    } else if (arg === "--team") {
+      team = argv[++i] || null;
+    } else if (arg === "--any-assignee") {
+      anyAssignee = true;
+    } else if (arg === "--help" || arg === "-h") {
+      help = true;
+    }
+  }
+
+  return { apply, minutes, team, anyAssignee, help };
+}
+
+export async function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
+
+  if (args.help) {
+    console.log(`Reclaim stale agent claims in Linear.
+
+Usage:
+  bun orchestrator/reaper.mjs [options]
+
+Options:
+  --apply          Actually reclaim tickets (default is dry-run)
+  --minutes <N>    Silence threshold before a claim is stale (default: 45)
+  --team <KEY>     Limit reaping to a single team key (e.g. CW)
+  --any-assignee   Audit all In Progress tickets regardless of agent claim labels
+  -h, --help       Show this help message
+`);
+    process.exit(0);
+  }
+
+  const mode = args.apply ? "APPLY" : "DRY RUN";
+  console.log(`=== Stale-claim reaper [${mode}] threshold=${args.minutes}min ===\n`);
+
+  const teams = await fetchTeams();
+  let issues = await fetchInProgress(args.team);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - args.minutes * 60 * 1000);
+
+  if (!args.anyAssignee) {
+    const claims = issues.filter(isAgentClaim);
+    const skipped = issues.length - claims.length;
+    if (skipped > 0) {
+      console.log(`  (skipping ${skipped} In Progress ticket(s) with no agent claim labels -- not agent work)\n`);
+    }
+    issues = claims;
+  }
+
+  const stale = [];
+  const live = [];
+
+  for (const issue of issues) {
+    const seen = lastActivity(issue);
+    if (seen && seen < cutoff) {
+      stale.push({ issue, seen });
+    } else {
+      live.push({ issue, seen });
+    }
+  }
+
+  for (const { issue, seen } of live) {
+    const age = seen ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString() : "?";
+    const who = issue.assignee?.name || "unassigned";
+    const id = (issue.identifier || "").padEnd(10);
+    const ageStr = age.padStart(4);
+    const whoStr = who.padEnd(16);
+    const titleStr = (issue.title || "").slice(0, 44);
+    console.log(`  ok    ${id} ${ageStr}m  ${whoStr} ${titleStr}`);
+  }
+
+  if (stale.length === 0) {
+    console.log(`\n=== No stale claims among ${issues.length} in progress. ===`);
+    return;
+  }
+
+  console.log();
+  for (const { issue, seen } of stale) {
+    const age = seen ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString() : "?";
+    const who = issue.assignee?.name || "unassigned";
+    const id = (issue.identifier || "").padEnd(10);
+    const ageStr = age.padStart(4);
+    const whoStr = who.padEnd(16);
+    const titleStr = (issue.title || "").slice(0, 44);
+    console.log(`  STALE ${id} ${ageStr}m  ${whoStr} ${titleStr}`);
+
+    const teamKey = issue.team?.key;
+    const team = teams[teamKey];
+    const todoId = team?.states?.[RECLAIM_TO];
+
+    if (!todoId) {
+      console.log(`        ! no '${RECLAIM_TO}' state on team ${teamKey}, skipping`);
+      continue;
+    }
+
+    try {
+      await reclaim(issue, todoId, args.minutes, args.apply);
+    } catch (err) {
+      console.log(`        ! failed: ${err.message || err}`);
+      continue;
+    }
+
+    if (args.apply) {
+      console.log(`        -> unassigned, returned to Todo`);
+    }
+  }
+
+  console.log(
+    `\n=== ${args.apply ? "Reclaimed" : "Would reclaim"}: ${stale.length} | Healthy: ${live.length} ===`
+  );
+  if (!args.apply) {
+    console.log("Run again with --apply to reclaim these.");
+  }
+}
+
+if (import.meta.main || process.argv[1]?.endsWith("reaper.mjs")) {
+  main().catch((err) => {
+    console.error(`Linear API error: ${err.message || err}`);
+    process.exit(1);
+  });
+}

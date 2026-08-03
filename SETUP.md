@@ -24,8 +24,8 @@ Symlinks rather than copies: `git pull` then updates every harness at once, and 
 Run the reaper by hand when you want it:
 
 ```bash
-python3 ~/Develop/hdkiller/scripts/linear-reaper.py           # dry run first
-python3 ~/Develop/hdkiller/scripts/linear-reaper.py --apply
+bun orchestrator/reaper.mjs           # dry run first
+bun orchestrator/reaper.mjs --apply
 ```
 
 ```bash
