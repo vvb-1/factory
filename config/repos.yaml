@@ -85,6 +85,16 @@ repos:
     # into it. Raise once a few land clean.
     max_in_flight: 4
 
+    # Surfaces where a diff is never auto-merged, on top of the global list in
+    # policy.yaml. Without these, escalate.mjs has nothing to check and the
+    # whole mechanical half of the gate is missing — in a CLNT repo that
+    # generates legal documents and holds client personal data.
+    escalate_paths:
+      - legalease/main/migrations/**
+      - legalease/legalease/settings*.py
+      - legalease/main/services/document_generation/**
+      - legalease/main/services/access_control.py
+
   - name: cashsaas
     path: ~/Develop/cashsaas
     github: hdkiller/cashsaas
