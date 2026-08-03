@@ -131,6 +131,34 @@ Not in the command. The layering:
 
 The agent runs with `cwd` set to the repo, so it reads that repo's `AGENTS.md` naturally — repo specifics arrive as *context*, not as forked commands. For genuinely stage-specific repo guidance, `run-agent.sh --args` appends to the prompt. Resist adding config surface before a real case demands it.
 
+### Where the work happens
+
+| What | Where | Why |
+| :--- | :--- | :--- |
+| The repo itself | `~/Develop/pets/bj29` (`repos.yaml: path`) | Triage reads it; worktrees are created *from* it |
+| Per-ticket worktrees | `~/Develop/.worktrees/<repo>/<TICKET>` (`repos.yaml: worktree_root`) | One ticket, one checkout, own branch/ports/database |
+| Factory runtime state | `~/.factory/` | Session ids, budget ledger, logs — never in git |
+| This repo | `~/Develop/factory` | Control plane only. **No work happens here.** |
+
+**Worktrees must not live inside `~/Develop/factory/`.** It's a git repo, so nesting checkouts under it means `git status` noise, a real chance of `git add -A` sweeping an entire worktree into a commit, and the drift check walking trees it has no business in. A control plane that can accidentally commit its own workload is a bad control plane.
+
+A sibling like `~/Develop/factory-workspace/` would work, but it buys nothing and costs a migration: `bin/worktree-up.sh` in each repo already writes to `~/Develop/.worktrees/<repo>/`, [linear.md §6](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md) documents that path, and 21 existing bj29 worktrees live there. Changing it means editing every repo's script plus the docs, and orphaning what's already on disk.
+
+The existing convention already has the properties you'd want: outside any repo, namespaced per repo, dot-prefixed so it stays out of `~/Develop` listings, and pointed at by `worktree_root` in `config/repos.yaml` — so it's a config change, not a code change, if it ever needs to move.
+
+**The one good reason to move it: disk.** This machine is at 89%, and worktrees are the bulk of it. If you relocate them to another volume, change `worktree_root` here *and* the corresponding path in the repo's `worktree-up.sh` — those two must agree, or the janitor cleans a directory the scripts aren't using.
+
+### Lifecycle
+
+```
+triage    main checkout, read-only (edit tools disabled), no worktree
+dispatch  bin/worktree-up.sh <TICKET>   → own branch, ports, per-ticket database
+merge     bin/worktree-down.sh <TICKET> → drops the database, removes the worktree
+janitor   hourly sweep for whatever the above missed
+```
+
+The janitor exists because that third step is the one that gets skipped — a crashed run, a hand-merge, or a ticket closed directly in Linear all leave an orphan, and an orphan looks exactly like live work.
+
 ### Checkout freshness
 
 Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **fetches and reports** — branch, commits behind, uncommitted files — but **never pulls**. The main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. Triage is read-only and needs no worktree; only dispatch creates them.
