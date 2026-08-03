@@ -149,6 +149,34 @@ console.log(`  gemini  dist/gemini/   (${skillDirs.length} skills)  — also Ant
 console.log(`  cursor  dist/cursor/   (${commands.length} commands)`);
 console.log(`  floor   dist/AGENTS.floor.md`);
 
+// -------------------------------------------------------------- link repos ---
+// Claude Code reads project commands from <repo>/.claude/commands/. Symlinking
+// them there is how a repo gets /factory-* without a marketplace fetch — which
+// matters for headless runs, where a private-repo plugin install needs GitHub
+// auth inside the session and fails closed if it isn't there.
+//
+// The marketplace route (SETUP.md) still works and is nicer for interactive use;
+// this is the one that reliably works for `claude -p`.
+if (process.argv.includes("--link-repos")) {
+  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+  console.log("\nlinking factory commands into each configured repo:");
+  for (const repo of cfg.repos ?? []) {
+    const repoPath = String(repo.path).replace(/^~/, homedir());
+    if (!existsSync(repoPath)) { console.log(`  skip     ${repo.name} — no checkout at ${repo.path}`); continue; }
+    const dst = path.join(repoPath, ".claude", "commands");
+    mkdirSync(dst, { recursive: true });
+    for (const f of commands) {
+      const target = path.join(dst, path.basename(f));
+      let st = null;
+      try { st = lstatSync(target); } catch {}
+      if (st && !st.isSymbolicLink()) { console.log(`  skip     ${repo.name}/${path.basename(f)} (real file)`); continue; }
+      if (st) unlinkSync(target);
+      symlinkSync(path.join(CLAUDE, "commands", path.basename(f)), target);
+    }
+    console.log(`  linked   ${repo.name}  ${commands.length} command(s) -> ${repo.path}/.claude/commands/`);
+  }
+}
+
 // ------------------------------------------------------------------- link ----
 if (LINK) {
   console.log("\nlinking this machine's harnesses to shared/ (source of truth, no copy to go stale):");

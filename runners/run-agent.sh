@@ -113,6 +113,16 @@ echo "  cwd: $REPO_PATH"
 # invoke from anywhere, including an interactive session.
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 
+# ANTHROPIC_API_KEY takes precedence over the claude.ai login and DISABLES
+# claude.ai connectors — including the Linear MCP the stages rely on. The
+# protocol has fallbacks (the `linear` CLI, or GraphQL via linear_common), but
+# the agent should know which transport it has before it starts.
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "  ! ANTHROPIC_API_KEY is set — claude.ai connectors (incl. Linear MCP) are disabled."
+  echo "    The agent must fall back to the linear CLI or GraphQL (linear.md §13)."
+  echo "    To use connectors instead: unset ANTHROPIC_API_KEY and run \`claude setup-token\`."
+fi
+
 OUT="$(mktemp)"; trap 'rm -f "$OUT"' EXIT
 set +e
 (
@@ -135,16 +145,35 @@ set -e
 bun -e '
   const raw = await Bun.file(process.argv[1]).text();
   const status = Number(process.argv[2]);
-  let env;
-  try { env = JSON.parse(raw); } catch {
-    console.error("non-JSON output from claude (exit " + status + "):");
+  // claude prints warnings (e.g. "connectors are disabled...") before the JSON
+  // envelope, so the capture is not pure JSON. Take the last line that parses.
+  let env = null;
+  for (const line of raw.split("\n").map((l) => l.trim()).reverse()) {
+    if (!line.startsWith("{")) continue;
+    try { env = JSON.parse(line); break; } catch {}
+  }
+  if (!env) {
+    console.error("no JSON envelope in claude output (exit " + status + "):");
     console.error(raw.slice(0, 2000));
     process.exit(status || 1);
   }
-  const ok = env.subtype === "success";
+  // subtype alone is NOT the truth. An unknown slash command returns
+  // subtype:"success", is_error:false, num_turns:0 and result:"Unknown command:
+  // /x" — a run that did nothing, reported as ok. Check what actually happened.
+  const result = String(env.result ?? "");
+  const unknownCommand = /^Unknown command:/.test(result);
+  const didNothing = (env.num_turns ?? 0) === 0;
+  const ok = env.subtype === "success" && !env.is_error && !unknownCommand && !didNothing;
+
   if (env.result) console.log("\n" + env.result);
+  if (unknownCommand) {
+    console.error("\n  The command is not installed in this repo.");
+    console.error("  Fix: bun build/emit.mjs --link-repos   (symlinks factory commands into each repo)");
+  } else if (didNothing && env.subtype === "success") {
+    console.error("\n  Zero turns — the session started and did nothing. Treating as failure.");
+  }
   console.log(
-    "\n  " + (ok ? "ok" : "FAILED: " + (env.subtype ?? "unknown")) +
+    "\n  " + (ok ? "ok" : "FAILED: " + (unknownCommand ? "unknown command" : didNothing ? "no turns" : env.subtype ?? "unknown")) +
     "   $" + (env.total_cost_usd ?? 0).toFixed?.(3) +
     "   " + (env.num_turns ?? "?") + " turns" +
     (env.session_id ? "   session " + env.session_id : "")
