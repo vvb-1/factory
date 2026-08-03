@@ -11,11 +11,23 @@ concurrency:
   max_concurrent_merges: 1
 
 budget:
-  # Passed to `claude -p --max-budget-usd`. An unbounded session is the thing
-  # that quietly eats a daily cap at 3am.
-  per_ticket_usd: 5.00
-  per_day_usd: 60.00
-  # When the daily cap is hit: finish what's in flight, claim nothing new.
+  # AUTH IS THE SUBSCRIPTION (claude.ai OAuth), not the API. run-agent.sh unsets
+  # ANTHROPIC_API_KEY unless --use-api is passed, because with it set every run
+  # bills per token instead of drawing on the subscription — and claude.ai
+  # connectors, including the Linear MCP, get disabled.
+  #
+  # So these numbers are NOT money. Claude still reports costUSD per model (a
+  # trivial one-turn run showed ~$0.14 notional, most of it cache creation), and
+  # --max-budget-usd caps against that figure. Read it as a RUNAWAY GUARD in
+  # notional API-equivalent units: it stops a session that has gone in circles,
+  # it does not protect a wallet.
+  #
+  # The real constraint on a subscription is the usage window, and nothing here
+  # can see it. That is what tickets-per-tick caps are for (schedule.yaml
+  # --args): they bound how much of a window one tick can consume.
+  per_ticket_usd: 15.00     # generous — a triage run that explores a codebase
+                            # legitimately passes $5 notional
+  per_day_usd: 200.00       # advisory only; nothing enforces it across runs yet
   on_exhausted: drain
 
 circuit_breaker:

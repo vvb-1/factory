@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0
+REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0 ; USE_API=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +22,7 @@ while [[ $# -gt 0 ]]; do
     --args)    ARGS="$2"; shift 2 ;;
     --dry)     DRY=1; shift ;;
     --read-only) READONLY=1; shift ;;
+    --use-api)   USE_API=1; shift ;;
     -h|--help) sed -n '2,12p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -89,7 +90,7 @@ fi
 
 command -v claude >/dev/null || { echo "claude CLI not on PATH" >&2; exit 127; }
 
-echo "→ $REPO ($REPO_TEAM)  $PROMPT  budget \$$BUDGET"
+echo "→ $REPO ($REPO_TEAM)  $PROMPT  cap ~\$$BUDGET (notional)"
 echo "  cwd: $REPO_PATH"
 
 # Stages read the repo to write Source File Pointers, Owned Paths and
@@ -113,14 +114,19 @@ echo "  cwd: $REPO_PATH"
 # invoke from anywhere, including an interactive session.
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 
-# ANTHROPIC_API_KEY takes precedence over the claude.ai login and DISABLES
-# claude.ai connectors — including the Linear MCP the stages rely on. The
-# protocol has fallbacks (the `linear` CLI, or GraphQL via linear_common), but
-# the agent should know which transport it has before it starts.
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "  ! ANTHROPIC_API_KEY is set — claude.ai connectors (incl. Linear MCP) are disabled."
-  echo "    The agent must fall back to the linear CLI or GraphQL (linear.md §13)."
-  echo "    To use connectors instead: unset ANTHROPIC_API_KEY and run \`claude setup-token\`."
+# ANTHROPIC_API_KEY, if set, takes precedence over the claude.ai login. That has
+# two consequences the factory should never impose silently:
+#   1. Runs bill the API per token instead of drawing on the subscription.
+#   2. claude.ai connectors are DISABLED — including the Linear MCP the stages
+#      depend on, forcing them onto the CLI/GraphQL fallback (linear.md §13).
+# So the default is the subscription. --use-api opts in deliberately.
+CLAUDE_ENV=(env)
+if [[ "$USE_API" == "1" ]]; then
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "--use-api given but ANTHROPIC_API_KEY is not set" >&2; exit 2; }
+  echo "  auth: ANTHROPIC_API_KEY (billed per token; claude.ai connectors disabled)"
+else
+  CLAUDE_ENV=(env -u ANTHROPIC_API_KEY)
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] && echo "  auth: subscription (ANTHROPIC_API_KEY unset for this run; --use-api to bill the API instead)"
 fi
 
 OUT="$(mktemp)"; trap 'rm -f "$OUT"' EXIT
@@ -130,7 +136,7 @@ set +e
   # `json` (not stream-json): the envelope carries session_id, total_cost_usd,
   # num_turns and subtype, which is the only way this script learns what the run
   # actually did and cost. stream-json is for showing a human live progress.
-  claude -p "$PROMPT" \
+  "${CLAUDE_ENV[@]}" claude -p "$PROMPT" \
     --output-format json \
     --max-budget-usd "$BUDGET" \
     --fallback-model sonnet \

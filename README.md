@@ -215,6 +215,14 @@ Only then start the supervisor on a cadence.
 | Daily spend | `budget.per_day_usd` | $60 |
 | Which repos | `--repo` on each job | `bj29` only |
 
+### Auth and "budget" on a subscription
+
+Runs use the **claude.ai subscription**, not the API. `run-agent.sh` unsets `ANTHROPIC_API_KEY` for the child unless you pass `--use-api` — with it set, every run bills per token *and* claude.ai connectors (including the Linear MCP) are disabled.
+
+So `--max-budget-usd` is **not money**. Claude still reports `costUSD` per model — a trivial one-turn run shows ~$0.14 notional, mostly cache creation — and the flag caps against that figure. Treat it as a **runaway guard in notional API-equivalent units**: it stops a session going in circles; it does not protect a wallet. `$2` is too tight for a triage run that has to explore a codebase.
+
+The real constraint on a subscription is the **usage window**, and nothing here can see it. That is what per-tick ticket caps are for — they bound how much of a window one tick can consume. If you hit a limit, the answer is smaller `--args`, not a smaller budget number.
+
 **Per-tick caps are what keep a 5-minute loop honest.** Without `--args`, a triage tick would turn all 14 Triage tickets into specs in one unattended run, and you'd review the results after the fact instead of before. Small ticks also fail small.
 
 Good first candidates in BJ29 today: `CLNT-616` (missing aria-label — tiny, user-facing, clear acceptance criteria) or `CLNT-611` (broken blog banner image). **Avoid `CLNT-612` for a first test** — it's a unique-index migration, which is on the never-auto-merge list and will correctly escalate rather than complete.
