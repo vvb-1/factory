@@ -201,9 +201,13 @@ else
   ' "$COMMAND" "$ARGS")"
   (
     cd "$REPO_PATH"
+    # agy's print mode defaults to a 5-minute timeout, which is far shorter
+    # than a real stage: triage explores a codebase, dispatch compiles. Left at
+    # the default the run is cut off mid-work and looks like a hang.
     $ENV_PREFIX "$HARNESS" -p "$BODY" \
       --output-format stream-json \
       --dangerously-skip-permissions \
+      --print-timeout 45m \
       $MODEL_ARGS
   ) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG" --harness "$HARNESS")
 fi
