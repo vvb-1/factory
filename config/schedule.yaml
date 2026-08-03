@@ -118,6 +118,25 @@ jobs:
       Each ticket gets its own log, budget and session id, so one stuck ticket
       can be killed alone and one failed ticket resumed alone.
 
+  # 2b. RECONCILE. A ticket left In Progress after its PR is open holds a
+  #     dispatch slot forever, and nothing reports it because a stuck ticket
+  #     looks exactly like a working one. bj29 ran at one agent of three for 13
+  #     hours this way. Only ever moves In Progress -> In Review, and only for
+  #     tickets that have also gone quiet, so a live agent keeps its slot.
+  - name: reconcile
+    every: 10m
+    gate_command: bun orchestrator/reconcile.mjs --repo bj29 --gate
+    dry_command: bun orchestrator/reconcile.mjs --repo bj29
+    command: bun orchestrator/reconcile.mjs --repo bj29 --apply
+    enabled: false
+    why: >
+      Positive evidence, not silence: an open PR means the implementation phase
+      is over, whatever the ticket says. Complements the reaper, which asks a
+      different question (has this claim gone silent) and cannot see a finished
+      ticket that simply never moved. Never merges and never moves anything to
+      Done — Done needs base CI and the smoke check, which is the merge stage's
+      call.
+
   # 3. LAND. Merging is always serialized — two PRs landing in one base within
   #    seconds produce a base-CI failure belonging to neither.
   - name: merge
