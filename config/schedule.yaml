@@ -76,7 +76,7 @@ jobs:
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo bj29 --gate triage
     dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-triage
+    command: runners/run-agent.sh --repo bj29 --command factory-triage --read-only
     enabled: false
     why: >
       Turns Triage tickets into ai:agent-ready ones by exploring the codebase,
@@ -110,3 +110,19 @@ jobs:
       merges what qualifies into develop, and moves tickets to Done once base CI
       and the dev smoke check are green. Escalation list still applies: payments,
       auth and migrations never auto-merge in this client repo.
+
+  # 4. RECLAIM. Worktrees whose tickets finished. The merge stage is supposed to
+  #    tear its own down, but crashed runs, hand-merges and tickets closed in
+  #    Linear all leave orphans — and an orphan looks exactly like live work, so
+  #    nothing notices until the disk does. bj29 had 20 of them at 89% full.
+  - name: janitor
+    every: 1h
+    gate_command: bun orchestrator/janitor.mjs --repo bj29 --gate
+    dry_command: bun orchestrator/janitor.mjs --repo bj29
+    command: bun orchestrator/janitor.mjs --repo bj29 --apply
+    enabled: false
+    why: >
+      Calls the repo's worktree-down.sh WITHOUT --force, so anything holding
+      uncommitted or unpushed work refuses to be removed and is reported
+      instead. Never add --force: losing an agent's unpushed work is far worse
+      than the disk it occupies.

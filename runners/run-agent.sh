@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS=""
+REPO="" ; COMMAND="" ; BUDGET="" ; DRY=0 ; ARGS="" ; READONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -21,6 +21,7 @@ while [[ $# -gt 0 ]]; do
     --budget)  BUDGET="$2"; shift 2 ;;
     --args)    ARGS="$2"; shift 2 ;;
     --dry)     DRY=1; shift ;;
+    --read-only) READONLY=1; shift ;;
     -h|--help) sed -n '2,12p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -40,7 +41,8 @@ if [[ "$REPO" == *,* ]]; then
   for r in ${REPO//,/ }; do
     echo
     echo "=============================== $r ==============================="
-    "$0" --repo "$r" --command "$COMMAND" ${BUDGET:+--budget "$BUDGET"} ${ARGS:+--args "$ARGS"} $([[ "$DRY" == "1" ]] && echo --dry) || rc=$?
+    "$0" --repo "$r" --command "$COMMAND" ${BUDGET:+--budget "$BUDGET"} ${ARGS:+--args "$ARGS"} \
+      $([[ "$DRY" == "1" ]] && echo --dry) $([[ "$READONLY" == "1" ]] && echo --read-only) || rc=$?
   done
   exit $rc
 fi
@@ -66,9 +68,22 @@ fi
 
 PROMPT="/${COMMAND}${ARGS:+ $ARGS}"
 
+# Read-only stages run in the MAIN checkout, not a worktree — triage needs the
+# code to write file pointers but has no business changing it, and that checkout
+# routinely holds the human's uncommitted work. Blocking the edit tools keeps a
+# helpful-but-wrong agent from "fixing" something into their WIP.
+# Honest limitation: Bash is still available (exploration needs it), so this
+# raises the bar rather than sealing it. Dispatch, which does need to write,
+# works inside its own worktree instead.
+READONLY_FLAGS=()
+if [[ "$READONLY" == "1" ]]; then
+  READONLY_FLAGS=(--disallowedTools Edit Write NotebookEdit)
+fi
+
 if [[ "$DRY" == "1" ]]; then
   echo "would run in $REPO_PATH:"
-  echo "  claude -p '$PROMPT' --output-format json --max-budget-usd $BUDGET"
+  echo "  claude -p '$PROMPT' --output-format json --max-budget-usd $BUDGET ${READONLY_FLAGS[*]}"
+  [[ "$READONLY" == "1" ]] && echo "  (read-only: repo edit tools disabled)"
   exit 0
 fi
 
@@ -108,7 +123,8 @@ set +e
   claude -p "$PROMPT" \
     --output-format json \
     --max-budget-usd "$BUDGET" \
-    --fallback-model sonnet
+    --fallback-model sonnet \
+    "${READONLY_FLAGS[@]}"
 ) >"$OUT" 2>&1
 STATUS=$?
 set -e
