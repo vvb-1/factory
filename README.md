@@ -296,6 +296,7 @@ Secrets (injected via launchd env or `op run`), worktrees, agent session logs, a
 
 ## Related
 
+- [`docs/architecture.md`](docs/architecture.md) — **why** it is shaped this way: the decisions, their reasons, and the ones that were wrong first
 - `~/Develop/hdkiller/docs/orgs/linear.md` — the execution protocol (SoT)
 - `~/Develop/hdkiller/docs/guides/project-conventions.md` — the quality baseline and `PC-*` audit
 - `~/Develop/hdkiller/docs/servers/workstations/hdkiller-macbook-pro.md` — the host these jobs run on
