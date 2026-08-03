@@ -261,6 +261,8 @@ async function runTicket(t) {
       ? [TIMEOUT_BIN, ["-k", "30s", `${maxMin}m`, "env", ...envArgs]]
       : ["env", envArgs];
     const child = spawn(bin, args, { cwd: wt, stdio: ["ignore", "pipe", "pipe"] });
+    children.add(child);
+    child.on("close", () => children.delete(child));
 
     let buf = "";
     let recorded = false;
@@ -329,6 +331,42 @@ async function runTicket(t) {
 
 // --------------------------------------------------------- rolling loop -----
 const running = new Map();   // identifier -> promise
+const inFlight = new Map();  // identifier -> ticket, for releasing claims on interrupt
+const children = new Set();  // spawned agent processes, so shutdown can stop them explicitly
+let shuttingDown = false;
+
+/**
+ * Ctrl-C must not leave claims behind.
+ *
+ * The agent processes share our process group, so the same Ctrl-C that stops
+ * the supervisor already stopped them — but the code that releases a claim on
+ * failure lives in THIS process, in each child's close handler. Exiting
+ * immediately skipped it, and three tickets claimed seconds before a Ctrl-C
+ * stayed `In Progress` with nothing running: dispatch slots held by ghosts
+ * until a human noticed, since the reaper needs 45 minutes of silence first.
+ *
+ * So: stop claiming, stop the children, give their own handlers a moment to
+ * release cleanly, then release whatever is still held and leave.
+ */
+async function shutdown(sig) {
+  if (shuttingDown) process.exit(130);   // second Ctrl-C: the operator means it
+  shuttingDown = true;
+  console.log(c.yellow(`\n  ${sig} — releasing ${inFlight.size} claim(s) before exit. Ctrl-C again to abandon them.`));
+
+  for (const ch of children) { try { ch.kill("SIGTERM"); } catch {} }
+
+  const deadline = Date.now() + 10_000;
+  while (running.size && Date.now() < deadline) await Bun.sleep(250);
+
+  for (const [id, t] of [...inFlight]) {
+    await unclaim(t, `dispatcher interrupted (${sig}) before the run finished`).catch(() => {});
+    console.log(c.dim(`  released ${id}`));
+  }
+  console.log(c.dim(`\nstopped. Claims released; worktrees left in place for the next dispatch.\n`));
+  process.exit(130);
+}
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 const seen = new Set();      // everything we have claimed this run
 const warned = new Set();    // skip-warnings already printed, so refills don't repeat them
 let startedCount = 0;
@@ -355,7 +393,7 @@ function todaysSpendUSD() {
 }
 
 async function fill() {
-  if (startedCount >= MAX || tripped) return;
+  if (startedCount >= MAX || tripped || shuttingDown) return;
   const perDay = policy?.budget?.per_day_usd;
   if (perDay) {
     const spent = todaysSpendUSD();
@@ -393,7 +431,8 @@ async function fill() {
 
   for (const t of claimed) {
     startedCount++;
-    const p = runTicket(t).finally(() => running.delete(t.identifier));
+    inFlight.set(t.identifier, t);
+    const p = runTicket(t).finally(() => { running.delete(t.identifier); inFlight.delete(t.identifier); });
     running.set(t.identifier, p);
   }
 }

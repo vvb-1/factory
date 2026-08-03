@@ -37,7 +37,10 @@ const ONCE = has("--once");
 const ALL = has("--all");
 const ONLY = (val("--only") || "").split(",").map((s) => s.trim()).filter(Boolean);
 
-const { jobs } = loadSchedule();
+// One supervisor per repo. Run two of these side by side to work two repos at
+// once — they share nothing but the machine, and either can be stopped alone.
+const REPO = val("--repo");
+const { jobs, repo: TARGET } = loadSchedule(REPO);
 
 const c = {
   dim: (s) => `\x1b[2m${s}\x1b[0m`,
@@ -86,7 +89,7 @@ for (const j of selected) {
 
 const commandFor = (j) => (APPLY ? j.command : j.dry_command);
 
-console.log(c.bold(`\nfactory supervisor — ${APPLY ? c.yellow("APPLY (changes will be made)") : c.green("DRY RUN")}`));
+console.log(c.bold(`\nfactory supervisor — ${c.cyan(TARGET)} — ${APPLY ? c.yellow("APPLY (changes will be made)") : c.green("DRY RUN")}`));
 console.log(c.dim(`${selected.length} job(s); Ctrl-C to stop. Nothing runs after you exit.\n`));
 for (const j of selected) console.log(`  ${c.cyan(j.name)}  every ${j.every}  ${c.dim(commandFor(j))}`);
 console.log();
