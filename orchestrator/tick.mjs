@@ -109,11 +109,36 @@ const LOG_DIR = path.join(homedir(), ".factory/logs");
 mkdirSync(LOG_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 15);
 
-const results = [];
-async function runTicket(t) {
-  if (!(await claim(t))) { console.log(c.yellow(`  ${t.identifier} claim lost to another agent — skipping`)); return; }
-  console.log(`${c.dim(clock())} ${c.cyan(t.identifier)} claimed`);
+/**
+ * Refresh the warm cache before building worktrees, when it would pay.
+ *
+ * Worktree creation clones node_modules and the build cache from a template.
+ * Stale template => the clone is worthless and EVERY ticket pays a full
+ * compile. Warming costs one compile; skipping it costs N. So the arithmetic
+ * only works from two tickets up — for a single ticket, warming first is a wash
+ * or slightly worse, and the ticket would rather start now.
+ *
+ * Runs AFTER claiming (tickets are already ours, so a few minutes here can't
+ * lose them) and BEFORE any worktree-up, so nothing clones a template that is
+ * being rewritten underneath it.
+ */
+async function warmIfWorthIt(count) {
+  if (argv.includes("--no-warm")) return;
+  if (!repo.worktree_warm) return;
+  if (count < 2) { console.log(c.dim(`  (single ticket — not warming; the compile is the same either way)`)); return; }
 
+  const gate = spawnSync("/bin/bash", ["-lc", `bun orchestrator/warm.mjs --repo ${repo.name} --gate`], { cwd: ROOT, encoding: "utf8" });
+  if (gate.status !== 0) { console.log(c.dim(`  warm cache fresh — ${gate.stdout.trim()}`)); return; }
+
+  console.log(c.yellow(`\n  ${gate.stdout.trim()}`));
+  console.log(c.dim(`  Compiling once so ${count} worktrees don't. This is the slow part; it happens here instead of ${count} times.\n`));
+  const r = spawnSync("/bin/bash", ["-lc", `bun orchestrator/warm.mjs --repo ${repo.name} --apply`], { cwd: ROOT, stdio: "inherit" });
+  if (r.status !== 0) console.log(c.yellow(`\n  warm refresh failed — continuing anyway; worktrees will just be slower.\n`));
+  else console.log(c.green(`\n  warm cache refreshed.\n`));
+}
+
+const results = [];
+async function buildAndRun(t) {
   // Worktree via the repo's OWN script: deterministic ports, per-ticket
   // database, verified migration state. Never hand-rolled.
   const up = spawnSync("/bin/bash", [repo.worktree_up, t.identifier], { cwd: repoPath, encoding: "utf8" });
@@ -164,8 +189,19 @@ async function runTicket(t) {
   });
 }
 
-console.log(c.bold(`\nstarting ${picked.length} ticket process(es) — one per ticket, logs in ~/.factory/logs/\n`));
-await Promise.all(picked.map(runTicket));
+// Claim first — worktree-up and a warm refresh both take minutes, and an
+// unclaimed ticket is one another agent may take in the meantime.
+const claimed = [];
+for (const t of picked) {
+  if (await claim(t)) { claimed.push(t); console.log(`${c.dim(clock())} ${c.cyan(t.identifier)} claimed`); }
+  else console.log(c.yellow(`  ${t.identifier} claim lost to another agent — skipping`));
+}
+if (!claimed.length) { console.log(c.dim("\n  nothing claimed.\n")); process.exit(0); }
+
+await warmIfWorthIt(claimed.length);
+
+console.log(c.bold(`\nstarting ${claimed.length} ticket process(es) — one per ticket, logs in ~/.factory/logs/\n`));
+await Promise.all(claimed.map(buildAndRun));
 
 console.log(c.bold("\nsummary"));
 for (const r of results) console.log(`  ${r.ok ? c.green("ok  ") : c.red("FAIL")} ${r.id}${r.log ? c.dim("  " + r.log.replace(homedir(), "~")) : ""}${r.why ? c.dim("  " + r.why) : ""}`);

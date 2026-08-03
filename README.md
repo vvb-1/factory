@@ -125,6 +125,21 @@ Set per command in its frontmatter — that's the knob to turn. `run-agent.sh --
 
 The judgement call is triage. A bad spec burns a full dispatch run, so there's a real argument for Opus there; the counter is that `evals/` is the right place to catch spec quality dropping, and a 13-ticket triage pass on Opus is a large bite out of a five-hour window. Start on Sonnet, watch the specs, and move it up if quality slips.
 
+### The warm cache (why worktrees are sometimes slow)
+
+Worktree creation clones `node_modules` and the build cache from a template, which is effectively free on APFS. When the template is current a new worktree is seconds; **when it is stale the clone is worthless and every ticket pays a full compile.** Observed on bj29: a template 99 commits behind turned setup into ~3 minutes per worktree — ~9 minutes of wall clock for three tickets, competing for the same cores, before any agent wrote a line of code.
+
+It is handled automatically. `tick.mjs` checks staleness after claiming and refreshes before building any worktree, but only when it pays:
+
+- **2+ tickets** — warming costs one compile and saves N. From two up it always wins.
+- **Single ticket** — skipped. Warming first is a wash or slightly worse, and the ticket would rather start now.
+- **Cache fresh** (under 15 commits behind) — skipped.
+- `--no-warm` overrides.
+
+The ordering matters: claim → warm → build worktrees. Claiming first means the minutes spent warming can't lose a ticket to another agent, and warming before any `worktree-up` means nothing clones a template that is being rewritten underneath it.
+
+There is also a standalone `warm` stage (every 2h, same staleness gate) so a long-idle machine is ready before the next batch, and `bun orchestrator/warm.mjs --repo bj29` to check by hand.
+
 ### Slots and parallelism
 
 Three levels, each with a different job:
