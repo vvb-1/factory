@@ -65,6 +65,23 @@ const QUERY = `
     }
   }`;
 
+/**
+ * Open PRs that a merge run could actually act on: not drafts, and not already
+ * escalated to a human. Returns [] rather than throwing when `gh` is missing or
+ * unauthenticated — a gate that hard-fails takes the whole supervisor loop down
+ * with it, and being unable to see GitHub is not the same as having no work.
+ */
+async function openMergeCandidates(nameWithOwner) {
+  const p = Bun.spawnSync(["gh", "pr", "list", "--repo", nameWithOwner, "--state", "open",
+    "--json", "number,isDraft,labels,title"]);
+  if (p.exitCode !== 0) return [];
+  try {
+    return JSON.parse(p.stdout.toString())
+      .filter((pr) => !pr.isDraft)
+      .filter((pr) => !(pr.labels ?? []).some((l) => l.name === "escalated"));
+  } catch { return []; }
+}
+
 const summary = [];
 
 for (const repo of repos) {
@@ -80,6 +97,18 @@ for (const repo of repos) {
   const inProgress = nodes.filter((i) => state(i) === "In Progress");
   const inReview = nodes.filter((i) => state(i) === "In Review");
   const blocked = nodes.filter((i) => state(i) === "Blocked");
+
+  // GitHub is the source of truth for what is waiting to merge, not Linear.
+  // Gating the merge stage on `In Review` tickets meant a finished PR whose
+  // ticket was never moved out of `In Progress` was invisible to it forever:
+  // it held a dispatch slot AND never got reviewed. Two of bj29's three slots
+  // sat that way for 13 hours with green-ish PRs open.
+  //
+  // `escalated` is the escape hatch that keeps this from becoming an infinite
+  // poll: a PR the merge stage handed back to a human stays open by design, and
+  // without the label every tick would re-review it and re-escalate. The merge
+  // command applies the label when it escalates.
+  const openPRs = repo.github ? await openMergeCandidates(repo.github) : [];
 
   const quiet = GATE || JSON_OUT;
   const line = (label, n, color = (s) => s) => {
@@ -119,6 +148,7 @@ for (const repo of repos) {
     ready: ready.length,
     inProgress: inProgress.length,
     inReview: inReview.length,
+    openPRs: openPRs.length,
     blocked: blocked.length,
     slotsFree,
     startable: free.map((t) => t.identifier),
@@ -129,6 +159,12 @@ for (const repo of repos) {
   if (free.length) {
     console.log(c.dim(`\n  dispatch would start (cap ${repo.max_in_flight}, ${inProgress.length} running, ${slotsFree} slot(s) free):`));
     for (const t of free) console.log(`    ${c.green(t.identifier.padEnd(10))} ${t.title.slice(0, 60)}`);
+  } else if (ready.length && slotsFree === 0) {
+    // Distinguish "no room" from "nothing fits". Reporting the Owned Paths
+    // reason when the cap is simply full sends you reading glob sets for a
+    // problem that is a full slot table.
+    console.log(c.dim(`\n  no free slot — ${inProgress.length}/${repo.max_in_flight ?? defaultCap} in flight, ${ready.length} ready and waiting`));
+    for (const t of inProgress) console.log(c.dim(`    holding: ${t.identifier.padEnd(10)} ${t.title.slice(0, 55)}`));
   } else if (ready.length) {
     console.log(c.dim(`\n  nothing startable — all ready tickets collide with running work or lack Owned Paths`));
   } else {
@@ -139,6 +175,10 @@ for (const repo of repos) {
   if (inReview.length) {
     console.log(c.dim(`\n  awaiting review/merge:`));
     for (const t of inReview) console.log(`    ${c.cyan(t.identifier.padEnd(10))} ${t.title.slice(0, 60)}`);
+  }
+  if (openPRs.length) {
+    console.log(c.dim(`\n  open PRs the merge stage would look at:`));
+    for (const pr of openPRs) console.log(`    ${c.cyan(("#" + pr.number).padEnd(10))} ${pr.title.slice(0, 60)}`);
   }
   if (blocked.length) {
     console.log(c.red(`\n  BLOCKED — needs a human:`));
@@ -161,8 +201,10 @@ if (GATE) {
     // Don't dispatch with no free slot or nothing startable — an agent that
     // wakes to find the cap full has burned a run to learn nothing.
     dispatch: (s) => s.slotsFree > 0 && s.startable.length > 0,
-    // Only review when a PR is actually waiting.
-    merge: (s) => s.inReview > 0,
+    // A PR waiting on GitHub is the work, whatever its ticket says. Keying this
+    // on `In Review` alone made the stage blind to any PR whose ticket state
+    // was never updated — the most common way a run ends untidily.
+    merge: (s) => s.inReview > 0 || s.openPRs > 0,
   }[GATE];
 
   if (!has) {
