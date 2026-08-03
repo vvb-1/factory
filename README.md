@@ -163,6 +163,62 @@ The janitor exists because that third step is the one that gets skipped — a cr
 
 Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **fetches and reports** — branch, commits behind, uncommitted files — but **never pulls**. The main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. Triage is read-only and needs no worktree; only dispatch creates them.
 
+## Testing the loop
+
+Don't start the supervisor and watch it work fourteen tickets. Walk one ticket through all four stages by hand first, checking Linear between each — a bad spec caught on ticket one costs a few minutes; caught on ticket fourteen it costs a backlog.
+
+**0. Is the machine ready?**
+
+```bash
+bun orchestrator/doctor.mjs --repo bj29
+bun orchestrator/queue.mjs  --repo bj29
+```
+
+**1. Triage exactly one ticket.** Name it explicitly — `--args` is passed straight through to the command, which accepts issue IDs, a count, or `all`:
+
+```bash
+runners/run-agent.sh --repo bj29 --command factory-triage --read-only --args "CLNT-616" --budget 2
+```
+
+Then read the ticket in Linear. Did it get all five sections? **Are the `Owned Paths` tight** (`app/src/landing/Hero.tsx`, not `app/**`)? Does the `Verification Command` actually run? A spec that looks complete but whose command errors costs a full agent run to discover.
+
+**2. Dispatch that one ticket.**
+
+```bash
+runners/run-agent.sh --repo bj29 --command factory-work --args "CLNT-616" --budget 8
+```
+
+Watch for the worktree appearing at `~/Develop/.worktrees/bj29/CLNT-616` with its own port and database, verification running clean, and a PR opening against `develop`.
+
+**3. Merge it.**
+
+```bash
+runners/run-agent.sh --repo bj29 --command factory-merge --args "CLNT-616" --budget 5
+```
+
+**4. Clean up.**
+
+```bash
+bun orchestrator/janitor.mjs --repo bj29          # dry
+bun orchestrator/janitor.mjs --repo bj29 --apply
+```
+
+Only then start the supervisor on a cadence.
+
+### Limits
+
+| Limit | Where | Default |
+| :--- | :--- | :--- |
+| Tickets per tick | `--args` in `config/schedule.yaml` | triage 3, dispatch 2 |
+| Concurrent tickets | `max_in_flight` in `config/repos.yaml` | 3 |
+| Spend per run | `--budget`, else `budget.per_ticket_usd` in `config/policy.yaml` | $5 |
+| Daily spend | `budget.per_day_usd` | $60 |
+| Which repos | `--repo` on each job | `bj29` only |
+
+**Per-tick caps are what keep a 5-minute loop honest.** Without `--args`, a triage tick would turn all 14 Triage tickets into specs in one unattended run, and you'd review the results after the fact instead of before. Small ticks also fail small.
+
+Good first candidates in BJ29 today: `CLNT-616` (missing aria-label — tiny, user-facing, clear acceptance criteria) or `CLNT-611` (broken blog banner image). **Avoid `CLNT-612` for a first test** — it's a unique-index migration, which is on the never-auto-merge list and will correctly escalate rather than complete.
+
 ### The supervisor — a scheduler you watch
 
 `orchestrator/run.mjs` runs the same jobs in the foreground: it prints every command before running it, streams output live, and dies with Ctrl-C. When it isn't running, nothing is running.

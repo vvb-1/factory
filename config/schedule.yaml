@@ -72,11 +72,16 @@ jobs:
 
   # 1. INTAKE. Usually the binding constraint — a deep Triage pile with an empty
   #    agent-ready queue means dispatching harder cannot help.
+  #
+  #    --args caps WORK PER TICK, which is what keeps a 5-minute loop from
+  #    turning 14 Triage tickets into 14 specs in one unattended run. Small
+  #    ticks also fail small: a bad spec costs one ticket, not a backlog. Raise
+  #    it once you have watched a few passes.
   - name: triage
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo bj29 --gate triage
     dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-triage --read-only
+    command: runners/run-agent.sh --repo bj29 --command factory-triage --read-only --args "3"
     enabled: false
     why: >
       Turns Triage tickets into ai:agent-ready ones by exploring the codebase,
@@ -91,7 +96,7 @@ jobs:
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo bj29 --gate dispatch
     dry_command: bun orchestrator/queue.mjs --repo bj29
-    command: runners/run-agent.sh --repo bj29 --command factory-work
+    command: runners/run-agent.sh --repo bj29 --command factory-work --args "2 tickets, 1 in flight"
     enabled: false
     why: >
       Claims agent-ready tickets, works them in per-ticket worktrees
