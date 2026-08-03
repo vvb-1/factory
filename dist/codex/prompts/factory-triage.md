@@ -6,6 +6,14 @@ Triage the open Linear issues for the repository I'm currently in: turn raw `Tri
 
 Resolve the team from the repo via the mapping in `~/Develop/hdkiller/docs/orgs/linear.md` §1. Use the Linear MCP; on failure retry once then fall back to `linear_common` GraphQL per the global rule. Interpret $ARGUMENTS as specific issue IDs, a max count, or "all" (workspace-wide); default is this repo's team, up to 10 issues.
 
+## Claim what you are triaging
+
+Before working an issue, mark it so it appears in **Agents In Flight** and no other agent picks it up: set `assignee` to yourself and add `ai:in-progress` + `agent:<your-harness>`. **Leave the state alone** — a ticket being specified is still `Triage`; `In Progress` means implementation is underway and would misrepresent it.
+
+**Remove `ai:in-progress` when you finish that issue**, whether you promoted it, held it, or closed it. A claim marker left behind makes a finished ticket look live forever. (The reaper clears stale ones after 45 minutes of silence, but relying on that means a lost 45 minutes.)
+
+Claim one issue at a time as you get to it, not all of them up front — a batch claimed and then abandoned blocks the queue for everything you never reached.
+
 For each issue in `Triage` state (plus any `Todo` issue missing the `ai:agent-ready` label):
 
 1. **Sanity check** — is it a duplicate of an existing issue, already fixed in the codebase or git history, or obsolete? If so, say which and mark it (duplicate → link + cancel, fixed → comment with evidence + close). Confirm with me before canceling anything non-obvious.

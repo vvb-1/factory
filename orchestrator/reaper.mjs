@@ -155,12 +155,17 @@ export async function fetchTeams() {
 
 export async function fetchInProgress(teamKey = null) {
   const teamFilter = teamKey ? `, team: { key: { eq: "${teamKey}" } }` : "";
+  // Any ticket carrying the claim marker, in ANY state — not just In Progress.
+  // Triage claims tickets while specifying them and leaves them in `Triage`, so
+  // a crashed triage run would otherwise strand `ai:in-progress` forever on a
+  // ticket no state-based query ever looks at.
   const q = `
     query {
-      issues(first: 250, filter: { state: { name: { eq: "In Progress" } }${teamFilter} }) {
+      issues(first: 250, filter: { labels: { name: { eq: "ai:in-progress" } }${teamFilter} }) {
         nodes {
           id identifier title url startedAt updatedAt
           team { key }
+          state { name }
           assignee { id name }
           labels(first: 20) { nodes { id name } }
           comments(last: 1) { nodes { createdAt } }
@@ -198,7 +203,7 @@ export function lastActivity(issue) {
   return parseTs(issue.updatedAt);
 }
 
-export async function reclaim(issue, todoStateId, minutes, apply) {
+export async function reclaim(issue, todoStateId, minutes, apply, quiet = false) {
   const labels = issue.labels?.nodes || [];
   const keep = labels
     .filter((l) => {
@@ -209,28 +214,42 @@ export async function reclaim(issue, todoStateId, minutes, apply) {
 
   if (!apply) return;
 
+  // Two different repairs, because the two claims mean different things.
+  //
+  // In Progress: an implementation claim. The agent is gone, so the ticket goes
+  // back to Todo, unassigned, ready for someone else.
+  //
+  // Any other state: a stale claim MARKER (triage claims while specifying and
+  // leaves the state at Triage). Strip the labels only — the assignee on a
+  // Triage or Todo ticket is more likely a human's deliberate assignment than
+  // an agent's leftover, and while agents share the human's Linear identity
+  // (OPS-40) the two are indistinguishable. Removing the label is unambiguous
+  // and sufficient; clearing the assignee would be guessing.
+  const input = { labelIds: keep };
+  if (todoStateId) { input.stateId = todoStateId; input.assigneeId = null; }
+
   await gql(
     `
     mutation($id: String!, $input: IssueUpdateInput!) {
       issueUpdate(id: $id, input: $input) { success }
     }
     `,
-    {
-      id: issue.id,
-      input: {
-        stateId: todoStateId,
-        assigneeId: null,
-        labelIds: keep,
-      },
-    }
+    { id: issue.id, input }
   );
+
+  // Clearing a stale marker off a finished ticket needs no audit trail — 50
+  // comments on Done tickets is noise, not a record.
+  if (quiet) return;
 
   const who = issue.assignee?.name || "an agent";
   const body =
     `**Reclaimed by the stale-claim reaper.**\n\n` +
-    `This ticket was held by ${who} in \`In Progress\` with no heartbeat ` +
-    `for over ${minutes} minutes, so the claim was presumed abandoned. ` +
-    `It has been unassigned and returned to \`Todo\`.\n\n` +
+    `This ticket was claimed by ${who} with no heartbeat for over ${minutes} ` +
+    `minutes, so the claim was presumed abandoned. ` +
+    (todoStateId
+      ? `It has been unassigned and returned to \`Todo\`.`
+      : `Its \`ai:in-progress\` marker was cleared; state and assignee are unchanged.`) +
+    `\n\n` +
     `If the agent is still working, it must re-claim the ticket before ` +
     `continuing — see the claim protocol in \`docs/orgs/linear.md\`.`;
 
@@ -254,6 +273,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   let minutes = 45;
   let team = null;
   let anyAssignee = false;
+  let markersOnly = false;
   let help = false;
 
   for (let i = 0; i < argv.length; i++) {
@@ -267,12 +287,14 @@ export function parseArgs(argv = process.argv.slice(2)) {
       team = argv[++i] || null;
     } else if (arg === "--any-assignee") {
       anyAssignee = true;
+    } else if (arg === "--markers-only") {
+      markersOnly = true;
     } else if (arg === "--help" || arg === "-h") {
       help = true;
     }
   }
 
-  return { apply, minutes, team, anyAssignee, help };
+  return { apply, minutes, team, anyAssignee, markersOnly, help };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -289,6 +311,10 @@ Options:
   --minutes <N>    Silence threshold before a claim is stale (default: 45)
   --team <KEY>     Limit reaping to a single team key (e.g. CW)
   --any-assignee   Audit all In Progress tickets regardless of agent claim labels
+  --markers-only   Only clear stale ai:in-progress markers from tickets that are
+                   NOT In Progress (finished or unstarted work whose claim label
+                   was never removed). Never touches running work — pure
+                   cleanup, so "Agents In Flight" means what it says.
   -h, --help       Show this help message
 `);
     process.exit(0);
@@ -339,7 +365,14 @@ Options:
   }
 
   console.log();
-  for (const { issue, seen } of stale) {
+  const considered = args.markersOnly
+    ? stale.filter(({ issue }) => (issue.state?.name || "").toLowerCase() !== IN_PROGRESS)
+    : stale;
+  if (args.markersOnly && considered.length !== stale.length) {
+    console.log(`  (markers-only: leaving ${stale.length - considered.length} In Progress claim(s) alone)\n`);
+  }
+
+  for (const { issue, seen } of considered) {
     const age = seen ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString() : "?";
     const who = issue.assignee?.name || "unassigned";
     const id = (issue.identifier || "").padEnd(10);
@@ -350,15 +383,20 @@ Options:
 
     const teamKey = issue.team?.key;
     const team = teams[teamKey];
-    const todoId = team?.states?.[RECLAIM_TO];
+    const stateName = (issue.state?.name || "").toLowerCase();
 
-    if (!todoId) {
+    // An implementation claim goes back to Todo so it can be picked up again.
+    // A triage claim (any other state) only loses its markers — moving a ticket
+    // that was mid-specification into Todo would assert it is ready when it is
+    // not.
+    const todoId = stateName === IN_PROGRESS ? team?.states?.[RECLAIM_TO] : null;
+    if (stateName === IN_PROGRESS && !todoId) {
       console.log(`        ! no '${RECLAIM_TO}' state on team ${teamKey}, skipping`);
       continue;
     }
 
     try {
-      await reclaim(issue, todoId, args.minutes, args.apply);
+      await reclaim(issue, todoId, args.minutes, args.apply, !todoId);
     } catch (err) {
       console.log(`        ! failed: ${err.message || err}`);
       continue;
@@ -370,7 +408,7 @@ Options:
   }
 
   console.log(
-    `\n=== ${args.apply ? "Reclaimed" : "Would reclaim"}: ${stale.length} | Healthy: ${live.length} ===`
+    `\n=== ${args.apply ? "Reclaimed" : "Would reclaim"}: ${considered.length} | Healthy: ${live.length} ===`
   );
   if (!args.apply) {
     console.log("Run again with --apply to reclaim these.");

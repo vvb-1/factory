@@ -49,6 +49,24 @@ Git refuses to delete a branch that is checked out in a worktree. The merge stag
 
 **Fix:** put the canonical `type:*` and `area:*` values in `shared/floor.md`, where every harness sees them, rather than only in `linear.md` which an agent may not have loaded.
 
+### F-8 · Agents `sleep` to wait for CI instead of watching it
+
+**Seen:** `sleep 150; gh pr checks 166`, `sleep 180; echo done`, `sleep 60; echo done` across multiple runs.
+
+A fixed sleep is a guess: too long wastes wall clock in a process holding a concurrency slot, too short means a re-poll. `gh pr checks <PR> --watch --fail-fast` returns the moment checks settle and exits non-zero on the first failure.
+
+**Fix:** rule added to `shared/floor.md` (§Waiting). Verified `--watch`, `--fail-fast` and `-i` exist in gh 2.97.
+
+**Status:** fixed in the floor — watch whether agents actually adopt it. If sleeps persist in transcripts, the next step is a wrapper script they have to call, since a default beats a rule.
+
+### F-9 · Fixed sleeps waiting for dev servers to boot
+
+**Seen:** `wasp start ... & sleep 60; tail log`, `astro dev & sleep 12; cat log`, `sleep 75; tail`.
+
+Same shape as F-8 but for local processes, and the guess is worse: boot time varies with whether the worktree was warm-cloned or compiled from scratch.
+
+**Fix:** bounded readiness poll (`for i in $(seq 60); do curl -sf ... && break; sleep 2; done`) documented alongside F-8. A repo-level `bin/wait-for-dev.sh` would be the stronger fix — a default rather than a rule — if this keeps recurring.
+
 ---
 
 ## Fixed

@@ -35,6 +35,26 @@ Move the ticket to `Blocked`, say specifically what you need in one answerable q
 
 Before blocking on product intent, check whether it's already written down — the repo's `docs/product-decisions.md`, `docs/`, or the Linear project Overview. If you resolve a decision that wasn't recorded, record it.
 
+### Waiting
+
+**Never `sleep N` and hope.** A fixed sleep is either too long (dead wall-clock in a process that is holding a slot) or too short (a flaky check that then gets retried). Wait on the actual condition instead.
+
+**For CI:**
+
+```bash
+gh pr checks <PR> --watch --fail-fast     # returns the moment checks settle
+```
+
+**For a dev server, migration, or anything with an observable ready state** — poll the condition on a short interval with a bounded ceiling, so it returns as soon as it is up and still terminates if it never is:
+
+```bash
+for i in $(seq 60); do curl -sf localhost:4222 >/dev/null && break; sleep 2; done
+```
+
+**For a background job you started**, wait on the process (`wait`, or the harness's own background-task mechanism) rather than guessing how long it takes.
+
+Measured on real runs: single `sleep 180` and `sleep 75` calls, plus a `sleep 60` after starting a dev server that was ready in a fraction of that. Each one is a per-ticket process sitting idle while holding a concurrency slot.
+
 ### Secrets
 
 Never print, echo, commit, or paste an API key, token, or `.env` file — not into a transcript, a PR, a Linear comment, or a log. Scripts read credentials themselves. If a secret appears in a diff, that's an escalation, not a cleanup.

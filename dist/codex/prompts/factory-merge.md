@@ -20,7 +20,7 @@ CI passing is not the bar. Read the full diff and review for:
 
 For user-facing PRs, open the Linear ticket's attached screenshots and judge the visual result too — layout, truncation, spacing, before/after coherence. A user-facing PR with no screenshots on its ticket is a (minor) protocol finding: note it, and if you fix the branch anyway, capture and attach them yourself.
 
-Then check CI (`gh pr checks`) and whether the branch is behind/conflicting with the base.
+Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the moment checks settle and exits non-zero on the first failure. **Never `sleep` and re-poll**: a fixed wait is dead wall clock if it is too long and a retry if it is too short. Also check whether the branch is behind or conflicting with the base.
 
 ### 2. Classify
 
