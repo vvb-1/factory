@@ -43,3 +43,45 @@ repos:
       - app/src/payment/**
       - app/src/auth/**
       - app/migrations/**
+
+  # --------------------------------------------------------------------------
+  # REPORT-ONLY entries. These repos have worktrees accumulating but do NOT yet
+  # satisfy PC-15, so they deliberately carry no worktree_up/worktree_down:
+  #
+  #   - the janitor can SEE their orphans and tell you the count
+  #   - it CANNOT remove them (no down script means no safe teardown — dropping
+  #     a checkout by hand also orphans its database, which is how you end up
+  #     with a Postgres full of nameless dev databases)
+  #   - dispatch must never target them; concurrent agents there share ports and
+  #     databases
+  #
+  # They graduate to full entries when CW-363 (coach-wattz) and CLNT-609
+  # (legalease) land their worktree scripts.
+  # --------------------------------------------------------------------------
+
+  - name: coach-wattz
+    path: ~/Develop/coach-wattz
+    github: watt-mind/coach
+    team: CW
+    project: Coach Watts - Web & AI Core Platform
+    base: develop
+    worktree_root: ~/Develop/.worktrees/coach-wattz
+    report_only: true            # PC-15 pending — see CW-363
+
+  - name: legalease
+    path: ~/Develop/legalease
+    github: watt-mind/legalease
+    team: CLNT
+    project: Legalease
+    base: develop
+    worktree_root: ~/Develop/.worktrees/legalease
+    report_only: true            # PC-15 pending — see CLNT-609
+
+  - name: cashsaas
+    path: ~/Develop/cashsaas
+    github: hdkiller/cashsaas
+    team: CLNT
+    project: CashMap
+    base: develop
+    worktree_root: ~/Develop/.worktrees/cashsaas
+    report_only: true            # PC-15 pending — no ticket yet

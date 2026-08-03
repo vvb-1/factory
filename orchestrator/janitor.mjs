@@ -88,6 +88,16 @@ for (const repo of repos) {
     continue;
   }
 
+  // report_only repos are surveyed, never modified. Removing a worktree without
+  // the repo's own down script leaves its database behind — that is how a
+  // Postgres fills up with dev databases nobody can attribute.
+  if (repo.report_only) {
+    console.log(c.yellow(`\n  report-only: ${repo.name} has no worktree teardown script (PC-15 pending).`));
+    console.log(c.dim(`  Not removing anything. These need the repo's own worktree-down.sh so the`));
+    console.log(c.dim(`  per-ticket database goes with the checkout.`));
+    continue;
+  }
+
   const down = repo.worktree_down;
   if (!down || !existsSync(path.join(repoPath, down))) {
     console.log(c.red(`  ! ${repo.name} has no worktree_down script (${down}) — refusing to remove by hand`));
