@@ -95,18 +95,18 @@ for (const repo of repos) {
   // already running. Sorted the way §7 sorts: priority asc, then created asc.
   const inFlightPaths = inProgress.flatMap((i) => parseOwnedPaths(i.description ?? ""));
   const sorted = [...ready].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+  const slotsFree = Math.max(0, (repo.max_in_flight ?? 3) - inProgress.length);
   const free = [];
   const busyPaths = [...inFlightPaths];
   for (const t of sorted) {
+    if (free.length >= slotsFree) break;
     const own = parseOwnedPaths(t.description ?? "");
     if (!own.length) continue;                       // no Owned Paths => not dispatchable
     if (pathsCollide(own, busyPaths)) continue;      // would collide with running work
     free.push(t);
     busyPaths.push(...own);                          // later tickets must clear this one too
-    if (free.length >= (repo.max_in_flight ?? 3) - inProgress.length) break;
   }
 
-  const slotsFree = Math.max(0, (repo.max_in_flight ?? 3) - inProgress.length);
   summary.push({
     repo: repo.name,
     triage: triage.length + notReady.length,

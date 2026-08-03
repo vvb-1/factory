@@ -176,32 +176,50 @@ function runTicket(t) {
       { cwd: wt, stdio: ["ignore", "pipe", "pipe"] });
 
     let buf = "";
+    let recorded = false;
     const tag = c.cyan(`[${t.identifier}]`);
+    const processLine = (line) => {
+      if (!line.trim().startsWith("{")) return;
+      let e; try { e = JSON.parse(line); } catch { return; }
+      if (e.type === "assistant") {
+        for (const p of e.message?.content ?? []) {
+          if (p.type === "tool_use") {
+            const d = String(p.input?.command ?? p.input?.file_path ?? p.input?.description ?? "").replace(/\s+/g, " ").slice(0, 66);
+            console.log(`${c.dim(clock())} ${tag} ${p.name} ${c.dim(d)}`);
+          }
+        }
+      }
+      if (e.type === "result" || "num_turns" in e) {
+        const ok = e.subtype === "success" && !e.is_error && (e.num_turns ?? 0) > 0;
+        console.log(`${c.dim(clock())} ${tag} ${ok ? c.green("done") : c.red("FAILED")} ${c.dim(`${e.num_turns ?? 0} turns ~$${(e.total_cost_usd ?? 0).toFixed(2)}`)}`);
+        results.push({ id: t.identifier, ok, log });
+        recorded = true;
+      }
+    };
     child.stdout.on("data", (d) => {
       out.write(d);
       buf += d.toString();
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.trim().startsWith("{")) continue;
-        let e; try { e = JSON.parse(line); } catch { continue; }
-        if (e.type === "assistant") {
-          for (const p of e.message?.content ?? []) {
-            if (p.type === "tool_use") {
-              const d = String(p.input?.command ?? p.input?.file_path ?? p.input?.description ?? "").replace(/\s+/g, " ").slice(0, 66);
-              console.log(`${c.dim(clock())} ${tag} ${p.name} ${c.dim(d)}`);
-            }
-          }
-        }
-        if (e.type === "result" || "num_turns" in e) {
-          const ok = e.subtype === "success" && !e.is_error && (e.num_turns ?? 0) > 0;
-          console.log(`${c.dim(clock())} ${tag} ${ok ? c.green("done") : c.red("FAILED")} ${c.dim(`${e.num_turns ?? 0} turns ~$${(e.total_cost_usd ?? 0).toFixed(2)}`)}`);
-          results.push({ id: t.identifier, ok, log });
-        }
-      }
+      for (const line of lines) processLine(line);
     });
     child.stderr.on("data", (d) => out.write(d));
-    child.on("close", () => { out.end(); resolve(); });
+    child.on("close", (code) => {
+      // The final "result" line isn't guaranteed a trailing newline, so
+      // whatever is still in `buf` when the process exits needs a look too —
+      // otherwise a clean exit with no trailing "\n" silently reports nothing.
+      if (buf.trim()) processLine(buf);
+      // If the child never emitted a parseable result (crash, bad spawn,
+      // killed by the timeout), record it as a failure explicitly. Silence
+      // here previously showed up as "0 ok, 0 failed" — indistinguishable
+      // from an empty run.
+      if (!recorded) {
+        console.log(`${c.dim(clock())} ${tag} ${c.red("FAILED")} ${c.dim(`no result (exit ${code})`)}`);
+        results.push({ id: t.identifier, ok: false, log, why: `no result emitted (exit ${code})` });
+      }
+      out.end();
+      resolve();
+    });
   });
 }
 

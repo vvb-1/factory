@@ -96,12 +96,18 @@ for (const repo of repos) {
 
   // Worktree tooling is PC-15 — the precondition for dispatching concurrent
   // agents. Without it a repo's safe concurrency is one agent, whatever the
-  // dispatcher thinks.
+  // dispatcher thinks. `report_only: true` repos have already acknowledged
+  // this in repos.yaml (dispatch itself refuses to run for them — see
+  // tick.mjs), so a missing script here is expected, not a doctor failure.
   for (const [k, label] of [["worktree_up", "worktree-up script"], ["worktree_down", "worktree-down script"]]) {
     const s = repo[k];
     const full = s ? path.join(p, s) : null;
     const ok = Boolean(full && existsSync(full));
     const exec = ok && (statSync(full).mode & 0o111) !== 0;
+    if (repo.report_only && !ok) {
+      check("warn", `${label}`, "not configured", "report_only repo — dispatch is disabled here by design (PC-15)");
+      continue;
+    }
     check(ok && exec, `${label}`, s ?? "not configured",
       !ok ? `this repo has no ${k} — dispatch is unsafe here (PC-15); see CW-363 / CLNT-609 for the pattern`
           : `chmod +x ${s}`);
@@ -126,8 +132,10 @@ for (const repo of repos) {
       "check team key and project name against linear.md §1–2 (CW projects carry a 'Coach Watts - ' prefix)");
   }
 
-  check(Boolean(repo.verify), "verification command", repo.verify ?? "",
-    "set `verify:` in repos.yaml — agents must never open a PR without clean output");
+  check(Boolean(repo.verify) ? true : (repo.report_only ? "warn" : false), "verification command", repo.verify ?? "",
+    repo.verify ? null : repo.report_only
+      ? "report_only repo — set `verify:` before flipping dispatch on"
+      : "set `verify:` in repos.yaml — agents must never open a PR without clean output");
   check(Boolean(repo.smoke_workflow) ? true : "warn", "post-deploy smoke check", repo.smoke_workflow ?? "none",
     repo.smoke_workflow ? null : "without one, Done means merged rather than running");
 }

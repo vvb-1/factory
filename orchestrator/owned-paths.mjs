@@ -67,10 +67,15 @@ function escapeLiteral(s) {
  */
 export function globToRegExp(glob) {
   let g = glob.trim().replace(/^\.\//, "");
-  if (g.endsWith("/")) g += "**";
   // A path with no glob metacharacters and no extension is treated as a prefix:
-  // `app/services` owns everything beneath it.
-  if (!/[*?{}]/.test(g) && !/\.[a-z0-9]+$/i.test(g)) g += "/**";
+  // `app/services` owns everything beneath it. It also names a real, concrete
+  // path in its own right (`Dockerfile`, `Makefile` — extensionless files are
+  // common at repo root), so it must match itself too, not just descendants.
+  // A path with an explicit trailing slash (`app/services/`) means "contents
+  // only" and does not get this treatment.
+  const matchSelf = !g.endsWith("/") && !/[*?{}]/.test(g) && !/\.[a-z0-9]+$/i.test(g);
+  if (g.endsWith("/")) g += "**";
+  else if (matchSelf) g += "/**";
 
   let re = "";
   for (let i = 0; i < g.length; i++) {
@@ -92,6 +97,9 @@ export function globToRegExp(glob) {
       i = close;
     } else re += escapeLiteral(c);
   }
+  // The "/**" appended above compiles to a trailing literal "/.*"; make the
+  // "/" + anything optional so the bare path matches itself as well.
+  if (matchSelf) re = re.replace(/\/\.\*$/, "(?:/.*)?");
   return new RegExp(`^${re}$`);
 }
 

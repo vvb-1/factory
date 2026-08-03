@@ -43,6 +43,17 @@ test("disjoint directories do not overlap", () => {
   expectTrue(!globsOverlap(".github/workflows/*", "app/src/main.ts"));
 });
 
+test("extensionless concrete files (Dockerfile, Makefile) match themselves", () => {
+  expectTrue(globsOverlap("Dockerfile", "Dockerfile"));
+  expectTrue(globsOverlap("Dockerfile", "./Dockerfile"));
+  expectTrue(globsOverlap("./Dockerfile", "Dockerfile"));
+  expectTrue(globsOverlap("Makefile", "Makefile"));
+  // still owns everything beneath it, same as before
+  expectTrue(globsOverlap("app/services", "app/services/api.ts"));
+  // but a sibling file sharing the prefix is a different filesystem entity
+  expectTrue(!globsOverlap("app/src/auth", "app/src/auth.ts"));
+});
+
 test("the case keyword matching gets wrong", () => {
   // Same vocabulary, unrelated files: must NOT collide.
   expectTrue(!pathsCollide(["app/ui/LoginButton.tsx"], ["server/auth/middleware.ts"]));
