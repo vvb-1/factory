@@ -20,7 +20,7 @@
  * *during* the run (triage promoting one, or an agent filing follow-up work)
  * get picked up without waiting for the next supervisor tick.
  */
-import { readFileSync, mkdirSync, createWriteStream } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, createWriteStream } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -416,6 +416,47 @@ const warned = new Set();    // skip-warnings already printed, so refills don't 
 let startedCount = 0;
 let drained = false;
 
+/**
+ * Cross-process claim lock, so more than one supervisor can work one repo.
+ *
+ * Linear has no compare-and-swap, so claim() writes the assignee and reads it
+ * back. That works against a foreign agent, and not at all against a second
+ * supervisor of YOUR OWN: both authenticate as the same Linear user (OPS-40),
+ * so the read-back returns our id for both and each concludes it won. Two
+ * agents then enter the same worktree — same branch, same database, same
+ * ports. The slot accounting has the same problem: each dispatcher sees
+ * `cap - inProgress` before the other's claims land, so both fill the cap.
+ *
+ * Both are fixed by serialising the read-decide-claim window on the machine
+ * where the supervisors run. It is short — a Linear query and one update per
+ * ticket — so the second dispatcher waits milliseconds, then re-reads and sees
+ * the first one's claims.
+ *
+ * A holder that dies leaves the file behind, so the lock carries its pid and
+ * is stolen when that process is gone or the lock is older than 2 minutes.
+ */
+const LOCK = path.join(homedir(), ".factory/locks", `${repo.name}.dispatch.lock`);
+mkdirSync(path.dirname(LOCK), { recursive: true });
+
+function acquireClaimLock() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(LOCK, `${process.pid} ${Date.now()}\n`, { flag: "wx" });
+      return true;
+    } catch {
+      let pid = 0, at = 0;
+      try { [pid, at] = readFileSync(LOCK, "utf8").trim().split(/\s+/).map(Number); } catch { return false; }
+      let alive = false;
+      try { process.kill(pid, 0); alive = true; } catch { alive = false; }
+      if (alive && Date.now() - at < 120_000) return false;
+      console.log(c.yellow(`  stale dispatch lock from pid ${pid} — taking it`));
+      try { unlinkSync(LOCK); } catch {}
+    }
+  }
+  return false;
+}
+const releaseClaimLock = () => { try { unlinkSync(LOCK); } catch {} };
+
 async function fill() {
   if (startedCount >= MAX || tripped || shuttingDown) return;
   const spent = budgetExhausted(policy);
@@ -424,6 +465,15 @@ async function fill() {
     drained = true;
     return;
   }
+  // Everything from here to the last claim() must be exclusive: read the queue,
+  // decide, claim. Another dispatcher reading in the middle of it would see
+  // slots we are about to take.
+  if (!acquireClaimLock()) {
+    console.log(c.dim(`  another dispatcher is claiming for ${repo.name} — skipping this pass`));
+    return;
+  }
+  try {
+
   const state = await fetchState();
   const free = Math.min(cap - state.inProgress.length, MAX - startedCount);
   if (free <= 0) return;
@@ -456,6 +506,8 @@ async function fill() {
     const p = runTicket(t).finally(() => { running.delete(t.identifier); inFlight.delete(t.identifier); });
     running.set(t.identifier, p);
   }
+
+  } finally { releaseClaimLock(); }
 }
 
 await fill();
