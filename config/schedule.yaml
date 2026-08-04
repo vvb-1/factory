@@ -80,6 +80,32 @@ jobs:
   # do" never means "spawn an agent and find out".
   # ============================================================================
 
+  # 0. GUARD. Mechanical linear.md §5 check for `ai:agent-ready` tickets — a
+  #    string/regex match against two sections, not a judgment call, so it
+  #    runs before the triage agent stage instead of costing an LLM
+  #    invocation every tick. Demotes a mislabeled ticket (assignee: none,
+  #    state: Todo, label: ai:agent-ready — reads as dispatchable) back to
+  #    Triage before dispatch could ever see it. CLNT-871/872 shipped via the
+  #    4-section Frappe support-ticket template (frappe-agent-protocol.md
+  #    §12) and sat unassigned in Todo, undetected, until this caught them.
+  - name: label-guard
+    every: 5m
+    dry_command: bun orchestrator/label-guard.mjs --repo {{repo}}
+    command: bun orchestrator/label-guard.mjs --repo {{repo}} --apply
+    enabled: false
+    why: >
+      Checks only Owned Paths and Verification Command — the two §5 sections
+      that are mechanically load-bearing (one gates dispatch's collision
+      check, the other gates "done"). Deliberately does NOT check Problem &
+      Context / Acceptance Criteria / Source File Pointers: an early version
+      did, and against the live workspace that produced five false positives
+      — including an Urgent, fully-actionable security ticket — for every two
+      genuine catches, because those three vary too much in legitimate format
+      to check safely by regex. A false demotion costs real disruption to a
+      ready ticket, so this errs toward precision. Disabled under the
+      foreground policy above like everything else here — run by hand, dry
+      first, before enabling.
+
   # 1. INTAKE. Usually the binding constraint — a deep Triage pile with an empty
   #    agent-ready queue means dispatching harder cannot help.
   #

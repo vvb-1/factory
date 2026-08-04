@@ -1,0 +1,136 @@
+/**
+ * bun test
+ *
+ * templateGaps() checks only the two §5 sections that are mechanically
+ * load-bearing (Owned Paths gates dispatch collision detection, Verification
+ * Command gates "done"). An earlier version also checked Problem & Context,
+ * Acceptance Criteria, and Source File Pointers -- against the live workspace
+ * that produced five false positives (one an Urgent, fully-actionable
+ * security ticket) for every two genuine catches, because those three vary
+ * too much in legitimate format to check by regex. These tests pin both the
+ * genuine catch (CLNT-871/872's shape) and the false positives that got cut.
+ */
+import { test, expect } from "bun:test";
+import { templateGaps } from "./label-guard.mjs";
+
+const FULL_SPEC = `## Problem & Context
+
+Something is broken and it matters.
+
+## Acceptance Criteria
+
+- [ ] Observable requirement 1
+
+## Owned Paths
+
+- \`app/services/api.ts\`
+
+## Verification Command
+
+    npm test app/services/__tests__/api.test.ts`;
+
+test("a real §5 spec passes with no gaps", () => {
+  expect(templateGaps(FULL_SPEC)).toEqual([]);
+});
+
+test("the 4-section Frappe support-ticket template fails on both mechanical gaps (CLNT-871/872)", () => {
+  const desc = `## 🎫 Support Ticket Origin & Ingestion Metadata
+
+* **Source:** Frappe Helpdesk Support Ticket #0011
+
+## 📩 Original Customer Request
+
+> some customer text
+
+## 🛠️ Rephrased Specification for Implementation Agent
+
+**Target Repository:** \`~/Develop/legalease\`
+
+### Technical Tasks:
+
+1. Do the thing.
+2. Verify with existing tests.
+
+## 🎨 Artifacts & End-User Response Guidance
+
+Draft a response confirming completion.`;
+
+  expect(templateGaps(desc)).toEqual(["Owned Paths", "Verification Command"]);
+});
+
+test("Owned Paths explicitly declared not-applicable for a non-code deploy ticket passes (CLNT-737, CLNT-218, CLNT-889)", () => {
+  const variants = [
+    "None in this repo — the fix is an environment variable on a Dokploy stack, followed by a redeploy.",
+    "None — infra/deploy verification only, no code changes expected.",
+    "No repository paths — this ticket only creates Linear attachments or a blocker comment.",
+    "None in-repo — this ticket only closes the two named GitHub PRs and records the decision.",
+  ];
+  for (const body of variants) {
+    const desc = `## Owned Paths\n\n${body}\n\n## Verification Command\n\nSome evidence.`;
+    expect(templateGaps(desc), body).toEqual([]);
+  }
+});
+
+test("an 'Evidence Required' heading counts as the non-code Verification Command substitute (CLNT-901)", () => {
+  const desc = `## Owned Paths
+
+No repository paths — this ticket only creates Linear attachments.
+
+## Evidence Required
+
+* Two Linear attachments meeting the viewport criteria above.`;
+  expect(templateGaps(desc)).toEqual([]);
+});
+
+test("a real ticket with actual Owned Paths and a real Verification Command passes regardless of other heading names (CLNT-755)", () => {
+  const desc = `## Finding
+
+Some investigation writeup with no "Problem & Context" or "Acceptance
+Criteria" heading at all -- surfaced during a PR review, not hand-written.
+
+## What needs doing
+
+* Fix the bug described above.
+
+## Owned Paths
+
+* \`app/src/checkins/photoOperations.ts\`
+* \`app/src/checkins/checkinPhotos.ts\`
+
+## Verification Command
+
+\`\`\`bash
+cd app && npm run lint && npm test
+\`\`\``;
+  expect(templateGaps(desc)).toEqual([]);
+});
+
+test("neither Owned Paths nor Verification Command present, and nothing declared N/A, is a genuine gap (CW-213)", () => {
+  const desc = `## Production evidence
+
+Some log line proving the bug is real.
+
+## Acceptance criteria
+
+- [ ] Fix the thing.
+
+## Observed from
+
+Production logs, 2026-07-29.`;
+  expect(templateGaps(desc)).toEqual(["Owned Paths", "Verification Command"]);
+});
+
+test("Owned Paths heading present but unparseable and not declared N/A still fails", () => {
+  const desc = `## Owned Paths
+
+Some prose that isn't a path list and gives no real answer either way.
+
+## Verification Command
+
+    npm test`;
+  expect(templateGaps(desc)).toEqual(["Owned Paths"]);
+});
+
+test("empty description fails both", () => {
+  expect(templateGaps("")).toEqual(["Owned Paths", "Verification Command"]);
+});
