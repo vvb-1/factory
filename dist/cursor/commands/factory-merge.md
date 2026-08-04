@@ -38,11 +38,27 @@ Check out the PR branch in its worktree (or a fresh one), fix the findings / CI 
 
 Match the repo's existing merge style from `git log` (this workflow's repos generally use merge commits — `gh pr merge --merge`; use squash only where repo history shows squash).
 
-**Merge one PR at a time.** Two merges landing in the same base within seconds produce a base-CI failure that belongs to neither PR and costs more to untangle than the parallelism saved.
+**Batch by disjoint files; serialise only what overlaps.** The risk in merging two PRs together is that they interact — B was tested against a base that did not yet contain A. When their changed-file sets are disjoint that interaction is close to impossible, and waiting a full CI cycle between them buys nothing. Dispatch already enforces disjoint `Owned Paths` between concurrently-worked tickets, so most PRs in a batch are disjoint by construction.
 
-After each merge: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown (`git push origin --delete <branch>`, `git branch -D <branch>`).
+So:
 
-If base CI or the smoke check breaks after a merge, stop merging further PRs immediately, notify me, and fix or revert first. On an auto-deploying branch a red smoke check means the environment is down right now, not that a test is flaky.
+1. Take the PRs you classified MERGE and read each one's changed files (`gh pr diff <PR> --name-only`).
+2. Form a batch of PRs whose file sets are **pairwise disjoint**, up to **5**. Any PR sharing a file with one already in the batch waits for the next batch.
+3. Merge the batch back to back, without waiting for base CI between them.
+4. Then wait **once** for base CI on the batch (`gh run watch <run> --exit-status`), plus the smoke check where the repo has one.
+5. Green: move every ticket in the batch to `Done` and clean up. Red: you have at most 5 suspects and their file sets are disjoint, so the failing job names the culprit. Revert that one merge (`git revert -m 1 <merge-sha>`, push, re-verify), keep the rest, and report what you reverted and why.
+
+Cap the batch at 5 even when more are disjoint: a red base after 5 is still a diagnosable morning, and after 15 it is an outage with a haystack.
+
+Two PRs that share a file still go one at a time, base CI in between, exactly as before. That is the case the old serial-always rule was written for.
+
+Why this matters: a legalease run on 2026-08-04 landed 3 PRs in 15 minutes against ~2 minutes of CI per merge while 22 PRs sat open — one merge agent could not keep up with 8 dispatch slots, and the queue grew faster than it drained. Almost all of that wall clock was waiting for CI on changes that could not have interacted.
+
+If the repo has GitHub's native merge queue enabled, prefer it over any of this — it tests batches and drops the failures for you.
+
+After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown (`git push origin --delete <branch>`, `git branch -D <branch>`).
+
+If base CI or the smoke check breaks after a batch, stop merging further batches immediately, notify me, and fix or revert first. On an auto-deploying branch a red smoke check means the environment is down right now, not that a test is flaky.
 
 ## File what you find — every PR, every verdict
 
