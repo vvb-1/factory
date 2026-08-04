@@ -114,13 +114,14 @@ function RepoTabs({ repos, selected }) {
 
 function QueueStrip({ summary, worker }) {
   if (!summary) return <Text dimColor>waiting for queue.mjs…</Text>;
-  // "agents" is how many are in flight against the repo's concurrency
-  // ceiling (inProgress + slotsFree) — the question "how many can spawn, and
-  // how many is the max" in one glance, tone flips at the ceiling itself.
-  const agents = agentCapStat(summary.inProgress, summary.slotsFree);
+  // Capacity comes from durable worker leases, while Linear claims remain the
+  // ownership record. Showing both prevents a dead claim from masquerading as
+  // an active agent and explains why a queue can still dispatch.
+  const agents = agentCapStat(summary.workers, summary.slotsFree);
   return (
     <Box>
-      <StatChip label="agents" value={agents.text} tone={agents.tone} />
+      <StatChip label="workers" value={agents.text} tone={agents.tone} />
+      <StatChip label="claims" value={summary.inProgress} tone={summary.orphanedClaims ? "warn" : undefined} />
       <StatChip label="worker" value={worker == null ? "?" : worker ? "connected" : "offline"} tone={worker == null ? "warn" : worker ? "good" : "bad"} />
       <StatChip label="ready" value={summary.ready} tone={summary.ready ? "good" : undefined} />
       <StatChip label="review" value={summary.inReview} tone={summary.inReview ? "warn" : undefined} />
@@ -444,10 +445,12 @@ function TicketList({ stageAgents, rows, ready, blocked, ages, selected, height 
         // A running ticket whose log went quiet is the thing to look at — the
         // agent may be thinking, or gone (the reaper fires at 45m of Linear
         // silence; this is the earlier, cheaper tell).
-        const quiet = t.status === "running" && age != null && age >= 90_000;
-        const dot = t.status === "running" ? (quiet ? "◌" : "●") : "◐";
-        const dotColor = t.status === "running" ? (quiet ? "yellow" : "green") : "yellow";
+        const quiet = t.status === "running" && t.hasWorker && age != null && age >= 90_000;
+        const noWorker = t.status === "running" && !t.hasWorker;
+        const dot = t.status === "running" ? (noWorker || quiet ? "◌" : "●") : "◐";
+        const dotColor = t.status === "running" ? (noWorker ? "red" : quiet ? "yellow" : "green") : "yellow";
         const note = t.status !== "running" ? "in review"
+          : noWorker ? "claim only — no worker"
           : age == null ? "running — no log"
           : quiet ? `quiet ${formatAge(age)}`
           : `running ${formatAge(age)}`;
@@ -455,7 +458,7 @@ function TicketList({ stageAgents, rows, ready, blocked, ages, selected, height 
           <Box key={t.identifier} flexDirection="column" marginBottom={0}>
             <Text inverse={isSel}>
               <Text color={dotColor}>{dot}</Text> {t.identifier}{" "}
-              <Text dimColor color={quiet ? "yellow" : undefined}>{note}</Text>
+              <Text dimColor color={noWorker ? "red" : quiet ? "yellow" : undefined}>{note}</Text>
               {t.prNumber ? <Text color="magenta"> [PR: #{t.prNumber}]</Text> : null}
             </Text>
             <Text dimColor wrap="truncate-end">  {t.title}</Text>
@@ -611,9 +614,9 @@ function App() {
   }, [summary]);
 
   const budgetTone = spendTone(spend, PER_DAY_USD);
-  const quietTickets = rows.filter(
-    (t) => t.status === "running" && ticketAges[t.identifier] != null && ticketAges[t.identifier] >= QUIET_MS,
-  ).length;
+  const quietTickets = rows.filter((t) => t.status === "running" && (
+    !t.hasWorker || (ticketAges[t.identifier] != null && ticketAges[t.identifier] >= QUIET_MS)
+  )).length;
   const attention = needsAttention({ blocked: summary?.blocked ?? 0, stages: stages ?? [], quietTickets, budgetTone });
 
   // Terminal tab title (OSC 0) follows the selected repo and gets a "⚠"

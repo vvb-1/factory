@@ -111,7 +111,11 @@ export function entryTone(entry) {
 
 /** Running + in-review tickets from one queue.mjs --json summary entry, in display order. */
 export function buildTicketRows(summary) {
-  const running = (summary?.inProgressTickets ?? []).map((t) => ({ ...t, status: "running" }));
+  const hasLeaseData = Array.isArray(summary?.liveWorkerIds);
+  const liveWorkers = new Set(summary?.liveWorkerIds ?? []);
+  const running = (summary?.inProgressTickets ?? []).map((t) => ({
+    ...t, status: "running", ...(hasLeaseData ? { hasWorker: liveWorkers.has(t.identifier) } : {}),
+  }));
   const review = (summary?.inReviewTickets ?? []).map((t) => ({ ...t, status: "review" }));
   return [...running, ...review];
 }

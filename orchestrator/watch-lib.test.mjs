@@ -148,6 +148,14 @@ test("buildTicketRows tags running and in-review tickets and preserves order", (
   ]);
 });
 
+test("buildTicketRows marks an In Progress claim without a live worker lease", () => {
+  const rows = buildTicketRows({
+    liveWorkerIds: ["CLNT-2"],
+    inProgressTickets: [{ identifier: "CLNT-1", title: "stale" }, { identifier: "CLNT-2", title: "live" }],
+  });
+  expect(rows.map((row) => [row.identifier, row.hasWorker])).toEqual([["CLNT-1", false], ["CLNT-2", true]]);
+});
+
 test("buildTicketRows tolerates a summary with no tickets", () => {
   expect(buildTicketRows({})).toEqual([]);
 });

@@ -239,6 +239,7 @@ for (const repo of repos) {
     ready: ready.length,
     inProgress: inProgress.length,
     workers: workers.length,
+    liveWorkerIds: workers.map((w) => w.ticket),
     orphanedClaims: orphanedClaims.length,
     inReview: inReview.length,
     openPRs: openPRs.length,
