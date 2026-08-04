@@ -18,6 +18,7 @@ import path from "node:path";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
 import { parseOwnedPaths, pathsCollide } from "./owned-paths.mjs";
+import { budgetExhausted } from "../lib/spend.mjs";
 
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
@@ -91,7 +92,12 @@ for (const repo of repos) {
   const labels = (i) => (i.labels?.nodes ?? []).map((l) => l.name);
   const state = (i) => i.state?.name ?? "?";
 
-  const triage = nodes.filter((i) => state(i) === "Triage");
+  // `ai:blocked` in Triage means a previous tick already decided this one needs
+  // a human. Counting it as triage work is how the stage ends up re-deriving
+  // the same hold every 5 minutes — the same shape as the merge stage
+  // re-reviewing escalated PRs. It reappears the moment the label comes off.
+  const triage = nodes.filter((i) => state(i) === "Triage" && !labels(i).includes("ai:blocked"));
+  const triageHeld = nodes.filter((i) => state(i) === "Triage" && labels(i).includes("ai:blocked"));
   const ready = nodes.filter((i) => state(i) === "Todo" && labels(i).includes("ai:agent-ready") && !i.assignee);
   const notReady = nodes.filter((i) => state(i) === "Todo" && !labels(i).includes("ai:agent-ready"));
   const inProgress = nodes.filter((i) => state(i) === "In Progress");
@@ -116,6 +122,7 @@ for (const repo of repos) {
   };
 
   line("Triage (unspecified)", triage.length, triage.length > 20 ? c.yellow : (s) => s);
+  if (triageHeld.length) line("Triage, held for you", triageHeld.length, c.red);
   line("Todo, not ready", notReady.length);
   line("READY to dispatch", ready.length, ready.length ? c.green : c.red);
   line("In Progress", inProgress.length);
@@ -192,6 +199,16 @@ if (JSON_OUT) {
 }
 
 if (GATE) {
+  // The day budget binds EVERY stage that spawns an agent, not just dispatch.
+  // Gating it in tick.mjs alone inverted the intent: over budget, the stage
+  // that makes progress stopped while triage and merge kept spawning opus
+  // sessions on their timers.
+  const spent = budgetExhausted(policy);
+  if (spent) {
+    console.log(`${spent} — no ${GATE} this tick. Running work finishes; nothing new starts.`);
+    process.exit(1);
+  }
+
   // Exit 0 = there is work for this stage, so the supervisor should run it.
   // Exit 1 = idle, skip. Anything else is a real error and stops the loop.
   const has = {
@@ -201,10 +218,17 @@ if (GATE) {
     // Don't dispatch with no free slot or nothing startable — an agent that
     // wakes to find the cap full has burned a run to learn nothing.
     dispatch: (s) => s.slotsFree > 0 && s.startable.length > 0,
-    // A PR waiting on GitHub is the work, whatever its ticket says. Keying this
-    // on `In Review` alone made the stage blind to any PR whose ticket state
-    // was never updated — the most common way a run ends untidily.
-    merge: (s) => s.inReview > 0 || s.openPRs > 0,
+    // A PR waiting on GitHub is the work, whatever its ticket says — and
+    // `openPRs` already excludes drafts and anything labelled `escalated`.
+    //
+    // This deliberately does NOT also fire on `In Review` tickets. It used to,
+    // and that silently defeated the escalated-label escape hatch: an escalated
+    // PR keeps its ticket In Review by design, so the gate stayed open and the
+    // merge stage re-reviewed the same two PRs every 10 minutes — seven ticks,
+    // ~$1.37 each, producing no new information and no way to stop short of
+    // closing the PR. An In Review ticket with no actionable PR is drift for
+    // the reconciler to explain, not merge work.
+    merge: (s) => s.openPRs > 0,
   }[GATE];
 
   if (!has) {

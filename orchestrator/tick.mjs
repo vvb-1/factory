@@ -27,6 +27,7 @@ import path from "node:path";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
 import { parseOwnedPaths, pathsCollide } from "./owned-paths.mjs";
+import { budgetExhausted } from "../lib/spend.mjs";
 
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
@@ -372,36 +373,13 @@ const warned = new Set();    // skip-warnings already printed, so refills don't 
 let startedCount = 0;
 let drained = false;
 
-/**
- * budget.per_day_usd, enforced (it used to say "advisory only"). Sums
- * total_cost_usd across today's run logs — notional units on subscription
- * auth, so this is a runaway guard, not a wallet. `on_exhausted: drain`:
- * running tickets finish, nothing new starts.
- */
-function todaysSpendUSD() {
-  const today = new Date().toISOString().slice(0, 10);
-  let sum = 0;
-  for (const f of new Bun.Glob("*.jsonl").scanSync(LOG_DIR)) {
-    const full = path.join(LOG_DIR, f);
-    if (new Date(Bun.file(full).lastModified).toISOString().slice(0, 10) !== today) continue;
-    for (const line of readFileSync(full, "utf8").split("\n")) {
-      if (!line.includes('"total_cost_usd"')) continue;
-      try { sum += JSON.parse(line).total_cost_usd ?? 0; } catch {}
-    }
-  }
-  return sum;
-}
-
 async function fill() {
   if (startedCount >= MAX || tripped || shuttingDown) return;
-  const perDay = policy?.budget?.per_day_usd;
-  if (perDay) {
-    const spent = todaysSpendUSD();
-    if (spent >= perDay) {
-      if (!drained) console.log(c.yellow(`\n  day budget reached (~$${spent.toFixed(2)} of $${perDay} notional) — draining: running tickets finish, nothing new starts.\n`));
-      drained = true;
-      return;
-    }
+  const spent = budgetExhausted(policy);
+  if (spent) {
+    if (!drained) console.log(c.yellow(`\n  ${spent} — draining: running tickets finish, nothing new starts.\n`));
+    drained = true;
+    return;
   }
   const state = await fetchState();
   const free = Math.min(cap - state.inProgress.length, MAX - startedCount);
