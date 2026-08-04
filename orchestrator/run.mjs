@@ -178,9 +178,22 @@ function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-await Promise.all(selected.map(runJob));
+// Start the first pass, but DO NOT await it before scheduling.
+//
+// `dispatch` is deliberately long-running: rolling refill keeps tick.mjs alive
+// for as long as tickets are in flight, which is hours. Awaiting the first pass
+// before installing timers therefore meant the timers were never installed at
+// all — the supervisor silently degraded into a one-shot the moment dispatch
+// picked up a ticket. legalease ran merge exactly once, at 08:54, and never
+// again while twelve green PRs piled up behind it; the loop looked alive
+// because dispatch's agents kept printing.
+//
+// Overlap is already handled per job by the `running` set, so a timer that
+// fires while its own job is still going skips rather than stacks.
+const firstPass = Promise.all(selected.map(runJob)).catch(() => {});
 
 if (ONCE) {
+  await firstPass;
   console.log(`\n${c.bold("one pass complete.")} ${completed} ok, ${failed} failed.`);
   process.exit(failed ? 1 : 0);
 }
