@@ -1,7 +1,7 @@
 ---
 description: Implement exactly one already-claimed Linear ticket in the current worktree
 argument-hint: <ISSUE-ID>
-model: opus
+model: sonnet
 ---
 
 Implement **one** ticket: $ARGUMENTS. You are already in its worktree, and the ticket is already claimed for you.
