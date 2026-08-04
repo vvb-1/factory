@@ -52,6 +52,7 @@ for (const repo of repos) {
   if (s.answered) line("Held, reply received", s.answered, c.green);
   line("Todo, not ready", s.todoNotReady);
   line("READY to dispatch", s.ready, s.ready ? c.green : c.red);
+  if (s.readyHeld) line("READY, held by blocker", s.readyHeld, c.yellow);
   line("In Progress", s.inProgress);
   line("In Review", s.inReview, s.inReview ? c.cyan : (x) => x);
   line("Blocked", s.blocked, s.blocked ? c.red : (x) => x);
@@ -74,11 +75,19 @@ for (const repo of repos) {
     }
   } else if (s.ready) {
     console.log(c.dim(`\n  nothing startable — all ready tickets collide with running or with each other's unparseable Owned Paths`));
+  } else if (s.readyHeld) {
+    // Not "queue empty": there IS specified work, it is waiting on its
+    // blockers, and if those never finish this line is the only symptom.
+    console.log(c.dim(`\n  nothing startable — every ready ticket is waiting on a blocker (see below)`));
   } else {
     console.log(c.dim(`\n  queue empty — the constraint is specification, not dispatch.`));
     console.log(c.dim(`  ${s.triageState} ticket(s) in Triage. Run the triage stage.`));
   }
 
+  if (s.readyHeld) {
+    console.log(c.dim(`\n  ready but held — waiting on another ticket, not on capacity:`));
+    for (const t of s.readyHeldTickets) console.log(`    ${c.yellow(t.identifier.padEnd(10))} blocked by ${t.blockedBy.join(", ")}  ${c.dim(t.title.slice(0, 45))}`);
+  }
   if (s.inReview) {
     console.log(c.dim(`\n  awaiting review/merge:`));
     for (const t of s.inReviewTickets) console.log(`    ${c.cyan(t.identifier.padEnd(10))} ${t.title.slice(0, 60)}`);
