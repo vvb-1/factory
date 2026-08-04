@@ -74,6 +74,10 @@ REPO_TEAM="$(cd "$ROOT" && bun -e '
 ' "$REPO")"
 [[ -d "$REPO_PATH" ]] || { echo "repo path does not exist: $REPO_PATH" >&2; exit 2; }
 
+# Terminal tab title when run interactively. Headless spawns have stdout piped
+# into a log, so the -t guard keeps escape bytes out of the jsonl.
+[[ -t 1 ]] && printf '\033]0;factory %s \xe2\x96\xb8 %s%s\007' "$REPO" "$COMMAND" "${ARGS:+ $ARGS}" || true
+
 # Hard cap, from policy. `timeout` sends TERM at the limit and KILL 30s later,
 # so a wedged harness cannot hold a slot indefinitely.
 MAX_MIN="$(cd "$ROOT" && bun -e '

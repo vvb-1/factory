@@ -54,6 +54,12 @@ const c = {
 };
 const clock = () => new Date().toTimeString().slice(0, 8);
 
+// Terminal tab title (OSC 0) — so a wall of tabs reads "which repo, which
+// mode, what's running right now" without focusing any of them.
+const setTitle = (s) => { if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${s}\x07`); };
+const baseTitle = () => `factory ${TARGET} — ${APPLY ? "APPLY" : "dry"}`;
+const refreshTitle = () => setTitle(running.size ? `${baseTitle()} ▸ ${[...running].join(",")}` : baseTitle());
+
 if (has("--list") || (!ALL && ONLY.length === 0)) {
   console.log(c.bold("\njobs in config/schedule.yaml\n"));
   for (const j of jobs) {
@@ -99,6 +105,7 @@ console.log();
 const running = new Set();
 let completed = 0;
 let failed = 0;
+refreshTitle();
 
 /**
  * Run a command, return its exit code. Used for gates, where we want the code
@@ -138,6 +145,7 @@ async function runJob(job) {
   }
 
   running.add(job.name);
+  refreshTitle();
   const cmd = commandFor(job);
   const started = Date.now();
   console.log(`${c.dim(clock())} ${c.cyan("start")} ${c.bold(job.name)} ${c.dim(cmd)}`);
@@ -160,6 +168,7 @@ async function runJob(job) {
 
     child.on("close", (code) => {
       running.delete(job.name);
+      refreshTitle();
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       if (code === 0) { completed++; console.log(`${c.dim(clock())} ${c.green("done")}  ${job.name} ${c.dim(`(${secs}s)`)}`); }
       else { failed++; console.log(`${c.dim(clock())} ${c.red("FAIL")}  ${job.name} ${c.dim(`exit ${code}, ${secs}s`)}`); }
@@ -171,6 +180,7 @@ async function runJob(job) {
 const timers = [];
 function shutdown() {
   for (const t of timers) clearInterval(t);
+  setTitle("");
   console.log(`\n${c.bold("stopped.")} ${completed} run(s) ok, ${failed} failed.`);
   if (running.size) console.log(c.yellow(`  ${[...running].join(", ")} still finishing — they are child processes and will exit on their own.`));
   console.log(c.dim("nothing is scheduled; nothing runs until you start this again.\n"));

@@ -30,14 +30,17 @@ import path from "node:path";
 import { ROOT } from "../lib/schedule.mjs";
 import { todaysSpendUSD } from "../lib/spend.mjs";
 import {
-  buildTicketRows, latestLogForTicket, tailFormattedLines, formatSpend,
+  buildTicketRows, latestLogForTicket, tailEntries, entryTone, formatEntry, formatSpend,
   formatIssueCounts, parseReaperOutput, linearDeepLink, stageStatuses, formatAge, visibleWindow,
-  activeAgents,
+  activeAgents, spendPct, spendTone, agentCapStat, needsAttention,
 } from "./watch-lib.mjs";
 
 const LOG_DIR = path.join(homedir(), ".factory/logs");
 const QUEUE_POLL_MS = 20_000;
 const LOG_POLL_MS = 3_000;
+const TAIL_BUFFER = 500;   // entries kept for PgUp scrollback, well beyond one screen
+const LOG_PAGE = 10;       // rows per PgUp/PgDn
+const QUIET_MS = 90_000;   // matches the "quiet" threshold TicketList already renders
 
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
@@ -90,9 +93,13 @@ function RepoTabs({ repos, selected }) {
 
 function QueueStrip({ summary }) {
   if (!summary) return <Text dimColor>waiting for queue.mjs…</Text>;
+  // "agents" is how many are in flight against the repo's concurrency
+  // ceiling (inProgress + slotsFree) — the question "how many can spawn, and
+  // how many is the max" in one glance, tone flips at the ceiling itself.
+  const agents = agentCapStat(summary.inProgress, summary.slotsFree);
   return (
     <Box>
-      <StatChip label="running" value={summary.inProgress} />
+      <StatChip label="agents" value={agents.text} tone={agents.tone} />
       <StatChip label="ready" value={summary.ready} tone={summary.ready ? "good" : undefined} />
       <StatChip label="review" value={summary.inReview} tone={summary.inReview ? "warn" : undefined} />
       <StatChip label="triage" value={summary.triage} />
@@ -148,12 +155,17 @@ function StageStrip({ stages, waiting, counts }) {
 const SHORTCUTS = [
   ["↑ ↓", "select a ticket"],
   ["← →", "switch repo"],
+  ["1-9", "jump straight to repo tab N"],
   ["o", "open the selected ticket in Linear (desktop app, browser fallback)"],
+  ["c", "copy the selected ticket's identifier to the clipboard"],
   ["r", "refresh queue + spend now"],
   ["x", "run the stale-claim reaper (dry run) for this repo's team"],
   ["y", "confirm reaper --apply — only offered when the dry run found stale claims"],
   ["b", "blocked-tickets digest for this repo — every hold, its question, its age"],
   ["u", "launch the unblock sweep agent for this repo (spawns immediately, no dry run)"],
+  ["PgUp/PgDn", "scroll the log tail; PgUp stops following live output"],
+  ["G", "jump the log tail back to live (re-follow)"],
+  ["enter", "open the selected log in $PAGER (full scrollback, search with /)"],
   ["?", "this help"],
   ["esc", "close an open pane; quit when none is open"],
   ["q", "quit"],
@@ -259,14 +271,16 @@ async function runReaperProcess(team, apply) {
   return { out, err };
 }
 
-function TicketList({ stageAgents, rows, ready, ages, selected, height }) {
+function TicketList({ stageAgents, rows, ready, blocked, ages, selected, height }) {
   // Budget in rows: agents section (1 header + 1 per agent), 1 in-flight
-  // header, 2 per ticket, 3 for the ready section, 2 for the more-above/below
-  // markers. Never let the list outgrow the pane — an overgrown frame is what
-  // pushes the TUI into terminal scrollback.
+  // header, 2 per ticket, 3 for the ready section, 2 for the blocked section
+  // (header + one line each, capped), 2 for the more-above/below markers.
+  // Never let the list outgrow the pane — an overgrown frame is what pushes
+  // the TUI into terminal scrollback.
   const agentReserve = stageAgents.length > 0 ? stageAgents.length + 1 : 0;
   const readyReserve = ready?.length > 0 ? 3 : 0;
-  const maxRows = Math.max(1, Math.floor((height - agentReserve - 1 - readyReserve - 2) / 2));
+  const blockedReserve = blocked?.length > 0 ? Math.min(blocked.length, 3) + 1 : 0;
+  const maxRows = Math.max(1, Math.floor((height - agentReserve - 1 - readyReserve - blockedReserve - 2) / 2));
   const ticketSel = Math.max(0, selected - stageAgents.length);
   const [start, end] = visibleWindow(rows.length, ticketSel, maxRows);
   return (
@@ -317,19 +331,40 @@ function TicketList({ stageAgents, rows, ready, ages, selected, height }) {
           <Text dimColor wrap="truncate-end">  {ready.join(" · ")}</Text>
         </Box>
       )}
+      {blocked?.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>blocked</Text>
+          {blocked.slice(0, 3).map((t) => (
+            <Text key={t.identifier} color="red" wrap="truncate-end">  ⛔ {t.identifier} — {t.title}</Text>
+          ))}
+          {blocked.length > 3 && <Text dimColor>  … {blocked.length - 3} more — press b for the full digest</Text>}
+        </Box>
+      )}
     </Box>
   );
 }
 
-function LogTail({ label, lines, height }) {
-  const shown = lines.slice(-Math.max(1, height - 1));
+const TONE_COLOR = { tool: "cyan", ok: "green", fail: "red" };
+
+// entries[] is the full buffer (see TAIL_BUFFER in App); scrollOffset counts
+// rows back from the live end, 0 = following. PgUp increases it (freezes the
+// view further back in history), PgDn/G walk it back to 0 (re-follow).
+function LogTail({ label, entries, scrollOffset, height }) {
+  const rows = Math.max(1, height - 1);
+  const end = Math.max(0, entries.length - scrollOffset);
+  const start = Math.max(0, end - rows);
+  const shown = entries.slice(start, end);
+  const following = scrollOffset === 0;
   return (
     <Box flexDirection="column" width="58%">
-      <Text dimColor>{label ? `log tail — ${label}` : "log tail"}</Text>
+      <Text dimColor>
+        {label ? `log tail — ${label}` : "log tail"}
+        {label && !following && <Text color="yellow"> — scrolled (G to follow)</Text>}
+      </Text>
       {!label && <Text dimColor>  select a ticket or agent to tail its log</Text>}
-      {label && lines.length === 0 && <Text dimColor>  no log yet</Text>}
-      {shown.map((line, i) => (
-        <Text key={i} wrap="truncate-end">{line}</Text>
+      {label && entries.length === 0 && <Text dimColor>  no log yet</Text>}
+      {shown.map((entry, i) => (
+        <Text key={start + i} wrap="truncate-end" color={TONE_COLOR[entryTone(entry)]}>{formatEntry(entry)}</Text>
       ))}
     </Box>
   );
@@ -341,8 +376,11 @@ function App() {
   const [lastPoll, setLastPoll] = useState(null);
   const [repoIdx, setRepoIdx] = useState(0);
   const [rowIdx, setRowIdx] = useState(0);
-  const [logLines, setLogLines] = useState([]);
+  const [logEntries, setLogEntries] = useState([]);
+  const [scrollOffset, setScrollOffset] = useState(0); // rows back from live; 0 = following
   const [spend, setSpend] = useState(0);
+  const [lastPollMs, setLastPollMs] = useState(null);
+  const [nowTick, setNowTick] = useState(Date.now());
   const [reaper, setReaper] = useState(null); // { phase, team, lines, stale }
   const [digest, setDigest] = useState(null); // { phase, repo, lines }
   const [unblock, setUnblock] = useState(null); // { phase, repo, lines }
@@ -351,6 +389,8 @@ function App() {
   const [ticketAges, setTicketAges] = useState({});
   const [showHelp, setShowHelp] = useState(false);
   const pollRef = useRef(null);
+  const logFileRef = useRef(null);
+  const wasAttention = useRef(false);
   const { stdout } = useStdout();
   const width = Math.max(70, stdout?.columns ?? 100);
   const height = Math.max(12, stdout?.rows ?? 40);
@@ -378,6 +418,12 @@ function App() {
     // rowIdx is not clamped here — it's clamped at render time against the
     // current agents+tickets list, which this effect can't see.
   }, []);
+
+  // Terminal tab title (OSC 0) follows the selected repo, so the tab strip
+  // says which repo this monitor is on without focusing it.
+  useEffect(() => {
+    if (process.stdout.isTTY) process.stdout.write(`\x1b]0;factory watch${summary?.repo ? ` — ${summary.repo}` : ""}\x07`);
+  }, [summary?.repo]);
 
   useEffect(() => {
     const id = setInterval(() => setSpend(todaysSpendUSD(LOG_DIR)), LOG_POLL_MS);
@@ -566,5 +612,5 @@ function App() {
 // behaviour), so the shell prompt and scrollback are untouched underneath and
 // come back intact on exit — however the process ends.
 process.stdout.write("\x1b[?1049h\x1b[H");
-process.on("exit", () => process.stdout.write("\x1b[?1049l"));
+process.on("exit", () => process.stdout.write("\x1b[?1049l\x1b]0;\x07"));
 render(<App />);

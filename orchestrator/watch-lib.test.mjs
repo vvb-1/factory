@@ -11,9 +11,9 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  parseLogLine, formatEntry, tailFormattedLines, latestLogForTicket, buildTicketRows, formatSpend,
+  parseLogLine, formatEntry, tailFormattedLines, tailEntries, entryTone, latestLogForTicket, buildTicketRows, formatSpend,
   formatIssueCounts, parseReaperOutput, linearDeepLink, stageStatuses, formatAge, visibleWindow,
-  activeAgents,
+  activeAgents, spendPct, spendTone, agentCapStat, needsAttention,
 } from "./watch-lib.mjs";
 
 test("ignores blank lines and non-JSON noise", () => {
@@ -236,4 +236,41 @@ test("activeAgents tolerates a missing log dir and foreign repos", () => {
   writeFileSync(path.join(dir, "legalease-CLNT-1-20260804-120000.jsonl"), "{}");
   expect(activeAgents(dir, "bj29")).toEqual([]);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("spendPct and spendTone track the daily cap", () => {
+  expect(spendPct(4.2, 40)).toBe(11);
+  expect(spendPct(0, 0)).toBeNull();      // no cap configured -> no percentage
+  expect(spendTone(4, 40)).toBeUndefined();
+  expect(spendTone(29, 40)).toBe("warn"); // >= 70%
+  expect(spendTone(37, 40)).toBe("bad");  // >= 90%
+  expect(spendTone(4, 0)).toBeUndefined();
+});
+
+test("agentCapStat reads inProgress/slotsFree as N/cap", () => {
+  expect(agentCapStat(2, 6)).toEqual({ text: "2/8", tone: undefined, cap: 8 });
+  expect(agentCapStat(8, 0)).toEqual({ text: "8/8", tone: "warn", cap: 8 }); // at the ceiling
+  expect(agentCapStat(0, 3)).toEqual({ text: "0/3", tone: undefined, cap: 3 });
+});
+
+test("tailEntries returns raw entries; entryTone classifies them", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
+  const file = path.join(dir, "log.jsonl");
+  writeFileSync(file, [
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] } }),
+    JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.1, result: "done" }),
+  ].join("\n"));
+  const entries = tailEntries(file);
+  expect(entries.map(entryTone)).toEqual(["tool", "ok"]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("needsAttention fires on blocked tickets, a failed stage, quiet tickets, or budget in the red", () => {
+  expect(needsAttention({})).toBe(false);
+  expect(needsAttention({ blocked: 1 })).toBe(true);
+  expect(needsAttention({ stages: [{ lastResult: { ok: false } }] })).toBe(true);
+  expect(needsAttention({ stages: [{ lastResult: { ok: true } }] })).toBe(false);
+  expect(needsAttention({ quietTickets: 1 })).toBe(true);
+  expect(needsAttention({ budgetTone: "bad" })).toBe(true);
+  expect(needsAttention({ budgetTone: "warn" })).toBe(false);
 });

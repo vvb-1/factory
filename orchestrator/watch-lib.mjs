@@ -69,13 +69,25 @@ export function latestLogForTicket(logDir, repo, identifier) {
   return best;
 }
 
-/** Last `maxEntries` formatted lines from a log file. Missing/unreadable file -> []. */
-export function tailFormattedLines(filePath, maxEntries = 40) {
+/** Last `maxEntries` raw display entries from a log file. Missing/unreadable file -> []. */
+export function tailEntries(filePath, maxEntries = 40) {
   if (!filePath) return [];
   let text;
   try { text = readFileSync(filePath, "utf8"); } catch { return []; }
   const entries = text.split("\n").flatMap(parseLogLine);
-  return entries.slice(-maxEntries).map(formatEntry);
+  return entries.slice(-maxEntries);
+}
+
+/** Last `maxEntries` formatted lines from a log file. Missing/unreadable file -> []. */
+export function tailFormattedLines(filePath, maxEntries = 40) {
+  return tailEntries(filePath, maxEntries).map(formatEntry);
+}
+
+/** Render tone for a log entry — used to color the tail (tool calls vs a clean vs failed result). */
+export function entryTone(entry) {
+  if (entry.kind === "tool") return "tool";
+  if (entry.kind === "result") return entry.ok ? "ok" : "fail";
+  return undefined;
 }
 
 /** Running + in-review tickets from one queue.mjs --json summary entry, in display order. */
@@ -87,6 +99,29 @@ export function buildTicketRows(summary) {
 
 export function formatSpend(spent, perDay) {
   return `$${(spent ?? 0).toFixed(2)} / $${(perDay ?? 0).toFixed(2)}`;
+}
+
+/** Spend as a % of the daily cap, or null when there's no cap to measure against. */
+export function spendPct(spent, perDay) {
+  if (!perDay) return null;
+  return Math.round(((spent ?? 0) / perDay) * 100);
+}
+
+/** Tone for the spend chip once it's getting close to the daily cap (matches the StatChip vocabulary). */
+export function spendTone(spent, perDay) {
+  const pct = spendPct(spent, perDay);
+  if (pct == null) return undefined;
+  if (pct >= 90) return "bad";
+  if (pct >= 70) return "warn";
+  return undefined;
+}
+
+/** In-flight agents as "N/cap" plus a tone once the repo is at or near its concurrency ceiling. */
+export function agentCapStat(inProgress, slotsFree) {
+  const cap = (inProgress ?? 0) + (slotsFree ?? 0);
+  const text = `${inProgress ?? 0}/${cap}`;
+  const tone = slotsFree === 0 && inProgress > 0 ? "warn" : undefined;
+  return { text, tone, cap };
 }
 
 /** Project progress for the stat strip. `capped` means the counts are floors (a 250-issue page filled up). */
@@ -219,6 +254,21 @@ export function activeAgents(logDir, repo, { now = Date.now(), activeMs = 90_000
     }
   } catch { /* no log dir yet */ }
   return out.sort((a, b) => a.ageMs - b.ageMs);
+}
+
+/**
+ * Whether the current state is worth a human's attention right now — drives
+ * the "⚠" tab-title prefix (level-triggered: on for as long as this is true)
+ * and gates the terminal bell (edge-triggered by the caller: ring only on the
+ * false -> true transition, so it doesn't nag on every poll while a problem
+ * sits unresolved).
+ */
+export function needsAttention({ blocked = 0, stages = [], quietTickets = 0, budgetTone } = {}) {
+  if (blocked > 0) return true;
+  if (stages.some((s) => s.lastResult && !s.lastResult.ok)) return true;
+  if (quietTickets > 0) return true;
+  if (budgetTone === "bad") return true;
+  return false;
 }
 
 /**
