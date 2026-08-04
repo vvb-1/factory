@@ -58,11 +58,26 @@ const QUERY = `
       state: { type: { nin: ["completed", "canceled"] } }
     }) {
       nodes {
-        identifier title description priority
+        identifier title description priority url
         state { name type }
         assignee { name }
         labels(first: 20) { nodes { name } }
       }
+    }
+  }`;
+
+// Finished work, for the done/total readout. Kept out of QUERY on purpose: the
+// active-issue query feeds gates and dispatch decisions, and mixing hundreds of
+// Done tickets into `nodes` would push live work past the 250-issue page long
+// before the project gets big enough to notice any other way.
+const CLOSED_QUERY = `
+  query($team: String!, $project: String!) {
+    issues(first: 250, filter: {
+      team: { key: { eq: $team } },
+      project: { name: { eq: $project } },
+      state: { type: { in: ["completed", "canceled"] } }
+    }) {
+      nodes { state { type } }
     }
   }`;
 
@@ -89,6 +104,11 @@ for (const repo of repos) {
   if (!GATE && !JSON_OUT) console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${repo.team} / ${repo.project}  ->  ${repo.base}`));
 
   const nodes = (await gql(QUERY, { team: repo.team, project: repo.project }))?.issues?.nodes ?? [];
+  const closed = (await gql(CLOSED_QUERY, { team: repo.team, project: repo.project }))?.issues?.nodes ?? [];
+  const done = closed.filter((i) => i.state?.type === "completed").length;
+  const total = nodes.length + closed.length;
+  // Either page hitting its 250 cap means these are floors, not counts.
+  const countCapped = nodes.length === 250 || closed.length === 250;
   const labels = (i) => (i.labels?.nodes ?? []).map((l) => l.name);
   const state = (i) => i.state?.name ?? "?";
 
@@ -128,12 +148,20 @@ for (const repo of repos) {
   line("In Progress", inProgress.length);
   line("In Review", inReview.length, inReview.length ? c.cyan : (s) => s);
   line("Blocked", blocked.length, blocked.length ? c.red : (s) => s);
+  line("Done / project total", `${done}/${total}${countCapped ? "+" : ""}`, c.dim);
 
   // What dispatch would actually pick up, honouring Owned Paths against what is
   // already running. Sorted the way §7 sorts: priority asc, then created asc.
+  //
+  // report_only repos have no worktree tooling — dispatch must never target
+  // them (see config/repos.yaml). Forcing slotsFree to 0 here is what keeps
+  // the dispatch gate closed for them; without it the gate reports "work
+  // available" from Linear state alone, run.mjs spawns tick.mjs, and tick.mjs
+  // immediately exits 2 because the repo can't be dispatched — a FAIL every
+  // tick for a repo that was never eligible to begin with.
   const inFlightPaths = inProgress.flatMap((i) => parseOwnedPaths(i.description ?? ""));
   const sorted = [...ready].sort((a, b) => (a.priority || 99) - (b.priority || 99));
-  const slotsFree = Math.max(0, (repo.max_in_flight ?? defaultCap) - inProgress.length);
+  const slotsFree = repo.report_only ? 0 : Math.max(0, (repo.max_in_flight ?? defaultCap) - inProgress.length);
   const free = [];
   const busyPaths = [...inFlightPaths];
   for (const t of sorted) {
@@ -147,6 +175,12 @@ for (const repo of repos) {
 
   summary.push({
     repo: repo.name,
+    // Team key, so the monitor can scope actions like the reaper without
+    // re-reading config/repos.yaml itself.
+    team: repo.team,
+    done,
+    total,
+    countCapped,
     triage: triage.length + notReady.length,
     // Triage-state only. The stage processes Triage tickets; gating on the
     // combined count kept the gate open for Todo-without-agent-ready tickets
@@ -159,6 +193,12 @@ for (const repo of repos) {
     blocked: blocked.length,
     slotsFree,
     startable: free.map((t) => t.identifier),
+    // Identifier + title + url — enough for a monitor (orchestrator/watch.jsx)
+    // to render a ticket list and deep-link into Linear without re-querying
+    // Linear itself.
+    inProgressTickets: inProgress.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
+    inReviewTickets: inReview.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
+    blockedTickets: blocked.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
   });
 
   if (quiet) continue;
@@ -166,6 +206,8 @@ for (const repo of repos) {
   if (free.length) {
     console.log(c.dim(`\n  dispatch would start (cap ${repo.max_in_flight}, ${inProgress.length} running, ${slotsFree} slot(s) free):`));
     for (const t of free) console.log(`    ${c.green(t.identifier.padEnd(10))} ${t.title.slice(0, 60)}`);
+  } else if (repo.report_only && ready.length) {
+    console.log(c.dim(`\n  report_only — dispatch is disabled here by design (${ready.length} ready ticket(s) would otherwise start)`));
   } else if (ready.length && slotsFree === 0) {
     // Distinguish "no room" from "nothing fits". Reporting the Owned Paths
     // reason when the cap is simply full sends you reading glob sets for a
