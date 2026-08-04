@@ -17,9 +17,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
-import { parseOwnedPaths, pathsCollide } from "./owned-paths.mjs";
+import { parseOwnedPaths, effectiveOwnedPaths, pathsCollide } from "./owned-paths.mjs";
 import { AI_BLOCKED, answeredHeldTickets } from "./reply-detection.mjs";
 import { budgetExhausted } from "../lib/spend.mjs";
+import { liveWorkerLeases } from "../lib/worker-leases.mjs";
 
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
@@ -60,6 +61,7 @@ const QUERY = `
     }) {
       nodes {
         identifier title description priority url
+        attachments(first: 20) { nodes { url } }
         state { name type }
         assignee { name }
         labels(first: 20) { nodes { name } }
@@ -88,15 +90,34 @@ const CLOSED_QUERY = `
  * unauthenticated — a gate that hard-fails takes the whole supervisor loop down
  * with it, and being unable to see GitHub is not the same as having no work.
  */
-async function openMergeCandidates(nameWithOwner) {
-  const p = Bun.spawnSync(["gh", "pr", "list", "--repo", nameWithOwner, "--state", "open",
-    "--json", "number,isDraft,labels,title"]);
-  if (p.exitCode !== 0) return [];
+async function openPRSummary(nameWithOwner) {
+  // Include closed PRs in the association index too: a Linear ticket can lag
+  // behind a merged PR, and the monitor should still link the evidence that
+  // explains its review state. The displayed PR counts below remain OPEN-only.
+  const p = Bun.spawnSync(["gh", "pr", "list", "--repo", nameWithOwner, "--state", "all", "--limit", "250",
+    "--json", "number,url,body,isDraft,labels,title,state"]);
+  if (p.exitCode !== 0) return { all: 0, drafts: 0, escalated: 0, allPRs: [], mergeCandidates: [] };
   try {
-    return JSON.parse(p.stdout.toString())
-      .filter((pr) => !pr.isDraft)
-      .filter((pr) => !(pr.labels ?? []).some((l) => l.name === "escalated"));
-  } catch { return []; }
+    const prs = JSON.parse(p.stdout.toString());
+    const open = prs.filter((pr) => pr.state === "OPEN");
+    return {
+      all: open.length,
+      drafts: open.filter((pr) => pr.isDraft).length,
+      escalated: open.filter((pr) => (pr.labels ?? []).some((l) => l.name === "escalated")).length,
+      allPRs: prs,
+      mergeCandidates: open.filter((pr) => !pr.isDraft && !(pr.labels ?? []).some((l) => l.name === "escalated")),
+    };
+  } catch { return { all: 0, drafts: 0, escalated: 0, allPRs: [], mergeCandidates: [] }; }
+}
+
+/** Open PR associated with an issue through Linear's PR attachment or `Fixes ID`. */
+function issuePR(issue, repo, prs) {
+  const attachmentNumbers = new Set((issue.attachments?.nodes ?? []).flatMap((a) => {
+    const m = new RegExp(`github\\.com/${repo.github.replace("/", "\\/")}/pull/(\\d+)`, "i").exec(a.url ?? "");
+    return m ? [Number(m[1])] : [];
+  }));
+  const id = String(issue.identifier).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return prs.find((pr) => attachmentNumbers.has(pr.number) || new RegExp(`\\b${id}\\b`, "i").test(`${pr.title ?? ""}\n${pr.body ?? ""}`));
 }
 
 const summary = [];
@@ -144,7 +165,8 @@ for (const repo of repos) {
   // poll: a PR the merge stage handed back to a human stays open by design, and
   // without the label every tick would re-review it and re-escalate. The merge
   // command applies the label when it escalates.
-  const openPRs = repo.github ? await openMergeCandidates(repo.github) : [];
+  const prs = repo.github ? await openPRSummary(repo.github) : { all: 0, drafts: 0, escalated: 0, allPRs: [], mergeCandidates: [] };
+  const openPRs = prs.mergeCandidates;
 
   const quiet = GATE || JSON_OUT;
   const line = (label, n, color = (s) => s) => {
@@ -170,15 +192,24 @@ for (const repo of repos) {
   // available" from Linear state alone, run.mjs spawns tick.mjs, and tick.mjs
   // immediately exits 2 because the repo can't be dispatched — a FAIL every
   // tick for a repo that was never eligible to begin with.
-  const inFlightPaths = inProgress.flatMap((i) => parseOwnedPaths(i.description ?? ""));
+  // Linear claims are an ownership/path fence even after their worker has
+  // disappeared. Capacity, however, belongs to an actually live worker lease;
+  // otherwise a dead process can consume the whole repo cap until a reaper
+  // eventually notices it.
+  const workers = liveWorkerLeases(repo.name);
+  const workerIds = new Set(workers.map((w) => w.ticket));
+  const orphanedClaims = inProgress.filter((i) => !workerIds.has(i.identifier));
+  const inFlightPaths = inProgress.flatMap((i) => effectiveOwnedPaths(i.description ?? ""));
   const sorted = [...ready].sort((a, b) => (a.priority || 99) - (b.priority || 99));
-  const slotsFree = repo.report_only ? 0 : Math.max(0, (repo.max_in_flight ?? defaultCap) - inProgress.length);
+  const slotsFree = repo.report_only ? 0 : Math.max(0, (repo.max_in_flight ?? defaultCap) - workers.length);
   const free = [];
   const busyPaths = [...inFlightPaths];
   for (const t of sorted) {
     if (free.length >= slotsFree) break;
-    const own = parseOwnedPaths(t.description ?? "");
-    if (!own.length) continue;                       // no Owned Paths => not dispatchable
+    // Unparseable Owned Paths => treated as owning everything (see
+    // effectiveOwnedPaths): still dispatchable, just serialized alone rather
+    // than skipped forever.
+    const own = effectiveOwnedPaths(t.description ?? "");
     if (pathsCollide(own, busyPaths)) continue;      // would collide with running work
     free.push(t);
     busyPaths.push(...own);                          // later tickets must clear this one too
@@ -186,6 +217,9 @@ for (const repo of repos) {
 
   summary.push({
     repo: repo.name,
+    // The monitor uses this to open the selected repo's pull-request page
+    // without duplicating the repo registry or guessing an owner from a path.
+    github: repo.github,
     // Team key, so the monitor can scope actions like the reaper without
     // re-reading config/repos.yaml itself.
     team: repo.team,
@@ -197,21 +231,39 @@ for (const repo of repos) {
     // combined count kept the gate open for Todo-without-agent-ready tickets
     // the stage never touches, spawning a no-op agent every tick.
     triageState: triage.length,
+    triageHeld: triageHeld.length,
+    todoNotReady: notReady.length,
     // Held tickets with a reply newer than their ai:blocked application — the
     // triage stage re-examines these, so they open the triage gate too.
     answered: answered.length,
     ready: ready.length,
     inProgress: inProgress.length,
+    workers: workers.length,
+    orphanedClaims: orphanedClaims.length,
     inReview: inReview.length,
     openPRs: openPRs.length,
+    allOpenPRs: prs.all,
+    draftPRs: prs.drafts,
+    escalatedPRs: prs.escalated,
     blocked: blocked.length,
     slotsFree,
     startable: free.map((t) => t.identifier),
+    // Keep the full ticket identity alongside the compact id list: the TUI
+    // renders this as the manual-dispatch picker. `free` is deliberately the
+    // same collision- and capacity-aware selection the automatic dispatcher
+    // would make at this instant.
+    startableTickets: free.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
     // Identifier + title + url — enough for a monitor (orchestrator/watch.jsx)
     // to render a ticket list and deep-link into Linear without re-querying
     // Linear itself.
-    inProgressTickets: inProgress.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
-    inReviewTickets: inReview.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
+    inProgressTickets: inProgress.map((t) => {
+      const pr = issuePR(t, repo, prs.allPRs);
+      return { identifier: t.identifier, title: t.title, url: t.url, prNumber: pr?.number, prUrl: pr?.url };
+    }),
+    inReviewTickets: inReview.map((t) => {
+      const pr = issuePR(t, repo, prs.allPRs);
+      return { identifier: t.identifier, title: t.title, url: t.url, prNumber: pr?.number, prUrl: pr?.url };
+    }),
     blockedTickets: blocked.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
     answeredTickets: answered.map((t) => ({ identifier: t.identifier, title: t.title, url: t.url })),
   });
@@ -227,10 +279,10 @@ for (const repo of repos) {
     // Distinguish "no room" from "nothing fits". Reporting the Owned Paths
     // reason when the cap is simply full sends you reading glob sets for a
     // problem that is a full slot table.
-    console.log(c.dim(`\n  no free slot — ${inProgress.length}/${repo.max_in_flight ?? defaultCap} in flight, ${ready.length} ready and waiting`));
-    for (const t of inProgress) console.log(c.dim(`    holding: ${t.identifier.padEnd(10)} ${t.title.slice(0, 55)}`));
+    console.log(c.dim(`\n  no free worker slot — ${workers.length}/${repo.max_in_flight ?? defaultCap} live, ${ready.length} ready and waiting`));
+    for (const t of inProgress.filter((i) => workerIds.has(i.identifier))) console.log(c.dim(`    working: ${t.identifier.padEnd(10)} ${t.title.slice(0, 55)}`));
   } else if (ready.length) {
-    console.log(c.dim(`\n  nothing startable — all ready tickets collide with running work or lack Owned Paths`));
+    console.log(c.dim(`\n  nothing startable — all ready tickets collide with running or with each other's unparseable Owned Paths`));
   } else {
     console.log(c.dim(`\n  queue empty — the constraint is specification, not dispatch.`));
     console.log(c.dim(`  ${triage.length} ticket(s) in Triage. Run the triage stage.`));

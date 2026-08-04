@@ -2,6 +2,8 @@ Review and land the open PRs for this repository. My invoking this command is th
 
 Interpret $ARGUMENTS as specific PR numbers or Linear issue IDs; default is every open PR in this repo (`gh pr list`, cross-checked against the team's `In Review` tickets so orphaned PRs and ticket-less PRs both surface).
 
+`--include-escalated` is a one-off override used only by the foreground TUI's explicitly confirmed **merge all** action. It means the human has decided that existing `escalated` labels are not a hold for this run: include those PRs in the review and merge them when they otherwise meet the normal MERGE bar. Do not treat it as permission to merge with red CI, unresolved conflicts, a failing base/smoke check, or a blocking review finding. Do not apply this override merely because an escalated PR is visible; it must be present in `$ARGUMENTS`.
+
 ## Per PR, in this order
 
 ### 1. Review first — always, even when CI is green
@@ -23,6 +25,8 @@ Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the mo
 - **MERGE** — CI green, no blocking findings. Minor/polish findings don't block: file them to Linear `Triage` per §8 and merge anyway.
 - **FIX** — CI red, merge conflicts, or blocking review findings that are mechanical to fix (a real bug, missing error handling, a failing test).
 - **ESCALATE** — never auto-merge, regardless of CI or review outcome: diffs touching auth/authz, payments/money, credentials/secrets handling, destructive DB migrations, prod infra config, or anything in a `CLNT` repo touching security. Also escalate when the fix would require changing the ticket's intent. Report these to me with the findings, add **`ai:escalated`** to the Linear ticket, **notify me** — `python3 ~/Develop/hdkiller/scripts/notify.py "ESCALATED PR#<n> (<TICKET>): <why, in one sentence>"` — rather than only writing it in the final report, and stop there.
+
+  Exception: when `$ARGUMENTS` contains `--include-escalated`, the invoking human has explicitly cleared this escalation hold for this run. Review the PR just as thoroughly; if CI is green and there are no other blocking findings, classify it MERGE instead of holding it solely because it is escalated. This exception never overrides the normal MERGE prerequisites.
 
   Then label the PR `escalated` on GitHub (`gh pr edit <PR> --add-label escalated`, creating the label if the repo lacks it). An escalated PR stays open by design, waiting on me — and the merge gate counts open PRs, so without the label every tick would re-review it and re-escalate it forever. Removing the label is my signal that it is yours again.
 

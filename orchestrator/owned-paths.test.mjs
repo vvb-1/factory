@@ -8,7 +8,7 @@ import { test, expect } from "bun:test";
 
 const expectEqual = (a, b, msg) => expect(a, msg).toEqual(b);
 const expectTrue = (v, msg) => expect(v, msg).toBeTruthy();
-import { parseOwnedPaths, globsOverlap, pathsCollide, nextDispatchable } from "./owned-paths.mjs";
+import { parseOwnedPaths, effectiveOwnedPaths, globsOverlap, pathsCollide, nextDispatchable } from "./owned-paths.mjs";
 
 test("parses the Owned Paths section of a real ticket", () => {
   const desc = `## Problem & Context
@@ -26,8 +26,13 @@ Something is broken.
   expectEqual(parseOwnedPaths(desc), ["app/services/api.ts", "app/services/__tests__/*"]);
 });
 
-test("missing section yields no paths (caller treats as not-dispatchable)", () => {
+test("missing section yields no paths (caller decides what that means)", () => {
   expectEqual(parseOwnedPaths("## Problem\n\nno paths here"), []);
+});
+
+test("effectiveOwnedPaths turns unparseable into the maximal glob, not a skip", () => {
+  expectEqual(effectiveOwnedPaths("## Problem\n\nno paths here"), ["**"]);
+  expectEqual(effectiveOwnedPaths("## Owned Paths\n\n- `app/api.ts`"), ["app/api.ts"]);
 });
 
 test("identical and nested globs overlap", () => {
@@ -69,14 +74,26 @@ test("CW-363 and CLNT-609 are concurrent-safe (different repos, same globs)", ()
   expectTrue(pathsCollide(a, b), "same repo: must serialize");
 });
 
-test("nextDispatchable skips collisions and tickets without Owned Paths", () => {
+test("nextDispatchable skips collisions but still picks up unparseable Owned Paths", () => {
   const inFlight = [{ id: "A", ownedPaths: ["app/services/**"] }];
   const candidates = [
     { id: "B", ownedPaths: ["app/services/api.ts"] }, // collides
-    { id: "C", ownedPaths: [] },                       // not agent-ready
+    { id: "C", ownedPaths: [] },                       // unparseable, but nothing else queued ahead of it collides
     { id: "D", ownedPaths: ["docs/**"] },              // free
   ];
+  // C is treated as owning everything, so it collides with A (in flight) too — D is next in queue order and free.
   expectEqual(nextDispatchable(candidates, inFlight)?.id, "D");
+});
+
+test("unparseable Owned Paths still dispatches when nothing is in flight", () => {
+  const candidates = [{ id: "C", ownedPaths: [] }];
+  expectEqual(nextDispatchable(candidates, [])?.id, "C");
+});
+
+test("two unparseable-Owned-Paths tickets serialize against each other", () => {
+  const inFlight = [{ id: "A", ownedPaths: [] }];
+  const candidates = [{ id: "B", ownedPaths: [] }];
+  expectEqual(nextDispatchable(candidates, inFlight), undefined);
 });
 
 test("nothing dispatchable returns undefined rather than throwing", () => {

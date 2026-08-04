@@ -17,6 +17,16 @@
  *       rule-bound to touch nothing without new evidence, so the guard lives
  *       in the command, not in a confirm keystroke. It shows up in the agents
  *       section like any stage agent, tailable from here.
+ *   `m` opens an explicit confirmation for a one-off merge sweep of every
+ *       open PR in the selected repo, including PRs previously escalated. The
+ *       agent still performs the merge command's review and CI checks; this
+ *       action supplies the human authorization to override the escalation
+ *       hold, not permission to merge a broken PR.
+ *   `d` lists tickets that are dispatchable right now and lets the operator
+ *       launch exactly one through tick.mjs, preserving its claim, worktree,
+ *       capacity, and collision safeguards.
+ *   `t` launches a bounded triage pass for the selected repo, using the same
+ *       read-only runner invocation as the scheduled triage stage.
  * (`b` shows the blocked-tickets digest, which is read-only like the rest.)
  * Everything else re-reads the same state queue.mjs and the log files already
  * expose — including `enter`, which just hands the terminal to $PAGER on the
@@ -33,14 +43,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { render, Box, Text, useInput, useStdout } from "ink";
 import { homedir } from "node:os";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../lib/schedule.mjs";
 import { todaysSpendUSD } from "../lib/spend.mjs";
 import {
   buildTicketRows, latestLogForTicket, tailEntries, entryTone, formatEntry, formatSpend,
   formatIssueCounts, parseReaperOutput, linearDeepLink, stageStatuses, formatAge, visibleWindow,
-  activeAgents, spendPct, spendTone, agentCapStat, needsAttention,
+  activeAgents, spendPct, spendTone, agentCapStat, supervisorAlive, needsAttention,
 } from "./watch-lib.mjs";
 
 const LOG_DIR = path.join(homedir(), ".factory/logs");
@@ -58,6 +68,9 @@ const policy = (() => {
   try { return Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8")); } catch { return {}; }
 })();
 const PER_DAY_USD = policy?.budget?.per_day_usd ?? 0;
+const SUPERVISOR_DEFAULT_REPO = (() => {
+  try { return Bun.YAML.parse(readFileSync(path.join(ROOT, "config/schedule.yaml"), "utf8"))?.defaults?.repo; } catch { return undefined; }
+})();
 
 const clock = () => new Date().toTimeString().slice(0, 8);
 
@@ -99,7 +112,7 @@ function RepoTabs({ repos, selected }) {
   );
 }
 
-function QueueStrip({ summary }) {
+function QueueStrip({ summary, worker }) {
   if (!summary) return <Text dimColor>waiting for queue.mjs…</Text>;
   // "agents" is how many are in flight against the repo's concurrency
   // ceiling (inProgress + slotsFree) — the question "how many can spawn, and
@@ -108,6 +121,7 @@ function QueueStrip({ summary }) {
   return (
     <Box>
       <StatChip label="agents" value={agents.text} tone={agents.tone} />
+      <StatChip label="worker" value={worker == null ? "?" : worker ? "connected" : "offline"} tone={worker == null ? "warn" : worker ? "good" : "bad"} />
       <StatChip label="ready" value={summary.ready} tone={summary.ready ? "good" : undefined} />
       <StatChip label="review" value={summary.inReview} tone={summary.inReview ? "warn" : undefined} />
       <StatChip label="triage" value={summary.triage} />
@@ -165,12 +179,19 @@ const SHORTCUTS = [
   ["← →", "switch repo"],
   ["1-9", "jump straight to repo tab N"],
   ["o", "open the selected ticket in Linear (desktop app, browser fallback)"],
+  ["P", "open the selected ticket's linked pull request in the browser"],
+  ["p", "open this repo's GitHub pull requests page in the browser"],
+  ["d", "list dispatchable tickets; select one and press y to launch its agent"],
+  ["s", "show Linear workflow status and GitHub PR stats for this repo"],
   ["c", "copy the selected ticket's identifier to the clipboard"],
   ["r", "refresh queue + spend now"],
   ["x", "run the stale-claim reaper (dry run) for this repo's team"],
   ["y", "confirm reaper --apply — only offered when the dry run found stale claims"],
   ["b", "blocked-tickets digest for this repo — every hold, its question, its age"],
   ["u", "launch the unblock sweep agent for this repo (spawns immediately, no dry run)"],
+  ["t", "launch a triage pass for this repo"],
+  ["m", "merge every open PR for this repo, including escalated PRs (then press y to confirm)"],
+  ["v", "toggle the log tail between agent messages and compact tool activity"],
   ["PgUp/PgDn", "scroll the log tail; PgUp stops following live output"],
   ["G", "jump the log tail back to live (re-follow)"],
   ["enter", "open the selected log in $PAGER (full scrollback, search with /)"],
@@ -231,7 +252,11 @@ function DigestPane({ digest, height }) {
     done: `blocked digest (${digest.repo})`,
     error: "blocked digest — failed",
   }[digest.phase];
-  const shown = digest.lines.slice(0, Math.max(1, height - 2));
+  const total = digest.lines.length;
+  const budget = Math.max(1, height - 3);
+  const isTruncated = total > budget;
+  const maxLines = isTruncated ? Math.max(1, height - 4) : budget;
+  const shown = digest.lines.slice(0, maxLines);
   return (
     <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor={digest.phase === "error" ? "red" : "cyan"} paddingX={1}>
       <Text bold color={digest.phase === "error" ? "red" : "cyan"}>{title}</Text>
@@ -263,6 +288,110 @@ function UnblockPane({ unblock }) {
       ))}
       {!failed && <Text dimColor>it will appear under agents shortly — select it there to tail its log</Text>}
       <Text dimColor>esc close</Text>
+    </Box>
+  );
+}
+
+function TriagePane({ triage }) {
+  const failed = triage.phase === "error";
+  return (
+    <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor={failed ? "red" : "green"} paddingX={1}>
+      <Text bold color={failed ? "red" : "green"}>
+        {failed ? "triage — failed to launch" : `triage launched (${triage.repo})`}
+      </Text>
+      {triage.lines.map((line, i) => (
+        <Text key={i} wrap="truncate-end">{line}</Text>
+      ))}
+      {!failed && <Text dimColor>it will appear under agents shortly — select it there to tail its log</Text>}
+      <Text dimColor>esc close</Text>
+    </Box>
+  );
+}
+
+/**
+ * `m` has no useful dry run: an agent's review is what determines whether a
+ * PR can land. It does require a second key because it deliberately includes
+ * PRs that the normal merge gate leaves held under the `escalated` label.
+ */
+function MergeAllPane({ mergeAll }) {
+  const failed = mergeAll.phase === "error";
+  const launched = mergeAll.phase === "launched";
+  return (
+    <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor={failed ? "red" : launched ? "green" : "yellow"} paddingX={1}>
+      <Text bold color={failed ? "red" : launched ? "green" : "yellow"}>
+        {failed ? "merge-all — failed to launch" : launched ? `merge-all launched (${mergeAll.repo})` : `merge all open PRs (${mergeAll.repo})`}
+      </Text>
+      {mergeAll.lines.map((line, i) => (
+        <Text key={i} wrap="truncate-end">{line}</Text>
+      ))}
+      {launched ? (
+        <Text dimColor>including escalated PRs — select the merge agent shortly to tail its log · esc close</Text>
+      ) : (
+        <Text dimColor>y launch agent (review + CI checks still apply) · esc cancel</Text>
+      )}
+    </Box>
+  );
+}
+
+function DispatchPane({ dispatch, height }) {
+  const failed = dispatch.phase === "error";
+  const launched = dispatch.phase === "launched";
+  const maxRows = Math.max(1, Math.floor((height - 4) / 2));
+  const [start, end] = visibleWindow(dispatch.tickets.length, dispatch.selected, maxRows);
+  const tickets = dispatch.tickets.slice(start, end);
+  const selected = dispatch.tickets[dispatch.selected];
+  return (
+    <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor={failed ? "red" : launched ? "green" : "cyan"} paddingX={1}>
+      <Text bold color={failed ? "red" : launched ? "green" : "cyan"}>
+        {failed ? "dispatch — failed to launch" : launched ? `dispatch launched — ${dispatch.ticket.identifier}` : `dispatchable now (${dispatch.repo})`}
+      </Text>
+      {failed ? dispatch.lines.map((line, i) => <Text key={i} wrap="truncate-end">{line}</Text>) : tickets.length ? (
+        <>
+          {start > 0 && <Text dimColor>▲ {start} more</Text>}
+          {tickets.map((ticket, idx) => {
+            const i = start + idx;
+            return (
+              <Box key={ticket.identifier} flexDirection="column">
+                <Text inverse={!launched && i === dispatch.selected} color={!launched && i === dispatch.selected ? "green" : undefined}>▶ {ticket.identifier}</Text>
+                <Text dimColor wrap="truncate-end">  {ticket.title}</Text>
+              </Box>
+            );
+          })}
+          {end < dispatch.tickets.length && <Text dimColor>▼ {dispatch.tickets.length - end} more</Text>}
+        </>
+      ) : <Text dimColor>no ticket is dispatchable right now</Text>}
+      <Text dimColor>
+        {launched ? "the ticket agent will appear shortly — esc close" : selected ? "↑/↓ select · y launch one agent · o open in Linear · esc close" : "esc close"}
+      </Text>
+    </Box>
+  );
+}
+
+function StatsPane({ summary }) {
+  const rows = [
+    ["Triage", summary.triageState ?? 0],
+    ["Triage held", summary.triageHeld ?? 0],
+    ["Todo — ready", summary.ready ?? 0],
+    ["Todo — not ready", summary.todoNotReady ?? 0],
+    ["In Progress", summary.inProgress ?? 0],
+    ["In Review", summary.inReview ?? 0],
+    ["Blocked", summary.blocked ?? 0],
+    ["Done", `${summary.done ?? 0}/${summary.total ?? 0}${summary.countCapped ? "+" : ""}`],
+    ["Open PRs", summary.allOpenPRs ?? 0],
+    ["Merge-eligible PRs", summary.openPRs ?? 0],
+    ["Draft PRs", summary.draftPRs ?? 0],
+    ["Escalated PRs", summary.escalatedPRs ?? 0],
+  ];
+  return (
+    <Box flexDirection="column" flexGrow={1} borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text bold color="cyan">repo stats — {summary?.repo}</Text>
+      <Box marginTop={1}>
+        <Text bold>{"Linear / GitHub".padEnd(24)} count</Text>
+      </Box>
+      {rows.map(([label, value]) => (
+        <Text key={label}>{String(label).padEnd(24)} {value}</Text>
+      ))}
+      <Text dimColor>open PRs includes drafts and escalated PRs · esc close</Text>
     </Box>
   );
 }
@@ -327,6 +456,7 @@ function TicketList({ stageAgents, rows, ready, blocked, ages, selected, height 
             <Text inverse={isSel}>
               <Text color={dotColor}>{dot}</Text> {t.identifier}{" "}
               <Text dimColor color={quiet ? "yellow" : undefined}>{note}</Text>
+              {t.prNumber ? <Text color="magenta"> [PR: #{t.prNumber}]</Text> : null}
             </Text>
             <Text dimColor wrap="truncate-end">  {t.title}</Text>
           </Box>
@@ -352,12 +482,12 @@ function TicketList({ stageAgents, rows, ready, blocked, ages, selected, height 
   );
 }
 
-const TONE_COLOR = { tool: "cyan", ok: "green", fail: "red" };
+const TONE_COLOR = { tool: "cyan", ok: "green", fail: "red", text: "gray" };
 
 // entries[] is the full buffer (see TAIL_BUFFER in App); scrollOffset counts
 // rows back from the live end, 0 = following. PgUp increases it (freezes the
 // view further back in history), PgDn/G walk it back to 0 (re-follow).
-function LogTail({ label, entries, scrollOffset, height }) {
+function LogTail({ label, entries, scrollOffset, height, mode }) {
   const rows = Math.max(1, height - 1);
   const end = Math.max(0, entries.length - scrollOffset);
   const start = Math.max(0, end - rows);
@@ -366,7 +496,7 @@ function LogTail({ label, entries, scrollOffset, height }) {
   return (
     <Box flexDirection="column" width="58%">
       <Text dimColor>
-        {label ? `log tail — ${label}` : "log tail"}
+        {label ? `log tail — ${label}` : "log tail"} <Text dimColor>({mode === "messages" ? "agent messages" : "tool activity"}; v toggle)</Text>
         {label && !following && <Text color="yellow"> — scrolled (G to follow)</Text>}
       </Text>
       {!label && <Text dimColor>  select a ticket or agent to tail its log</Text>}
@@ -386,13 +516,19 @@ function App() {
   const [rowIdx, setRowIdx] = useState(0);
   const [logEntries, setLogEntries] = useState([]);
   const [scrollOffset, setScrollOffset] = useState(0); // rows back from live; 0 = following
+  const [logMode, setLogMode] = useState("messages");
   const [spend, setSpend] = useState(0);
   const [lastPollMs, setLastPollMs] = useState(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const [reaper, setReaper] = useState(null); // { phase, team, lines, stale }
   const [digest, setDigest] = useState(null); // { phase, repo, lines }
   const [unblock, setUnblock] = useState(null); // { phase, repo, lines }
+  const [triage, setTriage] = useState(null); // { phase, repo, lines }
+  const [mergeAll, setMergeAll] = useState(null); // { phase, repo, lines }
+  const [dispatch, setDispatch] = useState(null); // { phase, repo, tickets, selected, lines }
+  const [showStats, setShowStats] = useState(false);
   const [stages, setStages] = useState(null);
+  const [worker, setWorker] = useState(null);
   const [agents, setAgents] = useState([]);
   const [ticketAges, setTicketAges] = useState({});
   const [showHelp, setShowHelp] = useState(false);
@@ -413,6 +549,7 @@ function App() {
         const data = await fetchQueue();
         if (cancelled) return;
         setSummaries(data);
+        setRepoIdx((i) => Math.min(i, Math.max(0, data.length - 1)));
         setError(null);
         setLastPoll(clock());
         setLastPollMs(Date.now());
@@ -453,9 +590,13 @@ function App() {
   const selectedTicket = selTicketRow?.identifier ?? null;
 
   useEffect(() => {
-    if (!summary?.repo) { setStages(null); setAgents([]); setTicketAges({}); return; }
+    if (!summary?.repo) { setStages(null); setWorker(null); setAgents([]); setTicketAges({}); return; }
     const scan = () => {
       setStages(stageStatuses(LOG_DIR, summary.repo));
+      try {
+        const p = Bun.spawnSync(["ps", "-axo", "command="]);
+        setWorker(p.exitCode === 0 ? supervisorAlive(p.stdout.toString(), summary.repo, SUPERVISOR_DEFAULT_REPO) : null);
+      } catch { setWorker(null); }
       setAgents(activeAgents(LOG_DIR, summary.repo));
       const ages = {};
       for (const t of summary.inProgressTickets ?? []) {
@@ -495,12 +636,15 @@ function App() {
       if (!summary || (!selAgent && !selectedTicket)) { setLogEntries([]); logFileRef.current = null; return; }
       const file = selAgent ? selAgent.file : latestLogForTicket(LOG_DIR, summary.repo, selectedTicket);
       logFileRef.current = file;
-      setLogEntries(tailEntries(file, TAIL_BUFFER));
+      setLogEntries(tailEntries(file, TAIL_BUFFER, {
+        verbose: logMode === "messages",
+        showTools: logMode === "tools",
+      }));
     };
     tail();
     const id = setInterval(tail, LOG_POLL_MS);
     return () => clearInterval(id);
-  }, [selKey, summary?.repo]);
+  }, [selKey, summary?.repo, logMode]);
 
   const startReaper = async (team, apply) => {
     setReaper({ phase: apply ? "applying" : "dry", team, lines: [], stale: 0 });
@@ -542,18 +686,78 @@ function App() {
   const startUnblock = (repo) => {
     try {
       const p = Bun.spawn(["bash", "runners/run-agent.sh", "--repo", repo, "--command", "factory-unblock", "--read-only", "--args", "10"],
-        { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
+        { cwd: ROOT, stdout: "ignore", stderr: "pipe" });
       setUnblock({ phase: "launched", repo, lines: [] });
       const born = Date.now();
       p.exited.then(async (code) => {
         if (code !== 0 && Date.now() - born < 3000) {
           const err = await new Response(p.stderr).text();
-          const out = await new Response(p.stdout).text();
-          setUnblock({ phase: "error", repo, lines: (out + "\n" + err).trim().split("\n").slice(-8) });
+          setUnblock({ phase: "error", repo, lines: err.trim().split("\n").slice(-8) });
         }
+      }).catch((e) => {
+        setUnblock({ phase: "error", repo, lines: [String(e.message ?? e)] });
       });
     } catch (e) {
       setUnblock({ phase: "error", repo, lines: [String(e.message ?? e)] });
+    }
+  };
+
+  const startTriage = (repo) => {
+    try {
+      const p = Bun.spawn(["bash", "runners/run-agent.sh", "--repo", repo, "--command", "factory-triage", "--read-only", "--args", "5"],
+        { cwd: ROOT, stdout: "ignore", stderr: "pipe" });
+      setTriage({ phase: "launched", repo, lines: [] });
+      const born = Date.now();
+      p.exited.then(async (code) => {
+        if (code !== 0 && Date.now() - born < 3000) {
+          const err = await new Response(p.stderr).text();
+          setTriage({ phase: "error", repo, lines: err.trim().split("\n").slice(-8) });
+        }
+        pollRef.current?.();
+      }).catch((e) => {
+        setTriage({ phase: "error", repo, lines: [String(e.message ?? e)] });
+      });
+    } catch (e) {
+      setTriage({ phase: "error", repo, lines: [String(e.message ?? e)] });
+    }
+  };
+
+  const startMergeAll = (repo) => {
+    try {
+      const p = Bun.spawn(["bash", "runners/run-agent.sh", "--repo", repo, "--command", "factory-merge", "--args", "--include-escalated"],
+        { cwd: ROOT, stdout: "ignore", stderr: "pipe" });
+      setMergeAll({ phase: "launched", repo, lines: [] });
+      const born = Date.now();
+      p.exited.then(async (code) => {
+        if (code !== 0 && Date.now() - born < 3000) {
+          const err = await new Response(p.stderr).text();
+          setMergeAll({ phase: "error", repo, lines: err.trim().split("\n").slice(-8) });
+        }
+      }).catch((e) => {
+        setMergeAll({ phase: "error", repo, lines: [String(e.message ?? e)] });
+      });
+    } catch (e) {
+      setMergeAll({ phase: "error", repo, lines: [String(e.message ?? e)] });
+    }
+  };
+
+  const startDispatch = (repo, ticket) => {
+    try {
+      const p = Bun.spawn(["bun", "orchestrator/tick.mjs", "--repo", repo, "--apply", "--ticket", ticket.identifier, "--max", "1", "--no-refill"],
+        { cwd: ROOT, stdout: "ignore", stderr: "pipe" });
+      setDispatch((current) => ({ ...current, phase: "launched", ticket }));
+      const born = Date.now();
+      p.exited.then(async (code) => {
+        if (code !== 0 && Date.now() - born < 3000) {
+          const err = await new Response(p.stderr).text();
+          setDispatch((current) => ({ ...current, phase: "error", lines: err.trim().split("\n").slice(-8) }));
+        }
+        pollRef.current?.();
+      }).catch((e) => {
+        setDispatch((current) => ({ ...current, phase: "error", lines: [String(e.message ?? e)] }));
+      });
+    } catch (e) {
+      setDispatch((current) => ({ ...current, phase: "error", lines: [String(e.message ?? e)] }));
     }
   };
 
@@ -564,12 +768,39 @@ function App() {
       return;
     }
     if (input === "?") { setShowHelp(true); return; }
+    if (showStats) {
+      if (key.escape || input === "s") setShowStats(false);
+      return;
+    }
     if (digest) {
       if (key.escape) setDigest(null);
       return;
     }
     if (unblock) {
       if (key.escape) setUnblock(null);
+      return;
+    }
+    if (triage) {
+      if (key.escape) setTriage(null);
+      return;
+    }
+    if (dispatch) {
+      if (key.escape) { setDispatch(null); return; }
+      if (dispatch.phase !== "list") return;
+      if (key.upArrow) setDispatch((current) => ({ ...current, selected: Math.max(0, current.selected - 1) }));
+      if (key.downArrow) setDispatch((current) => ({ ...current, selected: Math.min(Math.max(0, current.tickets.length - 1), current.selected + 1) }));
+      const ticket = dispatch.tickets[dispatch.selected];
+      if (input === "o" && ticket?.url) {
+        const deep = linearDeepLink(ticket.url);
+        const p = Bun.spawn(["open", deep ?? ticket.url], { stdout: "ignore", stderr: "ignore" });
+        if (deep) p.exited.then((code) => { if (code !== 0) Bun.spawn(["open", ticket.url], { stdout: "ignore", stderr: "ignore" }); });
+      }
+      if (input === "y" && ticket) startDispatch(dispatch.repo, ticket);
+      return;
+    }
+    if (mergeAll) {
+      if (key.escape) setMergeAll(null);
+      if (input === "y" && mergeAll.phase === "confirm") startMergeAll(mergeAll.repo);
       return;
     }
     if (reaper) {
@@ -581,6 +812,7 @@ function App() {
     }
     if (key.escape) process.exit(0);
     if (input === "r") { pollRef.current?.(); setSpend(todaysSpendUSD(LOG_DIR)); }
+    if (input === "v") setLogMode((mode) => mode === "messages" ? "tools" : "messages");
     if (input === "o") {
       const url = selTicketRow?.url;
       if (url) {
@@ -591,14 +823,22 @@ function App() {
         if (deep) p.exited.then((code) => { if (code !== 0) Bun.spawn(["open", url], { stdout: "ignore", stderr: "ignore" }); });
       }
     }
+    if (input === "P" && selTicketRow?.prUrl) {
+      Bun.spawn(["open", selTicketRow.prUrl], { stdout: "ignore", stderr: "ignore" });
+    }
+    if (input === "p" && summary?.github) {
+      Bun.spawn(["open", `https://github.com/${summary.github}/pulls`], { stdout: "ignore", stderr: "ignore" });
+    }
     if (input === "x" && summary?.team) startReaper(summary.team, false);
     if (input === "b" && summary?.repo) startDigest(summary.repo);
     if (input === "u" && summary?.repo) startUnblock(summary.repo);
+    if (input === "t" && summary?.repo) startTriage(summary.repo);
+    if (input === "m" && summary?.repo) setMergeAll({ phase: "confirm", repo: summary.repo, lines: [] });
+    if (input === "d" && summary?.repo) setDispatch({ phase: "list", repo: summary.repo, tickets: summary.startableTickets ?? [], selected: 0, lines: [] });
+    if (input === "s" && summary?.repo) setShowStats(true);
     if (input === "c" && selTicketRow?.identifier) {
       try {
-        const p = Bun.spawn(["pbcopy"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
-        p.stdin.write(selTicketRow.identifier);
-        p.stdin.end();
+        Bun.spawnSync(["pbcopy"], { stdin: Buffer.from(selTicketRow.identifier), stdout: "ignore", stderr: "ignore" });
       } catch { /* no clipboard available — nothing to fall back to here */ }
     }
     if (key.leftArrow) { setRepoIdx((i) => Math.max(0, i - 1)); setRowIdx(0); }
@@ -614,9 +854,11 @@ function App() {
       // scrollback + search, then take it back. Synchronous on purpose —
       // ink's own input loop is paused for the duration, same as htop's `l`.
       const file = logFileRef.current;
-      process.stdout.write("\x1b[?1049l");
-      Bun.spawnSync([process.env.PAGER || "less", "-R", "+G", file], { stdout: "inherit", stdin: "inherit", stderr: "inherit" });
-      process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
+      if (existsSync(file)) {
+        process.stdout.write("\x1b[?1049l");
+        Bun.spawnSync([process.env.PAGER || "less", "-R", "+G", file], { stdout: "inherit", stdin: "inherit", stderr: "inherit" });
+        process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
+      }
     }
   });
 
@@ -624,7 +866,7 @@ function App() {
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width={width} height={height}>
       <Text bold color={attention ? "yellow" : undefined}>{attention ? "⚠ " : ""}factory — foreground monitor</Text>
       <RepoTabs repos={summaries.map((s) => s.repo)} selected={repoIdx} />
-      <QueueStrip summary={summary} />
+      <QueueStrip summary={summary} worker={worker} />
       <StageStrip
         stages={stages}
         counts={{ dispatch: agents.filter((a) => a.identifier).length }}
@@ -633,16 +875,24 @@ function App() {
       <Box marginTop={1} marginBottom={1} flexGrow={1}>
         {showHelp ? (
           <HelpPane />
+        ) : showStats ? (
+          <StatsPane summary={summary} />
         ) : reaper ? (
           <ReaperPane reaper={reaper} />
         ) : digest ? (
           <DigestPane digest={digest} height={paneHeight} />
         ) : unblock ? (
           <UnblockPane unblock={unblock} />
+        ) : triage ? (
+          <TriagePane triage={triage} />
+        ) : mergeAll ? (
+          <MergeAllPane mergeAll={mergeAll} />
+        ) : dispatch ? (
+          <DispatchPane dispatch={dispatch} height={paneHeight} />
         ) : (
           <>
             <TicketList stageAgents={stageAgents} rows={rows} ready={summary?.startable} blocked={summary?.blockedTickets} ages={ticketAges} selected={selIdx} height={paneHeight} />
-            <LogTail label={selAgent ? `${selAgent.label} agent${selAgent.harness ? ` (${selAgent.harness})` : ""}` : selectedTicket} entries={logEntries} scrollOffset={scrollOffset} height={paneHeight} />
+            <LogTail label={selAgent ? `${selAgent.label} agent${selAgent.harness ? ` (${selAgent.harness})` : ""}` : selectedTicket} entries={logEntries} scrollOffset={scrollOffset} height={paneHeight} mode={logMode} />
           </>
         )}
       </Box>
@@ -667,5 +917,8 @@ function App() {
 // behaviour), so the shell prompt and scrollback are untouched underneath and
 // come back intact on exit — however the process ends.
 process.stdout.write("\x1b[?1049h\x1b[H");
-process.on("exit", () => process.stdout.write("\x1b[?1049l\x1b]0;\x07"));
+const cleanupTerminal = () => { process.stdout.write("\x1b[?1049l\x1b]0;\x07"); };
+process.on("exit", cleanupTerminal);
+process.on("SIGINT", () => { cleanupTerminal(); process.exit(0); });
+process.on("SIGTERM", () => { cleanupTerminal(); process.exit(0); });
 render(<App />);

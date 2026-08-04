@@ -24,12 +24,10 @@
  * positive rather than temporal: an open PR attached to the ticket means the
  * implementation phase is over, whatever the ticket says.
  *
- * SAFETY. This only ever moves `In Progress` -> `In Review`, which frees a slot
- * and hands the ticket to a stage that reviews before it acts. It never merges,
- * never moves anything to `Done`, and never touches a ticket without an open PR
- * of its own. A merged or closed PR is reported, not acted on: `Done` requires
- * base CI and the smoke check, which is the merge stage's judgment, not this
- * script's.
+ * SAFETY. This moves an active ticket to `In Review` only when its own PR is
+ * open, and to `Done` only when its own PR is merged. It never acts on a
+ * merely closed PR. A merged PR has already passed the merge stage's gate; this
+ * is the recovery path for the last Linear write being missed after that gate.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -61,8 +59,9 @@ const c = {
 const QUIET_MIN = Number(val("--quiet-minutes") ?? 25);
 
 const Q = `query($t:String!,$p:String!){ issues(first:250, filter:{
-    team:{key:{eq:$t}}, project:{name:{eq:$p}}, state:{name:{eq:"In Progress"}} }){
+    team:{key:{eq:$t}}, project:{name:{eq:$p}}, state:{type:{nin:["completed","canceled"]}} }){
   nodes{ id identifier title startedAt updatedAt labels(first:20){nodes{id name}}
+         state{ name }
          comments(last:1){ nodes{ createdAt } }
          attachments(first:20){ nodes{ url } } } } }`;
 
@@ -84,6 +83,13 @@ function prState(nameWithOwner, number) {
   try { return JSON.parse(p.stdout.toString()); } catch { return null; }
 }
 
+/** Remove only factory lifecycle markers; preserve all project labels. */
+function settledLabelIds(issue) {
+  return (issue.labels?.nodes ?? [])
+    .filter((l) => !["ai:in-progress", "ai:needs-review", "ai:agent-ready"].includes(l.name) && !l.name.startsWith("agent:"))
+    .map((l) => l.id);
+}
+
 let drift = 0;
 
 for (const repo of repos) {
@@ -91,8 +97,9 @@ for (const repo of repos) {
   if (!repo.github) { if (!GATE) console.log(c.dim("  no github: in repos.yaml — skipping")); continue; }
 
   const nodes = (await gql(Q, { t: repo.team, p: repo.project }))?.issues?.nodes ?? [];
-  const states = (await gql(`query($t:String!){ team(id:$t){ states(first:50){ nodes{ id name } } } }`, { t: repo.team }))?.team?.states?.nodes ?? [];
+  const states = (await gql(`query($t:String!){ team(id:$t){ states(first:50){ nodes{ id name type } } } }`, { t: repo.team }))?.team?.states?.nodes ?? [];
   const inReviewId = states.find((s) => s.name.toLowerCase() === "in review")?.id;
+  const doneId = states.find((s) => s.type === "completed")?.id;
   const allLabels = (await gql(`query{ issueLabels(first:250){ nodes{ id name } } }`))?.issueLabels?.nodes ?? [];
   const labelId = (n) => allLabels.find((l) => l.name === n)?.id;
 
@@ -100,11 +107,35 @@ for (const repo of repos) {
     const prs = prNumbers(issue, repo.github);
     if (!prs.length) continue;
 
-    const open = prs.filter((n) => prState(repo.github, n)?.state === "OPEN");
+    const prStates = prs.map((n) => ({ number: n, state: prState(repo.github, n)?.state }));
+    const open = prStates.filter((pr) => pr.state === "OPEN").map((pr) => pr.number);
     if (!open.length) {
-      if (!GATE) console.log(c.dim(`  ${issue.identifier} — PR ${prs.map((n) => "#" + n).join(", ")} not open; leaving to the merge stage`));
+      const merged = prStates.filter((pr) => pr.state === "MERGED").map((pr) => pr.number);
+      if (!merged.length) {
+        if (!GATE) console.log(c.dim(`  ${issue.identifier} — PR ${prs.map((n) => "#" + n).join(", ")} not open; leaving to the merge stage`));
+        continue;
+      }
+
+      drift++;
+      if (GATE) continue;
+      console.log(`  ${c.yellow(issue.identifier)} has merged PR ${merged.map((n) => "#" + n).join(", ")} but is still ${issue.state?.name ?? "active"} — ${APPLY ? "moving to Done" : "would move to Done"}`);
+      console.log(c.dim(`    ${issue.title.slice(0, 70)}`));
+      if (!APPLY) continue;
+      if (!doneId) { console.log(c.red(`    ! no completed state on team ${repo.team}, skipping`)); continue; }
+
+      await gql(`mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
+        { id: issue.id, in: { stateId: doneId, labelIds: settledLabelIds(issue) } });
+      await gql(`mutation($in:CommentCreateInput!){ commentCreate(input:$in){ success } }`,
+        { in: { issueId: issue.id, body:
+          `**State reconciled: \`${issue.state?.name ?? "active"}\` → \`Done\`.**\n\n` +
+          `PR ${merged.map((n) => `#${n}`).join(", ")} is merged, but the ticket's final Linear update was missed. ` +
+          `Removed the factory lifecycle labels; all project labels were preserved.` } });
       continue;
     }
+
+    // A ticket already in review is correctly represented by an open PR. Only
+    // In Progress tickets consume dispatch capacity and need this transition.
+    if (issue.state?.name !== "In Progress") continue;
 
     const quietFor = Math.round((Date.now() - (lastActivity(issue)?.getTime() ?? Date.now())) / 60000);
     if (quietFor < QUIET_MIN) {
@@ -121,7 +152,7 @@ for (const repo of repos) {
 
     // Swap the claim marker for the review marker; keep everything else the
     // agent set. Assignee is left alone — it is who to ask about the PR.
-    const keep = (issue.labels?.nodes ?? []).filter((l) => l.name !== "ai:in-progress").map((l) => l.id);
+    const keep = (issue.labels?.nodes ?? []).filter((l) => l.name !== "ai:in-progress" && !l.name.startsWith("agent:")).map((l) => l.id);
     const want = [...new Set([...keep, labelId("ai:needs-review")].filter(Boolean))];
     await gql(`mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
       { id: issue.id, in: { stateId: inReviewId, labelIds: want } });

@@ -13,7 +13,7 @@ import path from "node:path";
 import {
   parseLogLine, formatEntry, tailFormattedLines, tailEntries, entryTone, latestLogForTicket, buildTicketRows, formatSpend,
   formatIssueCounts, parseReaperOutput, linearDeepLink, stageStatuses, formatAge, visibleWindow,
-  activeAgents, spendPct, spendTone, agentCapStat, needsAttention,
+  activeAgents, spendPct, spendTone, agentCapStat, supervisorAlive, needsAttention,
 } from "./watch-lib.mjs";
 
 test("ignores blank lines and non-JSON noise", () => {
@@ -38,6 +38,17 @@ test("claude: extracts a tool_use call from an assistant message", () => {
 test("claude: a text-only assistant message yields no entries", () => {
   const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "thinking..." }] } });
   expect(parseLogLine(line)).toEqual([]);
+});
+
+test("verbose logs include Claude agent text while compact logs stay tool-only", () => {
+  const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I will verify the migration first." }] } });
+  expect(parseLogLine(line, { verbose: true })).toEqual([{ kind: "text", detail: "I will verify the migration first." }]);
+  expect(formatEntry(parseLogLine(line, { verbose: true })[0])).toBe("agent — I will verify the migration first.");
+});
+
+test("message-focused logs suppress tool calls", () => {
+  const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git status" } }] } });
+  expect(parseLogLine(line, { verbose: true, showTools: false })).toEqual([]);
 });
 
 test("claude: a successful result", () => {
@@ -66,6 +77,16 @@ test("agy: extracts an ACTIVE tool step_update", () => {
 test("agy: a DONE step_update produces no entry (only ACTIVE tool steps do)", () => {
   const line = JSON.stringify({ event: "step_update", step_update: { step_type: "tool", state: "DONE", tool_name: "run_command" } });
   expect(parseLogLine(line)).toEqual([]);
+});
+
+test("verbose logs include agy agent-response updates", () => {
+  const line = JSON.stringify({ event: "step_update", step_update: { step_type: "agent_response", state: "ACTIVE", text_delta: "Checking the PR now." } });
+  expect(parseLogLine(line, { verbose: true })).toEqual([{ kind: "text", detail: "Checking the PR now." }]);
+});
+
+test("verbose logs include Codex agent messages", () => {
+  const line = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "I found the failing check." } });
+  expect(parseLogLine(line, { verbose: true })).toEqual([{ kind: "text", detail: "I found the failing check." }]);
 });
 
 test("agy: a wrapped result event", () => {
@@ -118,11 +139,11 @@ test("latestLogForTicket returns null when nothing matches", () => {
 test("buildTicketRows tags running and in-review tickets and preserves order", () => {
   const summary = {
     inProgressTickets: [{ identifier: "CLNT-1", title: "a" }],
-    inReviewTickets: [{ identifier: "CLNT-2", title: "b" }, { identifier: "CLNT-3", title: "c" }],
+    inReviewTickets: [{ identifier: "CLNT-2", title: "b", prNumber: 123, prUrl: "https://github.com/acme/app/pull/123" }, { identifier: "CLNT-3", title: "c" }],
   };
   expect(buildTicketRows(summary)).toEqual([
     { identifier: "CLNT-1", title: "a", status: "running" },
-    { identifier: "CLNT-2", title: "b", status: "review" },
+    { identifier: "CLNT-2", title: "b", prNumber: 123, prUrl: "https://github.com/acme/app/pull/123", status: "review" },
     { identifier: "CLNT-3", title: "c", status: "review" },
   ]);
 });
@@ -253,6 +274,20 @@ test("agentCapStat reads inProgress/slotsFree as N/cap", () => {
   expect(agentCapStat(0, 3)).toEqual({ text: "0/3", tone: undefined, cap: 3 });
 });
 
+test("supervisorAlive scopes foreground run.mjs processes to their repos", () => {
+  const ps = [
+    "bun orchestrator/run.mjs --repo legalease --all --apply",
+    "bun orchestrator/run.mjs --repo cashsaas,bj29 --only triage",
+    "node unrelated-run.mjs --repo bj29",
+  ].join("\n");
+  expect(supervisorAlive(ps, "legalease", "bj29")).toBe(true);
+  expect(supervisorAlive(ps, "cashsaas", "bj29")).toBe(true);
+  expect(supervisorAlive(ps, "coach-wattz", "bj29")).toBe(false);
+  expect(supervisorAlive("node unrelated-run.mjs --repo bj29", "bj29", "bj29")).toBe(false);
+  expect(supervisorAlive("bun orchestrator/run.mjs --all", "bj29", "bj29")).toBe(true);
+  expect(supervisorAlive("bun orchestrator/run.mjs --all", "legalease", "bj29")).toBe(false);
+});
+
 test("tailEntries returns raw entries; entryTone classifies them", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
   const file = path.join(dir, "log.jsonl");
@@ -273,4 +308,37 @@ test("needsAttention fires on blocked tickets, a failed stage, quiet tickets, or
   expect(needsAttention({ quietTickets: 1 })).toBe(true);
   expect(needsAttention({ budgetTone: "bad" })).toBe(true);
   expect(needsAttention({ budgetTone: "warn" })).toBe(false);
+});
+
+test("claude: extracts file and query tool parameters in parseLogLine", () => {
+  const fileLine = JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "view_file", input: { TargetFile: "/src/main.ts" } }] },
+  });
+  expect(parseLogLine(fileLine)).toEqual([{ kind: "tool", tool: "view_file", detail: "/src/main.ts" }]);
+
+  const searchLine = JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "grep_search", input: { query: "export default" } }] },
+  });
+  expect(parseLogLine(searchLine)).toEqual([{ kind: "tool", tool: "grep_search", detail: "export default" }]);
+});
+
+test("activeAgents correctly classifies tickets starting with factory- as dispatch agents", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
+  writeFileSync(path.join(dir, "bj29-factory-100-20260804164848.jsonl"), "{}");
+  const live = activeAgents(dir, "bj29");
+  expect(live.map((a) => [a.stage, a.label, a.identifier])).toEqual([
+    ["dispatch", "factory-100", "factory-100"],
+  ]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("latestLogForTicket does not match sub-tickets that append to the identifier", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
+  writeFileSync(path.join(dir, "bj29-CLNT-1-SUB-20260102000000.jsonl"), "{}");
+  writeFileSync(path.join(dir, "bj29-CLNT-1-20260101000000.jsonl"), "{}");
+  const found = latestLogForTicket(dir, "bj29", "CLNT-1");
+  expect(found).toBe(path.join(dir, "bj29-CLNT-1-20260101000000.jsonl"));
+  rmSync(dir, { recursive: true, force: true });
 });

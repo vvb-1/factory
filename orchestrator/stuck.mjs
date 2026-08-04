@@ -2,11 +2,13 @@
 /**
  * Every repo's stuck tickets in one flat, worst-first list.
  *
- * "Stuck" means specifically: eligible for agent work, but will not move
- * without a human noticing something the per-repo dashboards don't surface on
- * their own — a parked supervisor, an Owned Paths section that fails to
- * parse, a crashed agent's abandoned claim, a finished PR the ticket doesn't
- * reflect yet, or a held ticket whose answer nobody re-read.
+ * "Stuck" means specifically: eligible for agent work, but not moving the way
+ * it should without a human noticing something the per-repo dashboards don't
+ * surface on their own — a parked supervisor, an Owned Paths section that
+ * fails to parse (dispatchable, but serialized alone behind everything else —
+ * worth a fix, not a block), a crashed agent's abandoned claim, a finished PR
+ * the ticket doesn't reflect yet, or a held ticket whose answer nobody
+ * re-read.
  *
  * Composes checks that already exist one-repo-at-a-time (queue.mjs's Owned
  * Paths parse, reaper.mjs's stale-claim detection, reconcile.mjs's
@@ -128,7 +130,7 @@ for (const repo of repos) {
   const cats = [
     { key: "no-supervisor", severity: 3, items: (!repo.report_only && alive === false) ? [{ id: "", title: "no `run.mjs --repo " + repo.name + "` process is running", why: "nothing will dispatch, triage, or merge here regardless of what's queued" }] : [] },
     { key: "report-only-ready", severity: 3, items: repo.report_only ? ready.map((i) => ({ id: i.identifier, title: i.title, why: "repo is report_only — dispatch will never target it" })) : [] },
-    { key: "unparseable-owned-paths", severity: 2, items: readyUnparseable.map((i) => ({ id: i.identifier, title: i.title, why: "ai:agent-ready but Owned Paths parses to zero paths — dispatch skips it every tick" })) },
+    { key: "unparseable-owned-paths", severity: 1, items: readyUnparseable.map((i) => ({ id: i.identifier, title: i.title, why: "ai:agent-ready but Owned Paths parses to zero paths — dispatch treats it as owning everything, so it only starts alone, serialized behind whatever's already running" })) },
     { key: "stale-claim", severity: 2, items: staleClaims.map((i) => ({ id: i.identifier, title: i.title, why: `In Progress, no heartbeat in over ${STALE_MIN}m — likely a crashed agent` })) },
     { key: "orphaned-pr", severity: 2, items: orphanedPR.map((i) => ({ id: i.identifier, title: i.title, why: `open PR but ticket still In Progress and quiet ${QUIET_MIN}m+ — holding a dispatch slot for nothing` })) },
     { key: "answered-hold", severity: 1, items: answeredHolds.map((i) => ({ id: i.identifier, title: i.title, why: "ai:blocked with a newer reply — ready for the triage sweep to re-examine" })) },

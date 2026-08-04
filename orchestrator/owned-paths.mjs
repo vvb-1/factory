@@ -18,8 +18,9 @@
 
 /**
  * Extract the `## Owned Paths` bullet list from a Linear issue description.
- * Returns [] when the section is missing — the caller decides what that means
- * (dispatch treats it as "not agent-ready", never as "collides with nothing").
+ * Returns [] when the section is missing or fails to parse — for dispatch,
+ * use `effectiveOwnedPaths`, which turns that into "collides with
+ * everything" rather than "not dispatchable".
  */
 export function parseOwnedPaths(description = "") {
   const section = description.split(/^##\s+/m).find((s) => /^Owned Paths/i.test(s));
@@ -57,6 +58,27 @@ export function parseOwnedPaths(description = "") {
     // A path has no spaces and looks like a path: a separator, a wildcard, or an
     // extension. This drops the prose that legitimately appears in the section.
     .filter((s) => !/\s/.test(s) && (s.includes("/") || s.includes("*") || /\.[a-z0-9]+$/i.test(s)));
+}
+
+/**
+ * Owned Paths for collision/dispatch purposes.
+ *
+ * A ticket whose Owned Paths section is missing or fails to parse used to be
+ * permanently undispatchable — `parseOwnedPaths` returning [] read as "not
+ * agent-ready" to every caller, so a ticket with a real spec but a parse miss
+ * (an unusual format, a typo in the heading) sat in Todo forever, silently,
+ * until stuck.mjs's "unparseable owned paths" report caught it. That's a
+ * human-in-the-loop requirement for what should be a self-healing case.
+ *
+ * Empty now means "unknown scope", which collision-wise is the maximal glob:
+ * the ticket is still dispatchable, but only when nothing else is in flight,
+ * and nothing else can start while it's running. Same bias as globsOverlap —
+ * a false "collides with everything" costs one serialized ticket; a false
+ * "collides with nothing" risks two agents editing the same file.
+ */
+export function effectiveOwnedPaths(description = "") {
+  const own = parseOwnedPaths(description);
+  return own.length ? own : ["**"];
 }
 
 /** Escape regex metacharacters that are not glob syntax. */
@@ -158,10 +180,7 @@ export function pathsCollide(setA = [], setB = []) {
  * computed once per batch, because rolling dispatch changes it continuously.
  */
 export function nextDispatchable(candidates, inFlight) {
-  const busy = inFlight.flatMap((t) => t.ownedPaths ?? []);
-  return candidates.find((t) => {
-    const own = t.ownedPaths ?? [];
-    if (own.length === 0) return false; // no Owned Paths => not dispatchable
-    return !pathsCollide(own, busy);
-  });
+  const scope = (t) => (t.ownedPaths?.length ? t.ownedPaths : ["**"]);
+  const busy = inFlight.flatMap(scope);
+  return candidates.find((t) => !pathsCollide(scope(t), busy));
 }

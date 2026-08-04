@@ -16,18 +16,30 @@ const trim = (s, n) => String(s ?? "").replace(/\s+/g, " ").slice(0, n);
 function resultEntry(ok, turns, cost, said) {
   return { kind: "result", ok, turns: turns ?? 0, cost: cost ?? 0, said: trim(said, 120) };
 }
+function textEntry(text) {
+  return { kind: "text", detail: trim(text, 180) };
+}
 
 /** One raw .jsonl line -> zero or more display entries. Never throws. */
-export function parseLogLine(rawLine) {
+export function parseLogLine(rawLine, { verbose = false, showTools = true } = {}) {
   const line = String(rawLine ?? "").trim();
   if (!line.startsWith("{")) return [];
   let e;
   try { e = JSON.parse(line); } catch { return []; }
 
   if (e.type === "assistant") {
-    return (e.message?.content ?? [])
-      .filter((p) => p.type === "tool_use")
-      .map((p) => ({ kind: "tool", tool: p.name, detail: trim(p.input?.command ?? p.input?.file_path ?? p.input?.description, 66) }));
+    return (e.message?.content ?? []).flatMap((p) => {
+      if (showTools && p.type === "tool_use") {
+        const inp = p.input ?? {};
+        const detail = trim(
+          inp.command ?? inp.CommandLine ?? inp.file_path ?? inp.path ?? inp.TargetFile ?? inp.AbsolutePath ?? inp.query ?? inp.Query ?? inp.pattern ?? inp.description ?? inp.prompt,
+          66,
+        );
+        return [{ kind: "tool", tool: p.name, detail }];
+      }
+      if (verbose && p.type === "text" && p.text) return [textEntry(p.text)];
+      return [];
+    });
   }
   if (e.type === "result" || (typeof e.num_turns === "number" && "subtype" in e)) {
     return [resultEntry(e.subtype === "success" && !e.is_error && (e.num_turns ?? 0) > 0, e.num_turns, e.total_cost_usd, e.result)];
@@ -35,21 +47,24 @@ export function parseLogLine(rawLine) {
 
   if (e.event === "step_update") {
     const s = e.step_update ?? {};
-    if (s.step_type === "tool" && s.state === "ACTIVE") {
+    if (showTools && s.step_type === "tool" && s.state === "ACTIVE") {
       const par = s.tool_info?.parameters ?? {};
       return [{ kind: "tool", tool: s.tool_name ?? "tool", detail: trim(par.CommandLine ?? par.command ?? par.AbsolutePath ?? par.path, 66) }];
     }
+    if (verbose && s.step_type === "agent_response" && s.text_delta) return [textEntry(s.text_delta)];
     return [];
   }
   const env = e.event === "result" ? e.result : ("status" in e && "num_turns" in e ? e : null);
   if (env) return [resultEntry(String(env.status).toLowerCase() === "success", env.num_turns, env.total_cost_usd, env.response)];
 
+  if (verbose && e.type === "item.completed" && e.item?.type === "agent_message" && e.item.text) return [textEntry(e.item.text)];
   return [];
 }
 
 /** A display entry -> one line of text for the log-tail pane. */
 export function formatEntry(entry) {
   if (entry.kind === "tool") return entry.detail ? `${entry.tool} ${entry.detail}` : entry.tool;
+  if (entry.kind === "text") return `agent — ${entry.detail}`;
   const cost = `${entry.turns} turns ~$${entry.cost.toFixed(2)}`;
   if (entry.ok) return `done — ${cost}`;
   return entry.said ? `FAILED — ${cost} — ${entry.said}` : `FAILED — ${cost}`;
@@ -62,6 +77,9 @@ export function latestLogForTicket(logDir, repo, identifier) {
   let files;
   try { files = new Bun.Glob(`${repo}-${identifier}-*.jsonl`).scanSync(logDir); } catch { return null; }
   for (const f of files) {
+    const rest = f.slice(repo.length + 1).replace(/\.jsonl$/, "");
+    const match = /^(.+?)-\d{8}-?\d{6}\.?$/.exec(rest);
+    if (match && match[1] !== identifier) continue;
     const full = path.join(logDir, f);
     const mtime = Bun.file(full).lastModified;
     if (mtime > bestMtime) { bestMtime = mtime; best = full; }
@@ -70,23 +88,24 @@ export function latestLogForTicket(logDir, repo, identifier) {
 }
 
 /** Last `maxEntries` raw display entries from a log file. Missing/unreadable file -> []. */
-export function tailEntries(filePath, maxEntries = 40) {
+export function tailEntries(filePath, maxEntries = 40, options) {
   if (!filePath) return [];
   let text;
   try { text = readFileSync(filePath, "utf8"); } catch { return []; }
-  const entries = text.split("\n").flatMap(parseLogLine);
+  const entries = text.split("\n").flatMap((line) => parseLogLine(line, options));
   return entries.slice(-maxEntries);
 }
 
 /** Last `maxEntries` formatted lines from a log file. Missing/unreadable file -> []. */
-export function tailFormattedLines(filePath, maxEntries = 40) {
-  return tailEntries(filePath, maxEntries).map(formatEntry);
+export function tailFormattedLines(filePath, maxEntries = 40, options) {
+  return tailEntries(filePath, maxEntries, options).map(formatEntry);
 }
 
 /** Render tone for a log entry — used to color the tail (tool calls vs a clean vs failed result). */
 export function entryTone(entry) {
   if (entry.kind === "tool") return "tool";
   if (entry.kind === "result") return entry.ok ? "ok" : "fail";
+  if (entry.kind === "text") return "text";
   return undefined;
 }
 
@@ -122,6 +141,22 @@ export function agentCapStat(inProgress, slotsFree) {
   const text = `${inProgress ?? 0}/${cap}`;
   const tone = slotsFree === 0 && inProgress > 0 ? "warn" : undefined;
   return { text, tone, cap };
+}
+
+/**
+ * Whether a foreground `run.mjs` supervisor is responsible for `repo`.
+ * A supervisor without `--repo` serves schedule.yaml's default repo; an
+ * explicit `--repo a,b` serves each named repo. Kept pure so the TUI can test
+ * the process-command interpretation without depending on the local process
+ * table.
+ */
+export function supervisorAlive(psText, repo, defaultRepo) {
+  return String(psText ?? "").split("\n").some((command) => {
+    if (!/(?:^|\s)(?:[^\s]*\/)?run\.mjs\b/.test(command)) return false;
+    const match = /--repo(?:=|\s+)([^\s]+)/.exec(command);
+    if (!match) return repo === defaultRepo;
+    return match[1].split(",").includes(repo);
+  });
 }
 
 /** Project progress for the stat strip. `capped` means the counts are floors (a 250-issue page filled up). */
@@ -230,6 +265,8 @@ export function parseReaperOutput(text) {
   return { stale: 0 };
 }
 
+const KNOWN_FACTORY_COMMANDS = new Set([...STAGES, "unblock", "triage", "merge", "reaper", "digest", "janitor", "doctor", "sweep", "warm"]);
+
 /**
  * One entry per agent running RIGHT NOW: every log under logDir for `repo`
  * whose mtime is within `activeMs`. The filename says which stage invoked it —
@@ -249,7 +286,7 @@ export function activeAgents(logDir, repo, { now = Date.now(), activeMs = 90_000
       const rest = f.slice(repo.length + 1).replace(/\.jsonl$/, "");
       const stage = /^factory-(.+?)-\d{8}-?\d{6}\.?$/.exec(rest);
       const ticket = /^(.+?)-\d{8}-?\d{6}\.?$/.exec(rest);
-      if (stage) out.push({ stage: stage[1], label: stage[1], identifier: null, file: full, ageMs, harness: peekHarness(full) });
+      if (stage && KNOWN_FACTORY_COMMANDS.has(stage[1])) out.push({ stage: stage[1], label: stage[1], identifier: null, file: full, ageMs, harness: peekHarness(full) });
       else if (ticket) out.push({ stage: "dispatch", label: ticket[1], identifier: ticket[1], file: full, ageMs, harness: peekHarness(full) });
     }
   } catch { /* no log dir yet */ }

@@ -26,9 +26,10 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
-import { parseOwnedPaths, pathsCollide } from "./owned-paths.mjs";
+import { parseOwnedPaths, effectiveOwnedPaths, pathsCollide } from "./owned-paths.mjs";
 import { budgetExhausted } from "../lib/spend.mjs";
 import { agentLabel } from "../tools/linear.mjs";
+import { LEASE_HEARTBEAT_MS, releaseWorkerLease, renewWorkerLease, writeWorkerLease, liveWorkerLeases } from "../lib/worker-leases.mjs";
 
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
@@ -111,14 +112,13 @@ async function fetchState() {
  * earlier — under rolling dispatch the in-flight set changes continuously.
  */
 function selectable(state, excludeIds, limit) {
-  const busy = state.inProgress.flatMap((i) => parseOwnedPaths(i.description ?? ""));
+  const busy = state.inProgress.flatMap((i) => effectiveOwnedPaths(i.description ?? ""));
   const out = [];
   for (const t of state.ready) {
     if (out.length >= limit) break;
     if (excludeIds.has(t.identifier)) continue;
     if (ONE && t.identifier !== ONE) continue;
-    const own = parseOwnedPaths(t.description ?? "");
-    if (!own.length) continue;
+    const own = effectiveOwnedPaths(t.description ?? "");
     if (pathsCollide(own, busy)) continue;
     out.push({ ...t, own });
     busy.push(...own);
@@ -128,13 +128,14 @@ function selectable(state, excludeIds, limit) {
 
 // ------------------------------------------------------------------- dry ----
 const first = await fetchState();
-const freeNow = Math.max(0, cap - first.inProgress.length);
-console.log(c.bold(`\n${repo.name}`) + c.dim(`  cap ${cap} · ${first.inProgress.length} running · ${freeNow} slot(s) · ${first.ready.length} ready`));
+const firstWorkers = liveWorkerLeases(repo.name);
+const freeNow = Math.max(0, cap - firstWorkers.length);
+console.log(c.bold(`\n${repo.name}`) + c.dim(`  cap ${cap} · ${firstWorkers.length} live worker(s) · ${first.inProgress.length} claim(s) · ${freeNow} slot(s) · ${first.ready.length} ready`));
 
 if (!APPLY) {
   const picked = selectable(first, new Set(), Math.min(freeNow, MAX));
-  const skipped = first.ready.filter((t) => !parseOwnedPaths(t.description ?? "").length);
-  for (const t of skipped) console.log(c.yellow(`  skip ${t.identifier} — no parseable Owned Paths`));
+  const unparseable = first.ready.filter((t) => !parseOwnedPaths(t.description ?? "").length);
+  for (const t of unparseable) console.log(c.yellow(`  ${t.identifier} — no parseable Owned Paths, treated as owning everything (dispatchable, but runs alone)`));
   if (!picked.length) { console.log(c.dim("  nothing to start.\n")); process.exit(0); }
   console.log(c.bold(`\nwould start ${picked.length} now${REFILL ? ", then refill slots as they free" : ""}:`));
   for (const t of picked) console.log(`  ${c.green(t.identifier)}  ${t.title.slice(0, 60)}\n    ${c.dim(t.own.join(", "))}`);
@@ -220,6 +221,7 @@ function warmIfWorthIt(count) {
 const LOG_DIR = path.join(homedir(), ".factory/logs");
 mkdirSync(LOG_DIR, { recursive: true });
 const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 15);
+const leaseOwner = `${process.pid}-${stamp}`;
 const results = [];
 
 // CIRCUIT BREAKER (policy.circuit_breaker). Environment failures — the
@@ -342,6 +344,10 @@ async function runTicket(t) {
       : ["env", envArgs];
     const child = spawn(bin, args, { cwd: wt, stdio: ["ignore", "pipe", "pipe"] });
     children.add(child);
+    // Replace the dispatcher's short setup lease with the actual ticket worker
+    // as soon as it exists. The lease is independent of transcript activity:
+    // a long test or API call can be silent without looking dead.
+    writeWorkerLease({ repo: repo.name, ticket: t.identifier, owner: leaseOwner, pid: child.pid });
     child.on("close", () => children.delete(child));
 
     let buf = "";
@@ -438,6 +444,7 @@ async function runTicket(t) {
       // still looks like ours — Blocked/In Review moves are left alone).
       const r = results.findLast((x) => x.id === t.identifier);
       if (r && !r.ok) await unclaim(t, r.why ?? "run failed", log).catch(() => {});
+      releaseWorkerLease({ repo: repo.name, ticket: t.identifier, owner: leaseOwner });
       resolve();
     });
   });
@@ -473,6 +480,7 @@ async function shutdown(sig) {
   while (running.size && Date.now() < deadline) await Bun.sleep(250);
 
   for (const [id, t] of [...inFlight]) {
+    releaseWorkerLease({ repo: repo.name, ticket: t.identifier, owner: leaseOwner });
     await unclaim(t, `dispatcher interrupted (${sig}) before the run finished`).catch(() => {});
     console.log(c.dim(`  released ${id}`));
   }
@@ -545,7 +553,7 @@ async function fill() {
   try {
 
   const state = await fetchState();
-  const free = Math.min(cap - state.inProgress.length, MAX - startedCount);
+  const free = Math.min(cap - liveWorkerLeases(repo.name).length, MAX - startedCount);
   if (free <= 0) return;
 
   // Same warning the dry run prints — without it, "READY is high but nothing
@@ -554,7 +562,7 @@ async function fill() {
     if (warned.has(t.identifier) || seen.has(t.identifier)) continue;
     if (!parseOwnedPaths(t.description ?? "").length) {
       warned.add(t.identifier);
-      console.log(c.yellow(`  skip ${t.identifier} — no parseable Owned Paths`));
+      console.log(c.yellow(`  ${t.identifier} — no parseable Owned Paths, treated as owning everything (dispatchable, but runs alone)`));
     }
   }
 
@@ -572,16 +580,33 @@ async function fill() {
 
   for (const t of claimed) {
     startedCount++;
+    // Count the claim immediately, including worktree setup, so another local
+    // supervisor cannot observe a free slot in the small gap before spawn.
+    writeWorkerLease({ repo: repo.name, ticket: t.identifier, owner: leaseOwner });
     inFlight.set(t.identifier, t);
-    const p = runTicket(t).finally(() => { running.delete(t.identifier); inFlight.delete(t.identifier); });
+    const p = runTicket(t).finally(() => {
+      releaseWorkerLease({ repo: repo.name, ticket: t.identifier, owner: leaseOwner });
+      running.delete(t.identifier);
+      inFlight.delete(t.identifier);
+    });
     running.set(t.identifier, p);
   }
 
   } finally { releaseClaimLock(); }
 }
 
+// A worker lease is deliberately not driven by its JSONL output: agents can
+// spend minutes in a test runner with no transcript event. The parent remains
+// responsible for the child, so its heartbeat is the authoritative liveness
+// signal; a vanished parent naturally lets every lease expire.
+const leaseHeartbeat = setInterval(() => {
+  for (const t of inFlight.values()) {
+    renewWorkerLease({ repo: repo.name, ticket: t.identifier, owner: leaseOwner });
+  }
+}, LEASE_HEARTBEAT_MS);
+
 await fill();
-if (!running.size) { console.log(c.dim("\n  nothing started.\n")); process.exit(0); }
+if (!running.size) { clearInterval(leaseHeartbeat); console.log(c.dim("\n  nothing started.\n")); process.exit(0); }
 
 while (running.size) {
   await Promise.race(running.values());
@@ -599,4 +624,5 @@ for (const r of results) console.log(`  ${r.ok ? c.green("ok  ") : c.red("FAIL")
 const failed = results.filter((r) => !r.ok).length;
 if (tripped) console.log(c.red(`circuit breaker tripped — dispatch stopped after ${envFailures} consecutive environment failures.`));
 console.log(c.dim(`\n${results.length - failed} ok, ${failed} failed, ${startedCount} started. Merging is a separate stage.\n`));
+clearInterval(leaseHeartbeat);
 process.exit(failed || tripped ? 1 : 0);
