@@ -36,7 +36,11 @@ repos:
 
     # Concurrency. Merges are always serialized regardless; this caps how many
     # ticket agents run at once, and each one costs a worktree on disk.
-    max_in_flight: 5
+    #
+    # NOTE: this is a cap on the REPO, not on a supervisor. Two supervisors on
+    # different harnesses share it — a second one adds capacity only if there
+    # are free slots for it to claim, which is why this went up with agy.
+    max_in_flight: 8
 
     # Surfaces where a diff is never auto-merged, on top of the global
     # escalation list in policy.yaml. This is a CLNT revenue-share client
@@ -112,9 +116,9 @@ repos:
     worktree_root: ~/Develop/.worktrees/legalease
     verify: cd legalease && ../.venv/bin/python manage.py check && ../.venv/bin/python manage.py test main.tests
 
-    # Lower than bj29 on purpose: this repo has never had a ticket dispatched
-    # into it. Raise once a few land clean.
-    max_in_flight: 4
+    # Raised with bj29 for the second (agy) supervisor; see the note there —
+    # the cap is per repo, not per supervisor.
+    max_in_flight: 8
 
     # Surfaces where a diff is never auto-merged, on top of the global list in
     # policy.yaml. Without these, escalate.mjs has nothing to check and the
