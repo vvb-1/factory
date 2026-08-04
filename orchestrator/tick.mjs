@@ -55,6 +55,13 @@ const cap = repo.max_in_flight ?? policy?.concurrency?.max_in_flight_per_repo ??
 // Same probe as run-agent.sh: the wall-clock cap is a safety feature, and a
 // safety feature that crashes every spawn on a machine without coreutils is
 // worse than saying plainly that the cap is off.
+// Which agent CLI runs the tickets. Claude by default; `agy` (Antigravity)
+// draws on a different provider's quota entirely, which is the point — a
+// second supervisor on a second harness adds capacity without spending more
+// of the same weekly allowance.
+const HARNESS = val("--harness") ?? "claude";
+if (!Bun.which(HARNESS)) { console.error(`harness "${HARNESS}" is not on PATH`); process.exit(2); }
+
 const TIMEOUT_BIN = Bun.which("timeout") ?? Bun.which("gtimeout");
 if (!TIMEOUT_BIN) console.log(c.yellow("  ! no timeout(1)/gtimeout on PATH — a wedged run will not be wall-clock capped"));
 
@@ -255,16 +262,29 @@ async function runTicket(t) {
     // Spawned without a shell: the prompt is a markdown document full of
     // backticks and quotes, and there is no quoting of it into `bash -lc`
     // that stays correct as the command body is edited.
-    const claudeArgs = [
-      "-p", promptFor(t.identifier),
-      "--output-format", "stream-json", "--verbose",
-      "--max-budget-usd", budget,
-      "--fallback-model", "sonnet",
-    ];
-    // The frontmatter's `model:` used to be applied by the slash command;
-    // inlining the body means passing it explicitly or silently downgrading.
-    if (COMMAND_MODEL) claudeArgs.push("--model", COMMAND_MODEL);
-    const envArgs = ["-u", "ANTHROPIC_API_KEY", "-u", "CLAUDECODE", "-u", "CLAUDE_CODE_ENTRYPOINT", "claude", ...claudeArgs];
+    // Flags differ per harness; the PROMPT does not. That is the whole reason
+    // the command bodies are harness-neutral markdown, and why run-agent.sh
+    // can already drive agy. Mirrors run-agent.sh's non-claude invocation.
+    const harnessArgs = HARNESS === "claude"
+      ? [
+          "-p", promptFor(t.identifier),
+          "--output-format", "stream-json", "--verbose",
+          "--max-budget-usd", budget,
+          "--fallback-model", "sonnet",
+          // The frontmatter's `model:` used to be applied by the slash command;
+          // inlining the body means passing it explicitly or silently downgrading.
+          ...(COMMAND_MODEL ? ["--model", COMMAND_MODEL] : []),
+        ]
+      : [
+          "-p", promptFor(t.identifier),
+          "--output-format", "stream-json",
+          "--dangerously-skip-permissions",
+          // agy's print mode defaults to 5 minutes — far shorter than a real
+          // ticket. Left at the default the run is cut off mid-work and looks
+          // like a hang rather than a timeout.
+          "--print-timeout", `${Math.max(1, maxMin - 2)}m`,
+        ];
+    const envArgs = ["-u", "ANTHROPIC_API_KEY", "-u", "CLAUDECODE", "-u", "CLAUDE_CODE_ENTRYPOINT", HARNESS, ...harnessArgs];
     const [bin, args] = TIMEOUT_BIN
       ? [TIMEOUT_BIN, ["-k", "30s", `${maxMin}m`, "env", ...envArgs]]
       : ["env", envArgs];
@@ -285,6 +305,22 @@ async function runTicket(t) {
             console.log(`${c.dim(clock())} ${tag} ${p.name} ${c.dim(d)}`);
           }
         }
+      }
+      // agy reports the same facts under different names: {event:"step_update"}
+      // for tool calls and a nested {event:"result", result:{status:"SUCCESS",
+      // response, num_turns}} envelope. Normalise rather than branching twice.
+      if (HARNESS !== "claude") {
+        const s = e.event === "step_update" ? (e.step_update ?? {}) : null;
+        if (s?.step_type === "tool" && s.state === "ACTIVE") {
+          const par = s.tool_info?.parameters ?? {};
+          const d = String(par.CommandLine ?? par.command ?? par.AbsolutePath ?? par.path ?? "").replace(/\s+/g, " ").slice(0, 66);
+          console.log(`${c.dim(clock())} ${tag} ${s.tool_name ?? "tool"} ${c.dim(d)}`);
+        }
+        const env = e.event === "result" ? e.result : ("status" in e && "num_turns" in e ? e : null);
+        if (!env) return;
+        e = { subtype: String(env.status).toLowerCase() === "success" ? "success" : String(env.status ?? "?"),
+              is_error: String(env.status).toLowerCase() !== "success",
+              num_turns: env.num_turns, total_cost_usd: env.total_cost_usd ?? 0, result: env.response ?? "" };
       }
       if (e.type === "result" || "num_turns" in e) {
         const turns = e.num_turns ?? 0;

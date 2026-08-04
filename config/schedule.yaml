@@ -26,6 +26,10 @@ defaults:
   #   bun orchestrator/run.mjs --repo legalease --only triage,dispatch,merge --apply
   # in two terminals, each stoppable on its own.
   repo: bj29
+  # Which agent CLI runs the stages. `agy` (Antigravity) is a different
+  # provider's quota, so a second supervisor on it adds capacity without
+  # drawing further on the Claude allowance.
+  harness: claude
   label_prefix: com.wattmind
   log_dir: ~/Library/Logs
   # Don't fire a burst of catch-up runs when the laptop wakes from sleep.
@@ -87,7 +91,7 @@ jobs:
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo {{repo}} --gate triage
     dry_command: bun orchestrator/queue.mjs --repo {{repo}}
-    command: runners/run-agent.sh --repo {{repo}} --command factory-triage --read-only --args "5"
+    command: runners/run-agent.sh --harness {{harness}} --repo {{repo}} --command factory-triage --read-only --args "5"
     enabled: false
     why: >
       Turns Triage tickets into ai:agent-ready ones by exploring the codebase,
@@ -116,7 +120,7 @@ jobs:
     every: 5m
     gate_command: bun orchestrator/queue.mjs --repo {{repo}} --gate dispatch
     dry_command: bun orchestrator/queue.mjs --repo {{repo}}
-    command: bun orchestrator/tick.mjs --repo {{repo}} --apply
+    command: bun orchestrator/tick.mjs --repo {{repo}} --harness {{harness}} --apply
     enabled: false
     why: >
       One OS PROCESS PER TICKET: tick.mjs claims, builds the worktree via
@@ -149,7 +153,7 @@ jobs:
     every: 10m
     gate_command: bun orchestrator/queue.mjs --repo {{repo}} --gate merge
     dry_command: bun orchestrator/queue.mjs --repo {{repo}}
-    command: runners/run-agent.sh --repo {{repo}} --command factory-merge
+    command: runners/run-agent.sh --harness {{harness}} --repo {{repo}} --command factory-merge
     enabled: false
     why: >
       Reviews In Review PRs as their CI finishes, fixes what is mechanical,
