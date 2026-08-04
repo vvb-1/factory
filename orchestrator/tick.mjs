@@ -279,6 +279,12 @@ async function runTicket(t) {
           "-p", promptFor(t.identifier),
           "--output-format", "stream-json",
           "--dangerously-skip-permissions",
+          // agy does not take its repo context from the working directory the
+          // way claude does — it looks for an IDE "active workspace" and, not
+          // finding one headless, asks which repository to use and stops. It
+          // then reports status SUCCESS for having asked. --add-dir is what
+          // actually points it at the worktree.
+          "--add-dir", wt,
           // agy's print mode defaults to 5 minutes — far shorter than a real
           // ticket. Left at the default the run is cut off mid-work and looks
           // like a hang rather than a timeout.

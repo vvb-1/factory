@@ -216,9 +216,13 @@ else
     # agy's print mode defaults to a 5-minute timeout, which is far shorter
     # than a real stage: triage explores a codebase, dispatch compiles. Left at
     # the default the run is cut off mid-work and looks like a hang.
+    # agy takes its repo context from --add-dir, not from cwd: headless it finds
+    # no IDE "active workspace", asks which repository to target, and stops —
+    # reporting SUCCESS for having asked.
     $RUN_CAP $ENV_PREFIX "$HARNESS" -p "$BODY" \
       --output-format stream-json \
       --dangerously-skip-permissions \
+      --add-dir "$REPO_PATH" \
       --print-timeout "$(( MAX_MIN - 2 ))m" \
       $MODEL_ARGS
   ) 2>&1 | (cd "$ROOT" && bun runners/report.mjs --log "$LOG" --harness "$HARNESS")
