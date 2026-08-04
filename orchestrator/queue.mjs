@@ -92,7 +92,12 @@ for (const repo of repos) {
   const labels = (i) => (i.labels?.nodes ?? []).map((l) => l.name);
   const state = (i) => i.state?.name ?? "?";
 
-  const triage = nodes.filter((i) => state(i) === "Triage");
+  // `ai:blocked` in Triage means a previous tick already decided this one needs
+  // a human. Counting it as triage work is how the stage ends up re-deriving
+  // the same hold every 5 minutes — the same shape as the merge stage
+  // re-reviewing escalated PRs. It reappears the moment the label comes off.
+  const triage = nodes.filter((i) => state(i) === "Triage" && !labels(i).includes("ai:blocked"));
+  const triageHeld = nodes.filter((i) => state(i) === "Triage" && labels(i).includes("ai:blocked"));
   const ready = nodes.filter((i) => state(i) === "Todo" && labels(i).includes("ai:agent-ready") && !i.assignee);
   const notReady = nodes.filter((i) => state(i) === "Todo" && !labels(i).includes("ai:agent-ready"));
   const inProgress = nodes.filter((i) => state(i) === "In Progress");
@@ -117,6 +122,7 @@ for (const repo of repos) {
   };
 
   line("Triage (unspecified)", triage.length, triage.length > 20 ? c.yellow : (s) => s);
+  if (triageHeld.length) line("Triage, held for you", triageHeld.length, c.red);
   line("Todo, not ready", notReady.length);
   line("READY to dispatch", ready.length, ready.length ? c.green : c.red);
   line("In Progress", inProgress.length);
