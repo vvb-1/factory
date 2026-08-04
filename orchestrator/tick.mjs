@@ -140,7 +140,14 @@ const labelId = (n) => allLabels.find((l) => l.name === n)?.id;
 if (!inProgressId) { console.error("no 'In Progress' state on team " + repo.team); process.exit(1); }
 
 async function claim(t) {
-  const keep = (t.labels?.nodes ?? []).map((l) => allLabels.find((x) => x.name === l.name)?.id).filter(Boolean);
+  // Drop ai:agent-ready on claim. It means "waiting to be picked up", so
+  // keeping it alongside ai:in-progress leaves the ticket asserting two
+  // lifecycle states at once — and it survives all the way to Done, where
+  // CLNT-675 sat carrying both ai:needs-review and ai:agent-ready. One flag,
+  // one value; the same rule the triage hold now follows.
+  const keep = (t.labels?.nodes ?? [])
+    .filter((l) => l.name !== "ai:agent-ready")
+    .map((l) => allLabels.find((x) => x.name === l.name)?.id).filter(Boolean);
   const want = [...new Set([...keep, labelId("ai:in-progress"), labelId("agent:claude-code")].filter(Boolean))];
   await gql(`mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
     { id: t.id, in: { stateId: inProgressId, assigneeId: me.id, labelIds: want } });
