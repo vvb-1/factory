@@ -94,6 +94,10 @@ repos:
       - legalease/legalease/settings*.py
       - legalease/main/services/document_generation/**
       - legalease/main/services/access_control.py
+      # The MCP OAuth boundary — token validation and scope expansion (OPS-50).
+      # PR #87 changed exactly this and escalate.mjs exited 0 on it; the
+      # escalation held only because a reviewer made the judgment call.
+      - legalease/main/mcp/**
 
   - name: cashsaas
     path: ~/Develop/cashsaas
