@@ -100,8 +100,16 @@ async function fetchState() {
   const has = (i, n) => (i.labels?.nodes ?? []).some((l) => l.name === n);
   return {
     inProgress: nodes.filter((i) => i.state?.name === "In Progress"),
+    // Assignee is NOT a gate: this workspace hasn't landed per-agent Linear
+    // identities (OPS-40) yet, so every claim -- human or agent -- writes the
+    // same shared account. That makes "has an assignee" indistinguishable
+    // from "was claimed and never cleared," which is exactly the reaper's
+    // job to fix, not dispatch's job to avoid by skipping the ticket forever.
+    // The actual collision guard is claim()'s read-back compare-and-swap
+    // below, which is assignee-based but per-ticket at claim time, not a
+    // blanket "already has anyone" skip.
     ready: nodes
-      .filter((i) => i.state?.name === "Todo" && has(i, "ai:agent-ready") && !i.assignee)
+      .filter((i) => i.state?.name === "Todo" && has(i, "ai:agent-ready"))
       .sort((a, b) => (a.priority || 99) - (b.priority || 99)),
   };
 }

@@ -141,7 +141,10 @@ for (const repo of repos) {
   // or, below, the moment a reply lands after the label was applied.
   const triage = nodes.filter((i) => state(i) === "Triage" && !labels(i).includes(AI_BLOCKED));
   const triageHeld = nodes.filter((i) => state(i) === "Triage" && labels(i).includes(AI_BLOCKED));
-  const ready = nodes.filter((i) => state(i) === "Todo" && labels(i).includes("ai:agent-ready") && !i.assignee);
+  // Matches tick.mjs's own definition exactly -- assignee is not a gate here
+  // either, for the same reason: per-agent Linear identities (OPS-40) haven't
+  // landed, so an assignee can't be told apart from a stale, uncleared claim.
+  const ready = nodes.filter((i) => state(i) === "Todo" && labels(i).includes("ai:agent-ready"));
   const notReady = nodes.filter((i) => state(i) === "Todo" && !labels(i).includes("ai:agent-ready"));
   const inProgress = nodes.filter((i) => state(i) === "In Progress");
   const inReview = nodes.filter((i) => state(i) === "In Review");
