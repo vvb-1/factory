@@ -13,7 +13,7 @@
  *
  * Why a build step at all: the CONTENT is harness-neutral (SKILL.md is a shared
  * format; command bodies are markdown) but the PACKAGING is not. Claude wants a
- * plugin with frontmatter, Codex wants ~/.codex/skills, Cursor wants bare
+ * plugin with frontmatter, Codex wants ~/.agents/skills, Cursor wants bare
  * markdown commands, and every harness reads a different context file.
  *
  * Why `--check` matters more than the emit: the failure this repo exists to
@@ -84,17 +84,24 @@ for (const s of skillDirs)
 for (const f of agents) emit(path.join(CLAUDE, "agents", path.basename(f)), read(f));
 
 // ------------------------------------------------------------- Codex ---------
-// ~/.codex/skills/<name>/SKILL.md — verified same format. Prompts take the
-// command bodies without frontmatter, which Codex doesn't consume.
+// Codex uses skills for reusable workflows. Factory's shared command bodies
+// become skills so they work in the desktop app too; custom prompts are a
+// deprecated CLI/IDE-only surface.
 const CODEX = path.join(ROOT, "dist", "codex");
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
     emit(path.join(CODEX, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
+
+const codexCommandSkills = commands.map((f) => path.basename(f, ".md"));
 for (const f of commands) {
   const { fm, body } = splitFrontmatter(read(f));
-  emit(path.join(CODEX, "prompts", path.basename(f)),
-    `# ${path.basename(f, ".md")}\n\n${fm.description ? `> ${fm.description}\n\n` : ""}${body.trimStart()}`);
+  const name = path.basename(f, ".md");
+  emit(path.join(CODEX, "skills", name, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${fm.description || `Run the ${name} Factory workflow.`}\n---\n\n# ${name}\n\nThe user's accompanying request is this workflow's argument string. Wherever these instructions refer to \`$ARGUMENTS\`, interpret it as that request.\n\n${body.trimStart()}`);
 }
+// Remove the legacy custom-prompt output on regular emits. In --check mode it
+// remains visible as an orphan, which catches a missing regeneration.
+if (!CHECK) rmSync(path.join(CODEX, "prompts"), { recursive: true, force: true });
 
 // ------------------------------------------------- Gemini CLI / Antigravity ---
 // Antigravity shares ~/.gemini, so one emit covers both.
@@ -102,6 +109,13 @@ const GEMINI = path.join(ROOT, "dist", "gemini");
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
     emit(path.join(GEMINI, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
+
+for (const f of commands) {
+  const { fm, body } = splitFrontmatter(read(f));
+  const name = path.basename(f, ".md");
+  emit(path.join(GEMINI, "skills", name, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${fm.description || `Run the ${name} Factory workflow.`}\n---\n\n# ${name}\n\nThe user's accompanying request is this workflow's argument string. Wherever these instructions refer to \`$ARGUMENTS\`, interpret it as that request.\n\n${body.trimStart()}`);
+}
 
 // ------------------------------------------------------------- Cursor --------
 // ~/.cursor/commands/*.md — plain markdown, no frontmatter.
@@ -216,8 +230,8 @@ if (CHECK) {
 
 console.log(`emitted ${written.size} files from shared/`);
 console.log(`  claude  plugins/core/  (${commands.length} commands, ${skillDirs.length} skills, ${agents.length} agents)`);
-console.log(`  codex   dist/codex/    (${skillDirs.length} skills, ${commands.length} prompts)`);
-console.log(`  gemini  dist/gemini/   (${skillDirs.length} skills)  — also Antigravity`);
+console.log(`  codex   dist/codex/    (${skillDirs.length + commands.length} skills)`);
+console.log(`  gemini  dist/gemini/   (${skillDirs.length + commands.length} skills)  — also Antigravity`);
 console.log(`  cursor  dist/cursor/   (${commands.length} commands)`);
 console.log(`  pi      dist/pi/       (${skillDirs.length} skills, ${commands.length} prompts)`);
 console.log(`  floor   dist/AGENTS.floor.md`);
@@ -253,9 +267,10 @@ if (process.argv.includes("--link-repos")) {
 // ------------------------------------------------------------------- link ----
 if (LINK) {
   console.log("\nlinking this machine's harnesses to shared/ (source of truth, no copy to go stale):");
+  const geminiCommandSkills = [...skillDirs, ...codexCommandSkills];
   const links = [
-    ...skillDirs.map((s) => [path.join(SHARED, "skills", s), path.join(homedir(), ".codex/skills", s)]),
-    ...skillDirs.map((s) => [path.join(SHARED, "skills", s), path.join(homedir(), ".gemini/skills", s)]),
+    ...[...skillDirs, ...codexCommandSkills].map((s) => [path.join(CODEX, "skills", s), path.join(homedir(), ".agents/skills", s)]),
+    ...geminiCommandSkills.map((s) => [path.join(GEMINI, "skills", s), path.join(homedir(), ".gemini/skills", s)]),
     ...commands.map((f) => [path.join(CURSOR, "commands", path.basename(f)), path.join(homedir(), ".cursor/commands", path.basename(f))]),
   ];
   for (const [src, dst] of links) {

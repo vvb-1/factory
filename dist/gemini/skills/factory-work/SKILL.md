@@ -1,8 +1,11 @@
 ---
+name: factory-work
 description: Dispatch subagents to work agent-ready Linear tickets, land the PRs, report
-argument-hint: [optional: issue IDs, max tickets e.g. "6", concurrency e.g. "3 at a time", or "no-merge"]
-model: sonnet
 ---
+
+# factory-work
+
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Work the agent-dispatchable Linear queue for this repository to completion — claimed, implemented, verified, reviewed, and landed — following `~/Develop/hdkiller/docs/orgs/linear.md` (§7 execution, §14 loops).
 

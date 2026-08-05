@@ -1,6 +1,11 @@
+---
+name: factory-retro
+description: Find what is repeatedly wasting the factory's time and fix the harness, not the symptom
+---
+
 # factory-retro
 
-> Find what is repeatedly wasting the factory's time and fix the harness, not the symptom
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Turn measured friction into harness changes.
 

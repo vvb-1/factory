@@ -4,7 +4,10 @@ Agents don't reliably remember what slowed them down, and asking them to write i
 
 ```bash
 bun orchestrator/friction.mjs $ARGUMENTS
+bun orchestrator/economics.mjs $ARGUMENTS
 ```
+
+Friction is what wasted the agents' *time*; economics is what consumed *context and the usage window* (context burn, cache thrash, zero-result runs). A repeat in either one is actionable — a tool that fails three runs running and a tool whose payloads dominate context burn are both harness defects.
 
 Then read `docs/friction-log.md` for what is already known and what was already decided against — the point is a shrinking list, not an accumulating one.
 
@@ -35,8 +38,16 @@ Repo-specific friction belongs in that repo (`AGENTS.md`, its `.env.example`, it
 
 ## Deliver
 
-For each item worth acting on: make the change if it is small and mechanical, or file a Linear issue with the evidence (how many runs, which transcripts) if it isn't. Then record it in `docs/friction-log.md` with its status.
+For each item worth acting on: make the change if it is small and mechanical, or file a Linear issue with the evidence (how many runs, which transcripts) if it isn't. Proposals that change how the factory works — a new stage, a policy change, new config surface — are **FIPs**: file to team `OPS`, `Triage`, title prefixed `FIP:`, with the evidence in the body. The triage loop is the FIP review; an idea that can't survive triage wasn't ready. Then record it in `docs/friction-log.md` with its status.
 
 **Record the rejections too**, with the reason. A friction log that only lists open items invites the same suggestion every month.
 
-Finish with what changed, what was filed, and what was deliberately left alone.
+Before reporting, persist what you measured:
+
+```bash
+bun orchestrator/economics.mjs --roll
+```
+
+That appends this batch's runs to the durable rollup (`~/.factory/metrics/runs.jsonl`) — the record that outlives the transcripts — and it is also what closes the retro gate until enough new runs accumulate.
+
+Finish with what changed, what was filed (issues and FIPs), and what was deliberately left alone.

@@ -1,6 +1,11 @@
+---
+name: factory-merge
+description: Review open PRs thoroughly, fix what's fixable, merge what's good
+---
+
 # factory-merge
 
-> Review open PRs thoroughly, fix what's fixable, merge what's good
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Review and land the open PRs for this repository. My invoking this command is the human merge decision for routine changes — but the review must be real, and sensitive changes still come back to me.
 
@@ -12,12 +17,14 @@ Interpret $ARGUMENTS as specific PR numbers or Linear issue IDs; default is ever
 
 ### 1. Review first — always, even when CI is green
 
+**Start from the ticket's `## Handoff` comment** — dispatch posts one per PR (PR link, verification result, UX critique verdict, files vs `Owned Paths`, risks). It tells you where to concentrate: a stated risk gets read first, a `FIX-FIRST resolved` critique means re-checking those fixes, an exceptions line on Files means the `Owned Paths` check below already has a suspect. A missing or vague Handoff is a (minor) protocol finding to note — and a reason to trust the diff less, not to skip the review.
+
 CI passing is not the bar. Read the full diff and review for:
 
 - **Correctness**: logic errors, edge cases, race conditions, broken assumptions about existing code it touches.
 - **Bugs the tests don't catch**: error handling, null/undefined paths, off-by-ones, state that survives navigation, platform differences (iOS/Android/web).
 - **Security**: injection, authz gaps, secrets in the diff, unsafe input handling.
-- **Protocol compliance**: does the diff stay inside the ticket's `Owned Paths`? Is the verification comment posted on the Linear ticket? Does the PR body have `Fixes <ISSUE-ID>`?
+- **Protocol compliance**: does the diff stay inside the ticket's `Owned Paths`? Is the Handoff comment posted on the Linear ticket, and does its verification line reflect a real pass? Does the PR body have `Fixes <ISSUE-ID>` (and `run:<id>` on factory-produced PRs)?
 - **Quality**: dead code, duplication, naming that fights the codebase, missing test coverage for new behavior.
 
 For user-facing PRs, open the Linear ticket's attached screenshots and judge the visual result too — layout, truncation, spacing, before/after coherence. A user-facing PR with no screenshots on its ticket is a (minor) protocol finding: note it, and if you fix the branch anyway, capture and attach them yourself.

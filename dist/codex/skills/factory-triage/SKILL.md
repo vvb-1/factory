@@ -1,6 +1,11 @@
+---
+name: factory-triage
+description: Find open Linear issues for this repo and triage them toward agent-ready
+---
+
 # factory-triage
 
-> Find open Linear issues for this repo and triage them toward agent-ready
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Triage the open Linear issues for the repository I'm currently in: turn raw `Triage` tickets into fully specified, agent-dispatchable ones where possible.
 

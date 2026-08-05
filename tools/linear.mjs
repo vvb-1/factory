@@ -38,7 +38,39 @@
  * orchestrator/reaper.mjs — retries, backoff and key loading are solved there,
  * and a second client would be a second set of bugs.
  */
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { gql } from "../orchestrator/reaper.mjs";
+
+// Every verb here is a fresh `bun` process, so nothing in module scope survives
+// between calls — and the protocol calls this constantly (claim, heartbeat
+// comments, state transitions, on up to 3 concurrent tickets per repo). `claim`
+// alone costs 5 API calls, two of which (team states, workspace labels) are
+// reference data that almost never changes. Caching them to disk with a short
+// TTL is what actually cuts call volume; a same-process memo (allLabelsCache
+// below) does nothing here since no verb calls allLabels() twice in one run.
+const CACHE_DIR = path.join(homedir(), ".factory/cache/linear");
+const CACHE_TTL_MS = 15 * 60 * 1000;
+
+function cacheGet(key) {
+  if (process.env.LINEAR_NO_CACHE) return null;
+  try {
+    const { at, value } = JSON.parse(readFileSync(path.join(CACHE_DIR, `${key}.json`), "utf8"));
+    return Date.now() - at < CACHE_TTL_MS ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheSet(key, value) {
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+    writeFileSync(path.join(CACHE_DIR, `${key}.json`), JSON.stringify({ at: Date.now(), value }));
+  } catch {
+    // Cache is an optimization, never a dependency — a write failure must not fail the verb.
+  }
+}
 
 // The eight values that resolve; `type:chore` fails the mutation. Kept here as
 // well as in the floor because a typo should fail locally with a list of the
@@ -127,26 +159,42 @@ async function issueByKey(key) {
 
 const teamOf = (key) => key.split("-")[0];
 
-async function statesFor(teamKey) {
+async function statesFor(teamKey, force = false) {
+  if (!force) {
+    const cached = cacheGet(`states-${teamKey}`);
+    if (cached) return cached;
+  }
   const d = await gql(`query($t:String!){ teams(filter:{key:{eq:$t}}, first:1){ nodes{ id states(first:50){ nodes{ id name } } } } }`, { t: teamKey });
   const team = d?.teams?.nodes?.[0];
   if (!team) throw new Error(`no such team: ${teamKey}`);
-  return { teamId: team.id, states: team.states?.nodes ?? [] };
+  const result = { teamId: team.id, states: team.states?.nodes ?? [] };
+  cacheSet(`states-${teamKey}`, result);
+  return result;
 }
 
 const allLabelsCache = { v: null };
-async function allLabels() {
-  if (!allLabelsCache.v) {
-    allLabelsCache.v = (await gql(`query{ issueLabels(first:250){ nodes{ id name } } }`))?.issueLabels?.nodes ?? [];
+async function allLabels(force = false) {
+  if (!force) {
+    if (allLabelsCache.v) return allLabelsCache.v;
+    const cached = cacheGet("labels");
+    if (cached) {
+      allLabelsCache.v = cached;
+      return cached;
+    }
   }
-  return allLabelsCache.v;
+  const v = (await gql(`query{ issueLabels(first:250){ nodes{ id name } } }`))?.issueLabels?.nodes ?? [];
+  allLabelsCache.v = v;
+  cacheSet("labels", v);
+  return v;
 }
 
 async function applyLabels(issue, add, remove) {
   const bad = validateLabels(add);
   if (bad.length) throw new Error("invalid label(s):\n  " + bad.join("\n  "));
-  const all = await allLabels();
-  const missing = add.filter((n) => !all.some((l) => l.name === n));
+  let all = await allLabels();
+  let missing = add.filter((n) => !all.some((l) => l.name === n));
+  if (missing.length) all = await allLabels(true); // stale cache? refetch once before failing
+  missing = add.filter((n) => !all.some((l) => l.name === n));
   if (missing.length) throw new Error(`label(s) do not exist in this workspace: ${missing.join(", ")}`);
   const current = (issue.labels?.nodes ?? []).map((l) => l.name);
   return resolveLabelIds(current, { add, remove }, all);
@@ -164,6 +212,18 @@ const flagAll = (name) => argv.flatMap((a, i) => (a === `--${name}` ? [argv[i + 
 const has = (name) => argv.includes(`--${name}`);
 const JSON_OUT = has("json");
 const out = (obj, text) => console.log(JSON_OUT ? JSON.stringify(obj, null, 2) : text);
+
+// Attribution stamp (OPS-76). Factory spawns set FACTORY_RUN_ID to the
+// transcript basename, and the rollup keys on the same string — so stamping it
+// here makes every comment and filed issue joinable back to the exact run that
+// wrote it, without trusting the agent to remember. Skipped when the id is
+// already in the body (an agent that includes it deliberately shouldn't get it
+// twice) and when unset (interactive human use stays clean).
+const stampRun = (body) => {
+  const id = process.env.FACTORY_RUN_ID;
+  if (!id || !body || body.includes(`run:${id}`)) return body;
+  return `${body}\n\nrun:${id}`;
+};
 
 const VERBS = {
   async get() {
@@ -202,7 +262,7 @@ const VERBS = {
     if (!body) throw new Error(`usage: comment <ISSUE-ID> "<text>"`);
     const issue = await issueByKey(key);
     await gql(`mutation($in:CommentCreateInput!){ commentCreate(input:$in){ success } }`,
-      { in: { issueId: issue.id, body } });
+      { in: { issueId: issue.id, body: stampRun(body) } });
     out({ ok: true, identifier: key }, `commented on ${key}`);
   },
 
@@ -211,8 +271,10 @@ const VERBS = {
     const wanted = positional[1];
     if (!wanted) throw new Error(`usage: state <ISSUE-ID> "<State Name>" [--add label] [--remove label]`);
     const issue = await issueByKey(key);
-    const { states } = await statesFor(teamOf(key));
-    const target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
+    let { states } = await statesFor(teamOf(key));
+    let target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
+    if (!target) ({ states } = await statesFor(teamOf(key), true)); // stale cache? refetch once before failing
+    target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
     if (!target) throw new Error(`no state "${wanted}" on team ${teamOf(key)} — have: ${states.map((s) => s.name).join(", ")}`);
 
     const add = flagAll("add"), remove = flagAll("remove");
@@ -252,7 +314,7 @@ const VERBS = {
       `mutation($in:IssueCreateInput!){ issueCreate(input:$in){ success issue{ identifier url } } }`,
       { in: {
         teamId, title,
-        description: flag("body", ""),
+        description: stampRun(flag("body", "")),
         stateId: target?.id,
         labelIds: resolveLabelIds([], { add: wanted }, all),
         ...(flag("project") ? { projectId: flag("project") } : {}),

@@ -221,6 +221,28 @@ jobs:
       and the dev smoke check are green. Escalation list still applies: payments,
       auth and migrations never auto-merge in this client repo.
 
+  # 3b. LEARN. The one loop that improves the others: retro reads what runs
+  #     actually did (friction.mjs for wasted time, economics.mjs for context
+  #     burn) and turns repeats into harness changes — a shared/ fix when
+  #     mechanical, a `FIP:` issue in OPS Triage when not. Without this on a
+  #     cadence, every agent run is ephemeral and learning only happens when a
+  #     human remembers to look. Runs against the factory checkout itself
+  #     (repos.yaml: factory), the one stage that does.
+  - name: retro
+    every: 24h
+    gate_command: bun orchestrator/economics.mjs --gate
+    dry_command: bun orchestrator/friction.mjs
+    command: runners/run-agent.sh --harness {{harness}} --repo factory --command factory-retro
+    enabled: false
+    why: >
+      Gated on un-rolled transcripts (>=5 completed runs not yet in
+      metrics/runs.jsonl), so it fires after real batches, not on quiet days.
+      The retro itself runs economics --roll, which both persists the durable
+      record and closes the gate until new work accumulates. Disabled under
+      the foreground policy like everything else — it can edit shared/, so
+      watch its first passes; its edits still land by ordinary commit, never
+      silently.
+
   # 4. RECLAIM. Worktrees whose tickets finished. The merge stage is supposed to
   #    tear its own down, but crashed runs, hand-merges and tickets closed in
   #    Linear all leave orphans — and an orphan looks exactly like live work, so

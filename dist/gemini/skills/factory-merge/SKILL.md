@@ -1,8 +1,11 @@
 ---
+name: factory-merge
 description: Review open PRs thoroughly, fix what's fixable, merge what's good
-argument-hint: [optional: PR numbers or issue IDs, e.g. "123" or "CW-310"; default all open PRs]
-model: opus
 ---
+
+# factory-merge
+
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Review and land the open PRs for this repository. My invoking this command is the human merge decision for routine changes — but the review must be real, and sensitive changes still come back to me.
 

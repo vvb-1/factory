@@ -54,15 +54,26 @@ import {
 } from "./watch-lib.mjs";
 
 const LOG_DIR = path.join(homedir(), ".factory/logs");
-const QUEUE_POLL_MS = 20_000;
+// Linear advises integrations not to poll aggressively. Queue data changes on
+// human/agent actions rather than every animation frame; keeping this at one
+// minute caps the all-repo monitor at 480 normal GraphQL requests/hour instead
+// of 1,440. The log tail remains independently live at three-second cadence.
+const QUEUE_POLL_MS = 60_000;
 const LOG_POLL_MS = 3_000;
 const TAIL_BUFFER = 500;   // entries kept for PgUp scrollback, well beyond one screen
 const LOG_PAGE = 10;       // rows per PgUp/PgDn
 const QUIET_MS = 90_000;   // matches the "quiet" threshold TicketList already renders
 
 const argv = process.argv.slice(2);
-const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
-const REPO_FILTER = val("--repo");
+const val = (f) => {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === f && i + 1 < argv.length && !argv[i + 1].startsWith("-")) {
+      return argv[i + 1];
+    }
+  }
+  return null;
+};
+const REPO_FILTER = val("--repo") ?? argv.find((a) => !a.startsWith("-"));
 
 const policy = (() => {
   try { return Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8")); } catch { return {}; }

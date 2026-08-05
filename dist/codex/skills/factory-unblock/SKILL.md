@@ -1,6 +1,11 @@
+---
+name: factory-unblock
+description: Re-examine held (ai:blocked) tickets for new evidence and release the ones that no longer need a human
+---
+
 # factory-unblock
 
-> Re-examine held (ai:blocked) tickets for new evidence and release the ones that no longer need a human
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Re-examine the `ai:blocked` holds for the repository I'm currently in: some blockers resolve without anyone commenting on the ticket — the dependency merged, the credential got documented, the code moved on — and this sweep is what notices. Resolve the team from the repo via the mapping in `~/Develop/hdkiller/docs/orgs/linear.md` §1. Use the Linear MCP; on failure retry once then fall back to `linear_common` GraphQL per the global rule.
 

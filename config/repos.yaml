@@ -40,7 +40,7 @@ repos:
     # NOTE: this is a cap on the REPO, not on a supervisor. Two supervisors on
     # different harnesses share it — a second one adds capacity only if there
     # are free slots for it to claim, which is why this went up with agy.
-    max_in_flight: 8
+    max_in_flight: 20
 
     # Surfaces where a diff is never auto-merged, on top of the global
     # escalation list in policy.yaml. This is a CLNT revenue-share client
@@ -119,7 +119,7 @@ repos:
 
     # Raised with bj29 for the second (agy) supervisor; see the note there —
     # the cap is per repo, not per supervisor.
-    max_in_flight: 8
+    max_in_flight: 20
 
     # Surfaces where a diff is never auto-merged, on top of the global list in
     # policy.yaml. Without these, escalate.mjs has nothing to check and the
@@ -157,6 +157,10 @@ repos:
     worktree_warm: bin/worktree-warm.sh
     worktree_root: ~/Develop/.worktrees/cashsaas
 
+    # Cap concurrent ticket agents for this repo. One agent receives one
+    # isolated worktree, so this also permits up to eight active worktrees.
+    max_in_flight: 20
+
     # What "verified" means. Agents run this before any PR.
     verify: npm run typecheck && npm run lint && npm run format:check
 
@@ -175,3 +179,16 @@ repos:
       - .env.example
       - src/auth/**
       - src/server/serverMiddleware.ts
+
+  # The factory itself — exists so run-agent.sh can target this checkout
+  # (currently only the retro stage: cwd here makes friction.mjs/economics.mjs
+  # and docs/friction-log.md resolve naturally). report_only keeps dispatch
+  # from ever claiming product tickets into the control plane; retro edits
+  # shared/ in place and its changes land by ordinary commit/PR, not worktree.
+  - name: factory
+    path: ~/Develop/factory
+    github: hdkiller/factory
+    team: OPS
+    base: main
+    report_only: true            # never a dispatch target — no worktree tooling
+    verify: bun test && bun build/emit.mjs --check

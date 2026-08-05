@@ -33,7 +33,7 @@ The **content** is portable; only the **packaging** isn't. `SKILL.md` is a forma
 | Harness | Context | Skills | Commands |
 | :--- | :--- | :--- | :--- |
 | Claude Code | `CLAUDE.md` → `AGENTS.md` | plugin `skills/` | plugin `commands/` |
-| Codex | `AGENTS.md` (native) | `~/.codex/skills/` | `~/.codex/prompts/` |
+| Codex | `AGENTS.md` (native) | `~/.agents/skills/` | — (use `@factory-*` skills) |
 | Pi | `AGENTS.md` (native) | `dist/pi/skills/` | `dist/pi/prompts/` |
 | Gemini CLI | `GEMINI.md` → `AGENTS.md` | `~/.gemini/skills/` | — |
 | Antigravity | shares `~/.gemini/` | via Gemini | — |

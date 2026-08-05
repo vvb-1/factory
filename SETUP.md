@@ -12,7 +12,7 @@ Do this **before** loading any launchd job. A launchd process inherits no intera
 
 ```bash
 bun build/emit.mjs           # regenerate plugins/ and dist/
-bun build/emit.mjs --link    # symlink ~/.codex, ~/.gemini, ~/.cursor at shared/
+bun build/emit.mjs --link    # symlink ~/.agents/skills, ~/.gemini, ~/.cursor at shared/
 bun run link-repos           # symlink plugins/core/commands/ into every repo in config/repos.yaml
 ```
 

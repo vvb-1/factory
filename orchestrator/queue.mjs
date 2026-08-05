@@ -54,7 +54,7 @@ const c = {
 
 const QUERY = `
   query($team: String!, $project: String!) {
-    issues(first: 250, filter: {
+    active: issues(first: 250, filter: {
       team: { key: { eq: $team } },
       project: { name: { eq: $project } },
       state: { type: { nin: ["completed", "canceled"] } }
@@ -67,15 +67,10 @@ const QUERY = `
         labels(first: 20) { nodes { name } }
       }
     }
-  }`;
-
-// Finished work, for the done/total readout. Kept out of QUERY on purpose: the
-// active-issue query feeds gates and dispatch decisions, and mixing hundreds of
-// Done tickets into `nodes` would push live work past the 250-issue page long
-// before the project gets big enough to notice any other way.
-const CLOSED_QUERY = `
-  query($team: String!, $project: String!) {
-    issues(first: 250, filter: {
+    # The TUI needs this only for its done/total readout. Keep it a separate
+    # connection so completed work cannot displace live tickets, but alias it
+    # into the same HTTP request as the active queue.
+    closed: issues(first: 250, filter: {
       team: { key: { eq: $team } },
       project: { name: { eq: $project } },
       state: { type: { in: ["completed", "canceled"] } }
@@ -125,8 +120,9 @@ const summary = [];
 for (const repo of repos) {
   if (!GATE && !JSON_OUT) console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${repo.team} / ${repo.project}  ->  ${repo.base}`));
 
-  const nodes = (await gql(QUERY, { team: repo.team, project: repo.project }))?.issues?.nodes ?? [];
-  const closed = (await gql(CLOSED_QUERY, { team: repo.team, project: repo.project }))?.issues?.nodes ?? [];
+  const data = await gql(QUERY, { team: repo.team, project: repo.project });
+  const nodes = data?.active?.nodes ?? [];
+  const closed = data?.closed?.nodes ?? [];
   const done = closed.filter((i) => i.state?.type === "completed").length;
   const total = nodes.length + closed.length;
   // Either page hitting its 250 cap means these are floors, not counts.

@@ -44,6 +44,28 @@ const TOP = Number(val("--top") ?? 15);
 
 if (!existsSync(LOG_DIR)) { console.error(`no transcripts at ${LOG_DIR}`); process.exit(1); }
 
+// --gate: is there enough un-rolled material to justify a retro run? Filename
+// comparison only — the rollup keys on the transcript basename, so this never
+// parses a transcript (the gate must stay cheap enough to poll). Exit 0 when
+// >= --gate-min (default 5) completed runs are not yet in the rollup; runs
+// younger than 5 minutes are skipped as possibly still streaming, mirroring
+// the in-flight rule in the rollup writer below.
+if (argv.includes("--gate")) {
+  const min = Number(val("--gate-min") ?? 5);
+  const seen = new Set();
+  if (existsSync(ROLLUP)) {
+    for (const line of readFileSync(ROLLUP, "utf8").split("\n")) {
+      if (!line.startsWith("{")) continue;
+      try { seen.add(JSON.parse(line).file); } catch {}
+    }
+  }
+  const unrolled = readdirSync(LOG_DIR)
+    .filter((f) => f.endsWith(".jsonl") && !seen.has(f))
+    .filter((f) => Date.now() - statSync(path.join(LOG_DIR, f)).mtimeMs > 5 * 60_000);
+  console.error(`gate: ${unrolled.length} un-rolled run(s), threshold ${min}`);
+  process.exit(unrolled.length >= min ? 0 : 1);
+}
+
 const sinceArg = val("--since");
 const sinceMs = sinceArg
   ? Date.now() - Number(sinceArg.replace(/[^\d]/g, "")) * (sinceArg.endsWith("h") ? 3600e3 : 86400e3)

@@ -172,6 +172,14 @@ LOG_DIR="$HOME/.factory/logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/${REPO}-${COMMAND}-$(date +%Y%m%d-%H%M%S).jsonl"
 
+# The run id IS the transcript basename — the rollup (metrics/runs.jsonl) is
+# already keyed by it, so a `run:<id>` stamp in a Linear comment or PR body
+# joins straight back to the transcript and its metrics row. tools/linear.mjs
+# stamps comments/issues mechanically when this is set; PR bodies rely on the
+# floor's rule. Complementary to OPS-40, not a replacement for a real assignee
+# lock (OPS-76).
+export FACTORY_RUN_ID="$(basename "$LOG" .jsonl)"
+
 echo "→ $REPO ($REPO_TEAM)  $PROMPT"
 echo "  cwd:    $REPO_PATH"
 echo "  harness: $HARNESS   auth: $AUTH_NOTE   cap ~\$$BUDGET notional / ${MAX_MIN}m wall"

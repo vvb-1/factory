@@ -1,6 +1,11 @@
+---
+name: factory-audit
+description: Audit this repo against the project-conventions baseline; file the gaps to Linear
+---
+
 # factory-audit
 
-> Audit this repo against the project-conventions baseline; file the gaps to Linear
+The user's accompanying request is this workflow's argument string. Wherever these instructions refer to `$ARGUMENTS`, interpret it as that request.
 
 Audit a repository against the conventions baseline in `~/Develop/hdkiller/docs/guides/project-conventions.md` and turn the gaps into tracked work.
 

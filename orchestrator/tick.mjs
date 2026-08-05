@@ -349,6 +349,10 @@ async function runTicket(t) {
       // Without it, --strict-mcp-config removes the Linear MCP and leaves no
       // replacement — the control plane goes silent.
       `FACTORY_ROOT=${ROOT}`,
+      // Run id == transcript basename, same convention as run-agent.sh: the
+      // rollup keys on it, linear.mjs stamps it into comments, the floor puts
+      // it in PR bodies. One key joins Linear/GitHub back to this log (OPS-76).
+      `FACTORY_RUN_ID=${path.basename(log, ".jsonl")}`,
       harnessBin, ...piPreArgs, ...harnessArgs
     ];
     const [bin, args] = TIMEOUT_BIN
