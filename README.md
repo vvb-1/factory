@@ -124,7 +124,7 @@ On a subscription the scarce resource is the **usage window**, and Opus consumes
 | `factory-audit` | sonnet | A mechanical checklist against `PC-01`..`PC-20` |
 | `ux-critic` | sonnet | Exercises the running app and reports |
 
-Set per command in its frontmatter — that's the knob to turn. `run-agent.sh --model X` overrides the whole session and is the blunt instrument.
+Claude reads the per-command frontmatter. `agy` is deliberately pinned to `gemini-3.6-flash-medium` in both Factory launch paths because it receives only the command body; `run-agent.sh --model X` overrides that for a one-off session.
 
 The judgement call is triage. A bad spec burns a full dispatch run, so there's a real argument for Opus there; the counter is that `evals/` is the right place to catch spec quality dropping, and a 13-ticket triage pass on Opus is a large bite out of a five-hour window. Start on Sonnet, watch the specs, and move it up if quality slips.
 

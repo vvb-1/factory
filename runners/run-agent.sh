@@ -98,12 +98,15 @@ fi
 
 PROMPT="/${COMMAND}${ARGS:+ $ARGS}"
 
-# Left empty, each command's own frontmatter decides its model (triage/audit
-# sonnet, merge opus, work sonnet orchestrating opus subagents). --model
-# overrides the whole session — the blunt instrument; prefer the frontmatter.
+# Claude reads command frontmatter (triage/audit sonnet, merge opus, work
+# sonnet orchestrating opus subagents). Other harnesses receive only the
+# command body, so agy must be pinned here rather than relying on frontmatter.
+# --model remains an explicit whole-session override.
 MODEL_ARGS=""
 if [[ -n "$MODEL" ]]; then
   MODEL_ARGS="--model $MODEL"
+elif [[ "$HARNESS" == "agy" ]]; then
+  MODEL_ARGS="--model gemini-3.6-flash-medium"
 fi
 
 # Read-only stages run in the MAIN checkout — triage needs the code to write

@@ -323,6 +323,10 @@ async function runTicket(t) {
         "--dangerously-skip-permissions",
         "--add-dir", wt,
         "--print-timeout", `${Math.max(1, maxMin - 2)}m`,
+        // agy receives the command body rather than its frontmatter, so pin
+        // its model explicitly. Other compatible harnesses retain their CLI
+        // defaults until they gain a dedicated adapter.
+        ...(HARNESS === "agy" ? ["--model", "gemini-3.6-flash-medium"] : []),
       ];
     }
 
