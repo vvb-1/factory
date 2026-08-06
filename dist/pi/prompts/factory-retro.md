@@ -4,14 +4,17 @@
 
 Turn measured friction into harness changes.
 
-Agents don't reliably remember what slowed them down, and asking them to write it up produces either nothing or noise. But every run leaves a full JSONL transcript in `~/.factory/logs/`, so the evidence already exists. Start there:
+Agents don't reliably remember what slowed them down, and asking them to write it up produces either nothing or noise. Three sources carry the evidence instead:
 
 ```bash
 bun orchestrator/friction.mjs $ARGUMENTS
 bun orchestrator/economics.mjs $ARGUMENTS
+bun orchestrator/ci.mjs $ARGUMENTS
 ```
 
-Friction is what wasted the agents' *time*; economics is what consumed *context and the usage window* (context burn, cache thrash, zero-result runs). A repeat in either one is actionable — a tool that fails three runs running and a tool whose payloads dominate context burn are both harness defects.
+Friction is what wasted the agents' *time* inside a session; economics is what consumed *context and the usage window* (context burn, cache thrash, zero-result runs); CI is the clock agents wait on *outside* the session — `gh pr checks --watch` in factory-merge/factory-ship sitting idle for however long GitHub Actions takes, per repo per workflow, with repeat-failure and slowdown-trend flags already computed. A repeat in any of the three is actionable — a tool that fails three runs running, a tool whose payloads dominate context burn, and an e2e job that's crept 40% slower over two weeks are all harness defects.
+
+**friction.mjs and economics.mjs need `~/.factory/logs/` transcripts, which only exist for runs the orchestrator itself dispatched.** Invoked directly from the harness — you running `/factory-retro` in a repo without going through orchestrator dispatch — there may be no matching transcripts; `friction.mjs` exits with "no transcripts" in that case, which is expected, not a failure, so don't chase it as one. `ci.mjs` has no such dependency: it reads GitHub's own run history, so it carries the CI-reflection half of retro on its own even when the other two have nothing. Run all three regardless; treat an empty friction/economics result as "no session data this time," not as a broken retro.
 
 Then read `docs/friction-log.md` for what is already known and what was already decided against — the point is a shrinking list, not an accumulating one.
 
@@ -35,6 +38,8 @@ Ask what would have made the friction impossible, then put the fix where it belo
 | Test needs a cookie banner clicked every run | a UI-clicking snippet | an env flag in the repo that skips it |
 | Wrong Linear label name, repeatedly | correct it each time | list the canonical values where the agent will see them |
 | Same expensive setup per ticket | accept it | do it once, before the batch |
+| e2e workflow creeping slower every window | wait longer in `gh pr checks --watch` | cache/parallelize/split the job in the repo's own workflow file — that's a repo change, not a factory one |
+| Same GitHub Actions job failing across multiple PRs | rerun until green | fix the flaky step or its test, in that repo |
 
 **Prefer removing the need over documenting the workaround.** A rule an agent must remember is weaker than a default it cannot get wrong: an env var, a script flag, a generated config. Only when the fix genuinely cannot be automated does it become a line in `AGENTS.md` or `shared/floor.md`.
 
@@ -42,7 +47,7 @@ Repo-specific friction belongs in that repo (`AGENTS.md`, its `.env.example`, it
 
 ## Deliver
 
-For each item worth acting on: make the change if it is small and mechanical, or file a Linear issue with the evidence (how many runs, which transcripts) if it isn't. Proposals that change how the factory works — a new stage, a policy change, new config surface — are **FIPs**: file to team `OPS`, `Triage`, title prefixed `FIP:`, with the evidence in the body. The triage loop is the FIP review; an idea that can't survive triage wasn't ready. Then record it in `docs/friction-log.md` with its status.
+For each item worth acting on: make the change if it is small and mechanical, or file a Linear issue with the evidence (how many runs, which transcripts, or which workflow/repo from `ci.mjs`) if it isn't. A CI finding almost always means a change in the *product* repo (its workflow YAML, its test setup), not in factory itself — file it there, or fix it there directly if you're already in that checkout. Proposals that change how the factory works — a new stage, a policy change, new config surface — are **FIPs**: file to team `OPS`, `Triage`, title prefixed `FIP:`, with the evidence in the body. The triage loop is the FIP review; an idea that can't survive triage wasn't ready. Then record it in `docs/friction-log.md` with its status.
 
 **Record the rejections too**, with the reason. A friction log that only lists open items invites the same suggestion every month.
 

@@ -13,7 +13,7 @@
  *
  * Read-only. Every failure names the fix.
  */
-import { readFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync, lstatSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { homedir } from "node:os";
@@ -77,6 +77,16 @@ if (!repos.length) {
   process.exit(2);
 }
 
+// run-agent.sh literally sends "/${COMMAND} $ARGS" as the prompt to `claude -p`
+// — there is no fallback if the repo's .claude/commands/<name>.md symlink is
+// missing, it's not "the command doesn't work", it's "the agent receives a
+// bare string with zero instructions and does whatever it improvises". The
+// directory is untracked by design (link-repos writes it, nothing commits
+// it), which means a `git clean -fdx` or a fresh worktree silently drops it.
+const expectedCommands = readdirSync(path.join(ROOT, "shared/commands"))
+  .filter((f) => f.endsWith(".md"))
+  .map((f) => path.basename(f, ".md"));
+
 // -------------------------------------------------------------------- repos ---
 for (const repo of repos) {
   console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${repo.team} / ${repo.project}`));
@@ -93,6 +103,21 @@ for (const repo of repos) {
 
   const hasBase = sh(`git rev-parse --verify origin/${repo.base}`, p).status === 0;
   check(hasBase, `base branch origin/${repo.base}`, "", "git fetch origin");
+
+  const commandsDir = path.join(p, ".claude", "commands");
+  const missing = [];
+  const broken = [];
+  for (const name of expectedCommands) {
+    const target = path.join(commandsDir, `${name}.md`);
+    let st = null;
+    try { st = lstatSync(target); } catch {}
+    if (!st) { missing.push(name); continue; }
+    if (st.isSymbolicLink() && !existsSync(target)) broken.push(name); // dangling symlink
+  }
+  const problems = [...missing, ...broken];
+  check(problems.length === 0, "/factory-* commands linked",
+    problems.length ? `${problems.length}/${expectedCommands.length} missing or broken: ${problems.join(", ")}` : `${expectedCommands.length} commands`,
+    problems.length ? "bun run link-repos" : null);
 
   // Worktree tooling is PC-15 — the precondition for dispatching concurrent
   // agents. Without it a repo's safe concurrency is one agent, whatever the
