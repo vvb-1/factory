@@ -196,9 +196,12 @@ repos:
       - src/auth/**
       - src/server/serverMiddleware.ts
 
+  # Command distribution only. Its worktree scripts exist, but this entry has
+  # not yet authorized factory dispatch; retain the report-only guard (OPS-115).
   - name: proxies
     path: ~/Develop/pets/proxies
     github: watt-mind/proxies
+    report_only: true
 
     # Linear routing (AGENTS.md + linear.md §1)
     team: LAB
