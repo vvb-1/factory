@@ -272,6 +272,8 @@ if (LINK) {
     ...[...skillDirs, ...codexCommandSkills].map((s) => [path.join(CODEX, "skills", s), path.join(homedir(), ".agents/skills", s)]),
     ...geminiCommandSkills.map((s) => [path.join(GEMINI, "skills", s), path.join(homedir(), ".gemini/skills", s)]),
     ...commands.map((f) => [path.join(CURSOR, "commands", path.basename(f)), path.join(homedir(), ".cursor/commands", path.basename(f))]),
+    ...commands.map((f) => [path.join(PI, "prompts", path.basename(f)), path.join(homedir(), ".pi/agent/prompts", path.basename(f))]),
+    ...skillDirs.map((s) => [path.join(PI, "skills", s), path.join(homedir(), ".pi/agent/skills", s)]),
   ];
   for (const [src, dst] of links) {
     mkdirSync(path.dirname(dst), { recursive: true });
