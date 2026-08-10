@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Factory control-plane CLI — cwd-independent dispatch to orchestrator/tools scripts.
+#
+#   factory linear get CLNT-616
+#   factory queue --repo bj29
+#   factory next --repo bj29 --apply
+#   factory run --repo bj29 --command factory-triage --read-only
+#
+# Install: bun build/emit.mjs --link-bin  (symlink -> ~/.local/bin/factory)
+set -euo pipefail
+
+# Resolve symlinks (~/.local/bin/factory -> checkout/bin/factory).
+_script="${BASH_SOURCE[0]}"
+while [ -h "$_script" ]; do
+  _dir="$(cd -P "$(dirname "$_script")" && pwd)"
+  _script="$(readlink "$_script")"
+  [[ "$_script" != /* ]] && _script="$_dir/$_script"
+done
+ROOT="$(cd -P "$(dirname "$_script")/.." && pwd)"
+export FACTORY_ROOT="$ROOT"
+
+cmd="${1:-}"
+shift || true
+
+run_bun() {
+  exec bun "$ROOT/$1" "${@:2}"
+}
+
+run_sh() {
+  exec bash "$ROOT/$1" "${@:2}"
+}
+
+case "$cmd" in
+  linear)       run_bun tools/linear.mjs "$@" ;;
+  queue)        run_bun orchestrator/queue.mjs "$@" ;;
+  next)         run_bun orchestrator/next.mjs "$@" ;;
+  state)        run_bun orchestrator/state.mjs "$@" ;;
+  friction)     run_bun orchestrator/friction.mjs "$@" ;;
+  economics)    run_bun orchestrator/economics.mjs "$@" ;;
+  ci)           run_bun orchestrator/ci.mjs "$@" ;;
+  label-guard)  run_bun orchestrator/label-guard.mjs "$@" ;;
+  digest)       run_bun orchestrator/digest.mjs "$@" ;;
+  doctor)       run_bun orchestrator/doctor.mjs "$@" ;;
+  escalate)     run_bun orchestrator/escalate.mjs "$@" ;;
+  reconcile)    run_bun orchestrator/reconcile.mjs "$@" ;;
+  reaper)       run_bun orchestrator/reaper.mjs "$@" ;;
+  janitor)      run_bun orchestrator/janitor.mjs "$@" ;;
+  warm)         run_bun orchestrator/warm.mjs "$@" ;;
+  tick)         run_bun orchestrator/tick.mjs "$@" ;;
+  run)          run_sh runners/run-agent.sh "$@" ;;
+  ""|help|-h|--help)
+    cat <<EOF
+factory — factory control plane (FACTORY_ROOT=$ROOT)
+
+  linear        tools/linear.mjs
+  queue         orchestrator/queue.mjs
+  next          orchestrator/next.mjs
+  state         orchestrator/state.mjs
+  friction      orchestrator/friction.mjs
+  economics     orchestrator/economics.mjs
+  ci            orchestrator/ci.mjs
+  label-guard   orchestrator/label-guard.mjs
+  digest        orchestrator/digest.mjs
+  doctor        orchestrator/doctor.mjs
+  escalate      orchestrator/escalate.mjs
+  reconcile     orchestrator/reconcile.mjs
+  reaper        orchestrator/reaper.mjs
+  janitor       orchestrator/janitor.mjs
+  warm          orchestrator/warm.mjs
+  tick          orchestrator/tick.mjs
+  run           runners/run-agent.sh
+
+Works from any cwd (worktrees included). Install: bun build/emit.mjs --link-bin
+EOF
+    ;;
+  *)
+    echo "factory: unknown subcommand '$cmd' (try: factory help)" >&2
+    exit 2
+    ;;
+esac

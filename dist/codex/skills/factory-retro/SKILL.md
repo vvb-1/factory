@@ -12,9 +12,9 @@ Turn measured friction into harness changes.
 Agents don't reliably remember what slowed them down, and asking them to write it up produces either nothing or noise. Three sources carry the evidence instead:
 
 ```bash
-bun orchestrator/friction.mjs $ARGUMENTS
-bun orchestrator/economics.mjs $ARGUMENTS
-bun orchestrator/ci.mjs $ARGUMENTS
+factory friction $ARGUMENTS
+factory economics $ARGUMENTS
+factory ci $ARGUMENTS
 ```
 
 Friction is what wasted the agents' *time* inside a session; economics is what consumed *context and the usage window* (context burn, cache thrash, zero-result runs); CI is the clock agents wait on *outside* the session — `gh pr checks --watch` in factory-merge/factory-ship sitting idle for however long GitHub Actions takes, per repo per workflow, with repeat-failure and slowdown-trend flags already computed. A repeat in any of the three is actionable — a tool that fails three runs running, a tool whose payloads dominate context burn, and an e2e job that's crept 40% slower over two weeks are all harness defects.
@@ -61,7 +61,7 @@ For each item worth acting on: make the change if it is small and mechanical, or
 Before reporting, persist what you measured:
 
 ```bash
-bun orchestrator/economics.mjs --roll
+factory economics --roll
 ```
 
 That appends this batch's runs to the durable rollup (`~/.factory/metrics/runs.jsonl`) — the record that outlives the transcripts — and it is also what closes the retro gate until enough new runs accumulate.

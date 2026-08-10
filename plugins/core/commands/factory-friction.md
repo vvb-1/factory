@@ -6,7 +6,7 @@ model: sonnet
 
 Capture harness friction from an interactive session where no orchestrator transcript exists.
 
-Runs dispatched through `runners/run-agent.sh` or `orchestrator/tick.mjs` already write JSONL to `~/.factory/logs/` — `/factory-retro` measures those mechanically via `bun orchestrator/friction.mjs`. This command is the **backstop** when you ran `/factory-work`, `/factory-merge`, `/factory-ticket`, `/factory-ship`, or similar **directly** in a harness (Claude, Codex, Pi, Cursor) without `FACTORY_RUN_ID` set.
+Runs dispatched through `runners/run-agent.sh` or `orchestrator/tick.mjs` already write JSONL to `~/.factory/logs/` — `/factory-retro` measures those mechanically via `factory friction`. This command is the **backstop** when you ran `/factory-work`, `/factory-merge`, `/factory-ticket`, `/factory-ship`, or similar **directly** in a harness (Claude, Codex, Pi, Cursor) without `FACTORY_RUN_ID` set.
 
 ## 1. When to use
 
@@ -30,7 +30,7 @@ Same bar as `docs/friction-log.md` — only two things:
 
 ## 4. Search before filing
 
-Search Linear (`bun "$FACTORY_ROOT/tools/linear.mjs"` or the Linear CLI per `linear.md` §13) for:
+Search Linear (`factory linear` or `linear.md` §13) for:
 
 - Existing `FIP:` issues describing the same shape
 - Prior issues whose body contains `## Session friction` with the same **Shape**
@@ -71,7 +71,7 @@ Factory-wide items: prefix the title with `FIP:`. Do not write the full §5 agen
 - **`area:*`** — `area:factory` for OPS/FIP items; match the repo's area labels for product-repo friction
 - **State:** `Triage` only — never `Todo` + `ai:agent-ready` from this command
 
-Use `bun "$FACTORY_ROOT/tools/linear.mjs" file ...` from a worktree; if `FACTORY_ROOT` is unset, use `~/Develop/factory/tools/linear.mjs`.
+Use `factory linear file ...` from a worktree.
 
 ## 8. Report
 

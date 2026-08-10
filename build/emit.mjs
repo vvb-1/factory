@@ -5,6 +5,7 @@
  *   bun build/emit.mjs           # regenerate plugins/ and dist/
  *   bun build/emit.mjs --check   # CI: fail if the tree isn't reproducible
  *   bun build/emit.mjs --link    # symlink this machine's harnesses at shared/
+ *   bun build/emit.mjs --link-bin # symlink bin/factory -> ~/.local/bin/factory
  *   bun run link-repos           # symlink plugins/core/commands/ into every
  *                                 # configured repo's .claude/commands/ — run
  *                                 # this whenever a /factory-* command is
@@ -34,6 +35,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHARED = path.join(ROOT, "shared");
 const CHECK = process.argv.includes("--check");
 const LINK = process.argv.includes("--link");
+const LINK_BIN = process.argv.includes("--link-bin");
 
 const rel = (p) => path.relative(ROOT, p);
 const read = (p) => readFileSync(p, "utf8");
@@ -263,6 +265,29 @@ if (process.argv.includes("--link-repos")) {
     console.log(`  linked   ${repo.name}  ${commands.length} command(s) -> ${repo.path}/.claude/commands/`);
   }
 }
+
+function linkFactoryBin() {
+  const src = path.join(ROOT, "bin", "factory");
+  const dst = path.join(homedir(), ".local/bin/factory");
+  if (!existsSync(src)) {
+    console.error(`missing ${src}`);
+    process.exit(2);
+  }
+  mkdirSync(path.dirname(dst), { recursive: true });
+  let existing = null;
+  try { existing = lstatSync(dst); } catch {}
+  if (existing) {
+    if (!existing.isSymbolicLink()) {
+      console.log(`  skip     ${dst}  (real file — not overwriting)`);
+      return;
+    }
+    unlinkSync(dst);
+  }
+  symlinkSync(src, dst);
+  console.log(`  linked   ${dst.replace(homedir(), "~")} -> ${src.replace(homedir(), "~")}`);
+}
+
+if (LINK_BIN || LINK) linkFactoryBin();
 
 // ------------------------------------------------------------------- link ----
 if (LINK) {

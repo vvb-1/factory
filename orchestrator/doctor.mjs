@@ -18,8 +18,9 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { homedir } from "node:os";
 import { gql } from "./reaper.mjs";
-import { ROOT } from "../lib/schedule.mjs";
+import { factoryRoot } from "../lib/factory-root.mjs";
 
+const ROOT = factoryRoot();
 const argv = process.argv.slice(2);
 const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
 const only = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -61,6 +62,13 @@ for (const [bin, fix] of [
   check(r.status === 0, bin, r.stdout.trim(), fix);
 }
 
+const factoryBin = sh("command -v factory");
+const factoryScript = path.join(ROOT, "bin/factory");
+check(factoryBin.status === 0, "factory CLI on PATH", factoryBin.stdout.trim(),
+  "bun build/emit.mjs --link-bin && ensure ~/.local/bin is on PATH");
+check(existsSync(factoryScript), "bin/factory in checkout", factoryScript,
+  "git pull the factory repo — bin/factory is part of the control plane");
+
 const key = process.env.LINEAR_API_KEY || (existsSync(expand("~/Develop/hdkiller/.env")) &&
   /LINEAR_API_KEY/.test(readFileSync(expand("~/Develop/hdkiller/.env"), "utf8")));
 check(Boolean(key), "LINEAR_API_KEY", key ? "found" : "", "add it to ~/Develop/hdkiller/.env or the environment");
@@ -70,7 +78,7 @@ check(Boolean(key), "LINEAR_API_KEY", key ? "found" : "", "add it to ~/Develop/h
 const df = sh("df -h ~ | tail -1 | awk '{print $5\" used, \"$4\" free\"}'");
 const pct = Number((df.stdout.match(/(\d+)%/) || [])[1] || 0);
 check(pct < 90 ? true : "warn", "disk", df.stdout.trim(),
-  pct >= 90 ? "run `bun orchestrator/janitor.mjs --repo <name> --apply` to reclaim finished worktrees" : null);
+  pct >= 90 ? "run `factory janitor --repo <name> --apply` to reclaim finished worktrees" : null);
 
 if (!repos.length) {
   console.error(c.red(`\nno matching repo in config/repos.yaml`));

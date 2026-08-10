@@ -13,8 +13,11 @@ Do this **before** loading any launchd job. A launchd process inherits no intera
 ```bash
 bun build/emit.mjs           # regenerate plugins/ and dist/
 bun build/emit.mjs --link    # symlink ~/.agents/skills, ~/.gemini, ~/.cursor at shared/
+bun build/emit.mjs --link-bin # symlink ~/.local/bin/factory (cwd-independent CLI)
 bun run link-repos           # symlink plugins/core/commands/ into every repo in config/repos.yaml
 ```
+
+Add `~/.local/bin` to your PATH if it is not already (e.g. `export PATH="$HOME/.local/bin:$PATH"` in `~/.zshrc`).
 
 Symlinks rather than copies: `git pull` then updates every harness at once, and there's no copy to drift. `--link`/`--link-repos` refuse to overwrite a real file, so neither will clobber anything you wrote by hand.
 

@@ -98,20 +98,32 @@ If a browser tool still errors: report it and continue with non-browser verifica
 
 Quote glob arguments: `grep -rn "..." src --include='*.ts'`, never `--include=*.ts`. zsh expands the unquoted form against the current directory and **errors** when nothing matches there, killing the command before grep runs. Seen repeatedly in real transcripts.
 
-### Linear
+### Factory scripts
 
-**Use `bun tools/linear.mjs` from the factory checkout — not the Linear MCP, and not the standalone `linear` CLI.** The MCP fails input validation often enough that 96 measured runs fell through to a hand-rolled GraphQL fallback; the schpet `linear` CLI fails differently (`linear issue comment CLNT-526 --body` is wrong syntax — it needs `comment add`; `linear issue query` with hand-rolled filters errors on type coercion). Both waste turns. The factory tool is in git, has the protocol's guardrails built in, and its claim verb performs the read-back that _is_ the concurrency control.
-
-You work in a worktree, not in the factory checkout, so **always go through `$FACTORY_ROOT`** — the factory sets it on every run. A bare `bun tools/linear.mjs` resolves to nothing.
+Mechanical factory tools run from **any cwd** via the `factory` CLI on PATH — product checkouts and worktrees do not contain `orchestrator/` or `tools/`.
 
 ```bash
-L="$FACTORY_ROOT/tools/linear.mjs"                 # or ~/Develop/factory/tools/linear.mjs
-bun "$L" get CLNT-616                              # ticket, state, labels, criteria
-bun "$L" claim CLNT-616 --agent claude             # assign + In Progress + labels + read-back
-bun "$L" comment CLNT-616 "..."                    # the heartbeat
-bun "$L" state CLNT-616 "In Review" --add ai:needs-review
-bun "$L" file --team CLNT --title "..." --body "..." --type bug
-bun "$L" queue --team CLNT                         # what is dispatchable
+factory linear get CLNT-616
+factory queue --repo bj29
+factory next --repo bj29
+factory label-guard --repo bj29 --apply
+```
+
+Install once: `bun build/emit.mjs --link-bin` (symlinks `~/Develop/factory/bin/factory` → `~/.local/bin/factory`). Never `bun orchestrator/...` from a worktree — that path is not there.
+
+### Linear
+
+**Use `factory linear` — not the Linear MCP, and not the standalone `linear` CLI.** The MCP fails input validation often enough that 96 measured runs fell through to a hand-rolled GraphQL fallback; the schpet `linear` CLI fails differently (`linear issue comment CLNT-526 --body` is wrong syntax — it needs `comment add`; `linear issue query` with hand-rolled filters errors on type coercion). Both waste turns. The factory tool is in git, has the protocol's guardrails built in, and its claim verb performs the read-back that _is_ the concurrency control.
+
+You work in a worktree, not in the factory checkout. **`factory linear` resolves the checkout itself**; headless runs also set `$FACTORY_ROOT`. Fallback when the CLI is missing: `bun "$FACTORY_ROOT/tools/linear.mjs"`.
+
+```bash
+factory linear get CLNT-616                              # ticket, state, labels, criteria
+factory linear claim CLNT-616 --agent claude             # assign + In Progress + labels + read-back
+factory linear comment CLNT-616 "..."                    # the heartbeat
+factory linear state CLNT-616 "In Review" --add ai:needs-review
+factory linear file --team CLNT --title "..." --body "..." --type bug
+factory linear queue --team CLNT                         # what is dispatchable
 ```
 
 `claim` **exits non-zero when another agent won the race** — that is not a retry, it means take the next ticket. For anything the verbs do not cover, `raw '<graphql>' --var k=v` beats inventing a new flag.

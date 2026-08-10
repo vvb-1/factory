@@ -181,7 +181,7 @@ LOG="$LOG_DIR/${REPO}-${COMMAND}-$(date +%Y%m%d-%H%M%S).jsonl"
 export FACTORY_RUN_ID="$(basename "$LOG" .jsonl)"
 export FACTORY_HARNESS="$HARNESS"
 
-(cd "$ROOT" && bun orchestrator/state.mjs record \
+(cd "$ROOT" && "$ROOT/bin/factory" state record \
   --type start --repo "$REPO" --command "$COMMAND" \
   --args "$ARGS" --harness "$HARNESS" --run-id "$FACTORY_RUN_ID") 2>/dev/null || true
 
@@ -299,7 +299,7 @@ if [[ "$STATUS" -eq 0 ]]; then
 else
   SUMMARY="exit $STATUS"
 fi
-(cd "$ROOT" && bun orchestrator/state.mjs record \
+(cd "$ROOT" && "$ROOT/bin/factory" state record \
   --type complete --repo "$REPO" --command "$COMMAND" \
   --harness "$HARNESS" --run-id "$FACTORY_RUN_ID" \
   --summary "$SUMMARY" --ok "$([[ "$STATUS" -eq 0 ]] && echo 1 || echo 0)") 2>/dev/null || true

@@ -1,6 +1,6 @@
 Pick **one** next step in the factory loop for the current repository — diagnose by default, run only when asked.
 
-The mechanical routing lives in `orchestrator/next.mjs`, which reads the same queue snapshot as `queue.mjs`. Do not re-derive gates from Linear yourself.
+The mechanical routing lives in `factory next`, which reads the same queue snapshot as `factory queue`. Do not re-derive gates from Linear yourself.
 
 ## 1. Resolve repo
 
@@ -8,14 +8,14 @@ Default: match the current working directory against `config/repos.yaml`. `$ARGU
 
 ## 2. Diagnose
 
-From the factory checkout:
+From the factory checkout (or any cwd with `factory` on PATH):
 
 ```bash
-bun orchestrator/state.mjs --repo <repo>
-bun orchestrator/next.mjs --repo <repo> $ARGUMENTS
+factory state --repo <repo>
+factory next --repo <repo> $ARGUMENTS
 ```
 
-Show **session history** from `state.mjs` (what ran earlier in this harness window), then **constraint**, **recommend**, **because**, and any **also** alternates from `next.mjs`. Both scripts record events to `~/.factory/state/events.jsonl` — `recommend` on every next run, `start` on `--apply`.
+Show **session history** from `factory state` (what ran earlier in this harness window), then **constraint**, **recommend**, **because**, and any **also** alternates from `factory next`. Both record events to `~/.factory/state/events.jsonl` — `recommend` on every next run, `start` on `--apply`.
 
 If `budgetBlocked` is set, stop — no new agent stages today.
 
@@ -30,25 +30,25 @@ If `budgetBlocked` is set, stop — no new agent stages today.
 Alternatively, delegate execution to the script:
 
 ```bash
-bun orchestrator/next.mjs --repo <repo> --apply [--orchestrated] [--harness <harness>] $OTHER_FLAGS
+factory next --repo <repo> --apply [--orchestrated] [--harness <harness>] $OTHER_FLAGS
 ```
 
 Use the script path when running headless via `run-agent.sh`; use the slash command path when you are already in an interactive harness.
 
 ## 4. Report
 
-State what ran (or what was recommended), the queue constraint in one line, and anything waiting on a human (blocked holds — suggest `bun orchestrator/digest.mjs`).
+State what ran (or what was recommended), the queue constraint in one line, and anything waiting on a human (blocked holds — suggest `factory digest --repo <repo>`).
 
 Record the outcome:
 
 ```bash
-bun orchestrator/state.mjs record --type complete --repo <repo> --command <stage> --summary "<one line>"
+factory state record --type complete --repo <repo> --command <stage> --summary "<one line>"
 ```
 
 **Session friction:** when `FACTORY_RUN_ID` is unset, scan the session per `/factory-friction` and note items filed or **none observed**. If any were filed:
 
 ```bash
-bun orchestrator/state.mjs record --type friction --repo <repo> --issues "OPS-123"
+factory state record --type friction --repo <repo> --issues "OPS-123"
 ```
 
 ## Priority (for transparency — the script encodes this)

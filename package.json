@@ -18,6 +18,7 @@
     "emit": "bun build/emit.mjs",
     "check": "bun build/emit.mjs --check",
     "link": "bun build/emit.mjs --link",
+    "link-bin": "bun build/emit.mjs --link-bin",
     "link-repos": "bun build/emit.mjs --link-repos",
     "sync-floor": "bun build/emit.mjs --sync-floor",
     "economics": "bun orchestrator/economics.mjs",
