@@ -621,6 +621,15 @@ const leaseHeartbeat = setInterval(() => {
   }
 }, LEASE_HEARTBEAT_MS);
 
+// Orphaned agent Chrome holds SingletonLock on the shared profile and blocks
+// every later browser launch (×43+ failures across 20 runs in friction.mjs).
+// Sweep before dispatch — only kills Chrome reparented to PID 1.
+if (APPLY) {
+  const sweep = spawnSync("/bin/bash", ["-lc", "bun orchestrator/chrome-sweep.mjs --apply"], { cwd: ROOT, encoding: "utf8" });
+  const line = (sweep.stdout || sweep.stderr || "").trim().split("\n").filter(Boolean).pop();
+  if (line && !line.includes("no orphaned")) console.log(c.dim(`  chrome-sweep: ${line}`));
+}
+
 await fill();
 if (!running.size) { clearInterval(leaseHeartbeat); console.log(c.dim("\n  nothing started.\n")); process.exit(0); }
 

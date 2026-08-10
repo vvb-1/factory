@@ -1,6 +1,6 @@
 Implement **one** ticket: $ARGUMENTS. You are already in its worktree, and the ticket is already claimed for you.
 
-The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In Progress`, assigned, labelled `ai:in-progress` + `agent:claude-code`, and this worktree was created by the repo's own `worktree-up.sh` with its own branch, ports and database. **Do not create another worktree, do not claim another ticket, and do not work anything except this one.**
+The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In Progress`, assigned, labelled `ai:in-progress` + `agent:claude-code`, and this worktree was created by the repo's own `worktree-up.sh` with its own branch, ports and database. **Do not create another worktree, do not claim another ticket, and do not work anything except this one.** This is the dispatched path, so it is always exactly one ticket — the protocol's human-requested ticket bundles (`linear.md` §6) never arrive here.
 
 ## Do
 
@@ -34,3 +34,9 @@ The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In P
 Do not open a PR. Comment the ticket with the specific decision, credential, or missing piece you need — phrased so one reply unblocks it — then move it to `Blocked` + `ai:blocked` and stop. A blocked ticket with a clear question is a good outcome; a PR built on a guess is not.
 
 If the work turns out to touch auth/authz, payments, secrets, destructive migrations, or production infra, say so and stop rather than pushing. Those are never merged without a human, so the useful thing is the finding, not the diff.
+
+## Capture session friction (interactive runs only)
+
+**Skip when `FACTORY_RUN_ID` is set** — orchestrator runs already write transcripts to `~/.factory/logs/` for `/factory-retro` to measure.
+
+When unset, scan the session for harness friction per `/factory-friction` before finishing. Report friction items filed (IDs) or **none observed** in the handoff comment or final message.

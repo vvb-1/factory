@@ -179,6 +179,11 @@ LOG="$LOG_DIR/${REPO}-${COMMAND}-$(date +%Y%m%d-%H%M%S).jsonl"
 # floor's rule. Complementary to OPS-40, not a replacement for a real assignee
 # lock (OPS-76).
 export FACTORY_RUN_ID="$(basename "$LOG" .jsonl)"
+export FACTORY_HARNESS="$HARNESS"
+
+(cd "$ROOT" && bun orchestrator/state.mjs record \
+  --type start --repo "$REPO" --command "$COMMAND" \
+  --args "$ARGS" --harness "$HARNESS" --run-id "$FACTORY_RUN_ID") 2>/dev/null || true
 
 echo "→ $REPO ($REPO_TEAM)  $PROMPT"
 echo "  cwd:    $REPO_PATH"
@@ -288,5 +293,15 @@ else
 fi
 STATUS=${PIPESTATUS[1]}
 set -e
+
+if [[ "$STATUS" -eq 0 ]]; then
+  SUMMARY="ok"
+else
+  SUMMARY="exit $STATUS"
+fi
+(cd "$ROOT" && bun orchestrator/state.mjs record \
+  --type complete --repo "$REPO" --command "$COMMAND" \
+  --harness "$HARNESS" --run-id "$FACTORY_RUN_ID" \
+  --summary "$SUMMARY" --ok "$([[ "$STATUS" -eq 0 ]] && echo 1 || echo 0)") 2>/dev/null || true
 
 exit "$STATUS"

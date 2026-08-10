@@ -38,3 +38,5 @@ The deploy branch usually auto-deploys, so the merge is not the finish line:
 ## 6. Report
 
 What shipped: ticket IDs and one-liners, the release PR link, CI + smoke status on master. If anything was reverted, fixed, or skipped, say exactly what and why. File anything discovered along the way (flaky release CI, direct-to-master commits, missing smoke coverage) to Linear `Triage` per the discovered-work rule.
+
+**Session friction:** skip when `FACTORY_RUN_ID` is set. When unset, scan the session per `/factory-friction` and note friction items filed (IDs) or **none observed**.

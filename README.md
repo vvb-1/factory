@@ -171,7 +171,7 @@ The agent runs with `cwd` set to the repo, so it reads that repo's `AGENTS.md` n
 | :--- | :--- | :--- |
 | The repo itself | `~/Develop/pets/bj29` (`repos.yaml: path`) | Triage reads it; worktrees are created *from* it |
 | Per-ticket worktrees | `~/Develop/.worktrees/<repo>/<TICKET>` (`repos.yaml: worktree_root`) | One ticket, one checkout, own branch/ports/database |
-| Factory runtime state | `~/.factory/` | Session ids, budget ledger, logs — never in git |
+| Factory runtime state | `~/.factory/` | Session ids, budget ledger, logs, stage journal — never in git |
 | This repo | `~/Develop/factory` | Control plane only. **No work happens here.** |
 
 **Worktrees must not live inside `~/Develop/factory/`.** It's a git repo, so nesting checkouts under it means `git status` noise, a real chance of `git add -A` sweeping an entire worktree into a commit, and the drift check walking trees it has no business in. A control plane that can accidentally commit its own workload is a bad control plane.

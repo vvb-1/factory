@@ -10,11 +10,17 @@
 
 Non-negotiable for every agent in this repo, in any harness. Full protocol: `~/Develop/hdkiller/docs/orgs/linear.md`. If that path doesn't exist where you're running (a cloud sandbox, someone else's machine), this block is the whole contract — follow it as written and don't infer the rest.
 
-**Work comes from Linear, and only when it's ready.** A ticket is dispatchable only if it is `Todo` + `ai:agent-ready` + unassigned. `Triage` and `Backlog` are not queues to pull from. If you're asked to do meaningful, trackable work with no ticket, create one first.
+**Work comes from Linear, and only when it's ready.** A ticket is dispatchable only if it is `Todo` + `ai:agent-ready` + unassigned. `Triage` and `Backlog` are not queues to pull from.
+
+**An ad-hoc request gets a ticket too — file it, don't wait to be asked.** A request typed into a chat session is not exempt from the control plane; if it isn't tracked, it is invisible to every other agent and to tomorrow. **The trip wire is your first file edit:** before it, either find the issue that already covers this or create one, and say in one line which it is ("Tracking as OPS-91"). Commits still carry their `(ISSUE-ID)`. Skip the ticket only for ordinary questions, read-only lookups with no actionable finding, and inconsequential edits — and the human can always say "no ticket", which settles it. Sessions drift: one that began as a question and turned into a change trips the wire at that moment, not at the end.
+
+**Retroactive capture is the backstop, not the plan.** If you notice partway through, or while wrapping up, that work already done has no issue, file it _then_ — with the commits or PR linked and the state set to where the work actually is (`Done` if it is already merged and green), never dressed up as queued work. Before reporting a session finished, check that everything you changed is on a ticket. A late ticket beats an invisible change; both are worse than filing up front.
 
 **Claim before you code.** Set assignee to yourself, state `In Progress`, add `ai:in-progress`, then **re-read the ticket** — if the assignee isn't you, another agent won the race; take the next one. This read-back is the entire concurrency control.
 
 **One ticket, one worktree.** Never share a checkout between concurrent tickets. **If the repo ships a worktree script (`bin/worktree-up.sh` or equivalent), it is mandatory** — git isolates branches, not ports or databases, and a migration against a shared dev database destroys another agent's work silently.
+
+**Bundling several tickets into one worktree is the human's call, never yours.** When the human explicitly asks for a set of tickets to be done together, they share one worktree, one branch (named after the lead ticket) and one PR: claim _every_ ticket in the bundle and heartbeat all of them, keep one commit per ticket, scope the work to the union of their `Owned Paths`, and give the PR body a `Fixes <ISSUE-ID>` line per ticket. If one of them turns out to be bigger than it looked or gets blocked, unassign it back to `Todo` and ship the rest — never stall the others behind it. Absent that explicit instruction it is one ticket, one worktree; noticing that two tickets are related is a reason to say so, not to merge them yourself.
 
 **Stay inside `Owned Paths`.** That glob set is what makes parallel work safe; the dispatcher refuses to run two tickets whose sets intersect. Work discovered outside it becomes a new `Triage` issue — it never expands the current ticket.
 
@@ -94,7 +100,7 @@ Quote glob arguments: `grep -rn "..." src --include='*.ts'`, never `--include=*.
 
 ### Linear
 
-**Use `bun tools/linear.mjs` from the factory checkout — not the Linear MCP.** The MCP is a UI-managed connector that fails input validation often enough that 96 measured runs fell through to a hand-rolled GraphQL fallback. The tool is in git, has the protocol's guardrails built in, and its claim verb performs the read-back that _is_ the concurrency control.
+**Use `bun tools/linear.mjs` from the factory checkout — not the Linear MCP, and not the standalone `linear` CLI.** The MCP fails input validation often enough that 96 measured runs fell through to a hand-rolled GraphQL fallback; the schpet `linear` CLI fails differently (`linear issue comment CLNT-526 --body` is wrong syntax — it needs `comment add`; `linear issue query` with hand-rolled filters errors on type coercion). Both waste turns. The factory tool is in git, has the protocol's guardrails built in, and its claim verb performs the read-back that _is_ the concurrency control.
 
 You work in a worktree, not in the factory checkout, so **always go through `$FACTORY_ROOT`** — the factory sets it on every run. A bare `bun tools/linear.mjs` resolves to nothing.
 

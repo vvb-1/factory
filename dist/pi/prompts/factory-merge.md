@@ -74,6 +74,12 @@ If base CI or the smoke check breaks after a batch, stop merging further batches
 
 Reviewing diffs is where follow-up work surfaces. Anything the review reveals that doesn't block this merge — defects elsewhere, missing test coverage, tech debt, refactor opportunities, UX rough edges, improvement ideas — gets a Linear issue in `Triage` **at the moment you spot it**: correct team/project, `type:*` + `area:*` + `source:agent` labels, evidence-based priority, linked to the PR and ticket that surfaced it. A finding mentioned only in this report or a PR comment is a finding lost. Filing is cheap; err on the side of filing. This applies to escalated and left-open PRs too, not just merged ones.
 
+## Capture session friction (interactive runs only)
+
+**Skip when `FACTORY_RUN_ID` is set** — orchestrator runs already write transcripts to `~/.factory/logs/` for `/factory-retro` to measure.
+
+When unset, scan the session for harness friction per `/factory-friction` (same bar as `docs/friction-log.md`). Include in the final report: friction items filed (IDs) or **none observed**.
+
 ## Final report
 
 Table: PR, ticket, verdict (merged / fixed-then-merged / escalated / left open), key findings. List everything filed to `Triage`. Escalated PRs come with enough context that I can decide from the report alone.

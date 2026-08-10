@@ -50,3 +50,9 @@ When the in-flight count drops below the cap and the queue still has agent-ready
 Notify me during the run only for exceptions (§14): a ticket blocked, a PR escalated, base CI or smoke red, the circuit breaker tripping. Not for routine claims, PRs, or clean merges.
 
 Final report: per ticket — merged / PR open / escalated / blocked / skipped, with links; what was filed to `Triage`; and anything waiting on a decision from me, with enough context to answer from the report alone. Post a project update (§10) if the run closed a meaningful batch or hit a blocker.
+
+## 6. Capture session friction (interactive runs only)
+
+**Skip when `FACTORY_RUN_ID` is set** — orchestrator runs already write transcripts to `~/.factory/logs/` for `/factory-retro` to measure.
+
+When unset (this command ran directly in Claude, Codex, Pi, or Cursor), scan the session for harness friction using the bar in `docs/friction-log.md` and file findings per `/factory-friction`. Include in the final report: friction items filed (IDs) or **none observed**.

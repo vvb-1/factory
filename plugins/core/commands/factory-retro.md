@@ -18,6 +18,8 @@ Friction is what wasted the agents' *time* inside a session; economics is what c
 
 **friction.mjs and economics.mjs need `~/.factory/logs/` transcripts, which only exist for runs the orchestrator itself dispatched.** Invoked directly from the harness — you running `/factory-retro` in a repo without going through orchestrator dispatch — there may be no matching transcripts; `friction.mjs` exits with "no transcripts" in that case, which is expected, not a failure, so don't chase it as one. `ci.mjs` has no such dependency: it reads GitHub's own run history, so it carries the CI-reflection half of retro on its own even when the other two have nothing. Run all three regardless; treat an empty friction/economics result as "no session data this time," not as a broken retro.
 
+**Interactive sessions without transcripts** file friction via `/factory-friction` at the end of `/factory-work`, `/factory-merge`, `/factory-ticket`, and `/factory-ship` (skipped when `FACTORY_RUN_ID` is set). Search Linear for `FIP:` issues and bodies containing `## Session friction` — merge that evidence with the mechanical transcript analysis below before deciding what to fix.
+
 Then read `docs/friction-log.md` for what is already known and what was already decided against — the point is a shrinking list, not an accumulating one.
 
 ## What counts
