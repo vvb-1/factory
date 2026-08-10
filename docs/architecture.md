@@ -145,13 +145,13 @@ The real constraint is the **usage window**, which nothing here can observe. Per
 | ticket (implementation) | **opus** | the code is the product |
 | merge | **opus** | review catches what tests don't; last gate before `develop` auto-deploys |
 | audit | sonnet | mechanical checklist |
-| ux-critic | sonnet | exercises the app and reports |
+| factory-ux-critic | sonnet on Claude; parent model elsewhere | exercises the app and reports |
 
 Triage is the live judgement call: a bad spec burns a full dispatch run, which argues for opus; `evals/` is the cheaper place to catch spec quality dropping. Currently sonnet — revisit if specs degrade.
 
 ### 2.11 Content is harness-neutral; packaging is generated
 
-`shared/` is the only place to edit. `build/emit.mjs` produces the Claude plugin, `~/.codex/skills`, `~/.gemini/skills`, `~/.cursor/commands`, and the `AGENTS.md` floor block.
+`shared/` is the only place to edit. `build/emit.mjs` produces the Claude plugin, harness-native skills/prompts, custom-agent definitions for Claude Code, Codex, Gemini, Cursor, and Pi, and the `AGENTS.md` floor block.
 
 `--check` is the half that matters: it fails CI when a generated file drifts from `shared/`. The failure this prevents is real — coach-wattz carries "NEVER `prisma db push`" only in `GEMINI.md`, invisible to Claude Code. Four generated copies beat four hand-written ones **only** if CI proves they still match their source.
 
