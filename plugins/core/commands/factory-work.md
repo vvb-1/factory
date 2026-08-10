@@ -43,7 +43,7 @@ Merging is the orchestrator's job, not the subagents'. As each PR's CI finishes 
 
 ## 4. Keep going
 
-When the in-flight count drops below the cap and the queue still has agent-ready tickets within the ticket cap, keep claiming — don't stop to ask whether to continue. Stop when the queue is empty, the cap is reached, or the circuit breaker trips: **two consecutive tickets failing for environment or build reasons** (not ticket-specific ones) stops dispatch immediately, with a report — a broken worktree template will otherwise convert the whole queue into `Blocked` in minutes.
+When the in-flight count drops below the cap and the queue still has agent-ready tickets within the ticket cap, keep claiming — don't stop to ask whether to continue. Stop when the queue is empty, the cap is reached, or the circuit breaker trips: **two consecutive tickets failing for environment or build reasons** (not ticket-specific ones) stops dispatch immediately, with a report. When the failure surfaced as a red CI run and the cause isn't obvious, spawn `factory-ci-doctor` to make that call — its `ENV` verdict is what counts toward the breaker, its `TICKET` verdict does not — a broken worktree template will otherwise convert the whole queue into `Blocked` in minutes.
 
 ## 5. Notify and report
 

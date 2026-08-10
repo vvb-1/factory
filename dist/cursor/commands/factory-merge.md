@@ -38,7 +38,7 @@ Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the mo
 
 ### 3. Fix loop (for FIX)
 
-Check out the PR branch in its worktree (or a fresh one), fix the findings / CI failures / conflicts (rebase or merge base branch per repo convention), run the ticket's Verification Command until clean, push, wait for CI, and **re-review your own fix diff** before reclassifying. Maximum **2 fix rounds per PR** — still not mergeable after that: escalate with a summary of what was tried. Never weaken tests, skip checks, or expand scope to force a green build; if the test is what's wrong, that's a finding to report, not to silently edit around.
+For a red CI run, spawn `factory-ci-doctor` on it first — it returns TICKET / ENV / FLAKE with the culprit step and log lines, so the failed-job logs stay out of this session; a FLAKE verdict with evidence justifies `gh run rerun` instead of a code fix. Then check out the PR branch in its worktree (or a fresh one), fix the findings / CI failures / conflicts (rebase or merge base branch per repo convention), run the ticket's Verification Command until clean, push, wait for CI, and **re-review your own fix diff** before reclassifying. Maximum **2 fix rounds per PR** — still not mergeable after that: escalate with a summary of what was tried. Never weaken tests, skip checks, or expand scope to force a green build; if the test is what's wrong, that's a finding to report, not to silently edit around.
 
 ### 4. Merge (for MERGE)
 
