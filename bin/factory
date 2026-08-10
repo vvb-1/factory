@@ -19,6 +19,38 @@ done
 ROOT="$(cd -P "$(dirname "$_script")/.." && pwd)"
 export FACTORY_ROOT="$ROOT"
 
+show_banner() {
+  # Box inner width (visible chars between borders)
+  _w=60
+  _pad() {
+    local s="$1" n=$(( _w - ${#1} ))
+    (( n < 0 )) && n=0
+    printf '  ║   %s%*s║\n' "$s" "$n" ""
+  }
+  if [[ -t 1 ]]; then
+    _b=$'\033[1m' _c=$'\033[36m' _d=$'\033[2m' _m=$'\033[35m' _r=$'\033[0m'
+  else
+    _b="" _c="" _d="" _m="" _r=""
+  fi
+  printf '%s%s\n' "$_c" "$_b"
+  echo '  ╔═══════════════════════════════════════════════════════════════╗'
+  echo '  ║                                                               ║'
+  echo '  ║   ███████╗ █████╗  ██████╗████████╗ ██████╗ ██████╗ ██╗   ██╗ ║'
+  echo '  ║   ██╔════╝██╔══██╗██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗╚██╗ ██╔╝ ║'
+  echo '  ║   █████╗  ███████║██║        ██║   ██║   ██║██████╔╝ ╚████╔╝  ║'
+  echo '  ║   ██╔══╝  ██╔══██║██║        ██║   ██║   ██║██╔══██╗  ╚██╔╝   ║'
+  echo '  ║   ██║     ██║  ██║╚██████╗   ██║   ╚██████╔╝██║  ██║   ██║    ║'
+  echo '  ║   ╚═╝     ╚═╝  ╚═╝ ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝   ╚═╝    ║'
+  echo '  ║                                                               ║'
+  _pad "${_d}Agent control plane · Linear · dispatch · merge${_r}"
+  echo '  ║                                                               ║'
+  _pad "${_m}▸ Proprietary software of Watt Mind${_r}"
+  _pad "${_d}Unauthorized use or distribution is prohibited.${_r}"
+  echo '  ║                                                               ║'
+  echo '  ╚═══════════════════════════════════════════════════════════════╝'
+  printf '%s\n' "$_r"
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -49,8 +81,9 @@ case "$cmd" in
   tick)         run_bun orchestrator/tick.mjs "$@" ;;
   run)          run_sh runners/run-agent.sh "$@" ;;
   ""|help|-h|--help)
+    show_banner
     cat <<EOF
-factory — factory control plane (FACTORY_ROOT=$ROOT)
+factory — control plane (FACTORY_ROOT=$ROOT)
 
   linear        tools/linear.mjs
   queue         orchestrator/queue.mjs
