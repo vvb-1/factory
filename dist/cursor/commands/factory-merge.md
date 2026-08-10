@@ -10,7 +10,7 @@ Interpret $ARGUMENTS as specific PR numbers or Linear issue IDs; default is ever
 
 **Start from the ticket's `## Handoff` comment** — dispatch posts one per PR (PR link, verification result, UX critique verdict, files vs `Owned Paths`, risks). It tells you where to concentrate: a stated risk gets read first, a `FIX-FIRST resolved` critique means re-checking those fixes, an exceptions line on Files means the `Owned Paths` check below already has a suspect. A missing or vague Handoff is a (minor) protocol finding to note — and a reason to trust the diff less, not to skip the review.
 
-CI passing is not the bar. Read the full diff and review for:
+CI passing is not the bar. **Prefer spawning the `factory-merge-reviewer` agent for this step** — one per PR, with the ticket, Handoff comment, `Owned Paths`, and the repo's `escalate_paths` in its prompt — so the full diff never enters this session's context; act on its MERGE/FIX/ESCALATE report (it never merges or edits; you do). Where subagents are unavailable, read the full diff yourself. Either way the review covers:
 
 - **Correctness**: logic errors, edge cases, race conditions, broken assumptions about existing code it touches.
 - **Bugs the tests don't catch**: error handling, null/undefined paths, off-by-ones, state that survives navigation, platform differences (iOS/Android/web).
