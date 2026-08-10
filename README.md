@@ -1,6 +1,6 @@
 # factory
 
-Runs on **bun**. The control layer of the Watt Mind agent factory: shared commands, agents, and skills distributed to every repo as a Claude Code plugin, plus the scheduler and dispatcher that run the standing loops.
+Runs on **bun**. The control layer of the Watt Mind agent factory: shared commands, agents, and skills packaged for every supported coding harness, plus the scheduler and dispatcher that run the standing loops.
 
 **Linear is the control plane, GitHub is the source of truth, CI is the reward signal.** Nothing merges because an agent said it was done — it merges because the tests passed and a reviewer (agent or human) approved.
 
@@ -13,10 +13,10 @@ shared/                           harness-neutral content, the only place to edi
   floor.md                        the non-negotiables (goes into every AGENTS.md)
   commands/                       factory-work, factory-merge, factory-triage, factory-audit
   skills/                         ticket-spec (SKILL.md — a format all harnesses share)
-  agents/                         ux-critic (Claude-only: needs its Task tool)
+  agents/                         factory-ux-critic (isolated specialist agent)
 build/emit.mjs                    shared/ -> per-harness packaging; --check guards drift
 plugins/core/                     GENERATED — the Claude Code plugin
-dist/{codex,gemini,cursor}/       GENERATED — the other harnesses
+dist/{codex,gemini,cursor,pi}/    GENERATED — the other harnesses
 dist/AGENTS.floor.md              GENERATED — paste/sync into each repo's AGENTS.md
 orchestrator/                     dispatch logic (owned-paths collision, tick)
 orchestrator/watch.jsx            read-only TUI: queue + in-flight tickets + live log tail
@@ -28,16 +28,16 @@ evals/                            prompt regression tests
 
 ## Multi-harness
 
-The **content** is portable; only the **packaging** isn't. `SKILL.md` is a format Claude, Codex, and Gemini all consume, and command bodies are just markdown.
+The **content** is portable; only the **packaging** isn't. `SKILL.md` is a shared workflow format, command bodies are Markdown, and each harness gets its native custom-agent manifest.
 
-| Harness | Context | Skills | Commands |
-| :--- | :--- | :--- | :--- |
-| Claude Code | `CLAUDE.md` → `AGENTS.md` | plugin `skills/` | plugin `commands/` |
-| Codex | `AGENTS.md` (native) | `~/.agents/skills/` | — (use `@factory-*` skills) |
-| Pi | `AGENTS.md` (native) | `dist/pi/skills/` | `dist/pi/prompts/` |
-| Gemini CLI | `GEMINI.md` → `AGENTS.md` | `~/.gemini/skills/` | — |
-| Antigravity | shares `~/.gemini/` | via Gemini | — |
-| Cursor | `.cursor/rules/` | — | `~/.cursor/commands/` |
+| Harness | Context | Skills | Commands | Agents |
+| :--- | :--- | :--- | :--- | :--- |
+| Claude Code | `CLAUDE.md` → `AGENTS.md` | plugin `skills/` | plugin `commands/` | plugin `agents/` |
+| Codex | `AGENTS.md` (native) | `~/.agents/skills/` | — (use `@factory-*` skills) | `~/.codex/agents/` |
+| Pi | `AGENTS.md` (native) | `dist/pi/skills/` | `dist/pi/prompts/` | `~/.pi/agent/agents/` |
+| Gemini CLI | `GEMINI.md` → `AGENTS.md` | `~/.gemini/skills/` | — | `~/.gemini/agents/` |
+| Antigravity | shares `~/.gemini/` | via Gemini | — | via Gemini |
+| Cursor | `.cursor/rules/` | — | `~/.cursor/commands/` | `~/.cursor/agents/` |
 
 ```bash
 bun build/emit.mjs           # regenerate everything
@@ -77,6 +77,14 @@ Prefixed `factory-` so they're identifiable as ours and never collide with a rep
 | `/factory-merge` | Reviews open PRs, fixes what's mechanical, merges what qualifies |
 | `/factory-triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
 | `/factory-audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
+
+## Agents
+
+Agents are isolated specialist contexts, not workflow entry points. Their names use `factory-<role>` so ownership is visible without repeating the resource type in every identifier.
+
+| Agent | Does |
+| :--- | :--- |
+| `factory-ux-critic` | Exercises a materially changed user journey and returns a read-only `SHIP` / `FIX-FIRST` critique |
 
 ## Scheduling — nothing is scheduled
 
@@ -122,7 +130,7 @@ On a subscription the scarce resource is the **usage window**, and Opus consumes
 | `factory-work` | sonnet **orchestrating opus subagents** | Coordination is cheap; the code is the product |
 | `factory-merge` | **opus** | Review catches what tests don't, and it is the last gate before `develop` auto-deploys |
 | `factory-audit` | sonnet | A mechanical checklist against `PC-01`..`PC-20` |
-| `ux-critic` | sonnet | Exercises the running app and reports |
+| `factory-ux-critic` | sonnet on Claude; parent model elsewhere | Exercises the running app and reports |
 
 Claude reads the per-command frontmatter. `agy` is deliberately pinned to `gemini-3.6-flash-medium` in both Factory launch paths because it receives only the command body; `run-agent.sh --model X` overrides that for a one-off session.
 

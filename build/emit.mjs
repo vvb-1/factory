@@ -57,6 +57,25 @@ function splitFrontmatter(text) {
   return { fm, body: text.slice(m[0].length) };
 }
 
+/** Render a harness-native Markdown agent without leaking another harness's model id. */
+function markdownAgent(agent, fields = {}) {
+  const frontmatter = { name: agent.name, description: agent.description, ...fields };
+  const lines = Object.entries(frontmatter).map(([key, value]) =>
+    `${key}: ${typeof value === "string" ? JSON.stringify(value) : value}`);
+  return `---\n${lines.join("\n")}\n---\n\n${agent.body.trimStart()}`;
+}
+
+/** Codex custom agents are standalone TOML configs rather than Markdown. */
+function codexAgent(agent) {
+  return [
+    `name = ${JSON.stringify(agent.name)}`,
+    `description = ${JSON.stringify(agent.description)}`,
+    `sandbox_mode = "read-only"`,
+    `developer_instructions = ${JSON.stringify(agent.body.trim())}`,
+    "",
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------- writing ---
 const written = new Map();
 function emit(file, content) {
@@ -73,6 +92,14 @@ const skillDirs = existsSync(path.join(SHARED, "skills"))
   ? readdirSync(path.join(SHARED, "skills"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
   : [];
 const agents = listFiles(path.join(SHARED, "agents")).filter((f) => f.endsWith(".md"));
+const agentDefinitions = agents.map((file) => {
+  const { fm, body } = splitFrontmatter(read(file));
+  const name = fm.name || path.basename(file, ".md");
+  if (!fm.description) throw new Error(`${rel(file)}: agents require a description`);
+  if (name !== path.basename(file, ".md"))
+    throw new Error(`${rel(file)}: agent name must match its filename (${name})`);
+  return { file, name, description: fm.description, body };
+});
 
 // ------------------------------------------------- Claude Code (plugin) ------
 // Frontmatter passes through unchanged: shared/ already uses Claude's keys
@@ -82,14 +109,20 @@ for (const f of commands) emit(path.join(CLAUDE, "commands", path.basename(f)), 
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
     emit(path.join(CLAUDE, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
-// Subagents are Claude-only (they need its Task tool); no other harness gets them.
-for (const f of agents) emit(path.join(CLAUDE, "agents", path.basename(f)), read(f));
+// Agent directories are cleaned on a normal emit so renames do not leave a
+// second, stale specialist registered alongside the canonical one.
+if (!CHECK) rmSync(path.join(CLAUDE, "agents"), { recursive: true, force: true });
+for (const agent of agentDefinitions)
+  emit(path.join(CLAUDE, "agents", `${agent.name}.md`), read(agent.file));
 
 // ------------------------------------------------------------- Codex ---------
 // Codex uses skills for reusable workflows. Factory's shared command bodies
 // become skills so they work in the desktop app too; custom prompts are a
 // deprecated CLI/IDE-only surface.
 const CODEX = path.join(ROOT, "dist", "codex");
+if (!CHECK) rmSync(path.join(CODEX, "agents"), { recursive: true, force: true });
+for (const agent of agentDefinitions)
+  emit(path.join(CODEX, "agents", `${agent.name}.toml`), codexAgent(agent));
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
     emit(path.join(CODEX, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
@@ -108,6 +141,9 @@ if (!CHECK) rmSync(path.join(CODEX, "prompts"), { recursive: true, force: true }
 // ------------------------------------------------- Gemini CLI / Antigravity ---
 // Antigravity shares ~/.gemini, so one emit covers both.
 const GEMINI = path.join(ROOT, "dist", "gemini");
+if (!CHECK) rmSync(path.join(GEMINI, "agents"), { recursive: true, force: true });
+for (const agent of agentDefinitions)
+  emit(path.join(GEMINI, "agents", `${agent.name}.md`), markdownAgent(agent, { kind: "local" }));
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
     emit(path.join(GEMINI, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
@@ -122,6 +158,9 @@ for (const f of commands) {
 // ------------------------------------------------------------- Cursor --------
 // ~/.cursor/commands/*.md — plain markdown, no frontmatter.
 const CURSOR = path.join(ROOT, "dist", "cursor");
+if (!CHECK) rmSync(path.join(CURSOR, "agents"), { recursive: true, force: true });
+for (const agent of agentDefinitions)
+  emit(path.join(CURSOR, "agents", `${agent.name}.md`), markdownAgent(agent, { readonly: true }));
 for (const f of commands) {
   const { body } = splitFrontmatter(read(f));
   emit(path.join(CURSOR, "commands", path.basename(f)), body.trimStart());
@@ -130,6 +169,14 @@ for (const f of commands) {
 // ------------------------------------------------------------- Pi ------------
 // dist/pi/ — skills and prompts for the Pi coding agent.
 const PI = path.join(ROOT, "dist", "pi");
+if (!CHECK) rmSync(path.join(PI, "agents"), { recursive: true, force: true });
+for (const agent of agentDefinitions)
+  emit(path.join(PI, "agents", `${agent.name}.md`), markdownAgent(agent, {
+    tools: "read, grep, find, ls, bash",
+    systemPromptMode: "replace",
+    inheritProjectContext: true,
+    inheritSkills: true,
+  }));
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
     emit(path.join(PI, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
@@ -232,10 +279,10 @@ if (CHECK) {
 
 console.log(`emitted ${written.size} files from shared/`);
 console.log(`  claude  plugins/core/  (${commands.length} commands, ${skillDirs.length} skills, ${agents.length} agents)`);
-console.log(`  codex   dist/codex/    (${skillDirs.length + commands.length} skills)`);
-console.log(`  gemini  dist/gemini/   (${skillDirs.length + commands.length} skills)  — also Antigravity`);
-console.log(`  cursor  dist/cursor/   (${commands.length} commands)`);
-console.log(`  pi      dist/pi/       (${skillDirs.length} skills, ${commands.length} prompts)`);
+console.log(`  codex   dist/codex/    (${skillDirs.length + commands.length} skills, ${agents.length} agents)`);
+console.log(`  gemini  dist/gemini/   (${skillDirs.length + commands.length} skills, ${agents.length} agents)  — also Antigravity`);
+console.log(`  cursor  dist/cursor/   (${commands.length} commands, ${agents.length} agents)`);
+console.log(`  pi      dist/pi/       (${skillDirs.length} skills, ${commands.length} prompts, ${agents.length} agents)`);
 console.log(`  floor   dist/AGENTS.floor.md`);
 
 // -------------------------------------------------------------- link repos ---
@@ -299,6 +346,13 @@ if (LINK) {
     ...commands.map((f) => [path.join(CURSOR, "commands", path.basename(f)), path.join(homedir(), ".cursor/commands", path.basename(f))]),
     ...commands.map((f) => [path.join(PI, "prompts", path.basename(f)), path.join(homedir(), ".pi/agent/prompts", path.basename(f))]),
     ...skillDirs.map((s) => [path.join(PI, "skills", s), path.join(homedir(), ".pi/agent/skills", s)]),
+    ...agentDefinitions.flatMap((agent) => [
+      [path.join(CLAUDE, "agents", `${agent.name}.md`), path.join(homedir(), ".claude/agents", `${agent.name}.md`)],
+      [path.join(CODEX, "agents", `${agent.name}.toml`), path.join(homedir(), ".codex/agents", `${agent.name}.toml`)],
+      [path.join(GEMINI, "agents", `${agent.name}.md`), path.join(homedir(), ".gemini/agents", `${agent.name}.md`)],
+      [path.join(CURSOR, "agents", `${agent.name}.md`), path.join(homedir(), ".cursor/agents", `${agent.name}.md`)],
+      [path.join(PI, "agents", `${agent.name}.md`), path.join(homedir(), ".pi/agent/agents", `${agent.name}.md`)],
+    ]),
   ];
   for (const [src, dst] of links) {
     mkdirSync(path.dirname(dst), { recursive: true });
