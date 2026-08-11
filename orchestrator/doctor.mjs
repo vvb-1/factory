@@ -19,6 +19,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { gql } from "./reaper.mjs";
 import { factoryRoot } from "../lib/factory-root.mjs";
+import { harnessGitignoreIsCurrent } from "../lib/factory-gitignore.mjs";
 
 const ROOT = factoryRoot();
 const argv = process.argv.slice(2);
@@ -125,7 +126,19 @@ for (const repo of repos) {
   const problems = [...missing, ...broken];
   check(problems.length === 0, "/factory-* commands linked",
     problems.length ? `${problems.length}/${expectedCommands.length} missing or broken: ${problems.join(", ")}` : `${expectedCommands.length} commands`,
-    problems.length ? "bun run link-repos" : null);
+    problems.length ? "factory emit" : null);
+
+  const gitignorePath = path.join(p, ".gitignore");
+  const gitignoreBody = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
+  check(harnessGitignoreIsCurrent(gitignoreBody), "factory harness gitignored",
+    existsSync(gitignorePath) ? ".gitignore" : "no .gitignore",
+    "factory emit  (adds FACTORY:HARNES block — symlinks must not be committed)");
+
+  const tracked = sh("git ls-files -- '.claude/commands/factory-*.md' '.cursor/commands/factory-*.md' 2>/dev/null", p)
+    .stdout.trim().split("\n").filter(Boolean);
+  check(tracked.length === 0, "no tracked factory command files",
+    tracked.length ? tracked.join(", ") : "",
+    tracked.length ? "git rm --cached the listed paths; they are local symlinks from factory emit" : null);
 
   // Worktree tooling is PC-15 — the precondition for dispatching concurrent
   // agents. Without it a repo's safe concurrency is one agent, whatever the

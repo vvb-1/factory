@@ -190,6 +190,44 @@ repos:
       - src/auth/**
       - src/server/serverMiddleware.ts
 
+  - name: proxies
+    path: ~/Develop/pets/proxies
+    github: watt-mind/proxies
+
+    # Linear routing (AGENTS.md + linear.md §1)
+    team: LAB
+    project: Proxies
+
+    base: develop
+    deploy_branch: master
+
+    # Worktrees — PC-15 (bin/worktree-up.sh/down.sh/warm.sh, per-ticket DB/ports).
+    worktree_up: bin/worktree-up.sh
+    worktree_down: bin/worktree-down.sh
+    worktree_warm: bin/worktree-warm.sh
+    worktree_root: ~/Develop/.worktrees/proxies
+
+    # Matches CI (pytest job in .github/workflows/ci.yml).
+    verify: uv run pytest -q -m "not integration"
+
+    max_in_flight: 10
+
+    escalate_paths:
+      - grocery_platform/settings*.py
+      - "**/migrations/**"
+      - .github/workflows/**
+
+  # Shared ESLint presets (@watt-mind/eslint-config) — tier 2 of the
+  # code-security baseline (OPS-164). Stub until the package lands; report_only
+  # because a single-package repo needs no worktree isolation, and verify
+  # arrives with the package's own test setup.
+  - name: eslint-config
+    path: ~/Develop/watt-mind/eslint-config
+    github: watt-mind/eslint-config
+    team: OPS
+    base: main
+    report_only: true            # stub (OPS-164) — no package, no worktree tooling yet
+
   # The factory itself — exists so run-agent.sh can target this checkout
   # (currently only the retro stage: cwd here makes friction.mjs/economics.mjs
   # and docs/friction-log.md resolve naturally). report_only keeps dispatch

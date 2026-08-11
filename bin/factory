@@ -85,6 +85,14 @@ case "$cmd" in
     # FACTORY_NOTIFY_SCRIPT is for tests or a deliberate local override only.
     exec python3 "${FACTORY_NOTIFY_SCRIPT:-$HOME/Develop/hdkiller/scripts/notify.py}" "$@"
     ;;
+  emit)
+    # Swift default: regenerate dist/plugins and link every harness + repos.
+    if [[ $# -eq 0 ]]; then
+      run_bun build/emit.mjs --link --link-bin --link-repos
+    else
+      run_bun build/emit.mjs "$@"
+    fi
+    ;;
   ""|help|-h|--help)
     show_banner
     cat <<EOF
@@ -108,9 +116,12 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   tick          orchestrator/tick.mjs
   run           runners/run-agent.sh
   notify        ~/Develop/hdkiller/scripts/notify.py (human interrupt channel)
+  emit          build/emit.mjs (--link --link-bin --link-repos when called bare)
 
-Works from any cwd (worktrees included). Install: bun build/emit.mjs --link-bin
+Works from any cwd (worktrees included).
   factory notify "BLOCKED LAB-176: need approval"
+  factory emit          regenerate + link harnesses, CLI, and repo commands
+  factory emit --check  CI: verify dist matches shared/
 EOF
     ;;
   *)

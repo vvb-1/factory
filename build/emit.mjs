@@ -30,6 +30,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { FLOOR_BEGIN, spliceFloor, floorIsCurrent } from "../lib/floor.mjs";
+import { ensureHarnessGitignore } from "../lib/factory-gitignore.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SHARED = path.join(ROOT, "shared");
@@ -310,6 +311,9 @@ if (process.argv.includes("--link-repos")) {
       symlinkSync(path.join(CLAUDE, "commands", path.basename(f)), target);
     }
     console.log(`  linked   ${repo.name}  ${commands.length} command(s) -> ${repo.path}/.claude/commands/`);
+    const gi = ensureHarnessGitignore(repoPath);
+    if (gi === "ok") console.log(`  gitignore  ${repo.name}  harness symlinks already excluded`);
+    else console.log(`  gitignore  ${repo.name}  ${gi} FACTORY:HARNES block -> .gitignore`);
   }
 }
 
