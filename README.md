@@ -78,6 +78,17 @@ Prefixed `factory-` so they're identifiable as ours and never collide with a rep
 | `/factory-triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
 | `/factory-audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
 
+### CLI notification wrapper
+
+`factory notify` is the cwd-independent human interrupt channel used by the factory floor:
+
+```bash
+factory notify "BLOCKED LAB-176: need approval"
+echo "CI RED LAB-176: verification failed" | factory notify -
+```
+
+It delegates to `~/Develop/hdkiller/scripts/notify.py` and preserves its exit status, so callers must post the same message to Linear when it fails.
+
 ## Agents
 
 Agents are isolated specialist contexts, not workflow entry points. Their names use `factory-<role>` so ownership is visible without repeating the resource type in every identifier.

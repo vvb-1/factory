@@ -80,6 +80,11 @@ case "$cmd" in
   warm)         run_bun orchestrator/warm.mjs "$@" ;;
   tick)         run_bun orchestrator/tick.mjs "$@" ;;
   run)          run_sh runners/run-agent.sh "$@" ;;
+  notify)
+    # A cwd-independent wrapper for the factory floor's interrupt channel.
+    # FACTORY_NOTIFY_SCRIPT is for tests or a deliberate local override only.
+    exec python3 "${FACTORY_NOTIFY_SCRIPT:-$HOME/Develop/hdkiller/scripts/notify.py}" "$@"
+    ;;
   ""|help|-h|--help)
     show_banner
     cat <<EOF
@@ -102,8 +107,10 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   warm          orchestrator/warm.mjs
   tick          orchestrator/tick.mjs
   run           runners/run-agent.sh
+  notify        ~/Develop/hdkiller/scripts/notify.py (human interrupt channel)
 
 Works from any cwd (worktrees included). Install: bun build/emit.mjs --link-bin
+  factory notify "BLOCKED LAB-176: need approval"
 EOF
     ;;
   *)
