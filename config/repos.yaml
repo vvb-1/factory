@@ -127,6 +127,12 @@ repos:
     worktree_root: ~/Develop/.worktrees/legalease
     verify: cd legalease && ../.venv/bin/python manage.py check && ../.venv/bin/python manage.py test main.tests
 
+    # Pip-based (not uv-native) — pins the interpreter `factory security`'s
+    # pip-audit step resolves against (OPS-178); without it uvx's own default
+    # Python can mismatch this repo's pin and break resolution entirely.
+    security:
+      python_version: "3.12"
+
     # Raised with bj29 for the second (agy) supervisor; see the note there —
     # the cap is per repo, not per supervisor.
     max_in_flight: 20

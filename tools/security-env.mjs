@@ -4,7 +4,8 @@
  *
  *   eval "$(bun tools/security-env.mjs /path/inside/repo)"
  *
- * Prints `export SEMGREP_ARGS=...` / `export GITLEAKS_ARGS=...` lines for the
+ * Prints `export SEMGREP_ARGS=...` / `export GITLEAKS_ARGS=...` /
+ * `export PYTHON_VERSION=...` lines for the
  * configured repo containing the given path (match by realpath prefix), or
  * nothing when the repo has no entry or no security block — the check then
  * runs with defaults. Central config replaces per-repo dotfiles so scan
@@ -41,5 +42,6 @@ for (const repo of cfg.repos || []) {
   const sec = repo.security || {};
   if (sec.semgrep_args) console.log(`export SEMGREP_ARGS=${JSON.stringify(sec.semgrep_args)}`);
   if (sec.gitleaks_args) console.log(`export GITLEAKS_ARGS=${JSON.stringify(sec.gitleaks_args)}`);
+  if (sec.python_version) console.log(`export PYTHON_VERSION=${JSON.stringify(String(sec.python_version))}`);
   break;
 }
