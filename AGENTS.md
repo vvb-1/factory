@@ -45,7 +45,7 @@ Move the ticket to `Blocked`, say specifically what you need in one answerable q
 **"Notify" means exactly this command** — a Linear comment, a `Blocked` state change, or a line in your final report does not reach the human in real time:
 
 ```bash
-python3 ~/Develop/hdkiller/scripts/notify.py "<EVENT> <TICKET/PR>: <one answerable sentence>"
+factory notify "<EVENT> <TICKET/PR>: <one answerable sentence>"
 ```
 
 Event prefix is one of `BLOCKED`, `ESCALATED`, `CI RED`, `SMOKE RED`, `CIRCUIT BREAKER`, `RC READY`. It pushes a Telegram message to the human and exits non-zero on failure — if it fails, post the same text as a Linear comment and flag the failed push in your report. Notify only for those six events; routine progress (claims, PRs opened, clean merges) goes to Linear and the run report, never here.
@@ -109,7 +109,7 @@ factory next --repo bj29
 factory label-guard --repo bj29 --apply
 ```
 
-Install once: `bun build/emit.mjs --link-bin` (symlinks `~/Develop/factory/bin/factory` → `~/.local/bin/factory`). Never `bun orchestrator/...` from a worktree — that path is not there.
+Install once: `bun build/emit.mjs --link-bin` (symlinks `~/Develop/factory/bin/factory` → `~/.local/bin/factory`). `factory notify` is the cwd-independent wrapper around the human interrupt channel. Never `bun orchestrator/...` from a worktree — that path is not there.
 
 ### Linear
 
