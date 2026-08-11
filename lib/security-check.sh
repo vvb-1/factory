@@ -9,9 +9,15 @@
 #   factory security [options] [path]
 #
 # Options:
-#   --history        Gitleaks scans full git history instead of the working tree (slow)
+#   --history        Gitleaks scans full git history instead of tracked changes (slow)
 #   --skip-semgrep   Skip the Semgrep scan (the slowest tool)
 #   -h, --help       Show this help
+#
+# Gitleaks runs git-aware (tracked changes only, via `gitleaks git --pre-commit
+# --staged`), never a raw filesystem walk — `gitleaks dir` ignores .gitignore
+# entirely and will happily crawl a stray .venv/node_modules/data dump for
+# minutes. New untracked files are NOT covered by the default scan; `git add`
+# them (or scan `--history`) if you need them checked.
 #
 # Runs from any git repo/worktree; [path] defaults to the repo containing $PWD.
 #
@@ -30,7 +36,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --history) HISTORY=1 ;;
     --skip-semgrep) SKIP_SEMGREP=1 ;;
-    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) TARGET="$1" ;;
   esac
@@ -74,12 +80,14 @@ run_tool() {
   fi
 }
 
-# 1. Gitleaks — secrets in the working tree (or full history with --history)
+# 1. Gitleaks — git-aware, never a raw filesystem walk (`gitleaks dir` ignores
+# .gitignore and can crawl a .venv/node_modules for minutes — see --help above).
+# Default: tracked changes (staged + unstaged) via git diff. --history: full log.
 # shellcheck disable=SC2086
 if [ "$HISTORY" = 1 ]; then
   run_tool "gitleaks (git history)" gitleaks git "$ROOT" --no-banner --redact ${GITLEAKS_ARGS:-}
 else
-  run_tool "gitleaks (working tree)" gitleaks dir "$ROOT" --no-banner --redact ${GITLEAKS_ARGS:-}
+  run_tool "gitleaks (tracked changes)" gitleaks git "$ROOT" --pre-commit --staged --no-banner --redact ${GITLEAKS_ARGS:-}
 fi
 
 # 2. Semgrep — SAST, security ruleset only (respects .gitignore)
