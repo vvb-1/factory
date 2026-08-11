@@ -106,6 +106,16 @@ repos:
     worktree_root: ~/Develop/.worktrees/coach-wattz
     report_only: true            # PC-15 pending — see CW-363
 
+  - name: watts-mobile
+    path: ~/Develop/watts-mobile
+    github: watt-mind/watts-mobile
+    team: CW
+    project: Mobile App
+    base: develop
+    worktree_root: ~/Develop/.worktrees/watts-mobile
+    report_only: true            # No isolated worktree lifecycle yet.
+    verify: pnpm typecheck && pnpm lint && pnpm test
+
   - name: legalease
     path: ~/Develop/legalease
     github: watt-mind/legalease
