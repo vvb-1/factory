@@ -3,7 +3,7 @@
 Status: **implemented** (OPS-212) at `event-runtime/web/`. Tracking: OPS-209
 (this spec), OPS-212 (implementation).
 
-Parent: [event-runtime.md](event-runtime.md). §12 already decided the shape of
+Parent: [event-runtime.md](event-runtime.md) | Roadmap: [event-runtime-webui-roadmap.md](event-runtime-webui-roadmap.md). §12 already decided the shape of
 this app: the TUI/CLI is one client of the control API, and a web app is a
 **second client of identical endpoints** — never a reader of the database.
 This document specifies that second client: stack, decisions, view-to-endpoint
