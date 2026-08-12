@@ -505,7 +505,9 @@ host-local PIDs, locks, and paths. The physical substrate can start small:
   then.
 - **Second process: Postgres.** Same schema, same contracts; workers claim with
   a database lease.
-- **Remote workers: a possibility kept cheap, not a requirement built toward.**
+- **Remote workers: a possibility kept cheap, not a requirement built toward**
+  (expanded into a staged, ticket-shaped design in
+  [event-runtime-workers.md](event-runtime-workers.md))**.**
   The binding constraint today is one machine and one usage window — the same
   reason architecture.md §4 rejects cross-repo parallelism. Keeping host-local
   assumptions out of the contracts costs nothing; buying distributed
