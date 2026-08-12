@@ -72,6 +72,10 @@ REPO_TEAM="$(cd "$ROOT" && bun -e '
   const c = Bun.YAML.parse(await Bun.file("config/repos.yaml").text());
   console.log((c.repos ?? []).find((x) => x.name === process.argv[1]).team);
 ' "$REPO")"
+REPO_BASE="$(cd "$ROOT" && bun -e '
+  const c = Bun.YAML.parse(await Bun.file("config/repos.yaml").text());
+  console.log((c.repos ?? []).find((x) => x.name === process.argv[1]).base ?? "main");
+' "$REPO")"
 [[ -d "$REPO_PATH" ]] || { echo "repo path does not exist: $REPO_PATH" >&2; exit 2; }
 
 # Terminal tab title when run interactively. Headless spawns have stdout piped
@@ -198,28 +202,39 @@ echo "  harness: $HARNESS   auth: $AUTH_NOTE   cap ~\$$BUDGET notional / ${MAX_M
 # When the tree is dirty, do nothing and say so: the main checkout routinely
 # holds uncommitted human work, and touching it to save a slightly stale spec is
 # a far worse trade.
-(
-  cd "$REPO_PATH"
-  git fetch --quiet 2>/dev/null || true
-  BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  BEHIND="$(git rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
-  DIRTY="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+#
+# NOT a subshell: when the tree stays behind, the agent has to be TOLD. Echoing
+# it here only reaches a human reading the log afterwards, which is exactly how
+# a sweep judged tickets against code that had already moved (OPS-190). The
+# facts get appended to the prompt below.
+git -C "$REPO_PATH" fetch --quiet 2>/dev/null || true
+BRANCH="$(git -C "$REPO_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+BEHIND="$(git -C "$REPO_PATH" rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
+DIRTY="$(git -C "$REPO_PATH" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
 
-  if [[ "$BEHIND" != "0" && "$DIRTY" == "0" ]]; then
-    if git pull --ff-only --quiet 2>/dev/null; then
-      echo "  branch: $BRANCH  fast-forwarded $BEHIND commit(s) — now current"
-      BEHIND=0
-    else
-      echo "  branch: $BRANCH  behind: $BEHIND  ! fast-forward refused (diverged) — fix by hand"
-    fi
+if [[ "$BEHIND" != "0" && "$DIRTY" == "0" ]]; then
+  if git -C "$REPO_PATH" pull --ff-only --quiet 2>/dev/null; then
+    echo "  branch: $BRANCH  fast-forwarded $BEHIND commit(s) — now current"
+    BEHIND=0
   else
-    echo "  branch: $BRANCH  behind: $BEHIND  uncommitted: $DIRTY"
+    echo "  branch: $BRANCH  behind: $BEHIND  ! fast-forward refused (diverged) — fix by hand"
   fi
+else
+  echo "  branch: $BRANCH  behind: $BEHIND  uncommitted: $DIRTY"
+fi
 
-  [[ "$BEHIND" != "0" && "$DIRTY" != "0" ]] && \
+if [[ "$BEHIND" != "0" ]]; then
+  DIRTY_NOTE=""
+  if [[ "$DIRTY" != "0" ]]; then
     echo "  ! $DIRTY uncommitted file(s) — not pulling, they would be clobbered; specs may reference moved code"
-  true
-)
+    DIRTY_NOTE=" and holds $DIRTY uncommitted file(s), so it was deliberately not pulled"
+  fi
+  # One line appended to the prompt, not a paragraph: it rides in the context
+  # window for the whole session and is re-sent on every turn.
+  PROMPT="$PROMPT
+
+[checkout] The working tree at $REPO_PATH is $BEHIND commit(s) behind origin/$REPO_BASE$DIRTY_NOTE. Do NOT treat the files on disk as current. Per the floor's Checkout freshness rule, take code evidence from origin/$REPO_BASE (git log origin/$REPO_BASE -- <path>, git show origin/$REPO_BASE:<file>) and name that ref in your report."
+fi
 echo
 
 # A session launched from inside a Claude Code session inherits these and the

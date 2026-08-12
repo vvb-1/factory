@@ -11,6 +11,8 @@ Find tickets in this project's backlog that no longer need to exist, and retire 
 
 Resolve the team/project from the repo via `~/Develop/hdkiller/docs/orgs/linear.md` §1–2, or from `$ARGUMENTS` if a project name is given. Use the Linear MCP; on failure retry once then fall back to `linear_common` GraphQL per the global rule.
 
+**First, before judging anything: `git fetch --quiet` and check `git rev-list --count HEAD..@{upstream}`.** This stage's entire job is deciding what is already true of the code, so it is the stage a stale checkout hurts most — a feature merged last week reads as unshipped and its ticket keeps a dispatch slot it no longer deserves. Follow the floor's **Checkout freshness** rule: fast-forward a clean tree, and read `origin/<base>` rather than the working tree when it is dirty. State the ref you swept against at the top of the report.
+
 ## Scope
 
 Target open tickets **not currently live**: `Backlog`, `Triage`, and `Todo` (including `ai:agent-ready` ones — the queue is exactly where an overtaken ticket keeps wasting a future dispatch slot if it isn't caught here). Interpret `$ARGUMENTS` as specific issue IDs or a max count; default up to 20, oldest-updated first — a ticket nobody has touched in months is the one most likely to have been overtaken by events, though age alone is never the verdict (see below).
@@ -26,11 +28,11 @@ Same protocol as triage/unblock: before judging an issue, set `assignee` to your
 Obsolete means one of these, each requiring **evidence you can cite**, not a hunch:
 
 - **Duplicate** — another ticket (open or `Done`) already covers the same requirement. Cite the other issue's ID.
-- **Already shipped** — read the actual codebase (or the linked PR) and confirm the acceptance criteria are already met. Cite the file/PR/commit that proves it.
-- **Overtaken by events** — the feature, flow, or integration it references no longer exists (removed in the codebase, product decision recorded in `docs/product-decisions.md`, project archived/ended). Cite what you found.
+- **Already shipped** — confirm against `origin/<base>` (or the linked PR) that the acceptance criteria are met, and cite the commit or PR that did it, not just a filename. `git log origin/<base> --oneline -- <path>` answers this and cannot be fooled by a behind-trunk checkout; a bare file read can.
+- **Overtaken by events** — the feature, flow, or integration it references no longer exists (removed in the codebase, product decision recorded in `docs/product-decisions.md`, project archived/ended). Cite what you found, again against `origin/<base>` — "the file isn't there" is the exact claim a stale checkout gets backwards.
 - **Superseded** — a later, more specific ticket replaced this one's scope. Cite the superseding ticket.
 
-**Age, low priority, and "nobody's gotten to it" are never evidence on their own.** A ticket that's sat in `Backlog` for six months untouched can still be exactly the right thing to build next quarter — that's a prioritization question, not an obsolescence one, and this sweep has no opinion on priority. If you can't point at a concrete reason the *work itself* no longer needs doing, leave it alone.
+**Age, low priority, and "nobody's gotten to it" are never evidence on their own.** A ticket that's sat in `Backlog` for six months untouched can still be exactly the right thing to build next quarter — that's a prioritization question, not an obsolescence one, and this sweep has no opinion on priority. If you can't point at a concrete reason the _work itself_ no longer needs doing, leave it alone.
 
 **Obvious cases — act directly:** an exact duplicate of a `Done` ticket, or acceptance criteria you can point to as already met in the current code, are safe to retire without asking first. Comment with the evidence and the state you're moving it to (`Duplicate` links the surviving ticket; `Canceled` for shipped/overtaken), then transition it.
 

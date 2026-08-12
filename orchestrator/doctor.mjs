@@ -30,6 +30,9 @@ const expand = (p) => String(p ?? "").replace(/^~/, homedir());
 const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
 const repos = (cfg.repos ?? []).filter((r) => !only.length || only.includes(r.name));
 
+// Commits behind origin/<base> before the main checkout is worth flagging.
+const BEHIND_WARN = 10;
+
 const c = {
   dim: (s) => `\x1b[2m${s}\x1b[0m`, bold: (s) => `\x1b[1m${s}\x1b[0m`,
   green: (s) => `\x1b[32m${s}\x1b[0m`, red: (s) => `\x1b[31m${s}\x1b[0m`, yellow: (s) => `\x1b[33m${s}\x1b[0m`,
@@ -110,8 +113,31 @@ for (const repo of repos) {
   check(remote.includes(repo.github), "remote matches repos.yaml", remote,
     `expected ${repo.github} — fix repos.yaml or the remote`);
 
+  // `git fetch` updates remote-tracking refs only — it never touches the
+  // working tree or your branches, so it stays within this script's read-only
+  // contract. Without it the check below compares against whatever origin/*
+  // happened to be cached, which is the same staleness it exists to catch.
+  sh("git fetch --quiet", p);
   const hasBase = sh(`git rev-parse --verify origin/${repo.base}`, p).status === 0;
   check(hasBase, `base branch origin/${repo.base}`, "", "git fetch origin");
+
+  // The read-only stages (sweep, triage, audit) read THIS checkout and judge
+  // what the code already does. Behind trunk, a shipped feature reads as
+  // unshipped: sweep leaves an overtaken ticket in the queue and triage writes
+  // specs against code that moved (OPS-190). Warn rather than fail — a checkout
+  // a few commits back is normal, and run-agent.sh fast-forwards a clean tree
+  // before each run anyway. What needs surfacing is a checkout that is rotting.
+  if (hasBase) {
+    const behind = Number(sh(`git rev-list --count HEAD..origin/${repo.base}`, p).stdout.trim() || 0);
+    const dirty = sh("git status --porcelain", p).stdout.trim().split("\n").filter(Boolean).length;
+    check(behind < BEHIND_WARN ? true : "warn", "checkout current",
+      `${behind} commit(s) behind origin/${repo.base}${dirty ? `, ${dirty} uncommitted` : ""}`,
+      behind >= BEHIND_WARN
+        ? dirty
+          ? `commit or stash first, then \`git -C ${repo.path} pull --ff-only\` — stages must read origin/${repo.base}, not this tree`
+          : `git -C ${repo.path} pull --ff-only`
+        : null);
+  }
 
   const commandsDir = path.join(p, ".claude", "commands");
   const missing = [];

@@ -72,6 +72,28 @@ for i in $(seq 60); do curl -sf localhost:4222 >/dev/null && break; sleep 2; don
 
 Measured on real runs: single `sleep 180` and `sleep 75` calls, plus a `sleep 60` after starting a dev server that was ready in a fraction of that. Each one is a per-ticket process sitting idle while holding a concurrency slot.
 
+### Checkout freshness
+
+**Code evidence cites a ref, not a path.** Any claim about what the code currently does — "already shipped", "that flow no longer exists", "the acceptance criteria are met" — is a claim about the trunk, and the main checkout is not the trunk. It is a working copy that may be days behind and may hold someone's uncommitted work. Before you read the tree as evidence:
+
+```bash
+git fetch --quiet
+git rev-list --count HEAD..@{upstream}    # 0 means the tree is trustworthy
+```
+
+Behind and **clean** → `git pull --ff-only`. It cannot create a merge commit or lose work, so it is safe to do unattended. Behind and **dirty** → leave the checkout alone and read the remote ref instead:
+
+```bash
+git log origin/<base> --oneline -- <path>   # was it actually shipped?
+git show origin/<base>:<file>               # what does it say now?
+```
+
+Never pull over uncommitted work to get a fresher read — those files are a human's in-flight change, and losing them costs far more than a slightly stale spec. Reading `origin/<base>` gets the same correctness without touching the tree.
+
+Then **name the ref your evidence came from** in the report or the Linear comment. `origin/develop@a1b2c3d` is checkable by the next reader; "I read the file" is not.
+
+Dispatch is exempt — the worktree script branches from `origin/<base>`, so ticket work always starts current. The exposure is the read-only stages (sweep, triage, audit), which read the main checkout: against a stale one, a shipped feature reads as unshipped and an overtaken ticket keeps its place in the queue.
+
 ### Context discipline
 
 A tool result is not paid for once. It stays in the context window and is re-sent on every later turn, so a large payload early in a long run is charged dozens of times. Measured across 485 real runs: 193MB of tool output became **10.1GB** of re-sent context, and **74% of that was images**.
