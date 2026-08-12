@@ -50,6 +50,42 @@ Dev loop: `cd event-runtime/web && bunx vite` (proxies /api to the control
 API). Keyboard-first: `⌘K` palette, `g o/p/r` to navigate, `j/k` + `Enter` on
 lists, `a`/`x` to approve/reject the selected proposal.
 
+## Demo environments and e2e (OPS-217)
+
+`bin/worktree-up.sh` provisions an **isolated, seeded** runtime — the part
+`git worktree add` cannot do: own ports, own `FACTORY_EVENT_HOME`, fake
+adapter (approvals never spawn a real agent), and deterministic demo data.
+
+```bash
+bin/worktree-up.sh --here        # demo env in this checkout → 7391 (API) / 7392 (web)
+bin/worktree-up.sh OPS-123       # ticket worktree + branch feat/OPS-123, own ports
+bin/worktree-down.sh --here      # stop + delete this checkout's demo state
+bin/worktree-down.sh OPS-123     # stop daemons, remove the worktree (branch stays)
+```
+
+Port allocation (so instances never collide):
+
+| Instance | API | Web |
+| :--- | :--- | :--- |
+| interactive default (`serve`) | 7381 | 7382 |
+| `--here` demo | 7391 | 7392 |
+| ticket worktree | 7400 + 2·(ticket % 200) | API + 1 |
+
+The seed (`event-runtime/demo/seed.mjs`) drives one of everything through the
+real intake/approval surfaces, using the fake adapter's input modes
+(`payload.repos[0]`): `ok` → COMPLETED, `refuse` → REFUSED, `crash` and
+`invalid-artifact` → FAILED, a rejected proposal → CANCELLED, `[]` → an open
+`human_needed` proposal, one open approvable proposal, and `hang` → a RUNNING
+run approved last (it occupies the single worker until the 600 s spec timeout,
+then TIMED_OUT — or cancel it from the UI). The seed refuses to run against a
+real-adapter runtime.
+
+`event-runtime/demo/verify.mjs --port <api>` asserts the whole fixture via
+the API — the e2e smoke. `worktree-up.sh` runs it before reporting ready, so
+"ready" means a browser test or styling session can rely on every state
+being present. Re-seed after consuming fixture state with
+`bin/worktree-up.sh <target> --reseed`.
+
 ## Try the slice
 
 ```bash
