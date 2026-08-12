@@ -20,8 +20,10 @@ Operator verbs (clients of the control API — they need `serve` running):
 
 ```bash
 bun event-runtime/cli.mjs status                      # events, proposals, runs, anomalies
+bun event-runtime/cli.mjs events [status]             # admitted events, optionally filtered
 bun event-runtime/cli.mjs proposals                   # open proposals with TTL age
 bun event-runtime/cli.mjs agents                      # registered agents and event routing
+bun event-runtime/cli.mjs requeue <source> <event-id> # re-plan a dead-lettered/human_needed event
 bun event-runtime/cli.mjs approve <proposal-id>
 bun event-runtime/cli.mjs reject <proposal-id> "<reason>"
 bun event-runtime/cli.mjs inject <envelope.json>      # replay CLI — same intake as the webhook
@@ -126,8 +128,10 @@ spec (§12).
 | `lib/worker.mjs` | single worker: lease, execute, verify, publish with fencing (§8) |
 | `lib/verify.mjs` | result verification + compact receipts (§9) |
 | `lib/adapters/` | adapter registry: `claude` (real), `fake` (tests) (§6) |
+| `lib/artifacts.mjs` | content-addressed artifact/transcript store, streamed via `GET /artifacts/:sha256` |
 | `lib/api.mjs` `cli.mjs` | loopback control API + CLI client (§12–§13) |
 | `web/` | web control plane: Vite/React app + `serve.mjs` static/proxy server |
+| `demo/` | seeded one-of-everything fixture + e2e verify (OPS-217, see above) |
 | `agents/` `schemas/` `event-types.json` | registered agents, contracts, event→agent mappings |
 
 ## Capabilities are audited, not enforced (§14)

@@ -626,6 +626,10 @@ lifecycle transitions with the operator as actor:
   attempt.
 - **replay** — re-inject a stored event body through the same intake function
   the webhook uses; dedup rules apply unchanged.
+- **requeue** — re-plan a dead-lettered or `human_needed` event in place:
+  same admitted event, a fresh planning pass against current state. Replay is
+  for a fixed *event body*; requeue is for a fixed *world* — after a registry
+  or planner fix, the stored event is fine and only the decision was wrong.
 
 **Dead-lettering.** An event that fails planning repeatedly (default: 3
 attempts) parks as dead-lettered with its last error, visible in status and

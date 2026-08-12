@@ -236,18 +236,28 @@ The target is "quiet tool you live in", not "dashboard demo".
 
 The web UI is a client, so anything it needs that the API lacks becomes API
 surface first, UI second — implemented in `lib/api.mjs` with the same
-read-only SQL discipline as `statusView`. Exactly one addition is needed:
+read-only SQL discipline as `statusView`. The spec originally required
+exactly one addition — `GET /events` — and the shipped surface (§10) grew
+with the same rule applied each time. Additions to date, all loopback-only
+and shared with the CLI:
 
-- **`GET /events`** — list admitted events: `(source, eventId)`, type,
-  subject, status, `occurredAt`/`receivedAt`, `correlationId`, plan error if
-  any, **and the stored envelope body**. Optional `?status=` filter. Without
-  it the UI sees only `/status` counts, dead letters lack their envelope (so
-  the doctor panel's replay verb cannot work), and an "inbox" view is
-  impossible. Read-only, loopback-only, and useful to the CLI as well.
+- **`GET /events`** (`?status=`) — admitted events **with the stored envelope
+  body**: without it dead letters lack their envelope, the doctor panel's
+  replay verb cannot work, and an inbox view is impossible.
+- **`GET /agents`** — the registered agent definitions and event routing
+  (CLI `agents`; the registry-visibility surface, OPS-213).
+- **`GET /journal`** (`?since=&limit=`) — the global lifecycle feed behind
+  Overview's activity list.
+- **`GET /outbox`** (`?limit=`) — emitted result events, the runtime's
+  actual output.
+- **`POST /events/requeue`** — re-plan a dead-lettered or `human_needed`
+  event (CLI `requeue`); the only non-read addition, audited like every
+  other verb.
+- **`GET /artifacts/:sha256`** — content-addressed artifact/transcript bytes
+  (the §8 deferral, since triggered and shipped).
 
-Everything else the four views need already exists. Explicitly *not* added
-now: pagination (volumes are tiny; first endpoint to hurt gets it), SSE, and
-artifact-content endpoints (§8).
+Still explicitly *not* added: pagination beyond `journal`/`outbox` limits
+(volumes are tiny; first endpoint to hurt gets it) and SSE (§8).
 
 ## 8. Deferred, with triggers
 
@@ -255,7 +265,7 @@ artifact-content endpoints (§8).
 | :--- | :--- |
 | Authentication + real actor identity | Binding the web server or control API beyond loopback — precondition, not retrofit (§1, parent §14) |
 | SSE / push updates | Polling demonstrably too slow — e.g. watching slice-2 remediation runs live |
-| Artifact/transcript content endpoint + viewer | First time "open the transcript" matters from the browser; until then `cli.mjs inspect` |
+| ~~Artifact/transcript content endpoint + viewer~~ | **Shipped** — content-addressed artifact store + `GET /artifacts/:sha256` + transcript capture (§7) |
 | Pagination on `/runs`, `/events` | First list where scrolling actually hurts |
 | Notification channel | Unattended stage (parent §12) — watched mode means the operator is watching |
 
@@ -332,7 +342,46 @@ timestamp and a jump-to-run link; (c) a compact **outbox feed** of the latest
 result events from `GET /outbox`, unpublished rows flagged in the warning
 tone, envelope behind a disclosure.
 
-### 10.5 Environment chip
+### 10.5 Artifacts in run detail
+
+`GET /runs/:id` result `artifacts` entries are durable
+(`{kind, uri, sha256, sizeBytes}`, content-addressed store; real claude runs
+include a runtime-captured `transcript` automatically). The run detail's
+**Artifacts** section lists each with kind, human-readable size, short hash
+(full hash on hover), and an **Open** link to `/api/artifacts/<sha256>` in a
+new tab — the serve proxy forwards to the control API, which streams
+`text/plain` for texty content and `octet-stream` otherwise. This partially
+lifts §2's "no artifact content viewer" non-goal: the trigger in §8 ("first
+time opening the transcript matters from the browser") fired, and the viewer
+is the browser itself, not new UI. Empty state shown when a result has no
+stored artifacts.
+
+### 10.6 Agents view (`#/agents`, `g t`)
+
+`GET /agents` exposes the registry, fully readable, so the operator can
+deep-dive what "factory-status-report@1" actually is before approving a spec
+that names it. List: ref, output contract, mutating flag (error tone when
+true), capabilities summary, timeout, attempts. Detail panel, stacked
+sections: **Definition** (workspace, capabilities, limits), **Prompt** (the
+full markdown text in a monospace block — readable, no new dependencies),
+**Schemas** (input/output, pretty JSON behind disclosures), **Pins** (file →
+hash table, captioned: content-hash pins that fail the registry closed on
+drift — versions are bumped and re-pinned, never edited in place), and
+**Event routing** (which event types select this agent, with adapter,
+idempotency scope, and proposal TTL). The shared envelope contracts
+(`factory.event/v1`, `factory.agent-result/v1`) render once at the list
+level, not per agent. Strictly read-only — the registry has no mutation
+surface.
+
+Chord choice: `g t` ("what is **t**his agent?"). `o/e/p/r` were taken, and
+`g a` is unusable — chord suffixes share the keydown with single-key list
+verbs, and `a` is approve on the proposals view (same class of collision
+that moved requeue to `q` in §10.1).
+
+Cross-links: the agent ref in the run detail and in the proposal detail is a
+link that opens the Agents view with that agent selected.
+
+### 10.7 Environment chip
 
 The nav rail header carries a permanent chip naming the runtime environment
 from `/health`'s `env` object: `env.name`, with the serve-wide adapter
