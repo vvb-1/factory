@@ -577,7 +577,9 @@ a diagram.
 **Where.** A TUI, in the terminal, like `orchestrator/run.mjs` and
 `watch.jsx`: it lists open proposals and takes `approve <id>` /
 `reject <id> <reason>`. The TUI is the only operator surface in the MVP — a
-web app can come later — but it is a **client, not the runtime**: every read
+web app can come later (specified in
+[event-runtime-webui.md](event-runtime-webui.md)) — but it is a **client, not
+the runtime**: every read
 and every verb goes through the same control API the runtime exposes, never
 directly into the database. That keeps a future web app a second client of
 identical endpoints, with the same audit trail, rather than a reimplementation.
