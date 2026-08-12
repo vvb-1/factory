@@ -76,7 +76,10 @@ describe("webhook intake (§14)", () => {
   test("GET /health", async () => {
     const res = await fetch(s.url("/health"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, policyVersion: PV });
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.policyVersion).toBe(PV);
+    expect(typeof body.env.name).toBe("string"); // environment identity, always present
   });
 
   test("unknown route → 404 with an error body", async () => {
@@ -453,6 +456,26 @@ describe("webui surface: proposal linkage, history, journal, outbox, requeue (OP
       expect((await client.proposals()).proposals).toHaveLength(0); // superseded, inbox clean
       const superseded = await client.proposals("superseded");
       expect(superseded.proposals[0].eventId).toBe("hn-1");
+    } finally {
+      server.close();
+    }
+  });
+});
+
+describe("environment identity (webui chip)", () => {
+  test("health and status expose the env the server was started with", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-env-"));
+    const db = openDb(path.join(dir, "runtime.db"));
+    const server = startApi({
+      db, registry, secret: SECRET, policyVersion: PV, port: 0,
+      env: { name: "dev", home: dir, adapter: "fake" },
+    });
+    await new Promise((resolve) => server.on("listening", resolve));
+    const client = apiClient({ port: server.address().port });
+    try {
+      const health = await client.health();
+      expect(health.env).toEqual({ name: "dev", home: dir, adapter: "fake" });
+      expect((await client.status()).env.name).toBe("dev");
     } finally {
       server.close();
     }

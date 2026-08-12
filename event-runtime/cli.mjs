@@ -18,7 +18,7 @@ import * as claude from "./lib/adapters/claude.mjs";
 import * as fake from "./lib/adapters/fake.mjs";
 import { apiClient } from "./lib/client.mjs";
 import {
-  API_HOST, DEFAULT_PORT, dbPath, ensureHome, policyVersion, workspacesRoot,
+  API_HOST, DEFAULT_PORT, dbPath, ensureHome, environmentName, policyVersion, runtimeHome, workspacesRoot,
 } from "./lib/config.mjs";
 import { openDb } from "./lib/db.mjs";
 import { newWorkerId } from "./lib/ids.mjs";
@@ -151,15 +151,16 @@ async function serve(args) {
     }
   }
 
+  const env = { name: environmentName(), home: runtimeHome(), adapter: adapterOverride ?? null };
   const server = startApi({
-    db, registry, policyVersion: pv, port,
+    db, registry, policyVersion: pv, port, env,
     onEvent: (kind) => {
       log(`event ${kind} — planning`);
       tick();
     },
   });
   server.on("listening", () => {
-    log(`control API listening on http://${API_HOST}:${port} (db ${dbPath()}, policy ${pv})`);
+    log(`environment "${env.name}" — control API on http://${API_HOST}:${port} (db ${dbPath()}, policy ${pv})`);
     if (adapterOverride) log(`adapter override: all new run specs use "${adapterOverride}"`);
   });
   server.on("error", (err) => fail(`serve: ${err.message}`));
@@ -186,6 +187,9 @@ function countLine(label, counts, order = Object.keys(counts)) {
 
 async function status(client) {
   const s = await client.status();
+  if (s.env) {
+    console.log(`${pad("env", 11)}${s.env.name}${s.env.adapter ? `   (adapter override: ${s.env.adapter})` : ""}   ${s.env.home}`);
+  }
   console.log(countLine("events", s.events, ["admitted", "planned", "noop", "human_needed", "dead_lettered"]));
   console.log(countLine("proposals", s.proposals, ["open", "expired"]));
   const states = Object.keys(s.runs.byState);

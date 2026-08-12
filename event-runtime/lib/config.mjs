@@ -30,6 +30,20 @@ export function ensureHome(home = runtimeHome()) {
   return home;
 }
 
+/**
+ * Human-readable environment name, shown by every client (CLI status line,
+ * web UI chip) so an operator always knows WHICH runtime they are pointed at
+ * before approving anything. Explicit FACTORY_EVENT_ENV wins; otherwise the
+ * default home is "live" and any other home is named by its directory suffix
+ * (~/.factory/event-runtime-dev → "dev").
+ */
+export function environmentName(home = runtimeHome()) {
+  if (process.env.FACTORY_EVENT_ENV) return process.env.FACTORY_EVENT_ENV;
+  const base = path.basename(home);
+  if (base === "event-runtime") return "live";
+  return base.replace(/^event-runtime-?/, "") || base;
+}
+
 /** Loopback only in the MVP — the control API is a local trust surface (§14). */
 export const API_HOST = "127.0.0.1";
 export const DEFAULT_PORT = Number(process.env.FACTORY_EVENT_PORT || 7381);

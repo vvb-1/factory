@@ -11,7 +11,7 @@
  * actor identity is the web-app step, not this one.
  */
 import http from "node:http";
-import { API_HOST, DEFAULT_PORT, webhookSecret } from "./config.mjs";
+import { API_HOST, DEFAULT_PORT, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
 import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
@@ -279,6 +279,7 @@ export function createApi({
   secret = webhookSecret(),
   now = () => Date.now(),
   policyVersion = "unknown",
+  env = { name: environmentName(), home: runtimeHome(), adapter: null },
   onEvent = () => {},
 } = {}) {
   const ACTOR = "operator"; // one local operator in the MVP (§14)
@@ -290,7 +291,7 @@ export function createApi({
       const nowMs = now();
 
       if (route === "GET /health") {
-        return send(res, 200, { ok: true, policyVersion });
+        return send(res, 200, { ok: true, policyVersion, env });
       }
 
       if (route === "POST /events") {
@@ -313,7 +314,7 @@ export function createApi({
       }
 
       if (route === "GET /status") {
-        return send(res, 200, statusView(db, nowMs));
+        return send(res, 200, { env, ...statusView(db, nowMs) });
       }
 
       if (route === "GET /events") {
