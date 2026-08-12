@@ -395,7 +395,7 @@ Secrets (injected via launchd env or `op run`), worktrees, agent session logs, a
 
 ## Where things stand (2026-08-03)
 
-**Wired and working for `bj29` only.** coach-wattz, legalease and cashsaas are `report_only` — the janitor sees their orphaned worktrees but dispatch refuses them until [CW-363](https://linear.app/watt-mind/issue/CW-363) and [CLNT-609](https://linear.app/watt-mind/issue/CLNT-609) land worktree scripts.
+**Automated dispatch is authorized for `bj29` only.** coach-wattz's lifecycle scripts landed in [CW-363](https://linear.app/watt-mind/issue/CW-363), so the janitor can safely reclaim its finished worktrees through the repo-owned teardown script. coach-wattz remains `report_only` for dispatch; legalease and cashsaas carry full lifecycle configuration.
 
 | Stage | State |
 | :--- | :--- |
