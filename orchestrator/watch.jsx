@@ -135,6 +135,7 @@ function QueueStrip({ summary, worker }) {
       <StatChip label="claims" value={summary.inProgress} tone={summary.orphanedClaims ? "warn" : undefined} />
       <StatChip label="worker" value={worker == null ? "?" : worker ? "connected" : "offline"} tone={worker == null ? "warn" : worker ? "good" : "bad"} />
       <StatChip label="ready" value={summary.ready} tone={summary.ready ? "good" : undefined} />
+      <StatChip label="held" value={summary.readyHeld ?? 0} tone={summary.readyHeld ? "warn" : undefined} />
       <StatChip label="review" value={summary.inReview} tone={summary.inReview ? "warn" : undefined} />
       <StatChip label="triage" value={summary.triage} />
       <StatChip label="blocked" value={summary.blocked} tone={summary.blocked ? "bad" : undefined} />

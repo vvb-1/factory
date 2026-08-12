@@ -27,6 +27,7 @@ import path from "node:path";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
 import { parseOwnedPaths, effectiveOwnedPaths, pathsCollide } from "./owned-paths.mjs";
+import { openBlockers, BLOCKING_RELATIONS_GQL } from "./blockers.mjs";
 import { budgetExhausted } from "../lib/spend.mjs";
 import { agentLabel } from "../tools/linear.mjs";
 import { LEASE_HEARTBEAT_MS, releaseWorkerLease, renewWorkerLease, writeWorkerLease, liveWorkerLeases } from "../lib/worker-leases.mjs";
@@ -92,7 +93,7 @@ const promptFor = (id) => COMMAND_BODY.replaceAll("$ARGUMENTS", id);
 const Q = `query($t:String!,$p:String!){ issues(first:250, filter:{
     team:{key:{eq:$t}}, project:{name:{eq:$p}},
     state:{ type:{ nin:["completed","canceled"] } } }){
-  nodes{ id identifier title description state{name} assignee{id} labels(first:20){nodes{name}} priority } } }`;
+  nodes{ id identifier title description state{name} assignee{id} labels(first:20){nodes{name}} priority ${BLOCKING_RELATIONS_GQL} } } }`;
 
 /** Current queue straight from Linear — never cached, because it changes under us. */
 async function fetchState() {
@@ -118,6 +119,11 @@ async function fetchState() {
  * What can start right now, given what is running right now.
  * Owned Paths overlap is checked at THIS moment, not from a plan computed
  * earlier — under rolling dispatch the in-flight set changes continuously.
+ *
+ * Two orthogonal gates: `blocked by` relations answer "can this run AT ALL
+ * yet", Owned Paths answers "can it run alongside what's in flight". Both are
+ * read fresh with the queue on every fill, so a blocker merged mid-run
+ * releases its dependents on the next refill, no sweep needed.
  */
 function selectable(state, excludeIds, limit) {
   const busy = state.inProgress.flatMap((i) => effectiveOwnedPaths(i.description ?? ""));
@@ -126,6 +132,7 @@ function selectable(state, excludeIds, limit) {
     if (out.length >= limit) break;
     if (excludeIds.has(t.identifier)) continue;
     if (ONE && t.identifier !== ONE) continue;
+    if (openBlockers(t).length) continue;
     const own = effectiveOwnedPaths(t.description ?? "");
     if (pathsCollide(own, busy)) continue;
     out.push({ ...t, own });
@@ -142,8 +149,11 @@ console.log(c.bold(`\n${repo.name}`) + c.dim(`  cap ${cap} · ${firstWorkers.len
 
 if (!APPLY) {
   const picked = selectable(first, new Set(), Math.min(freeNow, MAX));
-  const unparseable = first.ready.filter((t) => !parseOwnedPaths(t.description ?? "").length);
-  for (const t of unparseable) console.log(c.yellow(`  ${t.identifier} — no parseable Owned Paths, treated as owning everything (dispatchable, but runs alone)`));
+  for (const t of first.ready) {
+    const blockers = openBlockers(t);
+    if (blockers.length) console.log(c.yellow(`  skip ${t.identifier} — blocked by ${blockers.join(", ")}`));
+    else if (!parseOwnedPaths(t.description ?? "").length) console.log(c.yellow(`  ${t.identifier} — no parseable Owned Paths, treated as owning everything (dispatchable, but runs alone)`));
+  }
   if (!picked.length) { console.log(c.dim("  nothing to start.\n")); process.exit(0); }
   console.log(c.bold(`\nwould start ${picked.length} now${REFILL ? ", then refill slots as they free" : ""}:`));
   for (const t of picked) console.log(`  ${c.green(t.identifier)}  ${t.title.slice(0, 60)}\n    ${c.dim(t.own.join(", "))}`);
@@ -572,12 +582,18 @@ async function fill() {
   const free = Math.min(cap - liveWorkerLeases(repo.name).length, MAX - startedCount);
   if (free <= 0) return;
 
-  // Same warning the dry run prints — without it, "READY is high but nothing
-  // starts" is invisible in exactly the mode that matters (see F-7).
+  // Same warnings the dry run prints — without them, "READY is high but nothing
+  // starts" is invisible in exactly the mode that matters (see F-7). Keyed per
+  // reason: a blocked ticket can unblock mid-run and then be worth re-warning
+  // about its missing Owned Paths, and vice versa.
   for (const t of state.ready) {
-    if (warned.has(t.identifier) || seen.has(t.identifier)) continue;
-    if (!parseOwnedPaths(t.description ?? "").length) {
-      warned.add(t.identifier);
+    if (seen.has(t.identifier)) continue;
+    const blockers = openBlockers(t);
+    if (blockers.length && !warned.has(`${t.identifier}:blocked`)) {
+      warned.add(`${t.identifier}:blocked`);
+      console.log(c.yellow(`  skip ${t.identifier} — blocked by ${blockers.join(", ")}`));
+    } else if (!blockers.length && !parseOwnedPaths(t.description ?? "").length && !warned.has(`${t.identifier}:paths`)) {
+      warned.add(`${t.identifier}:paths`);
       console.log(c.yellow(`  ${t.identifier} — no parseable Owned Paths, treated as owning everything (dispatchable, but runs alone)`));
     }
   }

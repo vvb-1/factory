@@ -27,6 +27,8 @@ It is fine for the verification command to *fail* — that's the bug. It must no
 
 Include the test files and the docs the change will touch. A path the agent needs but doesn't own means it stops and blocks.
 
+**Owned Paths orders nothing — `blocked by` relations do.** Disjoint paths only mean two tickets can run *simultaneously*; if one consumes the other's output (a helper it adds, a migration it lands), they must not, and the dispatcher can't see that from globs. Set the Linear `blocked by` relation when you spec a ticket that builds on an open one — dispatch holds it until the blocker is `Done`/`Canceled` and releases it automatically. A spec whose hidden prerequisite is only mentioned in prose will dispatch anyway and burn the run.
+
 **Never promote what you couldn't verify against the actual codebase.** If exploration didn't find the code, that's a hold, not a guess.
 
 **Don't spec the whole backlog.** Queue depth is the throttle: keep roughly 20 tickets dispatchable and spend the remaining effort on the highest-priority `Triage` items. Most of a deep backlog will be closed, deduped, or overtaken before anyone works it. Measure **queue-hours remaining**, not ticket count — that's the number that says whether the factory is about to idle.
