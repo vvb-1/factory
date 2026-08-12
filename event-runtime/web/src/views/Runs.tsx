@@ -4,7 +4,7 @@ import { api, ApiError } from "../api";
 import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { RunState } from "../types";
-import { ago, Button, Dialog, JsonBlock, KV, Section, StateBadge, VerbError } from "../components/ui";
+import { ago, Button, Dialog, Disclosure, JsonBlock, KV, Section, StateBadge, VerbError } from "../components/ui";
 
 const STATE_TABS: (RunState | "ALL")[] = [
   "ALL", "QUEUED", "RUNNING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
@@ -83,6 +83,10 @@ export function Runs({
     selected: selectedIndex,
     onSelect: (i) => setSelectedId(rows[i]?.runId ?? null),
     onClose: () => setSelectedId(null),
+    keys: {
+      // §5 convention: `x` is the destructive verb on the selection — here, cancel.
+      x: () => sel && connected && !TERMINAL.includes(sel.state) && setConfirm("cancel"),
+    },
   });
 
   const d = detail.data;
@@ -136,7 +140,10 @@ export function Runs({
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Run</th>
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">State</th>
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
+              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Adapter</th>
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Attempts</th>
+              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
+              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Updated</th>
             </tr>
           </thead>
@@ -152,13 +159,22 @@ export function Runs({
                   <StateBadge state={r.state} />
                 </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{r.agent}</td>
-                <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">{r.attempts}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{r.adapter}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                  {r.attempts}/{r.maxAttempts}
+                </td>
+                <td className="mono max-w-36 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  {r.reasonCode ?? "-"}
+                </td>
+                <td className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  {r.eventId ?? "-"}
+                </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{ago(r.updated_at, now)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-(--text-faint)">
+                <td colSpan={8} className="px-3 py-8 text-center text-(--text-faint)">
                   No runs{tab === "ALL" ? "" : ` in ${tab}`}.
                 </td>
               </tr>
@@ -177,7 +193,9 @@ export function Runs({
           <Section title="Run">
             <KV k="run" v={d.run.runId} />
             <KV k="agent" v={d.run.spec.agent} />
+            <KV k="adapter" v={d.run.spec.adapter} />
             <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} />
+            {sel.eventId && <KV k="origin event" v={`${sel.eventSource ?? "?"} · ${sel.eventId}`} />}
             <KV k="idempotencyKey" v={d.run.idempotencyKey} />
             <KV k="specHash" v={d.run.specHash} />
             <KV k="workspace" v={d.workspace} />
@@ -186,7 +204,7 @@ export function Runs({
           <div className="mb-4 flex gap-2">
             {!TERMINAL.includes(d.run.state) && (
               <Button variant="danger" disabled={!connected} onClick={() => setConfirm("cancel")}>
-                Cancel
+                Cancel <span className="mono ml-1 opacity-70">x</span>
               </Button>
             )}
             {/* §8: only FAILED → QUEUED is a legal retry transition. */}
@@ -243,7 +261,20 @@ export function Runs({
 
           {d.result && (
             <Section title={`Result · ${d.result.terminalState}${d.result.reasonCode ? ` · ${d.result.reasonCode}` : ""}`}>
-              <JsonBlock value={d.result.artifact ?? d.result} />
+              {d.result.artifact !== undefined ? (
+                <Disclosure label="artifact" defaultOpen>
+                  <JsonBlock value={d.result.artifact} />
+                </Disclosure>
+              ) : (
+                <Disclosure label="result" defaultOpen>
+                  <JsonBlock value={d.result} />
+                </Disclosure>
+              )}
+              {d.result.evidence !== undefined && (
+                <Disclosure label="evidence — what the agent claims it verified">
+                  <JsonBlock value={d.result.evidence} />
+                </Disclosure>
+              )}
             </Section>
           )}
 

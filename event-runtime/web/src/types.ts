@@ -38,8 +38,12 @@ export interface Proposal {
   expired: boolean;
   created_at: string;
   ttl_seconds: number;
+  decided_at: string | null;
+  decided_by: string | null;
   reason: string | null;
   runId: string | null;
+  eventId: string | null;
+  eventSource: string | null;
   agent: string | null;
   spec: RunSpec | null;
 }
@@ -63,9 +67,39 @@ export interface RunListItem {
   runId: string;
   state: RunState;
   attempts: number;
+  maxAttempts: number;
   agent: string;
+  adapter: string;
+  reasonCode: string | null;
+  eventId: string | null;
+  eventSource: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One append-only journal row (GET /journal) — the runtime's activity feed. */
+export interface JournalEntry {
+  seq: number;
+  runId: string;
+  from: string | null;
+  to: string;
+  actor: string;
+  reason: string | null;
+  attempt: number | null;
+  at: string;
+}
+
+export interface JournalView {
+  head: number;
+  entries: JournalEntry[];
+}
+
+/** One published (or pending) result event from the §8 outbox. */
+export interface OutboxRow {
+  seq: number;
+  event: Record<string, unknown>;
+  created_at: string;
+  published_at: string | null;
 }
 
 export interface LifecycleEvent {
@@ -115,7 +149,15 @@ export interface RunDetail {
   workspace: string | null;
 }
 
+/** Which runtime this UI is pointed at — live vs dev, adapter override. */
+export interface EnvIdentity {
+  name: string;
+  home: string;
+  adapter: string | null;
+}
+
 export interface StatusView {
+  env: EnvIdentity;
   events: Record<string, number>;
   proposals: { open: number; expired: number };
   runs: { byState: Partial<Record<RunState, number>> };

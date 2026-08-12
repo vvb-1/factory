@@ -7,11 +7,21 @@ import type { Proposal } from "../types";
 import { SpecDiff } from "../components/SpecDiff";
 import { ago, Button, Countdown, Dialog, JsonBlock, KV, Section, VerbError } from "../components/ui";
 
+/** Decided-proposal statuses use their outcome's tone (doc §10.2). */
+const PROPOSAL_STATUS_HUES: Record<string, string> = {
+  open: "var(--hue-info)",
+  approved: "var(--hue-ok)",
+  rejected: "var(--hue-err)",
+  superseded: "var(--hue-idle)",
+  resolved: "var(--hue-idle)",
+};
+
 /**
  * Proposals (webui spec §4.2) — the watched-approval centerpiece. The full
  * immutable RunSpec is always rendered (§12: the operator approves a spec,
  * not a summary), and a TTL-expired approval that re-plans STOPS and shows
- * the diff — never auto-approves the replacement.
+ * the diff — never auto-approves the replacement. The History tab (doc
+ * §10.2) is the read-only decision audit off GET /proposals?status=all.
  */
 export function Proposals({
   connected,
@@ -26,12 +36,39 @@ export function Proposals({
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<"open" | "history">("open");
   const query = useQuery({
     queryKey: ["proposals"],
     queryFn: api.proposals,
     refetchInterval: 2000,
   });
-  const rows = query.data?.proposals ?? [];
+  const history = useQuery({
+    queryKey: ["proposals", "history"],
+    queryFn: () => api.proposalHistory("all"),
+    enabled: tab === "history",
+    refetchInterval: 2000,
+  });
+  const rows = useMemo(
+    () =>
+      tab === "open"
+        ? (query.data?.proposals ?? [])
+        : (history.data?.proposals ?? []).filter((p) => p.status !== "open"),
+    [tab, query.data, history.data],
+  );
+
+  // Origin event type, resolved from the shared events cache (cheap: same
+  // query key as the Events view's "all" tab).
+  const eventsQuery = useQuery({
+    queryKey: ["events", "all"],
+    queryFn: () => api.events(),
+    refetchInterval: 2000,
+  });
+  const eventTypes = useMemo(
+    () => new Map((eventsQuery.data?.events ?? []).map((e) => [`${e.source}:${e.eventId}`, e.type])),
+    [eventsQuery.data],
+  );
+  const originType = (p: Proposal) =>
+    p.eventId ? eventTypes.get(`${p.eventSource}:${p.eventId}`) : undefined;
 
   // An open proposal's run should still be PROPOSED; anything else means it
   // was raced (e.g. cancelled from the Runs view) and can never be approved.
@@ -94,7 +131,9 @@ export function Proposals({
     onError: invalidate,
   });
 
-  const canApprove = sel !== null && sel.decision === "run" && !staleState(sel);
+  // History rows are audit records — no verbs, ever (doc §10.2).
+  const isOpen = sel !== null && sel.status === "open";
+  const canApprove = isOpen && sel.decision === "run" && !staleState(sel);
   const openReject = () => {
     setRejecting(true);
     setTimeout(() => reasonRef.current?.focus(), 0);
@@ -108,13 +147,13 @@ export function Proposals({
     keys: {
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
       a: () => canApprove && connected && setConfirmApprove(true),
-      x: () => sel && connected && openReject(),
+      x: () => isOpen && connected && openReject(),
     },
   });
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
-    if (!sel || !connected) {
+    if (!sel || !connected || !isOpen) {
       setContextActions([]);
     } else {
       setContextActions([
@@ -126,18 +165,48 @@ export function Proposals({
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.id, canApprove, connected]);
+  }, [sel?.id, canApprove, isOpen, connected]);
 
   return (
     <div className="flex h-full min-w-0">
       <div className="min-w-0 flex-1 overflow-auto p-5">
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
+
+        <div className="mb-3 flex gap-1">
+          {(["open", "history"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => {
+                setTab(t);
+                setSelectedId(null);
+              }}
+              className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
+              }`}
+            >
+              {t === "open" ? "Open" : "History"}
+            </button>
+          ))}
+        </div>
+
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decision</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">TTL</th>
+              {tab === "open" ? (
+                <>
+                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decision</th>
+                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">TTL</th>
+                </>
+              ) : (
+                <>
+                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
+                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decided by</th>
+                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decided</th>
+                </>
+              )}
+              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Created</th>
               <th className="border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
             </tr>
@@ -150,23 +219,40 @@ export function Proposals({
                 className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
               >
                 <td className="border-b border-(--border) px-3 py-1.5">{p.agent ?? "—"}</td>
-                <td className="border-b border-(--border) px-3 py-1.5">
-                  <span style={{ color: p.decision === "run" ? "var(--hue-info)" : "var(--hue-warn)" }}>
-                    {p.decision}
-                  </span>
-                  {p.expired && (
-                    <span className="ml-2" style={{ color: "var(--hue-warn)" }}>
-                      expired
-                    </span>
-                  )}
-                  {staleState(p) && (
-                    <span className="ml-2" style={{ color: "var(--hue-err)" }}>
-                      run {staleState(p)}
-                    </span>
-                  )}
-                </td>
-                <td className="border-b border-(--border) px-3 py-1.5">
-                  <Countdown createdAt={p.created_at} ttlSeconds={p.ttl_seconds} />
+                {tab === "open" ? (
+                  <>
+                    <td className="border-b border-(--border) px-3 py-1.5">
+                      <span style={{ color: p.decision === "run" ? "var(--hue-info)" : "var(--hue-warn)" }}>
+                        {p.decision}
+                      </span>
+                      {p.expired && (
+                        <span className="ml-2" style={{ color: "var(--hue-warn)" }}>
+                          expired
+                        </span>
+                      )}
+                      {staleState(p) && (
+                        <span className="ml-2" style={{ color: "var(--hue-err)" }}>
+                          run {staleState(p)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5">
+                      <Countdown createdAt={p.created_at} ttlSeconds={p.ttl_seconds} />
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="border-b border-(--border) px-3 py-1.5">
+                      <span style={{ color: PROPOSAL_STATUS_HUES[p.status] ?? "var(--text-dim)" }}>{p.status}</span>
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.decided_by ?? "-"}</td>
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                      {p.decided_at ? ago(p.decided_at, now) : "-"}
+                    </td>
+                  </>
+                )}
+                <td className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={originType(p) ?? undefined}>
+                  {p.eventId ?? "-"}
                 </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{ago(p.created_at, now)}</td>
                 <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.reason ?? "-"}</td>
@@ -174,8 +260,10 @@ export function Proposals({
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-(--text-faint)">
-                  No open proposals — the operator&apos;s work is done, for now.
+                <td colSpan={tab === "open" ? 6 : 7} className="px-3 py-8 text-center text-(--text-faint)">
+                  {tab === "open"
+                    ? "No open proposals — the operator's work is done, for now."
+                    : "No decided proposals yet."}
                 </td>
               </tr>
             )}
@@ -195,13 +283,29 @@ export function Proposals({
           <Section title="Proposal">
             <KV k="id" v={sel.id} />
             <KV k="decision" v={sel.decision} />
-            <KV k="run" v={sel.runId} />
             <KV
-              k="ttl"
-              v={<Countdown createdAt={sel.created_at} ttlSeconds={sel.ttl_seconds} />}
+              k="status"
+              v={<span style={{ color: PROPOSAL_STATUS_HUES[sel.status] ?? "var(--text-dim)" }}>{sel.status}</span>}
             />
+            <KV k="run" v={sel.runId} />
+            {isOpen && (
+              <KV
+                k="ttl"
+                v={<Countdown createdAt={sel.created_at} ttlSeconds={sel.ttl_seconds} />}
+              />
+            )}
+            {sel.decided_at && <KV k="decided at" v={sel.decided_at} />}
+            {sel.decided_by && <KV k="decided by" v={sel.decided_by} />}
             {sel.reason && <KV k="planner reason" v={sel.reason} />}
           </Section>
+
+          {sel.eventId && (
+            <Section title="Origin event">
+              <KV k="eventId" v={sel.eventId} />
+              <KV k="source" v={sel.eventSource} />
+              {originType(sel) && <KV k="type" v={originType(sel)} />}
+            </Section>
+          )}
 
           {sel.spec && (
             <Section title="Run spec — what you approve">
@@ -209,7 +313,7 @@ export function Proposals({
             </Section>
           )}
 
-          {staleState(sel) && (
+          {isOpen && staleState(sel) && (
             <div
               className="mb-3 rounded-md px-2.5 py-1.5 text-[12px]"
               style={{
@@ -221,22 +325,24 @@ export function Proposals({
               Reject it to clear the queue.
             </div>
           )}
-          <div className="flex gap-2">
-            {canApprove && (
-              <Button
-                variant="primary"
-                disabled={!connected || approve.isPending}
-                onClick={() => setConfirmApprove(true)}
-              >
-                Approve… <span className="mono ml-1 opacity-70">a</span>
+          {isOpen && (
+            <div className="flex gap-2">
+              {canApprove && (
+                <Button
+                  variant="primary"
+                  disabled={!connected || approve.isPending}
+                  onClick={() => setConfirmApprove(true)}
+                >
+                  Approve… <span className="mono ml-1 opacity-70">a</span>
+                </Button>
+              )}
+              <Button variant="danger" disabled={!connected || reject.isPending} onClick={openReject}>
+                Reject <span className="mono ml-1 opacity-70">x</span>
               </Button>
-            )}
-            <Button variant="danger" disabled={!connected || reject.isPending} onClick={openReject}>
-              Reject <span className="mono ml-1 opacity-70">x</span>
-            </Button>
-          </div>
+            </div>
+          )}
 
-          {rejecting && (
+          {isOpen && rejecting && (
             <div className="mt-3 flex gap-2">
               <input
                 ref={reasonRef}

@@ -277,3 +277,68 @@ artifact-content endpoints (§8).
 - Existing factory tests, emit checks, and `event-runtime` tests remain
   untouched and green; `GET /events` arrives with tests matching the other
   read endpoints' coverage in `cli.test.mjs`.
+
+---
+
+## 10. What shipped beyond the spec
+
+The control API grew past §7's single addition (proposal↔event linkage,
+proposal history, `GET /journal`, `GET /outbox`, `POST /events/requeue`,
+environment identity on `/health`/`/status`), and the UI now consumes all of
+it. Everything below follows §5's keyboard model and §5.1's design language
+unchanged.
+
+### 10.1 Events view (`#/events`, `g e`)
+
+The event inbox is a first-class view, not just the Overview table it started
+as. Status filter tabs (all / admitted / planned / noop / human_needed /
+dead_lettered) over `GET /events?status=`, j/k selection, and a detail panel
+with the full stored envelope plus `planFailures`/`lastPlanError`.
+Dead-lettered rows carry the error tone. **Requeue** (`q`, button, and ⌘K —
+`r` is off-limits as the `g r` navigation suffix) calls
+`POST /events/requeue` for dead_lettered/human_needed events only — it
+re-plans the already-admitted event, which supersedes §4.1's replay verb as
+the recovery path for dead letters (replay through intake remains available
+in the panel for dedup demonstrations). `404`/`409` render inline per §6.
+
+### 10.2 Proposals: origin + decision history
+
+Each proposal shows its originating event (`eventId`/`eventSource` from the
+API; the event type resolved from the shared events cache). An **Open /
+History** tab pair: History is backed by `GET /proposals?status=all` and is
+strictly read-only — decided proposals with `status`, `decided_by`,
+`decided_at`, and the immutable spec, no verbs ever offered on a decided row.
+The TTL countdown behaves as §4.2 specified.
+
+### 10.3 Runs: enriched list + evidence
+
+The list gains adapter, latest `reasonCode`, attempts as `n/maxAttempts`, and
+the origin `eventId`. The detail panel additionally renders the result's
+declared `evidence` (collapsible pretty JSON, per §4.3's result block) and
+the origin event; `x` cancels the selected run from the list, matching the
+proposals-view verb convention. `#/runs/:id` deep-links to the runs view with
+that run selected.
+
+### 10.4 Overview: dashboard
+
+Stat tiles stay. Added: (a) the **doctor panel** now links each anomaly to
+its view (expired proposal → that proposal, stale leases → runs,
+dead-lettered → the Events view's dead_lettered tab) and offers requeue
+directly on dead-letter rows; (b) a **live activity feed** off `GET /journal`
+— first fetch seeds the latest entries, then each poll passes
+`since=<last head>` and prepends only what is new, capped at 50 shown, each
+entry rendered as `run · FROM → TO by actor (reason)` with a relative
+timestamp and a jump-to-run link; (c) a compact **outbox feed** of the latest
+result events from `GET /outbox`, unpublished rows flagged in the warning
+tone, envelope behind a disclosure.
+
+### 10.5 Environment chip
+
+The nav rail header carries a permanent chip naming the runtime environment
+from `/health`'s `env` object: `env.name`, with the serve-wide adapter
+override appended when set ("dev · fake"). **live** wears the warning tone —
+approvals there trigger real agent runs; every other environment is
+informational. The title attribute carries `env.home` and the
+`policyVersion`. When `/health` fails the chip shows **disconnected** in the
+error tone, doubling as the API-down indicator alongside §4.1's connection
+dot.

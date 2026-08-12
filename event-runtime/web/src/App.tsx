@@ -1,15 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { useHashRoute, useTheme } from "./hooks";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
+import { Events } from "./views/Events";
 import { Overview } from "./views/Overview";
 import { Proposals } from "./views/Proposals";
 import { Runs } from "./views/Runs";
 
 const NAV = [
   { key: "overview", label: "Overview", go: "o" },
+  { key: "events", label: "Events", go: "e" },
   { key: "proposals", label: "Proposals", go: "p" },
   { key: "runs", label: "Runs", go: "r" },
 ] as const;
@@ -21,6 +23,7 @@ export function App() {
   const [injectOpen, setInjectOpen] = useState(false);
   const [focusRunId, setFocusRunId] = useState<string | null>(null);
   const [focusProposalId, setFocusProposalId] = useState<string | null>(null);
+  const [focusEventStatus, setFocusEventStatus] = useState<string | null>(null);
 
   const jumpToRun = (runId: string) => {
     setFocusRunId(runId);
@@ -30,6 +33,19 @@ export function App() {
     setFocusProposalId(id);
     navigate("proposals");
   };
+  const jumpToEvents = (status: string) => {
+    setFocusEventStatus(status);
+    navigate("events");
+  };
+
+  // Deep link #/runs/:id → the runs view with that run selected, then
+  // normalize the hash so the master-detail pane owns selection state.
+  useEffect(() => {
+    if (route[0] === "runs" && route[1]) {
+      setFocusRunId(route[1]);
+      navigate("runs");
+    }
+  }, [route, navigate]);
 
   // Connection indicator (spec §4.1): reads keep rendering from cache when
   // the runtime is down; verbs disable.
@@ -46,6 +62,26 @@ export function App() {
   const activeRuns = Object.entries(status.data?.runs.byState ?? {})
     .filter(([s]) => ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(s))
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
+  // Events needing an operator: the two statuses requeue exists for.
+  const eventAttention =
+    (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
+
+  // Environment chip: which runtime this UI can mutate. "live" wears the
+  // warning tone — approving there triggers real agent runs; anything else
+  // (dev, or a serve-wide fake-adapter override) stays informational.
+  const env = health.data?.env;
+  const envHue = !connected
+    ? "var(--hue-err)"
+    : env?.name === "live"
+      ? "var(--hue-warn)"
+      : "var(--hue-info)";
+  const envLabel = !connected
+    ? "disconnected"
+    : env
+      ? env.adapter
+        ? `${env.name} · ${env.adapter}`
+        : env.name
+      : "…";
 
   useGoSequences(
     useMemo(
@@ -63,10 +99,33 @@ export function App() {
   return (
     <div className="flex h-screen">
       <nav className="flex w-52 shrink-0 flex-col border-r border-(--border) bg-(--surface-1)">
-        <div className="display px-4 pt-4 pb-3 text-[14px] font-semibold">event runtime</div>
+        <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+          <span className="display text-[14px] font-semibold">event runtime</span>
+          <span
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+            title={
+              env
+                ? `${env.home} · policy ${health.data?.policyVersion}`
+                : "runtime unreachable"
+            }
+            style={{
+              color: envHue,
+              background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
+            }}
+          >
+            {envLabel}
+          </span>
+        </div>
         <div className="flex-1 px-2">
           {NAV.map((n) => {
-            const count = n.key === "proposals" ? openProposals : n.key === "runs" ? activeRuns : 0;
+            const count =
+              n.key === "proposals"
+                ? openProposals
+                : n.key === "runs"
+                  ? activeRuns
+                  : n.key === "events"
+                    ? eventAttention
+                    : 0;
             return (
               <button
                 key={n.key}
@@ -117,7 +176,7 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/p/r</span> navigate
+            <span className="mono">o/e/p/r</span> navigate
           </div>
         </div>
       </nav>
@@ -132,8 +191,20 @@ export function App() {
           />
         ) : view === "runs" ? (
           <Runs connected={connected} focusRunId={focusRunId} onFocusConsumed={() => setFocusRunId(null)} />
+        ) : view === "events" ? (
+          <Events
+            connected={connected}
+            focusStatus={focusEventStatus}
+            onFocusConsumed={() => setFocusEventStatus(null)}
+          />
         ) : (
-          <Overview connected={connected} />
+          <Overview
+            connected={connected}
+            onJumpRun={jumpToRun}
+            onJumpProposal={jumpToProposal}
+            onJumpEvents={jumpToEvents}
+            onNavigate={navigate}
+          />
         )}
       </main>
 

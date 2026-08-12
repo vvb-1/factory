@@ -16,6 +16,15 @@ export const STATE_HUES: Record<string, string> = {
   CANCELLED: "var(--hue-idle)",
 };
 
+/** One hue map for the §5 event-inbox statuses — identical in every view. */
+export const EVENT_STATUS_HUES: Record<string, string> = {
+  admitted: "var(--hue-info)",
+  planned: "var(--hue-ok)",
+  noop: "var(--hue-idle)",
+  human_needed: "var(--hue-warn)",
+  dead_lettered: "var(--hue-err)",
+};
+
 export function StateBadge({ state }: { state: string }) {
   const hue = STATE_HUES[state] ?? "var(--hue-idle)";
   return (
@@ -68,6 +77,26 @@ export function JsonBlock({ value }: { value: unknown }) {
     <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 leading-relaxed whitespace-pre-wrap">
       {JSON.stringify(value, null, 2)}
     </pre>
+  );
+}
+
+/** Collapsible block for secondary payloads (result artifact, evidence). */
+export function Disclosure({
+  label,
+  children,
+  defaultOpen,
+}: {
+  label: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details open={defaultOpen} className="mb-1.5">
+      <summary className="cursor-pointer text-[11px] text-(--text-faint) select-none hover:text-(--text-dim)">
+        {label}
+      </summary>
+      <div className="mt-1.5">{children}</div>
+    </details>
   );
 }
 
