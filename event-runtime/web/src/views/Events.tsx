@@ -4,7 +4,7 @@ import { api } from "../api";
 import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { AdmittedEvent } from "../types";
-import { ago, Button, EVENT_STATUS_HUES, JsonBlock, KV, Section, VerbError } from "../components/ui";
+import { ago, Button, EVENT_STATUS_HUES, JsonBlock, KV, notify, Section, VerbError } from "../components/ui";
 
 const STATUS_TABS = ["all", "admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
 
@@ -61,13 +61,19 @@ export function Events({
 
   const requeue = useMutation({
     mutationFn: (e: AdmittedEvent) => api.requeue(e.source, e.eventId),
-    onSuccess: invalidate,
+    onSuccess: (_, e) => {
+      invalidate();
+      notify(`Requeued event ${e.eventId}`, "ok");
+    },
     onError: invalidate, // 404/409 mean someone else acted — converge on truth
   });
 
   const replay = useMutation({
     mutationFn: (envelope: unknown) => api.replay(envelope),
-    onSuccess: () => queryClient.invalidateQueries(),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries();
+      notify(data.duplicate ? `Duplicate event ${data.eventId}` : `Replayed event ${data.eventId}`, "info");
+    },
   });
 
   const canRequeue = sel !== null && REQUEUEABLE.has(sel.status);
@@ -123,11 +129,11 @@ export function Events({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Event</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Type</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Subject</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Admitted</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Event</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Type</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Subject</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Admitted</th>
             </tr>
           </thead>
           <tbody>

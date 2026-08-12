@@ -116,6 +116,11 @@ export function CommandPalette({
             </Command.Item>
           ))}
         </Command.List>
+        <div className="flex items-center justify-between border-t border-(--border) px-4 py-2 text-[11px] text-(--text-faint)">
+          <span><span className="mono font-medium">↑↓</span> Navigate</span>
+          <span><span className="mono font-medium">↵</span> Select</span>
+          <span><span className="mono font-medium">ESC</span> Close</span>
+        </div>
       </Command>
     </div>
   );

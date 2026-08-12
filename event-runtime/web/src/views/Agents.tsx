@@ -52,12 +52,12 @@ export function Agents({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Ref</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Contract</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Mutating</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Capabilities</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Timeout</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Attempts</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Ref</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Contract</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Mutating</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Capabilities</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Timeout</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Attempts</th>
             </tr>
           </thead>
           <tbody>

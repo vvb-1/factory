@@ -12,6 +12,7 @@ import {
   humanSize,
   JsonBlock,
   KV,
+  notify,
   Section,
   StateBadge,
   VerbError,
@@ -70,8 +71,9 @@ export function Runs({
 
   const cancel = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.cancel(id, reason),
-    onSuccess: () => {
+    onSuccess: (_, { id }) => {
       invalidate();
+      notify(`Cancelled run ${id}`, "info");
       setConfirm(null);
       setCancelReason("");
     },
@@ -80,8 +82,9 @@ export function Runs({
 
   const retry = useMutation({
     mutationFn: ({ id, force }: { id: string; force: boolean }) => api.retry(id, force),
-    onSuccess: () => {
+    onSuccess: (_, { id, force }) => {
       invalidate();
+      notify(`${force ? "Force retried" : "Retried"} run ${id}`, "ok");
       setConfirm(null);
     },
     onError: (err) => {
@@ -150,14 +153,14 @@ export function Runs({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Run</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">State</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Adapter</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Attempts</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Updated</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Run</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">State</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Adapter</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Attempts</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Updated</th>
             </tr>
           </thead>
           <tbody>

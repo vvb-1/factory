@@ -4,6 +4,7 @@ import { api } from "./api";
 import { useHashRoute, useTheme } from "./hooks";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
+import { ToastContainer } from "./components/ui";
 import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Overview } from "./views/Overview";
@@ -231,6 +232,7 @@ export function App() {
 
       <CommandPalette actions={paletteActions} onJumpRun={jumpToRun} onJumpProposal={jumpToProposal} />
       {injectOpen && <InjectDialog onClose={() => setInjectOpen(false)} />}
+      <ToastContainer />
     </div>
   );
 }

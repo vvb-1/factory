@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { modal, useNow } from "../hooks";
 
 /** One fixed hue map for the closed §8 lifecycle — identical in every view. */
@@ -78,11 +78,82 @@ export function humanSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function JsonBlock({ value }: { value: unknown }) {
+export interface ToastMessage {
+  id: string;
+  type: "ok" | "err" | "info";
+  message: string;
+}
+
+const toastListeners = new Set<(toasts: ToastMessage[]) => void>();
+let activeToasts: ToastMessage[] = [];
+
+export function notify(message: string, type: "ok" | "err" | "info" = "ok") {
+  const id = Math.random().toString(36).slice(2);
+  activeToasts = [...activeToasts, { id, type, message }].slice(-5);
+  toastListeners.forEach((l) => l(activeToasts));
+  setTimeout(() => {
+    activeToasts = activeToasts.filter((t) => t.id !== id);
+    toastListeners.forEach((l) => l(activeToasts));
+  }, 3000);
+}
+
+export function ToastContainer() {
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  useEffect(() => {
+    toastListeners.add(setToasts);
+    return () => {
+      toastListeners.delete(setToasts);
+    };
+  }, []);
+
+  if (toasts.length === 0) return null;
   return (
-    <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 leading-relaxed whitespace-pre-wrap">
-      {JSON.stringify(value, null, 2)}
-    </pre>
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="pointer-events-auto flex items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
+          style={{
+            borderColor: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
+          }}
+        >
+          <span
+            className="size-2 rounded-full"
+            style={{
+              background: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
+            }}
+          />
+          <span className="text-(--text) font-medium">{t.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function JsonBlock({ value }: { value: unknown }) {
+  const [copied, setCopied] = useState(false);
+  const text = useMemo(() => JSON.stringify(value, null, 2), [value]);
+
+  const copy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    notify("Copied JSON to clipboard", "info");
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="relative group">
+      <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 pr-16 leading-relaxed whitespace-pre-wrap">
+        {text}
+      </pre>
+      <button
+        type="button"
+        onClick={copy}
+        className="absolute top-2 right-2 rounded border border-(--border) bg-(--surface-1) px-2 py-0.5 text-[10px] font-medium text-(--text-dim) opacity-0 transition-opacity group-hover:opacity-100 hover:bg-(--surface-2) hover:text-(--text)"
+      >
+        {copied ? "Copied!" : "Copy"}
+      </button>
+    </div>
   );
 }
 

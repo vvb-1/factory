@@ -5,7 +5,7 @@ import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import { SpecDiff } from "../components/SpecDiff";
-import { ago, Button, Countdown, Dialog, JsonBlock, KV, Section, VerbError } from "../components/ui";
+import { ago, Button, Countdown, Dialog, JsonBlock, KV, notify, Section, VerbError } from "../components/ui";
 
 /** Decided-proposal statuses use their outcome's tone (doc §10.2). */
 const PROPOSAL_STATUS_HUES: Record<string, string> = {
@@ -113,8 +113,10 @@ export function Proposals({
     onSuccess: ({ p, outcome }) => {
       invalidate();
       if (outcome.approved && outcome.runId) {
+        notify(`Approved proposal — queued ${outcome.runId}`, "ok");
         onRunQueued(outcome.runId);
       } else if (outcome.replanned && outcome.proposal) {
+        notify(`Proposal expired — re-planned new spec`, "info");
         // §12: expired proposal re-planned to a different spec — stop and show it.
         setReplan({ before: p, after: outcome.proposal });
         setSelectedId(outcome.proposal.id);
@@ -125,8 +127,9 @@ export function Proposals({
 
   const reject = useMutation({
     mutationFn: ({ id, why }: { id: string; why: string }) => api.reject(id, why),
-    onSuccess: () => {
+    onSuccess: (_, { id }) => {
       invalidate();
+      notify(`Rejected proposal ${id}`, "info");
       setRejecting(false);
       setReason("");
     },
@@ -195,22 +198,22 @@ export function Proposals({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
               {tab === "open" ? (
                 <>
-                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decision</th>
-                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">TTL</th>
+                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Decision</th>
+                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">TTL</th>
                 </>
               ) : (
                 <>
-                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
-                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decided by</th>
-                  <th className="border-b border-(--border) px-3 py-1.5 font-medium">Decided</th>
+                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
+                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Decided by</th>
+                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Decided</th>
                 </>
               )}
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Created</th>
-              <th className="border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Created</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
             </tr>
           </thead>
           <tbody>
