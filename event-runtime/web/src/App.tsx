@@ -110,7 +110,10 @@ export function App() {
     <div className="flex h-screen">
       <nav className="flex w-52 shrink-0 flex-col border-r border-(--border) bg-(--surface-1)">
         <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
-          <span className="display text-[14px] font-semibold">event runtime</span>
+          <div className="flex items-center gap-2">
+            <img src="/watt-mind-logo.svg" alt="Watt Mind" className="size-5.5 shrink-0" />
+            <span className="display text-[14px] font-semibold">factory</span>
+          </div>
           <span
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
             title={
