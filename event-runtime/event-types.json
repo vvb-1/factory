@@ -1,0 +1,8 @@
+{
+  "factory.status-report.requested": {
+    "agent": "factory-status-report@1",
+    "adapter": "claude",
+    "idempotencyScope": ["correlationId", "inputHash"],
+    "proposalTtlSeconds": 1800
+  }
+}
