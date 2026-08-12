@@ -33,6 +33,10 @@ repos:
     # What "Done" means beyond a merge (linear.md §7).
     smoke_workflow: smoke-dev.yml
     smoke_url: https://bj29-dev.projects.watt-mind.com
+    # Optional public metadata; an origin is queried at /version.json.
+    deployment:
+      url: https://bj29-dev.projects.watt-mind.com
+      branch: develop
 
     # Concurrency. Merges are always serialized regardless; this caps how many
     # ticket agents run at once, and each one costs a worktree on disk.
@@ -137,6 +141,11 @@ repos:
     # the cap is per repo, not per supervisor.
     max_in_flight: 20
 
+    deployment:
+      url: https://legal-dev.projects.watt-mind.com/healthz
+      branch: develop
+      revision_field: revision
+
     # Surfaces where a diff is never auto-merged, on top of the global list in
     # policy.yaml. Without these, escalate.mjs has nothing to check and the
     # whole mechanical half of the gate is missing — in a CLNT repo that
@@ -176,6 +185,10 @@ repos:
     # Cap concurrent ticket agents for this repo. One agent receives one
     # isolated worktree, so this also permits up to eight active worktrees.
     max_in_flight: 20
+
+    deployment:
+      url: https://cashsaas.projects.watt-mind.com
+      branch: master
 
     # What "verified" means. Agents run this before any PR.
     verify: npm run typecheck && npm run lint && npm run format:check
@@ -218,6 +231,10 @@ repos:
 
     max_in_flight: 10
 
+    deployment:
+      url: https://proxies.projects.watt-mind.com
+      branch: master
+
     escalate_paths:
       - grocery_platform/settings*.py
       - "**/migrations/**"
@@ -256,7 +273,7 @@ repos:
   # shared/ in place and its changes land by ordinary commit/PR, not worktree.
   - name: factory
     path: ~/Develop/factory
-    github: hdkiller/factory
+    github: watt-mind/factory
     team: OPS
     base: main
     report_only: true            # never a dispatch target — no worktree tooling
