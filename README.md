@@ -78,6 +78,37 @@ Prefixed `factory-` so they're identifiable as ours and never collide with a rep
 | `/factory-triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
 | `/factory-audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
 
+### `factory status` — the everyday hub
+
+Run this from a configured repository (or choose one explicitly):
+
+```bash
+factory status
+factory status --repo legalease
+factory status --json
+```
+
+It is read-only and answers the immediate operational questions: which repository
+and branch you are in, whether the checkout is clean, the fetched remote base
+and deploy refs, deployment freshness, the live Linear pipeline counts, and the
+single recommended next action. The default output explains that action in plain
+English; `--json` is for scripts.
+
+A repo may opt into deployment revision comparison in `config/repos.yaml`:
+
+```yaml
+deployment:
+  url: https://app.example.com/healthz # exact endpoint, or origin -> /version.json
+  branch: develop                      # branch represented by this environment
+  revision_field: revision              # optional; commit/git_sha/sha are automatic
+```
+
+The endpoint must return JSON containing a revision field, such as
+`{"revision":"<git SHA>"}` or `{"commit":"<git SHA>"}`. `factory status`
+labels failures to fetch or missing metadata as **unknown**—never as a stale
+deploy—and distinguishes an older deploy from an unrelated revision. It also
+shows when the reaper and per-repository janitor last ran.
+
 ### CLI notification wrapper
 
 `factory notify` is the cwd-independent human interrupt channel used by the factory floor:

@@ -67,6 +67,7 @@ case "$cmd" in
   queue)        run_bun orchestrator/queue.mjs "$@" ;;
   next)         run_bun orchestrator/next.mjs "$@" ;;
   state)        run_bun orchestrator/state.mjs "$@" ;;
+  status)       run_bun orchestrator/status.mjs "$@" ;;
   friction)     run_bun orchestrator/friction.mjs "$@" ;;
   economics)    run_bun orchestrator/economics.mjs "$@" ;;
   ci)           run_bun orchestrator/ci.mjs "$@" ;;
@@ -112,6 +113,7 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   queue         orchestrator/queue.mjs
   next          orchestrator/next.mjs
   state         orchestrator/state.mjs
+  status        orchestrator/status.mjs (repo, deployment, and factory snapshot)
   friction      orchestrator/friction.mjs
   economics     orchestrator/economics.mjs
   ci            orchestrator/ci.mjs

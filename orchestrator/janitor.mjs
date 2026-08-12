@@ -19,7 +19,7 @@
  * Losing an agent's unpushed work would be far worse than the disk it holds.
  * Never add --force here; if a worktree won't go, that is a finding to look at.
  */
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, mkdirSync, appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { homedir } from "node:os";
@@ -41,6 +41,18 @@ const c = {
   dim: (s) => `\x1b[2m${s}\x1b[0m`, bold: (s) => `\x1b[1m${s}\x1b[0m`,
   green: (s) => `\x1b[32m${s}\x1b[0m`, yellow: (s) => `\x1b[33m${s}\x1b[0m`, red: (s) => `\x1b[31m${s}\x1b[0m`,
 };
+
+// Keep a lightweight per-repo run marker. Unlike worktree discovery this does
+// not depend on there being an orphan, so `factory status` can accurately say
+// when the janitor was last invoked even when it found nothing.
+if (!GATE) {
+  try {
+    const logDir = path.join(homedir(), ".factory/logs");
+    mkdirSync(logDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "").replace("T", "-");
+    for (const repo of repos) appendFileSync(path.join(logDir, `janitor-${repo.name}-${stamp}.log`), `${new Date().toISOString()} ${APPLY ? "apply" : "dry"}\n`);
+  } catch { /* observability must never block safe cleanup */ }
+}
 
 let totalReclaimable = 0;
 
