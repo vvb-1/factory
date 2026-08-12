@@ -178,11 +178,46 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 - Every verb the palette offers checks current state first — it never shows
   "approve" on a decided proposal or "cancel" on a terminal run.
 
-Design language: dark default (light theme supported via Tailwind tokens from
-the start — retrofitting themes is misery), 13–14 px base type, tight row
-height, muted grays with color reserved for state badges and the connection
-dot. Build-time reviews use the hallmark design skill; the target is "quiet
-tool you live in", not "dashboard demo".
+### 5.1 Design language
+
+Grounded in what Linear published about its own 2024 redesign
+([how-we-redesigned-the-linear-ui](https://linear.app/now/how-we-redesigned-the-linear-ui),
+[a-design-reset](https://linear.app/now/a-design-reset)) — adopted here as
+constraints, not vibes:
+
+- **Three theme tokens, OKLCH, derived shades.** Linear replaced ~98
+  hand-picked variables per theme with three — base, accent, contrast — and
+  generates every surface, border, and text shade from them in a perceptually
+  uniform color space. We do the same: three `oklch()` tokens as CSS
+  variables (Tailwind v4 is OKLCH-native), with light, dark, and a
+  high-contrast variant *computed*, never hand-tuned per theme. Dark is the
+  default; the others come for free by construction, which is the whole
+  point.
+- **Neutral chrome, meaningful color.** Keep chroma out of the chrome: nav
+  rail, headers, borders, and row hover states are near-zero-chroma grays
+  derived from the base token. Hue appears only where it carries meaning —
+  the FSM state badges, the connection dot, and destructive confirmations.
+  If a screenshot in grayscale loses information, color was doing structure's
+  job.
+- **Typography: Inter, Inter Display.** Inter at 13–14 px for body and table
+  text, tight row height; Inter Display for the few headings and stat-tile
+  numerals. Nothing else.
+- **The inverted-L is the whole chrome.** Nav rail plus view header form an
+  inverted L around the content, and Linear's redesign spent most of its
+  effort on pixel-level alignment inside it — icons, labels, and counts on
+  one consistent grid. Every one of our four views uses the identical
+  skeleton (header → dense list → right detail panel), so hierarchy and
+  density never reset between views.
+- **Stress-test before ship.** Linear validated against three axes —
+  environment, appearance, hierarchy — rather than a formal method. The
+  implementation ticket's hallmark critique pass adopts the same axes:
+  window sizes and platforms; all three generated themes; and whether run
+  state reads at a glance from two meters. The reset post's one transferable
+  lesson is that piecemeal polish reads as disjointed because user journeys
+  are unpredictable — hence tokens and the shared view skeleton are defined
+  once, first, and everything renders through them.
+
+The target is "quiet tool you live in", not "dashboard demo".
 
 ## 6. Liveness and concurrency honesty
 
