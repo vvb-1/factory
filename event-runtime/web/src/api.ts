@@ -1,5 +1,6 @@
 import type {
   AdmittedEvent,
+  AgentsView,
   ApproveOutcome,
   EnvIdentity,
   JournalView,
@@ -69,4 +70,9 @@ export const api = {
   // Re-plan a dead_lettered or human_needed event (404 unknown, 409 wrong status).
   requeue: (source: string, eventId: string) =>
     call<{ requeued: boolean }>("POST", "/events/requeue", { source, eventId }),
+  // The agent registry, fully readable: definitions, prompts, schemas, pins.
+  agents: () => call<AgentsView>("GET", "/agents"),
 };
+
+/** Browser URL for a stored artifact's bytes (streamed by the control API). */
+export const artifactUrl = (sha256: string) => `/api/artifacts/${encodeURIComponent(sha256)}`;

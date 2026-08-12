@@ -166,12 +166,20 @@ async function serve(args) {
   });
   server.on("error", (err) => fail(`serve: ${err.message}`));
 
-  announceProposals();
-  const timer = setInterval(tick, 1000);
+  // The watched loop starts ONLY once the API actually owns its port. A serve
+  // that lost the bind race must die, not keep planning and working the same
+  // database as the serve that won — that is a second unmanaged worker and a
+  // straight violation of the §3 single-worker cap. (Observed live: a portless
+  // serve raced the real one and executed its runs with stale code.)
+  let timer = null;
+  server.on("listening", () => {
+    announceProposals();
+    timer = setInterval(tick, 1000);
+  });
 
   process.on("SIGINT", () => {
     log("shutting down");
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref?.();
   });

@@ -1,10 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, artifactUrl } from "../api";
 import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { RunState } from "../types";
-import { ago, Button, Dialog, Disclosure, JsonBlock, KV, Section, StateBadge, VerbError } from "../components/ui";
+import {
+  ago,
+  Button,
+  Dialog,
+  Disclosure,
+  humanSize,
+  JsonBlock,
+  KV,
+  Section,
+  StateBadge,
+  VerbError,
+} from "../components/ui";
 
 const STATE_TABS: (RunState | "ALL")[] = [
   "ALL", "QUEUED", "RUNNING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
@@ -16,10 +27,12 @@ export function Runs({
   connected,
   focusRunId,
   onFocusConsumed,
+  onJumpAgent,
 }: {
   connected: boolean;
   focusRunId: string | null;
   onFocusConsumed: () => void;
+  onJumpAgent: (ref: string) => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -192,7 +205,19 @@ export function Runs({
 
           <Section title="Run">
             <KV k="run" v={d.run.runId} />
-            <KV k="agent" v={d.run.spec.agent} />
+            <KV
+              k="agent"
+              v={
+                <button
+                  type="button"
+                  className="mono cursor-pointer hover:text-(--accent)"
+                  title={`What is ${d.run.spec.agent}? Open in Agents`}
+                  onClick={() => onJumpAgent(d.run.spec.agent)}
+                >
+                  {d.run.spec.agent}
+                </button>
+              }
+            />
             <KV k="adapter" v={d.run.spec.adapter} />
             <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} />
             {sel.eventId && <KV k="origin event" v={`${sel.eventSource ?? "?"} · ${sel.eventId}`} />}
@@ -274,6 +299,41 @@ export function Runs({
                 <Disclosure label="evidence — what the agent claims it verified">
                   <JsonBlock value={d.result.evidence} />
                 </Disclosure>
+              )}
+            </Section>
+          )}
+
+          {d.result && (
+            <Section title="Artifacts">
+              {(d.result.artifacts ?? []).length === 0 ? (
+                <div className="text-(--text-faint)">No stored artifacts.</div>
+              ) : (
+                <div className="rounded-md border border-(--border) px-3 py-1">
+                  {(d.result.artifacts ?? []).map((a) => (
+                    <div
+                      key={a.sha256}
+                      className="flex items-baseline justify-between gap-3 border-b border-(--border) py-1.5 last:border-0"
+                    >
+                      <span className="truncate">
+                        {a.kind}
+                        <span className="mono ml-2 text-[11px] text-(--text-faint)" title={a.sha256}>
+                          {a.sha256.slice(0, 12)}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-baseline gap-3">
+                        <span className="tabular-nums text-(--text-faint)">{humanSize(a.sizeBytes)}</span>
+                        <a
+                          href={artifactUrl(a.sha256)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-(--accent) hover:underline"
+                        >
+                          Open
+                        </a>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </Section>
           )}

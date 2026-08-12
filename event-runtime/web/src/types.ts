@@ -125,6 +125,14 @@ export interface Attempt {
   workspace_path: string | null;
 }
 
+/** Durable, content-addressed artifact — bytes stream from GET /artifacts/:sha256. */
+export interface ArtifactRef {
+  kind: string;
+  uri: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
 export interface RunDetail {
   run: {
     runId: string;
@@ -143,10 +151,44 @@ export interface RunDetail {
     reasonCode: string | null;
     artifact?: unknown;
     artifactHash?: string;
+    artifacts?: ArtifactRef[];
     evidence?: unknown;
   } | null;
   receipt: Record<string, string | null> | null;
   workspace: string | null;
+}
+
+/** Which event types route to an agent, and how (GET /agents). */
+export interface AgentEventRoute {
+  type: string;
+  adapter: string;
+  idempotencyScope: string;
+  proposalTtlSeconds: number | null;
+}
+
+/** One registered agent, fully readable: definition, prompt, schemas, pins. */
+export interface AgentDef {
+  ref: string;
+  id: string;
+  version: number;
+  outputContract: string;
+  workspace: { type: string; retainOnFailure?: boolean };
+  capabilities: { filesystem?: string; services?: string[] };
+  limits: { timeout_seconds?: number; attempts?: number };
+  mutating: boolean;
+  promptFile: string;
+  prompt: string;
+  inputSchemaFile: string;
+  inputSchema: unknown;
+  outputSchemaFile: string;
+  outputSchema: unknown;
+  pins: Record<string, string>;
+  eventTypes: AgentEventRoute[];
+}
+
+export interface AgentsView {
+  agents: AgentDef[];
+  contracts: Record<string, unknown>;
 }
 
 /** Which runtime this UI is pointed at — live vs dev, adapter override. */

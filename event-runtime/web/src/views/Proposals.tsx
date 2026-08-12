@@ -28,11 +28,13 @@ export function Proposals({
   onRunQueued,
   focusProposalId,
   onFocusConsumed,
+  onJumpAgent,
 }: {
   connected: boolean;
   onRunQueued: (runId: string) => void;
   focusProposalId: string | null;
   onFocusConsumed: () => void;
+  onJumpAgent: (ref: string) => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -282,6 +284,21 @@ export function Proposals({
 
           <Section title="Proposal">
             <KV k="id" v={sel.id} />
+            {sel.agent && (
+              <KV
+                k="agent"
+                v={
+                  <button
+                    type="button"
+                    className="mono cursor-pointer hover:text-(--accent)"
+                    title={`What is ${sel.agent}? Open in Agents`}
+                    onClick={() => onJumpAgent(sel.agent!)}
+                  >
+                    {sel.agent}
+                  </button>
+                }
+              />
+            )}
             <KV k="decision" v={sel.decision} />
             <KV
               k="status"

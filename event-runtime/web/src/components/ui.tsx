@@ -72,6 +72,12 @@ export function ago(iso: string | null | undefined, now: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+export function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 leading-relaxed whitespace-pre-wrap">

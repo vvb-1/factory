@@ -4,16 +4,21 @@ import { api } from "./api";
 import { useHashRoute, useTheme } from "./hooks";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
+import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Overview } from "./views/Overview";
 import { Proposals } from "./views/Proposals";
 import { Runs } from "./views/Runs";
 
+// Agents rides `g t` ("what is this agent?"): o/e/p/r are taken, and `g a`
+// would double-fire the proposals view's `a` (approve) list key — chord
+// suffixes must never collide with single-key verbs.
 const NAV = [
   { key: "overview", label: "Overview", go: "o" },
   { key: "events", label: "Events", go: "e" },
   { key: "proposals", label: "Proposals", go: "p" },
   { key: "runs", label: "Runs", go: "r" },
+  { key: "agents", label: "Agents", go: "t" },
 ] as const;
 
 export function App() {
@@ -24,6 +29,7 @@ export function App() {
   const [focusRunId, setFocusRunId] = useState<string | null>(null);
   const [focusProposalId, setFocusProposalId] = useState<string | null>(null);
   const [focusEventStatus, setFocusEventStatus] = useState<string | null>(null);
+  const [focusAgentRef, setFocusAgentRef] = useState<string | null>(null);
 
   const jumpToRun = (runId: string) => {
     setFocusRunId(runId);
@@ -36,6 +42,10 @@ export function App() {
   const jumpToEvents = (status: string) => {
     setFocusEventStatus(status);
     navigate("events");
+  };
+  const jumpToAgent = (ref: string) => {
+    setFocusAgentRef(ref);
+    navigate("agents");
   };
 
   // Deep link #/runs/:id → the runs view with that run selected, then
@@ -176,7 +186,7 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/e/p/r</span> navigate
+            <span className="mono">o/e/p/r/t</span> navigate
           </div>
         </div>
       </nav>
@@ -188,9 +198,17 @@ export function App() {
             onRunQueued={jumpToRun}
             focusProposalId={focusProposalId}
             onFocusConsumed={() => setFocusProposalId(null)}
+            onJumpAgent={jumpToAgent}
           />
         ) : view === "runs" ? (
-          <Runs connected={connected} focusRunId={focusRunId} onFocusConsumed={() => setFocusRunId(null)} />
+          <Runs
+            connected={connected}
+            focusRunId={focusRunId}
+            onFocusConsumed={() => setFocusRunId(null)}
+            onJumpAgent={jumpToAgent}
+          />
+        ) : view === "agents" ? (
+          <Agents focusAgentRef={focusAgentRef} onFocusConsumed={() => setFocusAgentRef(null)} />
         ) : view === "events" ? (
           <Events
             connected={connected}
