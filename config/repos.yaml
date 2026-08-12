@@ -1,11 +1,8 @@
 # Per-repo facts the loop needs. One entry only, on purpose.
 #
-# BJ29 is the only repo that currently satisfies PC-15 (industrialized
-# worktrees), which is the precondition for dispatching concurrent agents into
-# it. coach-wattz and legalease get entries when CW-363 and CLNT-609 land —
-# adding them now would mean inventing ports and test commands for tooling that
-# doesn't exist yet, and an agent that trusts an invented port collides with
-# another agent's dev server.
+# BJ29 is currently the only repo authorized for automated dispatch. Repos
+# need industrialized worktrees before dispatch can be enabled; a repo may still
+# configure its teardown script while remaining `report_only` for dispatch.
 
 repos:
   - name: bj29
@@ -96,9 +93,10 @@ repos:
   #   - dispatch must never target them; concurrent agents there share ports and
   #     databases
   #
-  # coach-wattz graduates when CW-363 lands its worktree scripts. legalease
-  # (CLNT-609) and cashsaas (CLNT-791) already have — their entries below carry
-  # worktree_up/down/warm like bj29's, and are no longer report_only.
+  # A report-only repo may configure `worktree_down` for safe janitor cleanup.
+  # The janitor calls that repo-owned script; it never removes a worktree by
+  # hand. coach-wattz's scripts landed in CW-363. legalease (CLNT-609) and
+  # cashsaas (CLNT-791) have graduated to full lifecycle configuration.
   # --------------------------------------------------------------------------
 
   - name: wm-home
@@ -119,8 +117,11 @@ repos:
     team: CW
     project: Coach Watts - Web & AI Core Platform
     base: develop
+    worktree_up: bin/worktree-up.sh
+    worktree_down: bin/worktree-down.sh
+    worktree_warm: bin/worktree-warm.sh
     worktree_root: ~/Develop/.worktrees/coach-wattz
-    report_only: true            # PC-15 pending — see CW-363
+    report_only: true            # Dispatch remains disabled; janitor may use the teardown script.
 
   - name: watts-mobile
     path: ~/Develop/watts-mobile
