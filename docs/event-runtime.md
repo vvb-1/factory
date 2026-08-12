@@ -56,8 +56,9 @@ machinery it earns. Anything no listed event type needs stays unbuilt.
 | Event type | Source | Machinery it earns | When |
 | :--- | :--- | :--- | :--- |
 | `factory.status-report.requested` | operator webhook / replay CLI | intake, dedup, planner, approval, ephemeral workspace, schema verification, receipts | slice 1 |
-| `sentry.issue.created` | Sentry webhook (already a standing intake per linear.md §14) | semantic verification against declared evidence, `evidenceSetHash`, typed refusals that matter | slice 2 |
+| `keephq.disk-alert.raised` | Keep HQ infra alert webhook | two-node DAG (diagnose → remediate), semantic verification against declared evidence (`evidenceSetHash`), typed remediation plans from a **closed action registry**, first infra-mutating executor behind watched approval (OPS-208) | slice 2 |
 | `github.workflow-run.failed` | GitHub webhook | log-derived evidence, artifact retention, correlation with an external PR | later |
+| `sentry.issue.created` | Sentry webhook | *(dropped as a slice — Sentry already feeds Linear directly, so classifying here validates nothing operationally new; revisit only if that intake moves)* | — |
 | `clock.tick.<loop>` | scheduler | admitted, audited timer events; per-loop migration of the standing loops | later, per loop |
 | repository-mutating events | GitHub / Linear | shared claim, capacity, Owned Paths, and approval authority with the ticket dispatcher (§3) | last |
 
@@ -72,9 +73,10 @@ Conversely, what no event type above needs yet — and is therefore explicitly
 deferred, with its trigger named:
 
 - **`evidenceSetHash` and semantic verification** — slice 2, the first
-  data-bearing artifact whose truth matters (§9).
-- **The DAG engine (§11)** — the first event type that fans out into multiple
-  runs; nothing in slices 1–2 needs it.
+  data-bearing artifact whose truth matters (§9): reclaimed bytes are
+  recomputed from before/after evidence.
+- **The DAG engine (§11)** — earned by slice 2's diagnose → remediate chain,
+  the first event type that needs more than one node.
 - **Fencing tokens and `FOR UPDATE SKIP LOCKED`** — the second worker process
   (§10).
 - **Artifact and repository workspaces (§7)** — the first synthesis or
@@ -551,8 +553,12 @@ Aggregation is deterministic where possible: collect terminal states, validate
 that all required outputs exist, and assemble an ordered input object. Spawn a
 synthesis agent only when semantic synthesis is actually required.
 
-Per §2, the DAG engine is earned by the first event type that fans out into
-multiple runs. Slices 1 and 2 are single-node; nothing here is built for them.
+Per §2, the DAG engine is earned by slice 2 (`keephq.disk-alert.raised`,
+OPS-208): a read-only LLM diagnose node followed — only after watched approval
+of its typed plan — by a **deterministic-command remediation node**. That
+second node is exactly the "registered agent *or deterministic command*"
+option above: the model proposes, code executes. Slice 1 is single-node;
+nothing beyond a two-node chain is built until a real workflow needs it.
 
 ---
 
@@ -650,7 +656,11 @@ after the fact. The enforcement path, in order:
    `linear:read`, a GraphQL proxy that forwards queries and rejects mutations.
    Cheap, genuinely enforcing, and a natural place to inject per-agent
    credentials (advancing [OPS-40](https://linear.app/watt-mind/issue/OPS-40)).
-2. **The container workspace provider** for filesystem and network isolation.
+2. **Closed action registries for infra-mutating executors** (slice 2,
+   OPS-208): the executor resolves approved action IDs to fixed command
+   templates and refuses everything else — enforceable by construction, and
+   the reason the remediation node is deterministic code rather than an LLM.
+3. **The container workspace provider** for filesystem and network isolation.
 
 Until one of these exists, a compromised or confused agent is limited by the
 watched approval gate and read-only scope, not by the capability list.
@@ -705,10 +715,18 @@ MVP exit criteria:
 counting — the model adds little and its output is trivially checkable. That is
 deliberate: slice 1 validates intake, dedup, planning, approval, workspaces,
 lifecycle, and restart survival. The plumbing. It does **not** validate the
-runtime's reason to exist: accepting or rejecting *stochastic* output. That is
-slice 2 — `sentry.issue.created` drives a classification agent whose artifact
-must cite evidence the verifier independently rechecks (§9). Slice 2, not
-slice 1, is the go/no-go signal for this design.
+runtime's reason to exist: accepting or rejecting *stochastic* output, and
+gating a consequence behind approval. That is slice 2
+([OPS-208](https://linear.app/watt-mind/issue/OPS-208)) —
+`keephq.disk-alert.raised` drives a two-node chain: a read-only diagnose agent
+proposes a typed remediation plan (action IDs from a closed registry, with the
+`df`/`docker system df` evidence it derives from — never free-form shell); the
+operator approves the concrete action list; a deterministic command node
+executes the approved templates verbatim; the verifier recomputes reclaimed
+bytes from before/after evidence (§9) and fails closed on mismatch. A stale
+alert — disk healthy by diagnose time — converges to a typed NOOP, because a
+webhook is a hint, not truth (§4). Slice 2, not slice 1, is the go/no-go
+signal for this design.
 
 Only after these slices are observed should the runtime add a two-node DAG,
 then a second worker process, then — if ever needed — a remote worker.
