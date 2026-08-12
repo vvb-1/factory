@@ -127,6 +127,14 @@ for agent B → approval → agent B — same intake, same dedup (causation IDs
 already exist in the envelope for exactly this provenance), same audit
 trail, whether the "requester" was a webhook or another agent's result.
 
+**Decided (operator, 2026-08-12):** the discovered/recommendation flavor is
+the direction to build toward, ahead of general declared workflows (slice
+2's fixed two-node chain stands as designed). Approval model:
+**per-edge earned automation** — each recommendation edge (a specific
+`A-recommendation → B` mapping) is watched individually and earns
+auto-approval on its own record; mutating edges may simply never earn it.
+First use case: to be selected before any implementation ticket is cut.
+
 ## 6. Ticket cut-lines (when the operator says go)
 
 1. **Postgres substrate** — port `db.mjs`; same schema; `SKIP LOCKED` in
