@@ -13,6 +13,7 @@
  * deliberate exception: it edits agent definition files in the repo, not
  * runtime state.
  */
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import * as actions from "./lib/adapters/actions.mjs";
 import * as claude from "./lib/adapters/claude.mjs";
@@ -35,11 +36,15 @@ const USAGE = `event-runtime — watched event → agent runtime (docs/event-run
 
 usage: bun event-runtime/cli.mjs <command>
 
-  serve [--port N] [--adapter-override fake]
+  serve [--port N] [--adapter-override fake] [--watch]
                                  start the control API (loopback), planner,
-                                 and one worker in the foreground
+                                 and one worker in the foreground.
+                                 --watch restarts on event-runtime/ changes
+                                 (in-flight work is dropped — for development)
   status                         events, proposals, runs, anomalies
   events [status]                admitted events, optionally filtered by status
+  ps [state]                     running event processes/runs (default: RUNNING or LEASED)
+  runs [state]                   runs (optionally filtered by state)
   proposals                      open proposals with TTL age
   agents                         registered agent definitions and event routing
   approve <proposal-id>          approve an open proposal
@@ -85,7 +90,39 @@ async function withClient(fn) {
 // serve — the runtime itself (§3: explicit foreground start, one worker)
 // ---------------------------------------------------------------------------
 
+function underBunWatch() {
+  return process.execArgv.includes("--watch") || process.execArgv.includes("--hot");
+}
+
+/**
+ * Re-exec under `bun --watch` so lib/ edits replace this process. In-flight
+ * runs are dropped on purpose — a stale backend is worse during development.
+ */
+function watchServe(args) {
+  const rest = args.filter((a) => a !== "--watch");
+  log("serve --watch: restarting on event-runtime/ changes (in-flight runs are dropped)");
+  const child = spawn(process.execPath, ["--watch", import.meta.path, "serve", ...rest], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  const forward = (signal) => () => child.kill(signal);
+  process.on("SIGINT", forward("SIGINT"));
+  process.on("SIGTERM", forward("SIGTERM"));
+  return new Promise((resolve) => {
+    child.on("exit", (code, signal) => {
+      resolve();
+      if (signal) {
+        process.kill(process.pid, signal);
+        return;
+      }
+      process.exit(code ?? 1);
+    });
+  });
+}
+
 async function serve(args) {
+  if (args.includes("--watch") && !underBunWatch()) return watchServe(args);
+
   const port = flagValue(args, "--port") ? Number(flagValue(args, "--port")) : DEFAULT_PORT;
   if (!Number.isInteger(port) || port < 0) fail(`serve: invalid --port ${flagValue(args, "--port")}`);
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
@@ -186,12 +223,19 @@ async function serve(args) {
     timer = setInterval(tick, 1000);
   });
 
-  process.on("SIGINT", () => {
-    log("shutting down");
+  // SIGTERM is what `bun --watch` sends on reload; without a close the next
+  // process loses the bind race on 7381.
+  let stopping = false;
+  const shutdown = (signal) => {
+    if (stopping) return;
+    stopping = true;
+    log(`shutting down (${signal})`);
     if (timer) clearInterval(timer);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref?.();
-  });
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +276,38 @@ async function events(client, statusFilter) {
   for (const e of rows) {
     console.log(
       `${pad(e.source, 16)}${pad(e.eventId, 24)}${pad(e.type, 36)}${pad(e.status, 14)}${pad(e.admittedAt, 26)}${e.lastPlanError ?? "-"}`,
+    );
+  }
+}
+
+async function runs(client, stateFilter) {
+  const { runs: rows } = await client.runs(stateFilter);
+  if (rows.length === 0) {
+    console.log(stateFilter ? `no runs with state ${stateFilter}` : "no runs");
+    return;
+  }
+  console.log(`${pad("RUN ID", 42)}${pad("STATE", 12)}${pad("AGENT", 26)}${pad("ADAPTER", 12)}${pad("ATTEMPTS", 10)}${pad("ORIGIN EVENT", 24)}UPDATED`);
+  for (const r of rows) {
+    console.log(
+      `${pad(r.runId, 42)}${pad(r.state, 12)}${pad(r.agent, 26)}${pad(r.adapter, 12)}${pad(`${r.attempts}/${r.maxAttempts}`, 10)}${pad(r.eventId ?? "-", 24)}${r.updated_at}`,
+    );
+  }
+}
+
+async function ps(client, stateFilter) {
+  const { runs: rows } = await client.runs();
+  const filtered = stateFilter
+    ? rows.filter((r) => r.state.toUpperCase() === stateFilter.toUpperCase())
+    : rows.filter((r) => r.state === "RUNNING" || r.state === "LEASED");
+
+  if (filtered.length === 0) {
+    console.log(stateFilter ? `no process runs with state ${stateFilter}` : "no running processes");
+    return;
+  }
+  console.log(`${pad("RUN ID", 42)}${pad("STATE", 12)}${pad("AGENT", 26)}${pad("ADAPTER", 12)}${pad("ATTEMPTS", 10)}${pad("ORIGIN EVENT", 24)}UPDATED`);
+  for (const r of filtered) {
+    console.log(
+      `${pad(r.runId, 42)}${pad(r.state, 12)}${pad(r.agent, 26)}${pad(r.adapter, 12)}${pad(`${r.attempts}/${r.maxAttempts}`, 10)}${pad(r.eventId ?? "-", 24)}${r.updated_at}`,
     );
   }
 }
@@ -318,6 +394,12 @@ async function main() {
 
     case "events":
       return withClient((client) => events(client, args[0]));
+
+    case "runs":
+      return withClient((client) => runs(client, args[0]));
+
+    case "ps":
+      return withClient((client) => ps(client, args[0]));
 
     case "proposals":
       return withClient(proposals);

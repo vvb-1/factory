@@ -25,8 +25,84 @@ export const EVENT_STATUS_HUES: Record<string, string> = {
   dead_lettered: "var(--hue-err)",
 };
 
-export function StateBadge({ state }: { state: string }) {
-  const hue = STATE_HUES[state] ?? "var(--hue-idle)";
+/** One hue map for decided-proposal statuses — identical in list and panel. */
+export const PROPOSAL_STATUS_HUES: Record<string, string> = {
+  open: "var(--hue-info)",
+  approved: "var(--hue-ok)",
+  rejected: "var(--hue-err)",
+  superseded: "var(--hue-idle)",
+  resolved: "var(--hue-idle)",
+};
+
+export const DECISION_HUES: Record<string, string> = {
+  run: "var(--hue-info)",
+  human_needed: "var(--hue-warn)",
+  noop: "var(--hue-idle)",
+};
+
+export function copyText(text: string, label: string) {
+  navigator.clipboard.writeText(text);
+  notify(`Copied ${label}`, "info");
+}
+
+export function FilterInput({
+  value,
+  onChange,
+  placeholder,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  label: string;
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      aria-label={label}
+      className="w-56 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
+    />
+  );
+}
+
+/** Empty / loading / error row for the dense lists. Never say "none" while pending. */
+export function ListEmpty({
+  colSpan,
+  query,
+  filtered,
+  noun,
+  empty,
+}: {
+  colSpan: number;
+  query: { isPending: boolean; isError: boolean; data?: unknown };
+  filtered?: boolean;
+  noun: string;
+  empty: string;
+}) {
+  let msg = empty;
+  if (query.isPending && !query.data) msg = `Loading ${noun}…`;
+  else if (query.isError && !query.data) {
+    msg = `Cannot reach the control API — ${noun} will appear when it is up.`;
+  } else if (filtered) msg = `No ${noun} match this filter.`;
+  return (
+    <tr>
+      <td colSpan={colSpan} className="px-3 py-8 text-center text-(--text-faint)">
+        {msg}
+      </td>
+    </tr>
+  );
+}
+
+export function StateBadge({
+  state,
+  hues = STATE_HUES,
+}: {
+  state: string;
+  hues?: Record<string, string>;
+}) {
+  const hue = hues[state] ?? "var(--hue-idle)";
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium"
@@ -38,14 +114,58 @@ export function StateBadge({ state }: { state: string }) {
   );
 }
 
-export function StatTile({ label, value, hue }: { label: string; value: ReactNode; hue?: string }) {
-  return (
-    <div className="rounded-md border border-(--border) bg-(--surface-1) px-3 py-2">
+export function StatTile({
+  label,
+  value,
+  hue,
+  onClick,
+}: {
+  label: string;
+  value: ReactNode;
+  hue?: string;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
       <div className="text-[11px] text-(--text-faint)">{label}</div>
       <div className="display text-xl tabular-nums" style={hue ? { color: hue } : undefined}>
         {value}
       </div>
-    </div>
+    </>
+  );
+  const cls = "rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left";
+  if (!onClick) return <div className={cls}>{inner}</div>;
+  return (
+    <button type="button" onClick={onClick} className={`${cls} cursor-pointer hover:bg-(--surface-2)`}>
+      {inner}
+    </button>
+  );
+}
+
+/** In-table / KV jump that does not select the parent row. */
+export function JumpLink({
+  children,
+  onClick,
+  title,
+  className,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`}
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

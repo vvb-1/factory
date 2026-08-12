@@ -148,6 +148,8 @@ describe("webhook intake (§14)", () => {
     expect(events[0].status).toBe("admitted");
     expect(events[0].envelope.payload).toEqual({ repos: ["ok"] });
     expect(events[0].envelope.eventId).toBe("hook-1");
+    expect(events[0].proposalId).toBeNull();
+    expect(events[0].runId).toBeNull();
 
     const filtered = await (await fetch(s.url("/events?status=admitted"))).json();
     expect(filtered.events).toHaveLength(1);
@@ -387,6 +389,11 @@ describe("webui surface: proposal linkage, history, journal, outbox, requeue (OP
       expect(runs[0].eventId).toBe("link-1");
       expect(runs[0].adapter).toBe("fake");
       expect(runs[0].maxAttempts).toBe(1);
+
+      const { events } = await client.events();
+      expect(events[0].eventId).toBe("link-1");
+      expect(events[0].proposalId).toBe(proposals[0].id);
+      expect(events[0].runId).toBe(runs[0].runId);
     } finally {
       server.close();
     }

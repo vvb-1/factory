@@ -137,9 +137,20 @@ function statusView(db, nowMs) {
  * inbox. Read-only, like every other view here.
  */
 function eventsView(db, status) {
-  const rows = status
-    ? db.query(`SELECT * FROM events WHERE status = ? ORDER BY admitted_at DESC, rowid DESC`).all(status)
-    : db.query(`SELECT * FROM events ORDER BY admitted_at DESC, rowid DESC`).all();
+  // Latest proposal (and its run) for each event — an event is a node, not a
+  // leaf. Unplanned admissions have both ids null.
+  const sql = `
+    SELECT e.*, p.id AS proposal_id, p.run_id AS run_id
+    FROM events e
+    LEFT JOIN proposals p ON p.rowid = (
+      SELECT p2.rowid FROM proposals p2
+      WHERE p2.event_source = e.source AND p2.event_id = e.event_id
+      ORDER BY p2.created_at DESC, p2.rowid DESC
+      LIMIT 1
+    )
+    ${status ? "WHERE e.status = ?" : ""}
+    ORDER BY e.admitted_at DESC, e.rowid DESC`;
+  const rows = status ? db.query(sql).all(status) : db.query(sql).all();
   return rows.map((row) => ({
     source: row.source,
     eventId: row.event_id,
@@ -153,6 +164,8 @@ function eventsView(db, status) {
     planFailures: row.plan_failures,
     lastPlanError: row.last_plan_error,
     admittedAt: row.admitted_at,
+    proposalId: row.proposal_id ?? null,
+    runId: row.run_id ?? null,
     envelope: JSON.parse(row.envelope_json),
   }));
 }

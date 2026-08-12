@@ -14,6 +14,7 @@ emit checks, queue scans, or ticket dispatch.
 
 ```bash
 bun event-runtime/cli.mjs serve          # control API (loopback) + planner + one worker, foreground
+bun event-runtime/cli.mjs serve --watch  # same, restart on event-runtime/ changes (dev; drops in-flight work)
 ```
 
 Operator verbs (clients of the control API — they need `serve` running):
@@ -21,6 +22,8 @@ Operator verbs (clients of the control API — they need `serve` running):
 ```bash
 bun event-runtime/cli.mjs status                      # events, proposals, runs, anomalies
 bun event-runtime/cli.mjs events [status]             # admitted events, optionally filtered
+bun event-runtime/cli.mjs ps [state]                     # running event processes/runs (default: RUNNING/LEASED)
+bun event-runtime/cli.mjs runs [state]                   # event runs, optionally filtered by state
 bun event-runtime/cli.mjs proposals                   # open proposals with TTL age
 bun event-runtime/cli.mjs agents                      # registered agents and event routing
 bun event-runtime/cli.mjs requeue <source> <event-id> # re-plan a dead-lettered/human_needed event

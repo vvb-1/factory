@@ -5,16 +5,25 @@ import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import { SpecDiff } from "../components/SpecDiff";
-import { ago, Button, Countdown, Dialog, JsonBlock, KV, notify, Section, VerbError } from "../components/ui";
-
-/** Decided-proposal statuses use their outcome's tone (doc §10.2). */
-const PROPOSAL_STATUS_HUES: Record<string, string> = {
-  open: "var(--hue-info)",
-  approved: "var(--hue-ok)",
-  rejected: "var(--hue-err)",
-  superseded: "var(--hue-idle)",
-  resolved: "var(--hue-idle)",
-};
+import {
+  ago,
+  Button,
+  Countdown,
+  DECISION_HUES,
+  Dialog,
+  Disclosure,
+  FilterInput,
+  JsonBlock,
+  JumpLink,
+  KV,
+  ListEmpty,
+  notify,
+  PROPOSAL_STATUS_HUES,
+  Section,
+  StateBadge,
+  VerbError,
+  copyText,
+} from "../components/ui";
 
 /**
  * Proposals (webui spec §4.2) — the watched-approval centerpiece. The full
@@ -29,12 +38,14 @@ export function Proposals({
   focusProposalId,
   onFocusConsumed,
   onJumpAgent,
+  onJumpEvent,
 }: {
   connected: boolean;
   onRunQueued: (runId: string) => void;
   focusProposalId: string | null;
   onFocusConsumed: () => void;
   onJumpAgent: (ref: string) => void;
+  onJumpEvent: (source: string, eventId: string) => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -47,7 +58,6 @@ export function Proposals({
   const history = useQuery({
     queryKey: ["proposals", "history"],
     queryFn: () => api.proposalHistory("all"),
-    enabled: tab === "history",
     refetchInterval: 2000,
   });
   const rows = useMemo(
@@ -85,22 +95,49 @@ export function Proposals({
   };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [reason, setReason] = useState("");
   const [replan, setReplan] = useState<{ before: Proposal; after: Proposal } | null>(null);
   const reasonRef = useRef<HTMLInputElement>(null);
 
-  const selectedIndex = useMemo(() => rows.findIndex((p) => p.id === selectedId), [rows, selectedId]);
-  const sel = selectedIndex >= 0 ? rows[selectedIndex] : null;
+  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((p) =>
+      [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
+        (v ?? "").toLowerCase().includes(q),
+      ),
+    );
+  }, [rows, filter]);
 
-  // Deep link from the ⌘K palette.
+  const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
+  const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
+
   useEffect(() => {
-    if (focusProposalId && rows.some((p) => p.id === focusProposalId)) {
+    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  // Deep link: open tab first, then history if the id is a decided proposal.
+  useEffect(() => {
+    if (!focusProposalId) return;
+    if (visible.some((p) => p.id === focusProposalId) || rows.some((p) => p.id === focusProposalId)) {
+      setFilter("");
+      setSelectedId(focusProposalId);
+      onFocusConsumed();
+      return;
+    }
+    if (tab === "open") {
+      setTab("history");
+      return;
+    }
+    if (history.isFetched) {
       setSelectedId(focusProposalId);
       onFocusConsumed();
     }
-  }, [focusProposalId, rows, onFocusConsumed]);
+  }, [focusProposalId, rows, visible, tab, history.isFetched, onFocusConsumed]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["proposals"] });
@@ -145,9 +182,9 @@ export function Proposals({
   };
 
   useListKeys({
-    count: rows.length,
+    count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedId(rows[i]?.id ?? null),
+    onSelect: (i) => setSelectedId(visible[i]?.id ?? null),
     onClose: () => setSelectedId(null),
     keys: {
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
@@ -177,22 +214,39 @@ export function Proposals({
       <div className="min-w-0 flex-1 overflow-auto p-5">
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
 
-        <div className="mb-3 flex gap-1">
-          {(["open", "history"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => {
-                setTab(t);
-                setSelectedId(null);
-              }}
-              className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
-              }`}
-            >
-              {t === "open" ? "Open" : "History"}
-            </button>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="flex gap-1" role="tablist" aria-label="Proposal status">
+            {(["open", "history"] as const).map((t) => {
+              const count =
+                t === "open"
+                  ? (statusQ.data?.proposals.open ?? 0)
+                  : (history.data?.proposals.filter((p) => p.status !== "open").length ?? 0);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => {
+                    setTab(t);
+                    setSelectedId(null);
+                  }}
+                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                    tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
+                  }`}
+                >
+                  {t === "open" ? "Open" : "History"}
+                  {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            placeholder="Filter agent, id, origin…"
+            label="Filter proposals"
+          />
         </div>
 
         <table className="w-full border-separate border-spacing-0">
@@ -217,19 +271,29 @@ export function Proposals({
             </tr>
           </thead>
           <tbody>
-            {rows.map((p, i) => (
+            {visible.map((p, i) => (
               <tr
                 key={p.id}
                 onClick={() => setSelectedId(p.id)}
-                className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
+                aria-selected={i === selectedIndex}
+                className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${i === selectedIndex ? "row-selected" : ""}`}
               >
-                <td className="border-b border-(--border) px-3 py-1.5">{p.agent ?? "—"}</td>
+                <td className="border-b border-(--border) px-3 py-1.5">
+                  {p.agent ? (
+                    <JumpLink
+                      onClick={() => onJumpAgent(p.agent!)}
+                      title={`What is ${p.agent}? Open in Agents`}
+                    >
+                      {p.agent}
+                    </JumpLink>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 {tab === "open" ? (
                   <>
                     <td className="border-b border-(--border) px-3 py-1.5">
-                      <span style={{ color: p.decision === "run" ? "var(--hue-info)" : "var(--hue-warn)" }}>
-                        {p.decision}
-                      </span>
+                      <StateBadge state={p.decision} hues={DECISION_HUES} />
                       {p.expired && (
                         <span className="ml-2" style={{ color: "var(--hue-warn)" }}>
                           expired
@@ -248,29 +312,44 @@ export function Proposals({
                 ) : (
                   <>
                     <td className="border-b border-(--border) px-3 py-1.5">
-                      <span style={{ color: PROPOSAL_STATUS_HUES[p.status] ?? "var(--text-dim)" }}>{p.status}</span>
+                      <StateBadge state={p.status} hues={PROPOSAL_STATUS_HUES} />
                     </td>
                     <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.decided_by ?? "-"}</td>
-                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={p.decided_at ?? undefined}>
                       {p.decided_at ? ago(p.decided_at, now) : "-"}
                     </td>
                   </>
                 )}
                 <td className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={originType(p) ?? undefined}>
-                  {p.eventId ?? "-"}
+                  {p.eventId && p.eventSource ? (
+                    <JumpLink
+                      onClick={() => onJumpEvent(p.eventSource!, p.eventId!)}
+                      title={originType(p) ?? "Open origin event"}
+                    >
+                      {p.eventId}
+                    </JumpLink>
+                  ) : (
+                    (p.eventId ?? "-")
+                  )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{ago(p.created_at, now)}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={p.created_at}>
+                  {ago(p.created_at, now)}
+                </td>
                 <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.reason ?? "-"}</td>
               </tr>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={tab === "open" ? 6 : 7} className="px-3 py-8 text-center text-(--text-faint)">
-                  {tab === "open"
+            {visible.length === 0 && (
+              <ListEmpty
+                colSpan={tab === "open" ? 6 : 7}
+                query={tab === "open" ? query : history}
+                filtered={rows.length > 0}
+                noun="proposals"
+                empty={
+                  tab === "open"
                     ? "No open proposals — the operator's work is done, for now."
-                    : "No decided proposals yet."}
-                </td>
-              </tr>
+                    : "No decided proposals yet."
+                }
+              />
             )}
           </tbody>
         </table>
@@ -278,11 +357,14 @@ export function Proposals({
 
       {sel && (
         <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between gap-2">
             <div className="display truncate text-[14px] font-semibold" title={sel.id}>
               {sel.agent ?? sel.id}
             </div>
-            <Button onClick={() => setSelectedId(null)}>Close</Button>
+            <div className="flex shrink-0 gap-1.5">
+              <Button onClick={() => copyText(sel.id, "proposal id")}>Copy id</Button>
+              <Button onClick={() => setSelectedId(null)}>Close</Button>
+            </div>
           </div>
 
           <Section title="Proposal">
@@ -291,23 +373,24 @@ export function Proposals({
               <KV
                 k="agent"
                 v={
-                  <button
-                    type="button"
-                    className="mono cursor-pointer hover:text-(--accent)"
-                    title={`What is ${sel.agent}? Open in Agents`}
-                    onClick={() => onJumpAgent(sel.agent!)}
-                  >
+                  <JumpLink onClick={() => onJumpAgent(sel.agent!)} title={`What is ${sel.agent}? Open in Agents`}>
                     {sel.agent}
-                  </button>
+                  </JumpLink>
                 }
               />
             )}
-            <KV k="decision" v={sel.decision} />
+            <KV k="decision" v={<StateBadge state={sel.decision} hues={DECISION_HUES} />} />
+            <KV k="status" v={<StateBadge state={sel.status} hues={PROPOSAL_STATUS_HUES} />} />
             <KV
-              k="status"
-              v={<span style={{ color: PROPOSAL_STATUS_HUES[sel.status] ?? "var(--text-dim)" }}>{sel.status}</span>}
+              k="run"
+              v={
+                sel.runId ? (
+                  <JumpLink onClick={() => onRunQueued(sel.runId!)} title="Open run">
+                    {sel.runId}
+                  </JumpLink>
+                ) : null
+              }
             />
-            <KV k="run" v={sel.runId} />
             {isOpen && (
               <KV
                 k="ttl"
@@ -321,7 +404,18 @@ export function Proposals({
 
           {sel.eventId && (
             <Section title="Origin event">
-              <KV k="eventId" v={sel.eventId} />
+              <KV
+                k="eventId"
+                v={
+                  sel.eventSource ? (
+                    <JumpLink onClick={() => onJumpEvent(sel.eventSource!, sel.eventId!)} title="Open origin event">
+                      {sel.eventId}
+                    </JumpLink>
+                  ) : (
+                    sel.eventId
+                  )
+                }
+              />
               <KV k="source" v={sel.eventSource} />
               {originType(sel) && <KV k="type" v={originType(sel)} />}
             </Section>
@@ -329,7 +423,9 @@ export function Proposals({
 
           {sel.spec && (
             <Section title="Run spec — what you approve">
-              <JsonBlock value={sel.spec} />
+              <Disclosure label="immutable RunSpec" defaultOpen={isOpen}>
+                <JsonBlock value={sel.spec} />
+              </Disclosure>
             </Section>
           )}
 

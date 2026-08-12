@@ -67,10 +67,23 @@ body {
   font-size: 11.5px;
 }
 
+/* Status washes on inbox rows — declared before .row-selected so selection wins. */
+.row-wash-err {
+  background: color-mix(in oklch, var(--hue-err) 6%, transparent);
+}
+.row-wash-warn {
+  background: color-mix(in oklch, var(--hue-warn) 6%, transparent);
+}
+
 /* Row selection ring used by keyboard navigation. */
 .row-selected {
   background: color-mix(in oklch, var(--accent) 10%, var(--surface-0));
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 ::selection {

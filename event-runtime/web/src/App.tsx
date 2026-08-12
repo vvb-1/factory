@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { useHashRoute, useTheme } from "./hooks";
+import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
 import { ToastContainer } from "./components/ui";
@@ -31,20 +32,29 @@ export function App() {
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
   const [focusRunId, setFocusRunId] = useState<string | null>(null);
+  const [focusRunState, setFocusRunState] = useState<string | null>(null);
   const [focusProposalId, setFocusProposalId] = useState<string | null>(null);
-  const [focusEventStatus, setFocusEventStatus] = useState<string | null>(null);
+  const [focusEvent, setFocusEvent] = useState<EventFocus | null>(null);
   const [focusAgentRef, setFocusAgentRef] = useState<string | null>(null);
 
   const jumpToRun = (runId: string) => {
     setFocusRunId(runId);
     navigate("runs");
   };
+  const jumpToRuns = (state?: string) => {
+    if (state) setFocusRunState(state);
+    navigate("runs");
+  };
   const jumpToProposal = (id: string) => {
     setFocusProposalId(id);
     navigate("proposals");
   };
-  const jumpToEvents = (status: string) => {
-    setFocusEventStatus(status);
+  const jumpToEvent = (source: string, eventId: string, status?: string) => {
+    setFocusEvent({ source, eventId, status: status ?? "all" });
+    navigate("events");
+  };
+  const jumpToEvents = (focus: EventFocus) => {
+    setFocusEvent(focus);
     navigate("events");
   };
   const jumpToAgent = (ref: string) => {
@@ -52,12 +62,29 @@ export function App() {
     navigate("agents");
   };
 
-  // Deep link #/runs/:id → the runs view with that run selected, then
-  // normalize the hash so the master-detail pane owns selection state.
+  // Deep link #/runs/:id, #/events/:source/:eventId, #/proposals/:id,
+  // #/agents/:ref → select, then normalize the hash so the master-detail
+  // pane owns selection state.
   useEffect(() => {
     if (route[0] === "runs" && route[1]) {
       setFocusRunId(route[1]);
       navigate("runs");
+    }
+    if (route[0] === "events" && route[1] && route[2]) {
+      setFocusEvent({
+        source: decodeURIComponent(route[1]),
+        eventId: decodeURIComponent(route[2]),
+        status: "all",
+      });
+      navigate("events");
+    }
+    if (route[0] === "proposals" && route[1]) {
+      setFocusProposalId(decodeURIComponent(route[1]));
+      navigate("proposals");
+    }
+    if (route[0] === "agents" && route[1]) {
+      setFocusAgentRef(decodeURIComponent(route[1]));
+      navigate("agents");
     }
   }, [route, navigate]);
 
@@ -147,6 +174,7 @@ export function App() {
               <button
                 key={n.key}
                 type="button"
+                aria-current={view === n.key ? "page" : undefined}
                 onClick={() => navigate(n.key)}
                 className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] ${
                   view === n.key
@@ -206,13 +234,17 @@ export function App() {
             focusProposalId={focusProposalId}
             onFocusConsumed={() => setFocusProposalId(null)}
             onJumpAgent={jumpToAgent}
+            onJumpEvent={jumpToEvent}
           />
         ) : view === "runs" ? (
           <Runs
             connected={connected}
             focusRunId={focusRunId}
             onFocusConsumed={() => setFocusRunId(null)}
+            focusState={focusRunState}
+            onFocusStateConsumed={() => setFocusRunState(null)}
             onJumpAgent={jumpToAgent}
+            onJumpEvent={jumpToEvent}
           />
         ) : view === "graph" ? (
           <Graph />
@@ -221,8 +253,10 @@ export function App() {
         ) : view === "events" ? (
           <Events
             connected={connected}
-            focusStatus={focusEventStatus}
-            onFocusConsumed={() => setFocusEventStatus(null)}
+            focusEvent={focusEvent}
+            onFocusConsumed={() => setFocusEvent(null)}
+            onJumpProposal={jumpToProposal}
+            onJumpRun={jumpToRun}
             onTriggerAgain={(envelope) => {
               setInjectSeed(envelope);
               setInjectOpen(true);
@@ -234,12 +268,19 @@ export function App() {
             onJumpRun={jumpToRun}
             onJumpProposal={jumpToProposal}
             onJumpEvents={jumpToEvents}
+            onJumpRuns={jumpToRuns}
             onNavigate={navigate}
           />
         )}
       </main>
 
-      <CommandPalette actions={paletteActions} onJumpRun={jumpToRun} onJumpProposal={jumpToProposal} />
+      <CommandPalette
+        actions={paletteActions}
+        onJumpRun={jumpToRun}
+        onJumpProposal={jumpToProposal}
+        onJumpEvent={jumpToEvent}
+        onJumpAgent={jumpToAgent}
+      />
       {injectOpen && (
         <InjectDialog
           initialEnvelope={injectSeed}

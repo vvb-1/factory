@@ -169,7 +169,7 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   janitor       orchestrator/janitor.mjs
   warm          orchestrator/warm.mjs
   tick          orchestrator/tick.mjs
-  events        event-runtime/cli.mjs (status, proposals, approve, reject, inject, requeue)
+  events        event-runtime/cli.mjs (status, ps, runs, proposals, approve, reject, inject, requeue)
   serve         start event runtime control API (use --web or --all to launch web UI too)
   web           start event runtime web UI server (use --dev for Vite live HMR mode)
   demo          provision & run isolated seeded demo env (use --down to stop)

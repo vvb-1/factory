@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
-import { Button, Disclosure, JsonBlock, KV, Section } from "../components/ui";
+import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, Section, copyText } from "../components/ui";
 
 const caps = (a: AgentDef) =>
   [a.capabilities.filesystem, ...(a.capabilities.services ?? [])].filter(Boolean).join(", ") || "none";
@@ -26,21 +26,40 @@ export function Agents({
   const contracts = query.data?.contracts ?? {};
 
   const [selectedRef, setSelectedRef] = useState<string | null>(null);
-  const selectedIndex = useMemo(() => rows.findIndex((a) => a.ref === selectedRef), [rows, selectedRef]);
-  const sel = selectedIndex >= 0 ? rows[selectedIndex] : null;
+  const [filter, setFilter] = useState("");
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((a) =>
+      [a.ref, a.id, a.outputContract, caps(a), ...a.eventTypes.map((t) => t.type)].some((v) =>
+        v.toLowerCase().includes(q),
+      ),
+    );
+  }, [rows, filter]);
+  const selectedIndex = useMemo(() => visible.findIndex((a) => a.ref === selectedRef), [visible, selectedRef]);
+  const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
+
+  useEffect(() => {
+    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   // Deep link from a run's or proposal's agent ref.
   useEffect(() => {
-    if (focusAgentRef && rows.some((a) => a.ref === focusAgentRef)) {
+    if (!focusAgentRef) return;
+    setFilter("");
+    if (rows.some((a) => a.ref === focusAgentRef)) {
+      setSelectedRef(focusAgentRef);
+      onFocusConsumed();
+    } else if (query.isFetched) {
       setSelectedRef(focusAgentRef);
       onFocusConsumed();
     }
-  }, [focusAgentRef, rows, onFocusConsumed]);
+  }, [focusAgentRef, rows, query.isFetched, onFocusConsumed]);
 
   useListKeys({
-    count: rows.length,
+    count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedRef(rows[i]?.ref ?? null),
+    onSelect: (i) => setSelectedRef(visible[i]?.ref ?? null),
     onClose: () => setSelectedRef(null),
   });
 
@@ -48,6 +67,14 @@ export function Agents({
     <div className="flex h-full min-w-0">
       <div className="min-w-0 flex-1 overflow-auto p-5">
         <h1 className="display mb-4 text-lg font-semibold">Agents</h1>
+        <div className="mb-3">
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            placeholder="Filter ref, contract, event type…"
+            label="Filter agents"
+          />
+        </div>
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -61,10 +88,11 @@ export function Agents({
             </tr>
           </thead>
           <tbody>
-            {rows.map((a, i) => (
+            {visible.map((a, i) => (
               <tr
                 key={a.ref}
                 onClick={() => setSelectedRef(a.ref)}
+                aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
               >
                 <td className="mono border-b border-(--border) px-3 py-1.5">{a.ref}</td>
@@ -85,12 +113,14 @@ export function Agents({
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-(--text-faint)">
-                  No registered agents.
-                </td>
-              </tr>
+            {visible.length === 0 && (
+              <ListEmpty
+                colSpan={6}
+                query={query}
+                filtered={rows.length > 0}
+                noun="agents"
+                empty="No registered agents."
+              />
             )}
           </tbody>
         </table>
@@ -116,7 +146,10 @@ export function Agents({
             <div className="display mono truncate text-[14px] font-semibold" title={sel.ref}>
               {sel.ref}
             </div>
-            <Button onClick={() => setSelectedRef(null)}>Close</Button>
+            <div className="flex shrink-0 gap-1.5">
+              <Button onClick={() => copyText(sel.ref, "agent ref")}>Copy ref</Button>
+              <Button onClick={() => setSelectedRef(null)}>Close</Button>
+            </div>
           </div>
 
           <Section title="Definition">
@@ -141,6 +174,9 @@ export function Agents({
           </Section>
 
           <Section title={`Prompt · ${sel.promptFile}`}>
+            <div className="mb-1.5 flex justify-end">
+              <Button onClick={() => copyText(sel.prompt, "prompt")}>Copy prompt</Button>
+            </div>
             <pre className="mono max-h-96 overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 leading-relaxed whitespace-pre-wrap">
               {sel.prompt}
             </pre>

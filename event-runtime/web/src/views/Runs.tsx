@@ -9,13 +9,17 @@ import {
   Button,
   Dialog,
   Disclosure,
+  FilterInput,
   humanSize,
   JsonBlock,
+  JumpLink,
   KV,
+  ListEmpty,
   notify,
   Section,
   StateBadge,
   VerbError,
+  copyText,
 } from "../components/ui";
 
 const STATE_TABS: (RunState | "ALL")[] = [
@@ -23,22 +27,35 @@ const STATE_TABS: (RunState | "ALL")[] = [
 ];
 const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
 
+function rowWash(state: string): string {
+  if (state === "FAILED" || state === "TIMED_OUT") return "row-wash-err";
+  if (state === "REFUSED") return "row-wash-warn";
+  return "";
+}
+
 /** Runs (webui spec §4.3): state tabs, lifecycle timeline, guarded verbs. */
 export function Runs({
   connected,
   focusRunId,
   onFocusConsumed,
+  focusState,
+  onFocusStateConsumed,
   onJumpAgent,
+  onJumpEvent,
 }: {
   connected: boolean;
   focusRunId: string | null;
   onFocusConsumed: () => void;
+  focusState: string | null;
+  onFocusStateConsumed: () => void;
   onJumpAgent: (ref: string) => void;
+  onJumpEvent: (source: string, eventId: string) => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<(typeof STATE_TABS)[number]>("ALL");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   const [confirm, setConfirm] = useState<"cancel" | "force-retry" | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -47,18 +64,52 @@ export function Runs({
     queryFn: () => api.runs(tab === "ALL" ? undefined : tab),
     refetchInterval: 2000,
   });
+  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const rows = list.data?.runs ?? [];
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [r.runId, r.state, r.agent, r.adapter, r.reasonCode, r.eventId].some((v) =>
+        (v ?? "").toLowerCase().includes(q),
+      ),
+    );
+  }, [rows, filter]);
 
-  // Deep link from an approval: select the queued run once, then release.
+  // Deep link from an approval: switch to ALL if the run isn't on this tab.
   useEffect(() => {
-    if (focusRunId && rows.some((r) => r.runId === focusRunId)) {
+    if (!focusRunId) return;
+    if (rows.some((r) => r.runId === focusRunId)) {
+      setFilter("");
+      setSelectedId(focusRunId);
+      onFocusConsumed();
+      return;
+    }
+    if (tab !== "ALL") {
+      setTab("ALL");
+      return;
+    }
+    if (list.isFetched) {
       setSelectedId(focusRunId);
       onFocusConsumed();
     }
-  }, [focusRunId, rows, onFocusConsumed]);
+  }, [focusRunId, rows, tab, list.isFetched, onFocusConsumed]);
 
-  const selectedIndex = useMemo(() => rows.findIndex((r) => r.runId === selectedId), [rows, selectedId]);
-  const sel = selectedIndex >= 0 ? rows[selectedIndex] : null;
+  useEffect(() => {
+    if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
+      setTab(focusState as (typeof STATE_TABS)[number]);
+      onFocusStateConsumed();
+    } else if (focusState) {
+      onFocusStateConsumed();
+    }
+  }, [focusState, onFocusStateConsumed]);
+
+  const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
+  const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
+
+  useEffect(() => {
+    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
 
   const detail = useQuery({
     queryKey: ["run", selectedId],
@@ -95,9 +146,9 @@ export function Runs({
   });
 
   useListKeys({
-    count: rows.length,
+    count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedId(rows[i]?.runId ?? null),
+    onSelect: (i) => setSelectedId(visible[i]?.runId ?? null),
     onClose: () => setSelectedId(null),
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
@@ -135,19 +186,37 @@ export function Runs({
       <div className="min-w-0 flex-1 overflow-auto p-5">
         <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
 
-        <div className="mb-3 flex gap-1">
-          {STATE_TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
-              }`}
-            >
-              {t === "ALL" ? "All" : t}
-            </button>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-1" role="tablist" aria-label="Run state">
+            {STATE_TABS.map((t) => {
+              const byState = statusQ.data?.runs.byState ?? {};
+              const count =
+                t === "ALL"
+                  ? Object.values(byState).reduce((n, v) => n + (v ?? 0), 0)
+                  : (byState[t] ?? 0);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => setTab(t)}
+                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                    tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
+                  }`}
+                >
+                  {t === "ALL" ? "All" : t}
+                  {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            placeholder="Filter agent, id, origin…"
+            label="Filter runs"
+          />
         </div>
 
         <table className="w-full border-separate border-spacing-0">
@@ -164,17 +233,25 @@ export function Runs({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
+            {visible.map((r, i) => (
               <tr
                 key={r.runId}
                 onClick={() => setSelectedId(r.runId)}
-                className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
+                aria-selected={i === selectedIndex}
+                className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(r.state)} ${i === selectedIndex ? "row-selected" : ""}`}
               >
                 <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5">{r.runId}</td>
                 <td className="border-b border-(--border) px-3 py-1.5">
                   <StateBadge state={r.state} />
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{r.agent}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">
+                  <JumpLink
+                    onClick={() => onJumpAgent(r.agent)}
+                    title={`What is ${r.agent}? Open in Agents`}
+                  >
+                    {r.agent}
+                  </JumpLink>
+                </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{r.adapter}</td>
                 <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
                   {r.attempts}/{r.maxAttempts}
@@ -183,47 +260,80 @@ export function Runs({
                   {r.reasonCode ?? "-"}
                 </td>
                 <td className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                  {r.eventId ?? "-"}
+                  {r.eventId && r.eventSource ? (
+                    <JumpLink onClick={() => onJumpEvent(r.eventSource!, r.eventId!)} title="Open origin event">
+                      {r.eventId}
+                    </JumpLink>
+                  ) : (
+                    (r.eventId ?? "-")
+                  )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{ago(r.updated_at, now)}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={r.updated_at}>
+                  {ago(r.updated_at, now)}
+                </td>
               </tr>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-(--text-faint)">
-                  No runs{tab === "ALL" ? "" : ` in ${tab}`}.
-                </td>
-              </tr>
+            {visible.length === 0 && (
+              <ListEmpty
+                colSpan={8}
+                query={list}
+                filtered={rows.length > 0}
+                noun="runs"
+                empty={tab === "ALL" ? "No runs." : `No runs in ${tab}.`}
+              />
             )}
           </tbody>
         </table>
       </div>
 
-      {sel && d && (
+      {sel && (
         <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <StateBadge state={d.run.state} />
-            <Button onClick={() => setSelectedId(null)}>Close</Button>
+            <StateBadge state={sel.state} />
+            <div className="flex shrink-0 gap-1.5">
+              <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
+              <Button onClick={() => setSelectedId(null)}>Close</Button>
+            </div>
           </div>
 
+          {!d && (
+            <div className="text-(--text-faint)">{detail.isError ? "Could not load run detail." : "Loading run…"}</div>
+          )}
+
+          {d && (
+            <>
           <Section title="Run">
             <KV k="run" v={d.run.runId} />
             <KV
               k="agent"
               v={
-                <button
-                  type="button"
-                  className="mono cursor-pointer hover:text-(--accent)"
-                  title={`What is ${d.run.spec.agent}? Open in Agents`}
+                <JumpLink
                   onClick={() => onJumpAgent(d.run.spec.agent)}
+                  title={`What is ${d.run.spec.agent}? Open in Agents`}
                 >
                   {d.run.spec.agent}
-                </button>
+                </JumpLink>
               }
             />
             <KV k="adapter" v={d.run.spec.adapter} />
             <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} />
-            {sel.eventId && <KV k="origin event" v={`${sel.eventSource ?? "?"} · ${sel.eventId}`} />}
+            {sel.eventId && (
+              <KV
+                k="origin event"
+                v={
+                  sel.eventSource ? (
+                    <JumpLink
+                      onClick={() => onJumpEvent(sel.eventSource!, sel.eventId!)}
+                      title="Open origin event"
+                    >
+                      {`${sel.eventSource} · ${sel.eventId}`}
+                    </JumpLink>
+                  ) : (
+                    `${sel.eventSource ?? "?"} · ${sel.eventId}`
+                  )
+                }
+              />
+            )}
             <KV k="idempotencyKey" v={d.run.idempotencyKey} />
             <KV k="specHash" v={d.run.specHash} />
             <KV k="workspace" v={d.workspace} />
@@ -350,8 +460,12 @@ export function Runs({
           )}
 
           <Section title="Spec">
-            <JsonBlock value={d.run.spec} />
+            <Disclosure label="immutable RunSpec">
+              <JsonBlock value={d.run.spec} />
+            </Disclosure>
           </Section>
+            </>
+          )}
         </div>
       )}
 

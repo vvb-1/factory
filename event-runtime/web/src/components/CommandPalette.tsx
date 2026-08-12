@@ -16,10 +16,14 @@ export function CommandPalette({
   actions,
   onJumpRun,
   onJumpProposal,
+  onJumpEvent,
+  onJumpAgent,
 }: {
   actions: PaletteAction[];
   onJumpRun: (runId: string) => void;
   onJumpProposal: (id: string) => void;
+  onJumpEvent: (source: string, eventId: string) => void;
+  onJumpAgent: (ref: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const contextActions = useContextActions();
@@ -28,6 +32,8 @@ export function CommandPalette({
   // the views, so this is usually a cache hit, not a request.
   const runs = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), enabled: open });
   const proposals = useQuery({ queryKey: ["proposals"], queryFn: api.proposals, enabled: open });
+  const events = useQuery({ queryKey: ["events", "all"], queryFn: () => api.events(), enabled: open });
+  const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents, enabled: open });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -101,6 +107,22 @@ export function CommandPalette({
               </span>
             </Command.Item>
           ))}
+          {(events.data?.events ?? []).map((e) => (
+            <Command.Item
+              key={`${e.source}:${e.eventId}`}
+              value={`event ${e.source} ${e.eventId} ${e.type} ${e.status}`}
+              onSelect={() => {
+                setOpen(false);
+                onJumpEvent(e.source, e.eventId);
+              }}
+              className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+            >
+              <span className="mono truncate">{e.eventId}</span>
+              <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">
+                event · {e.source} · {e.status}
+              </span>
+            </Command.Item>
+          ))}
           {(runs.data?.runs ?? []).map((r) => (
             <Command.Item
               key={r.runId}
@@ -113,6 +135,20 @@ export function CommandPalette({
             >
               <span className="mono truncate">{r.runId}</span>
               <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">run · {r.state}</span>
+            </Command.Item>
+          ))}
+          {(agents.data?.agents ?? []).map((a) => (
+            <Command.Item
+              key={a.ref}
+              value={`agent ${a.ref} ${a.id} ${a.outputContract}`}
+              onSelect={() => {
+                setOpen(false);
+                onJumpAgent(a.ref);
+              }}
+              className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+            >
+              <span className="mono truncate">{a.ref}</span>
+              <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">agent · {a.outputContract}</span>
             </Command.Item>
           ))}
         </Command.List>

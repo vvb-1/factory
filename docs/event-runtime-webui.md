@@ -256,8 +256,10 @@ with the same rule applied each time. Additions to date, all loopback-only
 and shared with the CLI:
 
 - **`GET /events`** (`?status=`) — admitted events **with the stored envelope
-  body**: without it dead letters lack their envelope, the doctor panel's
-  replay verb cannot work, and an inbox view is impossible.
+  body**, plus the latest `proposalId` / `runId` for that origin (null until
+  planned). Without the envelope, dead letters lack their body, the doctor
+  panel's replay verb cannot work, and an inbox view is impossible; without
+  the ids, an event is a dead end.
 - **`GET /agents`** — the registered agent definitions and event routing
   (CLI `agents`; the registry-visibility surface, OPS-213).
 - **`GET /journal`** (`?since=&limit=`) — the global lifecycle feed behind
@@ -316,45 +318,62 @@ unchanged.
 
 The event inbox is a first-class view, not just the Overview table it started
 as. Status filter tabs (all / admitted / planned / noop / human_needed /
-dead_lettered) over `GET /events?status=`, j/k selection, and a detail panel
-with the full stored envelope plus `planFailures`/`lastPlanError`.
-Dead-lettered rows carry the error tone. **Requeue** (`q`, button, and ⌘K —
-`r` is off-limits as the `g r` navigation suffix) calls
+dead_lettered) over `GET /events?status=`, with counts from `/status` and a
+client-side type/source/id filter. j/k selection, `#/events/:source/:eventId`
+deep links, and a detail panel with identity KV rows, collapsed envelope
+payload, and jumps to the latest proposal and run. Status is a badge (same
+primitive as runs), not hue-only text; `human_needed` and `dead_lettered`
+rows carry a status wash that yields to the selection ring. **Requeue** (`q`,
+button, and ⌘K — `r` is off-limits as the `g r` navigation suffix) calls
 `POST /events/requeue` for dead_lettered/human_needed events only — it
-re-plans the already-admitted event, which supersedes §4.1's replay verb as
-the recovery path for dead letters (replay through intake remains available
-in the panel for dedup demonstrations). `404`/`409` render inline per §6.
+re-plans the already-admitted event and, once a new open proposal appears,
+jumps to it the way Approve jumps to the queued run. **Replay through intake**
+is behind a confirm: it re-injects the envelope (dedup demo), it does not
+re-plan. `404`/`409` render inline per §6. Empty copy distinguishes loading,
+unreachable API, and a genuinely empty inbox.
 
 ### 10.2 Proposals: origin + decision history
 
 Each proposal shows its originating event (`eventId`/`eventSource` from the
-API; the event type resolved from the shared events cache). An **Open /
-History** tab pair: History is backed by `GET /proposals?status=all` and is
-strictly read-only — decided proposals with `status`, `decided_by`,
-`decided_at`, and the immutable spec, no verbs ever offered on a decided row.
-The TTL countdown behaves as §4.2 specified.
+API; the event type resolved from the shared events cache) as a jump to the
+Events inbox, the agent ref as a jump to Agents, and the run id as a jump to
+Runs. An **Open / History** tab pair: History is backed by
+`GET /proposals?status=all` and is strictly read-only — decided proposals
+with `status`, `decided_by`, `decided_at`, and the immutable spec, no verbs
+ever offered on a decided row. Status and decision are badges (same primitive
+as events/runs); expired and stale-run rows carry a status wash that yields
+to the selection ring. Client-side filter, tab counts, Copy id, and
+`#/proposals/:id` deep links (open tab first, then history). The TTL
+countdown behaves as §4.2 specified.
 
 ### 10.3 Runs: enriched list + evidence
 
-The list gains adapter, latest `reasonCode`, attempts as `n/maxAttempts`, and
-the origin `eventId`. The detail panel additionally renders the result's
-declared `evidence` (collapsible pretty JSON, per §4.3's result block) and
-the origin event; `x` cancels the selected run from the list, matching the
-proposals-view verb convention. `#/runs/:id` deep-links to the runs view with
-that run selected.
+The list gains adapter, latest `reasonCode`, attempts as `n/maxAttempts`,
+the origin `eventId` (a jump to the Events inbox), and the agent ref (a jump
+to Agents). Failed and timed-out rows carry an error wash, refused a warning
+wash; selection wins. Client-side filter, tab counts from `/status`, Copy id,
+and a detail panel that opens while the run payload is still loading. The
+detail panel additionally renders the result's declared `evidence`
+(collapsible pretty JSON, per §4.3's result block) and the origin event; `x`
+cancels the selected run from the list, matching the proposals-view verb
+convention. `#/runs/:id` deep-links to the runs view with that run selected.
 
 ### 10.4 Overview: dashboard
 
-Stat tiles stay. Added: (a) the **doctor panel** now links each anomaly to
+Stat tiles stay, and each is a jump (event status → that Events tab, open
+proposals → Proposals, run state → that Runs tab). Added: (a) the **doctor panel** now links each anomaly to
 its view (expired proposal → that proposal, stale leases → runs,
-dead-lettered → the Events view's dead_lettered tab) and offers requeue
+dead-lettered → that event's row on the Events dead_lettered tab, unpublished
+outbox → scroll to the outbox feed) and offers requeue
 directly on dead-letter rows; (b) a **live activity feed** off `GET /journal`
 — first fetch seeds the latest entries, then each poll passes
 `since=<last head>` and prepends only what is new, capped at 50 shown, each
 entry rendered as `run · FROM → TO by actor (reason)` with a relative
-timestamp and a jump-to-run link; (c) a compact **outbox feed** of the latest
+timestamp, a state badge, and a jump-to-run link; empty copy distinguishes
+loading, unreachable API, and a genuinely empty journal; (c) a compact **outbox feed** of the latest
 result events from `GET /outbox`, unpublished rows flagged in the warning
-tone, envelope behind a disclosure.
+tone, envelope behind a disclosure. Tiles, doctor, and outbox never say
+"none" while the control API request is still pending.
 
 ### 10.5 Artifacts in run detail
 
@@ -375,9 +394,11 @@ stored artifacts.
 `GET /agents` exposes the registry, fully readable, so the operator can
 deep-dive what "factory-status-report@1" actually is before approving a spec
 that names it. List: ref, output contract, mutating flag (error tone when
-true), capabilities summary, timeout, attempts. Detail panel, stacked
+true), capabilities summary, timeout, attempts; client-side filter and
+`#/agents/:ref` deep links. Detail panel, stacked
 sections: **Definition** (workspace, capabilities, limits), **Prompt** (the
-full markdown text in a monospace block — readable, no new dependencies),
+full markdown text in a monospace block — readable, no new dependencies —
+with Copy prompt),
 **Schemas** (input/output, pretty JSON behind disclosures), **Pins** (file →
 hash table, captioned: content-hash pins that fail the registry closed on
 drift — versions are bumped and re-pinned, never edited in place), and
@@ -385,7 +406,7 @@ drift — versions are bumped and re-pinned, never edited in place), and
 idempotency scope, and proposal TTL). The shared envelope contracts
 (`factory.event/v1`, `factory.agent-result/v1`) render once at the list
 level, not per agent. Strictly read-only — the registry has no mutation
-surface.
+surface. ⌘K jumps to an agent ref the same way it jumps to a run or event.
 
 Chord choice: `g t` ("what is **t**his agent?"). `o/e/p/r` were taken, and
 `g a` is unusable — chord suffixes share the keydown with single-key list

@@ -2,15 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { api } from "../api";
 import { useNow } from "../hooks";
-import type { JournalEntry } from "../types";
+import type { JournalEntry, EventFocus } from "../types";
 import {
   ago,
   Button,
   Disclosure,
   EVENT_STATUS_HUES,
   JsonBlock,
+  JumpLink,
   Section,
-  STATE_HUES,
+  StateBadge,
   StatTile,
   VerbError,
 } from "../components/ui";
@@ -22,10 +23,10 @@ const FEED_CAP = 50;
  * then each 2 s poll asks only for `since=<last head>` and prepends what is
  * new — an append-only log consumed incrementally, capped at FEED_CAP shown.
  */
-function useJournalFeed(): JournalEntry[] {
+function useJournalFeed(): { entries: JournalEntry[]; isPending: boolean; isError: boolean } {
   const headRef = useRef(0);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
-  useQuery({
+  const query = useQuery({
     queryKey: ["journal"],
     queryFn: async () => {
       const res = await api.journal(headRef.current, FEED_CAP);
@@ -41,7 +42,11 @@ function useJournalFeed(): JournalEntry[] {
     },
     refetchInterval: 2000,
   });
-  return entries;
+  return {
+    entries,
+    isPending: query.isPending && entries.length === 0,
+    isError: query.isError && entries.length === 0,
+  };
 }
 
 /**
@@ -54,12 +59,14 @@ export function Overview({
   onJumpRun,
   onJumpProposal,
   onJumpEvents,
+  onJumpRuns,
   onNavigate,
 }: {
   connected: boolean;
   onJumpRun: (runId: string) => void;
   onJumpProposal: (id: string) => void;
-  onJumpEvents: (status: string) => void;
+  onJumpEvents: (focus: EventFocus) => void;
+  onJumpRuns: (state?: string) => void;
   onNavigate: (view: string) => void;
 }) {
   const now = useNow();
@@ -86,20 +93,24 @@ export function Overview({
       anomalyRows.push({ text: `expired open proposal ${id}`, linkLabel: "View proposal", link: () => onJumpProposal(id) });
     }
     if (anomalies.staleLeases > 0) {
-      anomalyRows.push({ text: `stale leases: ${anomalies.staleLeases}`, linkLabel: "View runs", link: () => onNavigate("runs") });
+      anomalyRows.push({
+        text: `stale leases: ${anomalies.staleLeases}`,
+        linkLabel: "View runs",
+        link: () => onJumpRuns(),
+      });
     }
     if (anomalies.unpublishedOutbox > 0) {
       anomalyRows.push({
         text: `unpublished outbox rows: ${anomalies.unpublishedOutbox}`,
         linkLabel: "View outbox",
-        link: () => onNavigate("overview"),
+        link: () => document.getElementById("outbox")?.scrollIntoView({ block: "start" }),
       });
     }
     for (const d of anomalies.deadLettered) {
       anomalyRows.push({
         text: `dead-lettered (${d.source}, ${d.eventId}): ${d.lastError ?? "unknown error"}`,
         linkLabel: "View event",
-        link: () => onJumpEvents("dead_lettered"),
+        link: () => onJumpEvents({ status: "dead_lettered", source: d.source, eventId: d.eventId }),
         requeue: { source: d.source, eventId: d.eventId },
       });
     }
@@ -109,21 +120,51 @@ export function Overview({
     <div className="h-full min-w-0 overflow-auto p-5">
       <h1 className="display mb-4 text-lg font-semibold">Overview</h1>
 
+      {status.isPending && !s && <div className="mb-5 text-(--text-faint)">Loading status…</div>}
+      {status.isError && !s && (
+        <div className="mb-5 text-(--text-faint)">Cannot reach the control API — tiles will appear when it is up.</div>
+      )}
+
       {s && (
         <div className="mb-5 grid grid-cols-4 gap-2 xl:grid-cols-8">
           {Object.entries(s.events).map(([k, v]) => (
-            <StatTile key={k} label={`events · ${k}`} value={v} hue={v > 0 ? EVENT_STATUS_HUES[k] : undefined} />
+            <StatTile
+              key={k}
+              label={`events · ${k}`}
+              value={v}
+              hue={v > 0 ? EVENT_STATUS_HUES[k] : undefined}
+              onClick={() => onJumpEvents({ status: k })}
+            />
           ))}
-          <StatTile label="proposals · open" value={s.proposals.open} hue={s.proposals.open > 0 ? "var(--hue-info)" : undefined} />
-          <StatTile label="proposals · expired" value={s.proposals.expired} hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined} />
+          <StatTile
+            label="proposals · open"
+            value={s.proposals.open}
+            hue={s.proposals.open > 0 ? "var(--hue-info)" : undefined}
+            onClick={() => onNavigate("proposals")}
+          />
+          <StatTile
+            label="proposals · expired"
+            value={s.proposals.expired}
+            hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined}
+            onClick={() => onNavigate("proposals")}
+          />
           {Object.entries(s.runs.byState).map(([k, v]) => (
-            <StatTile key={k} label={`runs · ${k.toLowerCase()}`} value={v ?? 0} />
+            <StatTile
+              key={k}
+              label={`runs · ${k.toLowerCase()}`}
+              value={v ?? 0}
+              onClick={() => onJumpRuns(k)}
+            />
           ))}
         </div>
       )}
 
       <Section title="Doctor">
-        {anomalyRows.length === 0 ? (
+        {!s ? (
+          <div className="text-(--text-faint)">
+            {status.isError ? "Cannot reach the control API." : "Loading anomalies…"}
+          </div>
+        ) : anomalyRows.length === 0 ? (
           <div className="text-(--text-faint)">No anomalies.</div>
         ) : (
           <div className="rounded-md border border-(--border)">
@@ -151,25 +192,29 @@ export function Overview({
       </Section>
 
       <div className="grid gap-x-5 xl:grid-cols-2">
-        <Section title={`Activity · latest ${Math.min(feed.length, FEED_CAP)}`}>
-          {feed.length === 0 ? (
-            <div className="text-(--text-faint)">No lifecycle activity yet.</div>
+        <Section title={`Activity · latest ${Math.min(feed.entries.length, FEED_CAP)}`}>
+          {feed.entries.length === 0 ? (
+            <div className="text-(--text-faint)">
+              {feed.isPending
+                ? "Loading activity…"
+                : feed.isError
+                  ? "Cannot reach the control API."
+                  : "No lifecycle activity yet."}
+            </div>
           ) : (
             <div className="rounded-md border border-(--border) px-3 py-1">
-              {feed.map((e) => (
+              {feed.entries.map((e) => (
                 <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
                   <span className="mono w-[52px] shrink-0 text-(--text-faint)">{ago(e.at, now)}</span>
-                  <button
-                    type="button"
+                  <JumpLink
                     onClick={() => onJumpRun(e.runId)}
-                    className="mono max-w-36 shrink-0 truncate text-left hover:text-(--accent)"
                     title={e.runId}
+                    className="max-w-36 shrink-0 truncate"
                   >
                     {e.runId}
-                  </button>
-                  <span className="shrink-0 text-(--text-faint)">
-                    {e.from ?? "·"} →{" "}
-                    <span style={{ color: STATE_HUES[e.to] ?? "var(--text-dim)" }}>{e.to}</span>
+                  </JumpLink>
+                  <span className="shrink-0">
+                    {e.from ?? "·"} → <StateBadge state={e.to} />
                   </span>
                   <span className="truncate text-(--text-faint)">
                     by {e.actor}
@@ -182,8 +227,15 @@ export function Overview({
         </Section>
 
         <Section title="Outbox — published results">
+          <div id="outbox">
           {(outbox.data?.outbox ?? []).length === 0 ? (
-            <div className="text-(--text-faint)">Nothing published yet.</div>
+            <div className="text-(--text-faint)">
+              {outbox.isPending && !outbox.data
+                ? "Loading outbox…"
+                : outbox.isError && !outbox.data
+                  ? "Cannot reach the control API."
+                  : "Nothing published yet."}
+            </div>
           ) : (
             <div className="rounded-md border border-(--border) px-3 py-1">
               {(outbox.data?.outbox ?? []).map((o) => (
@@ -205,6 +257,7 @@ export function Overview({
               ))}
             </div>
           )}
+          </div>
         </Section>
       </div>
     </div>

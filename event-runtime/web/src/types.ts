@@ -60,6 +60,8 @@ export interface AdmittedEvent {
   planFailures: number;
   lastPlanError: string | null;
   admittedAt: string;
+  proposalId: string | null;
+  runId: string | null;
   envelope: Record<string, unknown>;
 }
 
@@ -237,4 +239,11 @@ export interface ApproveOutcome {
   runId?: string;
   replanned?: boolean;
   proposal?: Proposal;
+}
+
+/** Deep-link payload for the Events inbox (tab and/or a specific row). */
+export interface EventFocus {
+  status?: string;
+  source?: string;
+  eventId?: string;
 }
