@@ -50,6 +50,7 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     /** Replay/inject: same admission path, no signature (loopback only, §13). */
     replay: (envelope) => call("POST", "/replay", { body: JSON.stringify(envelope) }),
     status: () => call("GET", "/status"),
+    events: (status) => call("GET", `/events${status ? `?status=${encodeURIComponent(status)}` : ""}`),
     proposals: () => call("GET", "/proposals"),
     approve: (id) => call("POST", `/proposals/${encodeURIComponent(id)}/approve`, { body: "{}" }),
     reject: (id, reason) =>

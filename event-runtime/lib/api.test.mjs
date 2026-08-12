@@ -138,6 +138,20 @@ describe("webhook intake (§14)", () => {
     expect((await res.json()).error).toBe("missing_signature");
   });
 
+  test("GET /events returns the stored envelope; ?status= filters (webui spec §7)", async () => {
+    const { events } = await (await fetch(s.url("/events"))).json();
+    expect(events).toHaveLength(1);
+    expect(events[0].eventId).toBe("hook-1");
+    expect(events[0].status).toBe("admitted");
+    expect(events[0].envelope.payload).toEqual({ repos: ["ok"] });
+    expect(events[0].envelope.eventId).toBe("hook-1");
+
+    const filtered = await (await fetch(s.url("/events?status=admitted"))).json();
+    expect(filtered.events).toHaveLength(1);
+    const none = await (await fetch(s.url("/events?status=dead_lettered"))).json();
+    expect(none.events).toEqual([]);
+  });
+
   test("envelope schema failure → 422 with errors, no admission", async () => {
     const body = JSON.stringify({ schemaVersion: "factory.event/v1", eventId: "bad" });
     const ts = String(Date.now());
@@ -257,6 +271,10 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     expect(list.runs[0].agent).toBe("factory-status-report@1");
     expect((await s.client.runs("COMPLETED")).runs).toHaveLength(1);
     expect((await s.client.runs("QUEUED")).runs).toHaveLength(0);
+
+    const { events } = await s.client.events("planned");
+    expect(events.map((e) => e.eventId)).toContain("flow-1");
+    expect(events[0].envelope.type).toBe("factory.status-report.requested");
 
     const status = await s.client.status();
     expect(status.events).toEqual({ admitted: 0, planned: 1, noop: 0, human_needed: 0, dead_lettered: 0 });

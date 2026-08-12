@@ -116,6 +116,31 @@ function statusView(db, nowMs) {
   };
 }
 
+/**
+ * Admitted-event rows with their stored envelope (§13, webui spec §7): the
+ * doctor panel's replay verb needs the body, and counts alone cannot show an
+ * inbox. Read-only, like every other view here.
+ */
+function eventsView(db, status) {
+  const rows = status
+    ? db.query(`SELECT * FROM events WHERE status = ? ORDER BY admitted_at DESC, rowid DESC`).all(status)
+    : db.query(`SELECT * FROM events ORDER BY admitted_at DESC, rowid DESC`).all();
+  return rows.map((row) => ({
+    source: row.source,
+    eventId: row.event_id,
+    type: row.type,
+    subject: row.subject,
+    status: row.status,
+    occurredAt: row.occurred_at,
+    receivedAt: row.received_at,
+    correlationId: row.correlation_id,
+    planFailures: row.plan_failures,
+    lastPlanError: row.last_plan_error,
+    admittedAt: row.admitted_at,
+    envelope: JSON.parse(row.envelope_json),
+  }));
+}
+
 function runView(db, runId) {
   const row = db.query(`SELECT * FROM runs WHERE run_id = ?`).get(runId);
   if (!row) return null;
@@ -208,6 +233,10 @@ export function createApi({
 
       if (route === "GET /status") {
         return send(res, 200, statusView(db, nowMs));
+      }
+
+      if (route === "GET /events") {
+        return send(res, 200, { events: eventsView(db, url.searchParams.get("status")) });
       }
 
       if (route === "GET /proposals") {

@@ -36,6 +36,7 @@ usage: bun event-runtime/cli.mjs <command>
                                  start the control API (loopback), planner,
                                  and one worker in the foreground
   status                         events, proposals, runs, anomalies
+  events [status]                admitted events, optionally filtered by status
   proposals                      open proposals with TTL age
   approve <proposal-id>          approve an open proposal
   reject <proposal-id> <reason>  reject an open proposal
@@ -198,6 +199,20 @@ async function status(client) {
   else for (const line of anomalyLines) console.log(`${pad("anomalies", 11)}${line}`);
 }
 
+async function events(client, statusFilter) {
+  const { events: rows } = await client.events(statusFilter);
+  if (rows.length === 0) {
+    console.log(statusFilter ? `no events with status ${statusFilter}` : "no events");
+    return;
+  }
+  console.log(`${pad("SOURCE", 16)}${pad("EVENT", 24)}${pad("TYPE", 36)}${pad("STATUS", 14)}${pad("ADMITTED", 26)}ERROR`);
+  for (const e of rows) {
+    console.log(
+      `${pad(e.source, 16)}${pad(e.eventId, 24)}${pad(e.type, 36)}${pad(e.status, 14)}${pad(e.admittedAt, 26)}${e.lastPlanError ?? "-"}`,
+    );
+  }
+}
+
 async function proposals(client) {
   const { proposals: open } = await client.proposals();
   if (open.length === 0) {
@@ -259,6 +274,9 @@ async function main() {
 
     case "status":
       return withClient(status);
+
+    case "events":
+      return withClient((client) => events(client, args[0]));
 
     case "proposals":
       return withClient(proposals);

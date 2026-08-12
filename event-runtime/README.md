@@ -34,6 +34,22 @@ Webhook intake: `POST /events` with HMAC (`x-factory-signature: sha256=<hex>`
 over `${x-factory-timestamp}.${raw body}`, secret from `FACTORY_EVENT_SECRET`).
 No secret configured → webhooks are refused; the replay CLI still works.
 
+## Web control plane
+
+A second client of the same control API
+([docs/event-runtime-webui.md](../docs/event-runtime-webui.md)) — Linear-style
+UI over proposals, runs, and the doctor view. Loopback only, no auth by
+decision; `serve` must be running.
+
+```bash
+cd event-runtime/web && bun install && bun run build   # once, and after UI changes
+bun event-runtime/web/serve.mjs                        # http://127.0.0.1:7382 (FACTORY_EVENT_WEB_PORT)
+```
+
+Dev loop: `cd event-runtime/web && bunx vite` (proxies /api to the control
+API). Keyboard-first: `⌘K` palette, `g o/p/r` to navigate, `j/k` + `Enter` on
+lists, `a`/`x` to approve/reject the selected proposal.
+
 ## Try the slice
 
 ```bash
@@ -74,6 +90,7 @@ spec (§12).
 | `lib/verify.mjs` | result verification + compact receipts (§9) |
 | `lib/adapters/` | adapter registry: `claude` (real), `fake` (tests) (§6) |
 | `lib/api.mjs` `cli.mjs` | loopback control API + CLI client (§12–§13) |
+| `web/` | web control plane: Vite/React app + `serve.mjs` static/proxy server |
 | `agents/` `schemas/` `event-types.json` | registered agents, contracts, event→agent mappings |
 
 ## Capabilities are audited, not enforced (§14)

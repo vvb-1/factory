@@ -1,7 +1,7 @@
 # Event runtime web control plane
 
-Status: **specified; not implemented**. Tracking: OPS-209 (this spec).
-Implementation is a separate ticket, filed after this document is reviewed.
+Status: **implemented** (OPS-212) at `event-runtime/web/`. Tracking: OPS-209
+(this spec), OPS-212 (implementation).
 
 Parent: [event-runtime.md](event-runtime.md). §12 already decided the shape of
 this app: the TUI/CLI is one client of the control API, and a web app is a
