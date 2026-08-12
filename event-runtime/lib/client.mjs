@@ -51,7 +51,11 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     replay: (envelope) => call("POST", "/replay", { body: JSON.stringify(envelope) }),
     status: () => call("GET", "/status"),
     events: (status) => call("GET", `/events${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-    proposals: () => call("GET", "/proposals"),
+    proposals: (status) => call("GET", `/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+    journal: ({ since = 0, limit = 100 } = {}) => call("GET", `/journal?since=${since}&limit=${limit}`),
+    outbox: ({ limit = 50 } = {}) => call("GET", `/outbox?limit=${limit}`),
+    requeue: (source, eventId) =>
+      call("POST", "/events/requeue", { body: JSON.stringify({ source, eventId }) }),
     approve: (id) => call("POST", `/proposals/${encodeURIComponent(id)}/approve`, { body: "{}" }),
     reject: (id, reason) =>
       call("POST", `/proposals/${encodeURIComponent(id)}/reject`, { body: JSON.stringify({ reason }) }),

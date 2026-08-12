@@ -41,6 +41,7 @@ usage: bun event-runtime/cli.mjs <command>
   approve <proposal-id>          approve an open proposal
   reject <proposal-id> <reason>  reject an open proposal
   inject <envelope.json|->       replay an event envelope (same intake as the webhook)
+  requeue <source> <event-id>    re-plan a dead-lettered or human_needed event
   cancel <run-id> [reason]       cancel a run before it is RUNNING
   retry <run-id> [--force]       re-queue a FAILED run (--force past maxAttempts)
   inspect <run-id>               spec, lifecycle journal, result, receipt, workspace
@@ -301,6 +302,14 @@ async function main() {
     case "inject": {
       if (!args[0]) fail("usage: inject <envelope.json|->");
       return withClient((client) => inject(client, args[0]));
+    }
+
+    case "requeue": {
+      if (!args[0] || !args[1]) fail("usage: requeue <source> <event-id>");
+      return withClient(async (client) => {
+        await client.requeue(args[0], args[1]);
+        console.log(`requeued (${args[0]}, ${args[1]}) — will be re-planned`);
+      });
     }
 
     case "cancel": {

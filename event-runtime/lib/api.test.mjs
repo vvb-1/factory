@@ -353,3 +353,108 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     expect(unknown.message).toBe("unknown run run_nope");
   });
 });
+
+describe("webui surface: proposal linkage, history, journal, outbox, requeue (OPS-212)", () => {
+  test("proposals carry their originating event; history filter works; runs list is enriched", async () => {
+    const { db, server, port } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "link-1" }));
+      planAdmittedEvents(db, registry, { policyVersion: PV, adapterOverride: "fake" });
+
+      const { proposals } = await client.proposals();
+      expect(proposals).toHaveLength(1);
+      expect(proposals[0].eventId).toBe("link-1");
+      expect(proposals[0].eventSource).toBe("test");
+
+      await client.approve(proposals[0].id);
+      await runOnce(db, registry, { claude: fake, fake }, {
+        workspacesRoot: mkdtempSync(path.join(os.tmpdir(), "evrt-ws-")),
+        owner: "test-worker", policyVersion: PV,
+      });
+
+      const history = await client.proposals("approved");
+      expect(history.proposals).toHaveLength(1);
+      expect(history.proposals[0].decided_by).toBe("operator");
+      expect((await client.proposals("all")).proposals.length).toBeGreaterThanOrEqual(1);
+
+      const { runs } = await client.runs();
+      expect(runs[0].state).toBe("COMPLETED");
+      expect(runs[0].reasonCode).toBe("ok");
+      expect(runs[0].eventId).toBe("link-1");
+      expect(runs[0].adapter).toBe("fake");
+      expect(runs[0].maxAttempts).toBe(1);
+    } finally {
+      server.close();
+    }
+  });
+
+  test("journal feed pages by seq and outbox lists published result events", async () => {
+    const { db, server, port } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "feed-1" }));
+      planAdmittedEvents(db, registry, { policyVersion: PV, adapterOverride: "fake" });
+      const { proposals } = await client.proposals();
+      await client.approve(proposals[0].id);
+      await runOnce(db, registry, { claude: fake, fake }, {
+        workspacesRoot: mkdtempSync(path.join(os.tmpdir(), "evrt-ws-")),
+        owner: "test-worker", policyVersion: PV,
+      });
+
+      const journal = await client.journal();
+      expect(journal.head).toBeGreaterThan(0);
+      expect(journal.entries.map((e) => e.to)).toContain("COMPLETED");
+      const after = await client.journal({ since: journal.head });
+      expect(after.entries).toHaveLength(0);
+      expect(after.head).toBe(journal.head);
+
+      const { outbox } = await client.outbox();
+      expect(outbox).toHaveLength(1);
+      expect(outbox[0].event.type).toBe("factory.status-report.completed");
+      expect(outbox[0].published_at).toBeNull(); // no serve loop in this test — sink not run
+    } finally {
+      server.close();
+    }
+  });
+
+  test("requeue recovers a dead-lettered event and refuses everything else", async () => {
+    const { db, server, port, onEvents } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "dead-1" }));
+      db.query(`UPDATE events SET status = 'dead_lettered', plan_failures = 3, last_plan_error = 'boom' WHERE event_id = 'dead-1'`).run();
+
+      expect((await client.requeue("test", "dead-1")).requeued).toBe(true);
+      expect(onEvents).toContain("requeued");
+      const { events } = await client.events("admitted");
+      expect(events.map((e) => e.eventId)).toContain("dead-1");
+      expect(events.find((e) => e.eventId === "dead-1").planFailures).toBe(0);
+
+      const again = await rejection(client.requeue("test", "dead-1"));
+      expect(again.status).toBe(409); // now admitted — not requeueable
+      const missing = await rejection(client.requeue("test", "ghost"));
+      expect(missing.status).toBe(404);
+    } finally {
+      server.close();
+    }
+  });
+
+  test("requeueing a human_needed event supersedes its open proposal", async () => {
+    const { db, server, port } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "hn-1", type: "unregistered.event.type" }));
+      planAdmittedEvents(db, registry, { policyVersion: PV });
+      const before = await client.proposals();
+      expect(before.proposals[0].decision).toBe("human_needed");
+
+      await client.requeue("test", "hn-1");
+      expect((await client.proposals()).proposals).toHaveLength(0); // superseded, inbox clean
+      const superseded = await client.proposals("superseded");
+      expect(superseded.proposals[0].eventId).toBe("hn-1");
+    } finally {
+      server.close();
+    }
+  });
+});

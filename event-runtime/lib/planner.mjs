@@ -153,6 +153,32 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
 }
 
 /**
+ * Operator recovery for parked events (§13): put a dead-lettered or
+ * human_needed event back through planning after the underlying problem is
+ * fixed (event type registered, planner bug shipped, …). Any open
+ * human_needed proposal for it is superseded so the inbox does not show a
+ * stale ask next to a fresh plan.
+ */
+export function requeueEvent(db, { source, eventId }, { actor = "operator", now = Date.now() } = {}) {
+  return tx(db, () => {
+    const event = db.query(`SELECT status FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
+    if (!event) throw new Error(`unknown event (${source}, ${eventId})`);
+    if (!["dead_lettered", "human_needed"].includes(event.status)) {
+      throw new Error(`requeue applies to dead_lettered or human_needed events, not ${event.status}`);
+    }
+    db.query(
+      `UPDATE proposals SET status = 'superseded', decided_at = ?, decided_by = ?, reason = 'requeued'
+       WHERE event_source = ? AND event_id = ? AND status = 'open'`,
+    ).run(new Date(now).toISOString(), actor, source, eventId);
+    db.query(
+      `UPDATE events SET status = 'admitted', plan_failures = 0, last_plan_error = NULL
+       WHERE source = ? AND event_id = ?`,
+    ).run(source, eventId);
+    return { requeued: true };
+  });
+}
+
+/**
  * Sweep every 'admitted' event through planEvent. A plan that throws rolls
  * back, increments the event's failure count, and — after DEAD_LETTER_AFTER
  * consecutive failures — parks the event as dead-lettered with its last error
