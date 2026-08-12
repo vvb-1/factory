@@ -256,6 +256,7 @@ the same run.
     "recommendedAction": "dispatch"
   },
   "artifactHash": "sha256:...",
+  "evidence": { "queries": ["<the reads the artifact derives from>"] },
   "evidenceSetHash": "sha256:...",
   "verification": {
     "status": "passed",
@@ -446,6 +447,12 @@ derived values from that evidence or re-executes the reads itself and diffs.
 `evidenceSetHash` binds that evidence into the receipt; it earns its place at
 slice 2, not before (§2). An artifact whose claims cannot be tied to evidence
 is a contract violation, not a completed run.
+
+Declared evidence is **retained inline in the accepted result**, size-limited
+and failing closed when oversized (OPS-206): a hash whose bytes died with the
+ephemeral workspace could never be rechecked, and slice 2's recompute needs
+the bytes. Evidence too large to inline waits for the content-addressed
+artifact store rather than being silently dropped.
 
 Repository work later adds the exact repository verification command, executed
 separately from the implementing agent. GitHub Actions is not required. The

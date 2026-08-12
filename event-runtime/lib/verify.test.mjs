@@ -178,3 +178,40 @@ describe("verifyResult", () => {
       .toThrow(ContractViolation);
   });
 });
+
+describe("evidence retention (OPS-206)", () => {
+  const completedWith = (evidence) => ({
+    schemaVersion: "factory.agent-result/v1",
+    terminalState: "completed",
+    artifact: VALID_ARTIFACT,
+    ...(evidence !== undefined ? { evidence } : {}),
+  });
+
+  test("declared evidence is retained in the result and its hash recomputes from the stored bytes", () => {
+    const evidence = { queries: ["df -h", "docker system df"] };
+    const dir = makeWorkspace(completedWith(evidence));
+    const { result } = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+    expect(result.evidence).toEqual(evidence);
+    expect(hashJson(result.evidence)).toBe(result.evidenceSetHash);
+    expect(result.verification.checks).toContain("evidence_retained");
+  });
+
+  test("absent evidence stores null hash and no evidence field", () => {
+    const dir = makeWorkspace(completedWith(undefined));
+    const { result } = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+    expect(result.evidenceSetHash).toBeNull();
+    expect("evidence" in result).toBe(false);
+    expect(result.verification.checks).not.toContain("evidence_retained");
+  });
+
+  test("oversize evidence fails closed as a contract violation", () => {
+    const dir = makeWorkspace(completedWith({ blob: "x".repeat(300 * 1024) }));
+    expect(() => verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 }))
+      .toThrow(ContractViolation);
+    try {
+      verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+    } catch (err) {
+      expect(err.violations[0]).toStartWith("evidence_too_large:");
+    }
+  });
+});

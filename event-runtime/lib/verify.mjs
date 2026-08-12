@@ -12,9 +12,18 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { hashJson, sha256Hex } from "./canonical.mjs";
+import { canonicalJson, hashBytes, hashJson, sha256Hex } from "./canonical.mjs";
 import { validate } from "./schema.mjs";
 import { PathViolation, safeJoin } from "./workspace.mjs";
+
+/**
+ * Declared evidence is retained inline in the accepted result (OPS-206): a
+ * stored hash whose bytes were destroyed with the workspace could never be
+ * rechecked, and slice 2's verifier recomputes derived values from evidence.
+ * The limit is a §14 size bound — larger evidence fails closed until a real
+ * case earns the content-addressed artifact store.
+ */
+export const EVIDENCE_INLINE_LIMIT_BYTES = 256 * 1024;
 
 export const REFUSAL_REASONS = [
   "missing_input",
@@ -110,7 +119,18 @@ function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalH
   if (violations.length > 0) throw new ContractViolation(violations);
 
   const artifactHash = hashJson(candidate.artifact);
-  const evidenceSetHash = candidate.evidence !== undefined ? hashJson(candidate.evidence) : null;
+
+  let evidence;
+  let evidenceSetHash = null;
+  if (candidate.evidence !== undefined) {
+    const canonical = canonicalJson(candidate.evidence);
+    const bytes = Buffer.byteLength(canonical, "utf8");
+    if (bytes > EVIDENCE_INLINE_LIMIT_BYTES) {
+      throw new ContractViolation([`evidence_too_large: ${bytes} bytes > ${EVIDENCE_INLINE_LIMIT_BYTES}`]);
+    }
+    evidence = candidate.evidence;
+    evidenceSetHash = hashBytes(canonical);
+  }
 
   const result = {
     schemaVersion: "factory.run-result/v1",
@@ -121,10 +141,14 @@ function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalH
     outputContract: spec.outputContract,
     artifact: candidate.artifact,
     artifactHash,
+    ...(evidence !== undefined ? { evidence } : {}),
     evidenceSetHash,
     verification: {
       status: "passed",
-      checks: ["schema_valid", "hash_recomputed", "paths_confined", "artifacts_exist"],
+      checks: [
+        "schema_valid", "hash_recomputed", "paths_confined", "artifacts_exist",
+        ...(evidence !== undefined ? ["evidence_retained"] : []),
+      ],
     },
     artifacts: collected,
   };
