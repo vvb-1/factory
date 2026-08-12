@@ -229,9 +229,10 @@ if [[ "$FETCH_OK" == "1" ]] && git -C "$REPO_PATH" rev-parse --verify -q "origin
 fi
 
 if [[ "$BEHIND" != "0" && "$BEHIND" != "unknown" && "$DIRTY" == "0" ]]; then
-  if git -C "$REPO_PATH" pull --ff-only --quiet 2>/dev/null; then
+  if git -C "$REPO_PATH" merge --ff-only --quiet "origin/$REPO_BASE" 2>/dev/null; then
     echo "  branch: $BRANCH  fast-forwarded $BEHIND commit(s) — now current"
-    BEHIND=0
+    BEHIND="$(git -C "$REPO_PATH" rev-list --count "HEAD..origin/$REPO_BASE" 2>/dev/null)" || BEHIND="unknown"
+    AHEAD="$(git -C "$REPO_PATH" rev-list --count "origin/$REPO_BASE..HEAD" 2>/dev/null)" || AHEAD="unknown"
   else
     echo "  branch: $BRANCH  behind: $BEHIND  ! fast-forward refused (diverged) — fix by hand"
   fi

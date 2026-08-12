@@ -149,8 +149,8 @@ for (const repo of repos) {
         `${behind} commit(s) behind origin/${repo.base}${dirty ? `, ${dirty} uncommitted` : ""}`,
         behind >= BEHIND_WARN
           ? dirty
-            ? `commit or stash first, then \`git -C ${repo.path} pull --ff-only\` — stages must read origin/${repo.base}, not this tree`
-            : `git -C ${repo.path} pull --ff-only`
+            ? `commit or stash first, then \`git -C ${repo.path} merge --ff-only origin/${repo.base}\` — stages must read origin/${repo.base}, not this tree`
+            : `git -C ${repo.path} merge --ff-only origin/${repo.base}`
           : null);
     }
   }
