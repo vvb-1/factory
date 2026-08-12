@@ -51,6 +51,14 @@ describe("openBlockers", () => {
     expect(openBlockers(i)).toEqual(["OPS-8", "OPS-10"]);
   });
 
+  test("handles more than the old relation page size", () => {
+    const nodes = Array.from({ length: 26 }, (_, n) => ({
+      type: "blocks",
+      issue: { identifier: `OPS-${n + 20}`, state: { type: "started" } },
+    }));
+    expect(openBlockers(issueWith(nodes))).toHaveLength(26);
+  });
+
   test("malformed node without an issue is ignored, not a crash", () => {
     const i = issueWith([{ type: "blocks", issue: null }]);
     expect(openBlockers(i)).toEqual([]);

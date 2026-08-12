@@ -34,7 +34,7 @@
  * (`completed`, `canceled`, ...) are Linear's own enum.
  */
 export const BLOCKING_RELATIONS_GQL =
-  "inverseRelations(first: 25) { nodes { type issue { identifier state { type } } } }";
+  "inverseRelations(first: 250) { nodes { type issue { identifier state { type } } } }";
 
 /**
  * Identifiers of the issues that block `issue` and are not finished.
