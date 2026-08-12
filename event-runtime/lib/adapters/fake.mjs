@@ -29,6 +29,20 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env }) {
   const mode = spec.input?.repos?.[0];
 
   switch (mode) {
+    case "with-artifact": {
+      // Declares a file artifact and a transcript — exercises the §7 store.
+      writeFileSync(path.join(workspaceDir, "report.txt"), `fake report for ${mode}\n`, "utf8");
+      writeFileSync(path.join(workspaceDir, ".transcript.json"), `{"fake":"transcript"}\n`, "utf8");
+      writeResult(workspaceDir, {
+        schemaVersion: "factory.agent-result/v1",
+        terminalState: "completed",
+        artifact: { repos: [repoRow(mode)], recommendedAction: "wait" },
+        evidence: { queries: ["fake"] },
+        artifacts: [{ kind: "report", path: "report.txt" }],
+      });
+      return { exitCode: 0, timedOut: false };
+    }
+
     case "refuse":
       writeResult(workspaceDir, {
         schemaVersion: "factory.agent-result/v1",

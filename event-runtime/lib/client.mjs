@@ -56,6 +56,7 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     outbox: ({ limit = 50 } = {}) => call("GET", `/outbox?limit=${limit}`),
     requeue: (source, eventId) =>
       call("POST", "/events/requeue", { body: JSON.stringify({ source, eventId }) }),
+    agents: () => call("GET", "/agents"),
     approve: (id) => call("POST", `/proposals/${encodeURIComponent(id)}/approve`, { body: "{}" }),
     reject: (id, reason) =>
       call("POST", `/proposals/${encodeURIComponent(id)}/reject`, { body: JSON.stringify({ reason }) }),

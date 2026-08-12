@@ -10,8 +10,10 @@
  * no signature. Operator verbs record "operator" as actor — authenticated
  * actor identity is the web-app step, not this one.
  */
+import { createReadStream, readFileSync } from "node:fs";
 import http from "node:http";
-import { API_HOST, DEFAULT_PORT, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
+import { findArtifact } from "./artifacts.mjs";
+import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
 import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
@@ -222,6 +224,52 @@ function outboxView(db, limit) {
     }));
 }
 
+/**
+ * The agent registry, fully readable (§6, webui): definition, prompt text,
+ * schemas, pins, and which event types route to each agent. An operator
+ * approving a RunSpec should be able to read exactly what `agent@version`
+ * means without opening the repo.
+ */
+function agentsView(registry) {
+  return {
+    agents: [...registry.agents.values()].map((def) => ({
+      ref: def.ref,
+      id: def.id,
+      version: def.version,
+      outputContract: def.output_contract,
+      workspace: def.workspace,
+      capabilities: def.capabilities,
+      limits: def.limits,
+      mutating: def.mutating,
+      promptFile: def.prompt,
+      prompt: readFileSync(def.promptPath, "utf8"),
+      inputSchemaFile: def.input_schema,
+      inputSchema: def.inputSchema,
+      outputSchemaFile: def.output_schema,
+      outputSchema: def.outputSchema,
+      pins: def.pins,
+      eventTypes: Object.entries(registry.eventTypes)
+        .filter(([, mapping]) => mapping.agent === def.ref)
+        .map(([type, mapping]) => ({
+          type,
+          adapter: mapping.adapter,
+          idempotencyScope: mapping.idempotencyScope,
+          proposalTtlSeconds: mapping.proposalTtlSeconds ?? null,
+        })),
+    })),
+    contracts: {
+      "factory.event/v1": registry.schemas.envelope,
+      "factory.agent-result/v1": registry.schemas.agentResult,
+    },
+  };
+}
+
+/** Crude but honest content-type: render text in the browser, download the rest. */
+function looksLikeText(file) {
+  const head = readFileSync(file).subarray(0, 512);
+  return !head.includes(0);
+}
+
 function runView(db, runId) {
   const row = db.query(`SELECT * FROM runs WHERE run_id = ?`).get(runId);
   if (!row) return null;
@@ -325,6 +373,22 @@ export function createApi({
         const status = url.searchParams.get("status");
         if (status) return send(res, 200, { proposals: proposalHistory(db, status === "all" ? null : status) });
         return send(res, 200, { proposals: openProposals(db, { now: nowMs }).map(proposalView) });
+      }
+
+      if (route === "GET /agents") {
+        return send(res, 200, agentsView(registry));
+      }
+
+      const artifactGet = url.pathname.match(/^\/artifacts\/([0-9a-f]{64})$/);
+      if (req.method === "GET" && artifactGet) {
+        const found = findArtifact(artifactsRoot(env.home), artifactGet[1]);
+        if (!found) return send(res, 404, { error: `no artifact ${artifactGet[1]}` });
+        res.writeHead(200, {
+          "content-type": looksLikeText(found.file) ? "text/plain; charset=utf-8" : "application/octet-stream",
+          "content-length": found.sizeBytes,
+        });
+        createReadStream(found.file).pipe(res);
+        return;
       }
 
       if (route === "GET /journal") {

@@ -48,7 +48,7 @@ export class ContractViolation extends Error {
  *         | { kind: "completed", result: object, receipt: object }}
  * @throws {ContractViolation} on any contract failure — fail closed.
  */
-export function verifyResult({ spec, def, registry, workspaceDir, attempt, journalHead = null }) {
+export function verifyResult({ spec, def, registry, workspaceDir, attempt, journalHead = null, extraArtifacts = [] }) {
   let raw;
   try {
     raw = readFileSync(path.join(workspaceDir, "result.json"), "utf8");
@@ -67,7 +67,7 @@ export function verifyResult({ spec, def, registry, workspaceDir, attempt, journ
   if (!shape.valid) throw new ContractViolation(shape.errors);
 
   if (candidate.terminalState === "refused") return verifyRefused({ spec, candidate, attempt });
-  return verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead });
+  return verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts });
 }
 
 /** Refusal is not failure (§5.3) — but only typed, known reasons are admitted. */
@@ -93,15 +93,24 @@ function verifyRefused({ spec, candidate, attempt }) {
   return { kind: "refused", reasonCode: candidate.reasonCode, result };
 }
 
-function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead }) {
+function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts = [] }) {
   if (candidate.artifact === undefined) throw new ContractViolation(["missing_artifact"]);
 
   const artifactCheck = validate(def.outputSchema, candidate.artifact);
   if (!artifactCheck.valid) throw new ContractViolation(artifactCheck.errors);
 
+  // Runtime-injected artifacts (e.g. the adapter's transcript): best-effort —
+  // included when present, never a violation when absent, and never allowed
+  // to shadow something the agent itself declared.
+  const declared = candidate.artifacts ?? [];
+  const declaredPaths = new Set(declared.map((entry) => entry.path));
+  const injected = extraArtifacts.filter(
+    (entry) => !declaredPaths.has(entry.path) && existsSync(path.join(workspaceDir, entry.path)),
+  );
+
   const violations = [];
   const collected = [];
-  for (const entry of candidate.artifacts ?? []) {
+  for (const entry of [...declared, ...injected]) {
     let abs;
     try {
       abs = safeJoin(workspaceDir, entry.path);

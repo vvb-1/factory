@@ -10,12 +10,21 @@
  * mid-flight surfaces here as IllegalTransition; the worker stops quietly,
  * publishing nothing.
  */
+import { storeCollected } from "./artifacts.mjs";
 import { canonicalJson, hashJson } from "./canonical.mjs";
+import { artifactsRoot } from "./config.mjs";
 import { nextCounter, tx } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
 import { IllegalTransition, transition } from "./lifecycle.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { createWorkspace, destroyWorkspace } from "./workspace.mjs";
+
+/**
+ * Runtime-injected artifacts: adapters that capture the agent's output write
+ * it here (workspace-relative); the verifier includes it when present. The
+ * agent does not have to declare its own transcript.
+ */
+const RUNTIME_ARTIFACTS = [{ kind: "transcript", path: ".transcript.json" }];
 
 /** Grace added to the spec timeout before a lease is considered abandoned. */
 const LEASE_GRACE_SECONDS = 120;
@@ -93,7 +102,7 @@ export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknow
  * { fenced: true } when a newer attempt owns the run at publish time.
  */
 export async function executeClaimed(db, registry, adapters, claim, {
-  workspacesRoot, now = Date.now(), policyVersion = "unknown",
+  workspacesRoot, artifactStore = artifactsRoot(), now = Date.now(), policyVersion = "unknown",
 } = {}) {
   const { runId, attempt, fencingToken, spec } = claim;
   const owner = db
@@ -163,7 +172,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     let verified;
     try {
-      verified = verifyResult({ spec, def, registry, workspaceDir, attempt });
+      verified = verifyResult({ spec, def, registry, workspaceDir, attempt, extraArtifacts: RUNTIME_ARTIFACTS });
     } catch (err) {
       if (!(err instanceof ContractViolation)) throw err;
       // Invalid output is a typed contract failure and emits no completion
@@ -210,6 +219,11 @@ export async function executeClaimed(db, registry, adapters, claim, {
       destroyWorkspace(workspaceDir);
       return { runId, attempt, terminalState: "REFUSED", reasonCode: verified.reasonCode };
     }
+
+    // Copy verified artifact files into the durable content-addressed store
+    // (§7) BEFORE the workspace dies and before the row referencing them
+    // commits. Orphans from a failed commit are harmless; dead links are not.
+    verified.result.artifacts = storeCollected({ entries: verified.result.artifacts, storeRoot: artifactStore });
 
     // Completed: fencing check, result, receipt, outbox event, and the
     // COMPLETED transition are one transaction.

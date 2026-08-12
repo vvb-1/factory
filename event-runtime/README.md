@@ -21,6 +21,7 @@ Operator verbs (clients of the control API — they need `serve` running):
 ```bash
 bun event-runtime/cli.mjs status                      # events, proposals, runs, anomalies
 bun event-runtime/cli.mjs proposals                   # open proposals with TTL age
+bun event-runtime/cli.mjs agents                      # registered agents and event routing
 bun event-runtime/cli.mjs approve <proposal-id>
 bun event-runtime/cli.mjs reject <proposal-id> "<reason>"
 bun event-runtime/cli.mjs inject <envelope.json>      # replay CLI — same intake as the webhook

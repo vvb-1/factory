@@ -25,8 +25,14 @@ export function workspacesRoot(home = runtimeHome()) {
   return path.join(home, "workspaces");
 }
 
+/** Durable content-addressed artifact store (§7) — survives its workspaces. */
+export function artifactsRoot(home = runtimeHome()) {
+  return path.join(home, "artifacts");
+}
+
 export function ensureHome(home = runtimeHome()) {
   mkdirSync(workspacesRoot(home), { recursive: true });
+  mkdirSync(artifactsRoot(home), { recursive: true });
   return home;
 }
 

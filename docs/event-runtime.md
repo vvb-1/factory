@@ -374,9 +374,12 @@ create unique directory
 ```
 
 The workspace is scratch state. Accepted, content-addressed artifacts and run
-events are durable state. Passing work between agents means materializing an
-accepted artifact into a new workspace, not letting two agents share a live
-directory.
+events are durable state: at publish time the worker copies every verified
+artifact file (including the adapter-captured transcript) into
+`<home>/artifacts/<sha256>`, and the control API serves them from there —
+result rows never reference files that died with a workspace. Passing work
+between agents means materializing an accepted artifact into a new workspace,
+not letting two agents share a live directory.
 
 Working-directory separation is not a security sandbox. Filesystem, network,
 secrets, CPU, memory, and process isolation are separate policy axes. A future

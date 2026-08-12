@@ -38,6 +38,7 @@ usage: bun event-runtime/cli.mjs <command>
   status                         events, proposals, runs, anomalies
   events [status]                admitted events, optionally filtered by status
   proposals                      open proposals with TTL age
+  agents                         registered agent definitions and event routing
   approve <proposal-id>          approve an open proposal
   reject <proposal-id> <reason>  reject an open proposal
   inject <envelope.json|->       replay an event envelope (same intake as the webhook)
@@ -254,6 +255,24 @@ async function inspect(client, runId) {
     console.log("\nreceipt");
     for (const [k, v] of Object.entries(view.receipt)) console.log(`  ${pad(k, 20)}${v ?? "-"}`);
   }
+  if (view.result?.artifacts?.length) {
+    console.log("\nartifacts");
+    for (const a of view.result.artifacts) {
+      console.log(`  ${pad(a.kind, 14)}${pad(a.sizeBytes != null ? `${a.sizeBytes}B` : "-", 10)}${pad(a.sha256, 66)}${a.uri}`);
+    }
+  }
+}
+
+async function agents(client) {
+  const { agents: defs } = await client.agents();
+  for (const d of defs) {
+    console.log(`${d.ref}   contract ${d.outputContract}   mutating ${d.mutating}   timeout ${d.limits.timeout_seconds}s   attempts ${d.limits.attempts}`);
+    console.log(`  capabilities  ${d.capabilities.filesystem}; ${(d.capabilities.services ?? []).join(", ") || "-"}`);
+    console.log(`  files         ${d.promptFile}, ${d.inputSchemaFile}, ${d.outputSchemaFile}`);
+    for (const t of d.eventTypes) {
+      console.log(`  event type    ${t.type}   adapter ${t.adapter}   scope ${t.idempotencyScope.join("+")}   ttl ${t.proposalTtlSeconds ?? "-"}s`);
+    }
+  }
 }
 
 async function inject(client, file) {
@@ -285,6 +304,9 @@ async function main() {
 
     case "proposals":
       return withClient(proposals);
+
+    case "agents":
+      return withClient(agents);
 
     case "approve": {
       if (!args[0]) fail("usage: approve <proposal-id>");

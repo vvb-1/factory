@@ -7,7 +7,8 @@
  * silently bill an API key that happens to be in the environment.
  */
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createWriteStream, readFileSync } from "node:fs";
+import path from "node:path";
 
 const KILL_GRACE_MS = 30_000;
 
@@ -28,6 +29,12 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env = {} }) 
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    // Capture the CLI's structured output as a runtime artifact: the worker
+    // collects .transcript.json into the §7 store, so the operator can read
+    // what the agent reported long after the workspace is gone.
+    const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
+    child.stdout.pipe(transcript);
 
     let timedOut = false;
     let killTimer;

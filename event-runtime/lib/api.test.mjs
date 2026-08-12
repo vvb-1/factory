@@ -481,3 +481,85 @@ describe("environment identity (webui chip)", () => {
     }
   });
 });
+
+describe("artifact store and agent registry surfacing (OPS-212)", () => {
+  test("declared artifacts and the transcript survive the workspace and stream from the API", async () => {
+    const { db, server, port } = await makeServer();
+    const client = apiClient({ port });
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-home-"));
+    try {
+      await client.replay(envelope({ eventId: "art-1", payload: { repos: ["with-artifact"] } }));
+      planAdmittedEvents(db, registry, { policyVersion: PV, adapterOverride: "fake" });
+      const { proposals } = await client.proposals();
+      await client.approve(proposals[0].id);
+      const summary = await runOnce(db, registry, { claude: fake, fake }, {
+        workspacesRoot: path.join(home, "workspaces"),
+        artifactStore: path.join(home, "artifacts"),
+        owner: "test-worker", policyVersion: PV,
+      });
+      expect(summary.terminalState).toBe("COMPLETED");
+
+      const view = await client.run(summary.runId);
+      const kinds = view.result.artifacts.map((a) => a.kind).sort();
+      expect(kinds).toEqual(["report", "transcript"]);
+      // Workspace is gone; every artifact URI must point into the store and exist.
+      for (const a of view.result.artifacts) {
+        expect(a.uri).toContain("/artifacts/");
+        expect(a.sizeBytes).toBeGreaterThan(0);
+      }
+    } finally {
+      server.close();
+    }
+  });
+
+  test("GET /artifacts/:hash streams stored bytes; unknown and malformed hashes 404", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-home-"));
+    const db = openDb(path.join(home, "runtime.db"));
+    const server = startApi({
+      db, registry, secret: SECRET, policyVersion: PV, port: 0,
+      env: { name: "test", home, adapter: "fake" },
+    });
+    await new Promise((resolve) => server.on("listening", resolve));
+    const port = server.address().port;
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "art-2", payload: { repos: ["with-artifact"] } }));
+      planAdmittedEvents(db, registry, { policyVersion: PV, adapterOverride: "fake" });
+      await client.approve((await client.proposals()).proposals[0].id);
+      const summary = await runOnce(db, registry, { claude: fake, fake }, {
+        workspacesRoot: path.join(home, "workspaces"),
+        artifactStore: path.join(home, "artifacts"),
+        owner: "test-worker", policyVersion: PV,
+      });
+
+      const view = await client.run(summary.runId);
+      const report = view.result.artifacts.find((a) => a.kind === "report");
+      const res = await fetch(`http://127.0.0.1:${port}/artifacts/${report.sha256}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/plain");
+      expect(await res.text()).toBe("fake report for with-artifact\n");
+
+      expect((await fetch(`http://127.0.0.1:${port}/artifacts/${"0".repeat(64)}`)).status).toBe(404);
+      expect((await fetch(`http://127.0.0.1:${port}/artifacts/not-a-hash`)).status).toBe(404);
+    } finally {
+      server.close();
+    }
+  });
+
+  test("GET /agents exposes definitions, prompt text, schemas, pins, and routing", async () => {
+    const { server, port } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      const { agents: defs, contracts } = await client.agents();
+      const def = defs.find((d) => d.ref === "factory-status-report@1");
+      expect(def.prompt).toContain("factory-status-report@1");
+      expect(def.outputSchema.required).toContain("recommendedAction");
+      expect(Object.keys(def.pins)).toHaveLength(3);
+      expect(def.eventTypes[0].type).toBe("factory.status-report.requested");
+      expect(def.mutating).toBe(false);
+      expect(contracts["factory.agent-result/v1"].properties.terminalState.enum).toContain("refused");
+    } finally {
+      server.close();
+    }
+  });
+});
