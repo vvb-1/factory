@@ -38,6 +38,26 @@ The test is whether the diff **changes security-relevant behavior**, not whether
 
 `master`/`main` always goes through a human. Merging into `develop` on an `hdkiller`/`watt-mind` repo is pre-authorized once CI is genuinely green **and you have read the diff** — green CI alone is never the bar.
 
+### Protected branches
+
+**Never delete a branch that is any repo's `base` or `deploy_branch`** — `develop`, `master`, `main`. These repos have no GitHub branch protection (the plan doesn't include it), so this rule is the only thing enforcing it. `origin/develop` has been deleted by factory cleanup more than once.
+
+Deleting it is not a tidy-up that someone can undo in a minute: it orphans every open PR targeting it, breaks `git log origin/master..origin/develop` (the ship-list source of truth), and leaves the next dispatch with no base to branch worktrees from.
+
+Two rules, both mechanical:
+
+**Delete only the head ref of the PR you just merged, and read the name back rather than assuming it:**
+
+```bash
+HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
+```
+
+A branch name you inferred from the ticket ID, or carried over from an earlier PR in the batch, is the one that deletes the wrong thing. If `$HEAD_REF` equals the repo's `base` or `deploy_branch`, do not delete it — that is not an edge case to handle, it is a sign you are looking at the wrong PR.
+
+**Never `--delete-branch` a release PR.** A release PR is `develop` → `master`, so its head **is** `develop` and the flag does exactly what it says. Release PRs are merged with a plain `gh pr merge <PR> --merge`.
+
+Same care for force-pushes: never `--force` onto a `base` or `deploy_branch`, and prefer `--force-with-lease` anywhere you do force.
+
 ### Stop and ask
 
 Move the ticket to `Blocked`, say specifically what you need in one answerable question, and notify. Never leave a stalled ticket sitting in `In Progress`.
@@ -71,6 +91,34 @@ for i in $(seq 60); do curl -sf localhost:4222 >/dev/null && break; sleep 2; don
 **For a background job you started**, wait on the process (`wait`, or the harness's own background-task mechanism) rather than guessing how long it takes.
 
 Measured on real runs: single `sleep 180` and `sleep 75` calls, plus a `sleep 60` after starting a dev server that was ready in a fraction of that. Each one is a per-ticket process sitting idle while holding a concurrency slot.
+
+### Checkout freshness
+
+**Code evidence cites a ref, not a path.** Any claim about what the code currently does — "already shipped", "that flow no longer exists", "the acceptance criteria are met" — is a claim about the trunk, and the main checkout is not the trunk. It is a working copy that may be behind, may be ahead of what's pushed, and may hold someone's uncommitted work. Before you read the tree as evidence, compare against `origin/<base>` by name — never `@{upstream}`, which depends on tracking config the checkout may not have and silently compares against the wrong branch (or none) when it doesn't:
+
+```bash
+git fetch --quiet
+git rev-list --count HEAD..origin/<base>     # >0 means behind
+git rev-list --count origin/<base>..HEAD     # >0 means ahead (unpushed local commits)
+git status --porcelain                       # non-empty means dirty
+```
+
+The tree is trustworthy only when all three come back clean — not behind, not ahead, not dirty. Behind and otherwise **clean** → `git pull --ff-only`; it cannot create a merge commit or lose work, so it is safe to do unattended. **Dirty, or ahead, or behind-and-dirty** → leave the checkout alone and read the remote ref instead:
+
+```bash
+git log origin/<base> --oneline -- <path>   # was it actually shipped?
+git show origin/<base>:<file>               # what does it say now?
+```
+
+Ahead-only (clean, not behind, but carrying unpushed commits) still routes to `origin/<base>` — those commits are real, but they are not what "shipped" means to anyone reading the remote, so evidence has to come from the ref others can check.
+
+**A failed `git fetch` or a failed `rev-list` is not "assume clean."** No network, no configured remote, a renamed base branch — any of these make the comparison fail, and letting a non-zero exit fall through to a default of `0` reads as "not behind" when the honest answer is "don't know." Fail closed: on failure, report freshness as **unknown**, say so in the report, and fall back to reading `origin/<base>` directly rather than trusting the tree.
+
+Never pull over uncommitted work to get a fresher read — those files are a human's in-flight change, and losing them costs far more than a slightly stale spec. Reading `origin/<base>` gets the same correctness without touching the tree.
+
+Then **name the ref your evidence came from** in the report or the Linear comment. `origin/develop@a1b2c3d` is checkable by the next reader; "I read the file" is not.
+
+Dispatch is exempt — the worktree script branches from `origin/<base>`, so ticket work always starts current. The exposure is the read-only stages (sweep, triage, audit), which read the main checkout: against a stale one, a shipped feature reads as unshipped and an overtaken ticket keeps its place in the queue.
 
 ### Context discipline
 

@@ -31,7 +31,7 @@ If CI is red: this is release CI on code that was already green on develop, so f
 
 **Always a merge commit: `gh pr merge <PR> --merge`.** Never squash or rebase a release PR — squashing develop into master makes every subsequent release PR re-show already-shipped commits as conflicts, and it wrecks `git log master..develop` as the ship-list source of truth. If the repo blocks merge commits, stop and tell me rather than squashing.
 
-Do not delete the head branch (it's develop). Do not force anything.
+**No `--delete-branch` on this PR.** Its head is `develop` — the flag would delete the integration branch, and there is no branch protection to stop it (floor: **Protected branches**). Do not force anything.
 
 ## 5. Verify the deploy
 

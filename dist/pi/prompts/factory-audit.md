@@ -14,7 +14,7 @@ For each check, record **PASS / FAIL / N/A** plus the evidence you actually obse
 
 Rules that keep the grade honest:
 
-- **Verify against the live repo and the live GitHub settings**, not against what `AGENTS.md` or this guide claims. `PC-20` exists precisely because docs drift; when a doc and reality disagree, the doc is the finding.
+- **Verify against the live repo and the live GitHub settings**, not against what `AGENTS.md` or this guide claims. `PC-20` exists precisely because docs drift; when a doc and reality disagree, the doc is the finding. "Live" means `origin/<base>`, so `git fetch --quiet` first and follow the floor's **Checkout freshness** rule — a FAIL graded against a checkout that predates the fix is a fabricated finding, and it gets filed as a ticket for work already done.
 - **N/A requires a stated reason** grounded in the repo ("no auto-deploy branch", "free private plan blocks branch protection"). Never N/A a check because it's inconvenient or because fixing it is out of scope — that's a FAIL with a filed ticket.
 - **`PC-03` (cloud runners) and `PC-18` (missing secrets) are cheap and high-consequence** — one bills real money, the other means a workflow that looks configured has never once run green. Always check them, even in a partial audit.
 - For `PC-17`, a workflow that exists but is disabled by a stale `if:` gate is a **FAIL, not a PASS** — a gate whose stated precondition has since been met is the most common way a repo loses its strongest test signal without anyone noticing.
