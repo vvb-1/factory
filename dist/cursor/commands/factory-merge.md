@@ -62,7 +62,16 @@ Why this matters: a legalease run on 2026-08-04 landed 3 PRs in 15 minutes again
 
 If the repo has GitHub's native merge queue enabled, prefer it over any of this — it tests batches and drops the failures for you.
 
-After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown (`git push origin --delete <branch>`, `git branch -D <branch>`).
+After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
+
+Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch:
+
+```bash
+HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
+git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+```
+
+Per the floor's **Protected branches** rule, if `$HEAD_REF` comes back as the repo's `base` or `deploy_branch` (`develop`, `master`, `main`), stop — you are cleaning up the wrong PR. These repos have no branch protection to catch it for you.
 
 If base CI or the smoke check breaks after a batch, stop merging further batches immediately, notify me, and fix or revert first. On an auto-deploying branch a red smoke check means the environment is down right now, not that a test is flaky.
 

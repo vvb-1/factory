@@ -38,6 +38,26 @@ The test is whether the diff **changes security-relevant behavior**, not whether
 
 `master`/`main` always goes through a human. Merging into `develop` on an `hdkiller`/`watt-mind` repo is pre-authorized once CI is genuinely green **and you have read the diff** — green CI alone is never the bar.
 
+### Protected branches
+
+**Never delete a branch that is any repo's `base` or `deploy_branch`** — `develop`, `master`, `main`. These repos have no GitHub branch protection (the plan doesn't include it), so this rule is the only thing enforcing it. `origin/develop` has been deleted by factory cleanup more than once.
+
+Deleting it is not a tidy-up that someone can undo in a minute: it orphans every open PR targeting it, breaks `git log origin/master..origin/develop` (the ship-list source of truth), and leaves the next dispatch with no base to branch worktrees from.
+
+Two rules, both mechanical:
+
+**Delete only the head ref of the PR you just merged, and read the name back rather than assuming it:**
+
+```bash
+HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
+```
+
+A branch name you inferred from the ticket ID, or carried over from an earlier PR in the batch, is the one that deletes the wrong thing. If `$HEAD_REF` equals the repo's `base` or `deploy_branch`, do not delete it — that is not an edge case to handle, it is a sign you are looking at the wrong PR.
+
+**Never `--delete-branch` a release PR.** A release PR is `develop` → `master`, so its head **is** `develop` and the flag does exactly what it says. Release PRs are merged with a plain `gh pr merge <PR> --merge`.
+
+Same care for force-pushes: never `--force` onto a `base` or `deploy_branch`, and prefer `--force-with-lease` anywhere you do force.
+
 ### Stop and ask
 
 Move the ticket to `Blocked`, say specifically what you need in one answerable question, and notify. Never leave a stalled ticket sitting in `In Progress`.
