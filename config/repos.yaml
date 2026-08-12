@@ -97,6 +97,18 @@ repos:
   # worktree_up/down/warm like bj29's, and are no longer report_only.
   # --------------------------------------------------------------------------
 
+  - name: wm-home
+    path: ~/Develop/pets/wm/wm-home
+    github: watt-mind/wm-home
+    team: WM
+    project: Corporate Marketing
+    base: develop
+    deploy_branch: master
+    report_only: true            # No isolated worktree lifecycle tooling yet.
+    verify: npm run typecheck && npm run lint && npm run format:check
+    smoke_workflow: smoke-prod.yml
+    smoke_url: https://watt-mind.com
+
   - name: coach-wattz
     path: ~/Develop/coach-wattz
     github: watt-mind/coach
