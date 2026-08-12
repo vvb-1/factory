@@ -21,45 +21,111 @@ import { latestReaperRunMs } from "./reaper.mjs";
 const argv = process.argv.slice(2);
 const val = (flag) => { const i = argv.indexOf(flag); return i === -1 ? null : argv[i + 1]; };
 const JSON_OUT = argv.includes("--json");
+const explicitRepo = val("--repo");
 const c = {
-  bold: (s) => `\x1b[1m${s}\x1b[0m`, dim: (s) => `\x1b[2m${s}\x1b[0m`,
-  green: (s) => `\x1b[32m${s}\x1b[0m`, yellow: (s) => `\x1b[33m${s}\x1b[0m`, red: (s) => `\x1b[31m${s}\x1b[0m`,
+  bold: (s) => `\x1b[1m${s}\x1b[0m`,
+  dim: (s) => `\x1b[2m${s}\x1b[0m`,
+  green: (s) => `\x1b[32m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
+  red: (s) => `\x1b[31m${s}\x1b[0m`,
 };
 const expand = (p) => p?.replace(/^~/, homedir());
+const quoteArg = (value) => `"${String(value).replace(/"/g, "\\\"")}"`;
 const sh = (args, cwd) => {
   const result = Bun.spawnSync({ cmd: args, cwd, stdout: "pipe", stderr: "pipe" });
   return { ok: result.exitCode === 0, out: result.stdout.toString().trim(), err: result.stderr.toString().trim() };
 };
 
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  return raw
+    .replace(/^git@github\.com:/, "")
+    .replace(/^https?:\/\/(?:www\.)?github\.com\//, "")
+    .replace(/\.git$/, "")
+    .trim();
+}
+
+function gitRemote(cwd) {
+  return normalizeGitRemote(sh(["git", "config", "--get", "remote.origin.url"], cwd).out);
+}
+
+function checkoutMatchesRepo(repo, checkoutRoot, fallbackRemote = gitRemote(checkoutRoot)) {
+  const roots = [repo.path, repo.worktree_root].map(expand).filter(Boolean);
+  const byPath = roots.some((root) => checkoutRoot === root || checkoutRoot.startsWith(`${root}/`));
+  if (byPath) return true;
+  if (!fallbackRemote || !repo.github) return false;
+  return normalizeGitRemote(repo.github) === fallbackRemote;
+}
+
 function configuredRepo() {
   const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
-  const explicit = val("--repo");
-  if (explicit) return (cfg.repos ?? []).find((r) => r.name === explicit) ?? null;
+  const repos = cfg.repos ?? [];
+
+  if (explicitRepo) {
+    return repos.find((r) => r.name === explicitRepo) ?? null;
+  }
+
   const cwd = process.cwd();
-  const byPath = (cfg.repos ?? []).find((r) => {
-    const roots = [r.path, r.worktree_root].map(expand).filter(Boolean);
-    return roots.some((root) => cwd === root || cwd.startsWith(`${root}/`));
-  });
+  const cwdTop = sh(["git", "rev-parse", "--show-toplevel"], cwd).out;
+  const cwdRemote = gitRemote(cwd);
+
+  const byPath = repos.find((r) => checkoutMatchesRepo(r, cwdTop, cwdRemote));
   if (byPath) return byPath;
 
-  // The factory itself has no worktree_root, and users may create a worktree
-  // outside the configured location. The configured GitHub slug remains a
-  // stable identity in both cases.
-  const remote = sh(["git", "config", "--get", "remote.origin.url"], cwd).out
-    .replace(/^git@github\.com:/, "").replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "");
-  return (cfg.repos ?? []).find((r) => r.github === remote) ?? null;
+  return repos.find((r) => normalizeGitRemote(r.github) === cwdRemote) ?? null;
+}
+
+function recommendationDto(plan, seen = new WeakSet()) {
+  if (!plan || typeof plan !== "object") return null;
+  if (seen.has(plan)) return null;
+  seen.add(plan);
+  return {
+    repo: plan.repo,
+    command: plan.command,
+    args: plan.args,
+    reason: plan.reason,
+    constraint: plan.constraint,
+    stage: plan.stage,
+    exec: plan.exec,
+    alternates: Array.isArray(plan.alternates)
+      ? plan.alternates.map((a) => recommendationDto(a, seen)).filter(Boolean)
+      : [],
+  };
+}
+
+function recommendedCommand(plan, repoName) {
+  if (!plan || typeof plan !== "object") return null;
+  if (plan.exec) return plan.exec;
+
+  if (plan.command === "tick") return `bun orchestrator/tick.mjs --repo ${quoteArg(repoName)} --apply`;
+  if (plan.command === "reconcile") return `bun orchestrator/reconcile.mjs --repo ${quoteArg(repoName)} --apply`;
+  if (plan.command === "digest") return `bun orchestrator/digest.mjs --repo ${quoteArg(repoName)}`;
+  if (plan.command?.startsWith("factory-")) {
+    const args = plan.args ? ` --args ${quoteArg(plan.args)}` : "";
+    const readOnly = new Set(["factory-triage", "factory-unblock", "factory-sweep"]).has(plan.command);
+    const readOnlyFlag = readOnly ? " --read-only" : "";
+    return `factory run --repo ${quoteArg(repoName)} --command ${plan.command}${args}${readOnlyFlag}`.trim();
+  }
+  return null;
+}
+
+function factoryQueueAvailability(config) {
+  if (config.report_only) return "report-only repository";
+  if (!config.team || !config.project) return "missing linear team/project configuration";
+  return null;
 }
 
 // Resolve before doing network work so an unmapped cwd fails with an actionable message.
 const repoConfig = configuredRepo();
 if (!repoConfig) {
-  console.error("no configured repository for cwd — pass --repo <name>");
+  const names = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8")).repos?.map((r) => r.name).join(", ") ?? "";
+  console.error(`no configured repository for cwd${explicitRepo ? ` --repo ${explicitRepo}` : ""} — pass --repo <name>`);
+  if (!explicitRepo && names) console.error(`known repositories: ${names}`);
   process.exit(2);
 }
 const configuredPath = expand(repoConfig.path);
-// Worktrees are valid entry points; use the checkout containing cwd for branch
-// and cleanliness, but retain the configured root for callers outside a repo.
-const repoPath = sh(["git", "rev-parse", "--show-toplevel"], process.cwd()).out || configuredPath;
+const cwdTop = sh(["git", "rev-parse", "--show-toplevel"], process.cwd()).out;
+const repoPath = cwdTop && checkoutMatchesRepo(repoConfig, cwdTop, gitRemote(cwdTop)) ? cwdTop : configuredPath;
 if (!existsSync(repoPath)) {
   console.error(`configured path does not exist: ${repoPath}`);
   process.exit(2);
@@ -119,19 +185,38 @@ function latestJanitorRunMs(repo) {
 
 const { repos, defaultCap } = loadQueueConfig([repoConfig.name]);
 let queue = null, next = null, queueError = null;
-try {
-  queue = (await fetchQueueSummaries(repos, defaultCap))[0] ?? null;
-  if (queue) next = recommendNext(queue);
-} catch (error) { queueError = error.message; }
+const queueUnavailable = factoryQueueAvailability(repoConfig);
+if (!queueUnavailable) {
+  try {
+    queue = (await fetchQueueSummaries(repos, defaultCap))[0] ?? null;
+    if (queue) next = recommendationDto(recommendNext(queue));
+  } catch (error) {
+    queueError = error.message;
+  }
+}
 
 const output = {
-  repo: repoConfig.name, path: repoPath, configuredPath, github: repoConfig.github, reportOnly: !!repoConfig.report_only,
-  checkout: { branch, head, dirtyFiles: dirty.length }, fetch: fetchResult.ok ? null : fetchResult.err,
-  branches: { base, deploy }, deployment,
+  repo: repoConfig.name,
+  path: repoPath,
+  configuredPath,
+  github: repoConfig.github,
+  reportOnly: !!repoConfig.report_only,
+  checkout: { branch, head, dirtyFiles: dirty.length },
+  fetch: fetchResult.ok ? null : fetchResult.err,
+  branches: { base, deploy },
+  deployment,
   maintenance: { reaperLastRun: latestReaperRunMs(), janitorLastRun: latestJanitorRunMs(repoConfig.name) },
-  factory: queue ? { queue, next } : { error: queueError },
+  factory: queueUnavailable
+    ? { available: false, reason: queueUnavailable, queue: null, next: null, error: null }
+    : queue
+      ? { available: true, queue, next }
+      : { available: false, reason: queueError ?? "unknown error", queue: null, next: null, error: queueError },
 };
-if (JSON_OUT) { console.log(JSON.stringify(output, null, 2)); process.exit(0); }
+
+if (JSON_OUT) {
+  console.log(JSON.stringify(output, null, 2));
+  process.exit(0);
+}
 
 console.log(c.bold(`\nfactory status — ${repoConfig.name}`));
 console.log(c.dim(`${repoPath}${repoConfig.report_only ? "  · report-only" : ""}`));
@@ -147,37 +232,35 @@ if (deployment.configured) {
   const color = deployment.state === "current" ? c.green : ["stale", "diverged", "different"].includes(deployment.state) ? c.yellow : c.red;
   console.log(`  ${color(deployment.state)} — ${deployment.message ?? deployment.error ?? "could not fetch endpoint"}`);
 }
+
+const factoryStatus = output.factory;
 console.log(`\nMaintenance  reaper ${formatAge(output.maintenance.reaperLastRun)}  ·  janitor ${formatAge(output.maintenance.janitorLastRun)}`);
 console.log(c.bold("\nFactory now:"));
-if (queue) {
+
+if (!factoryStatus.available) {
+  console.log(c.red(`  queue unavailable — ${factoryStatus.reason}`));
+} else if (queue) {
   console.log(`  Triage ${queue.triageState} · Todo ${queue.todoNotReady} · Ready ${queue.ready} · In progress ${queue.inProgress} · Review ${queue.inReview} · Blocked ${queue.blocked}`);
   const command = next.command ? `${next.command}${next.args ? ` ${next.args}` : ""}` : "(wait)";
   console.log(`  Next ${c.green(command)} — ${next.reason}`);
 
-  const action = next.command?.replace(/^factory-/, "");
-  const explanations = {
-    triage: "clarify and prepare the oldest tickets so agents can safely take them",
-    work: "claim up to three ready tickets and implement them in isolated worktrees",
-    merge: "review mergeable pull requests, verify their checks, then land eligible changes",
-    reconcile: "repair claims whose agent/worktree is no longer live",
-    digest: "show the questions currently waiting for a human answer",
-    unblock: "re-check held tickets for new evidence that removes their block",
-    sweep: "retire obsolete or duplicate tickets while the main pipeline is idle",
-  };
-  const waitExplanation = {
-    capacity: "Workers are already at capacity; let an active ticket finish before dispatching another.",
-    "path collision": "Ready tickets overlap paths with active work; wait rather than create a conflicting worktree.",
-    report_only: "This repository is intentionally report-only until its safe worktree lifecycle exists.",
-    idle: "No ticket needs action right now; re-run after a branch, deploy, or ticket changes.",
-  };
+  const suggested = recommendedCommand(next, repoConfig.name);
   console.log(c.bold("\nSuggested action:"));
-  if (action && explanations[action]) {
-    console.log(`  ${c.green(`factory ${action}${next.args ? ` ${next.args}` : ""}`)} — ${explanations[action]}.`);
-  } else if (next.command === "tick") {
-    console.log(`  ${c.green("factory tick --repo " + repoConfig.name + " --apply")} — run one orchestrated dispatch/merge pass.`);
+  if (suggested) {
+    console.log(`  ${c.green(suggested)} — ${next.reason}.`);
   } else {
-    console.log(`  ${c.dim(waitExplanation[next.constraint] ?? "No safe factory command is applicable yet; re-run after the state changes.")}`);
+    const waitExplanation = {
+      capacity: "Workers are already at capacity; let an active ticket finish before dispatching another.",
+      "path collision": "Ready tickets overlap paths with active work; wait rather than create a conflicting worktree.",
+      report_only: "This repository is intentionally report-only until its safe worktree lifecycle exists.",
+      idle: "No ticket needs action right now; re-run after a branch, deploy, or ticket changes.",
+    };
+    const alternate = waitExplanation[next?.constraint] ?? "No safe factory command is applicable yet; re-run after the state changes.";
+    console.log(`  ${c.dim(alternate)}`);
   }
-  console.log(c.dim("  `factory status --json` is available for scripts; this view is the human-facing hub."));
-} else console.log(c.red(`  queue unavailable — ${queueError ?? "unknown error"}`));
+} else {
+  console.log(c.red(`  queue unavailable — ${queueError ?? "unknown error"}`));
+}
+
+console.log(c.dim("  `factory status --json` is available for scripts; this view is the human-facing hub."));
 console.log();
