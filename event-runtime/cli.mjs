@@ -22,6 +22,7 @@ import {
 } from "./lib/config.mjs";
 import { openDb } from "./lib/db.mjs";
 import { newWorkerId } from "./lib/ids.mjs";
+import { publishOutbox } from "./lib/outbox.mjs";
 import { planAdmittedEvents } from "./lib/planner.mjs";
 import { loadRegistry, updatePins } from "./lib/registry.mjs";
 import { startApi } from "./lib/api.mjs";
@@ -136,6 +137,11 @@ async function serve(args) {
         workspacesRoot: workspacesRoot(), owner, now: Date.now(), policyVersion: pv,
       });
       announceTransitions();
+      // Watched-mode outbox sink (§15): display the result event, stamp it published.
+      publishOutbox(db, {
+        sink: (e) => log(`result event ${e.type} (${e.eventId}) artifact ${e.payload?.artifactHash ?? "-"}`),
+        now: Date.now(),
+      });
     } catch (err) {
       log(`tick error: ${err.message}`);
     } finally {
