@@ -140,6 +140,9 @@ const head = sh(["git", "rev-parse", "HEAD"], repoPath).out || null;
 const dirty = sh(["git", "status", "--porcelain"], repoPath).out.split("\n").filter(Boolean);
 
 function remoteRef(name) {
+  // Cached origin refs are not trustworthy when refresh failed: reporting a
+  // stale deployment as current is worse than reporting it unknown.
+  if (!fetchResult.ok) return { branch: name, sha: null, checkoutAhead: null, checkoutBehind: null };
   const sha = sh(["git", "rev-parse", `origin/${name}`], repoPath).out || null;
   const aheadBehind = head && sha ? sh(["git", "rev-list", "--left-right", "--count", `HEAD...origin/${name}`], repoPath).out.split(/\s+/).map(Number) : [];
   return { branch: name, sha, checkoutAhead: aheadBehind[0] ?? null, checkoutBehind: aheadBehind[1] ?? null };
@@ -152,7 +155,9 @@ let deployment = { configured: false, state: "not configured" };
 if (repoConfig.deployment?.url) {
   const url = metadataUrl(repoConfig.deployment.url);
   deployment = { configured: true, url, branch: metadataBranch, state: "unknown" };
+  if (!fetchResult.ok) deployment.error = `remote refresh failed: ${fetchResult.err || "unknown error"}`;
   try {
+    if (!fetchResult.ok) throw new Error(deployment.error);
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000), headers: { accept: "application/json" } });
     if (!response.ok) {
       deployment.error = `HTTP ${response.status}`;
