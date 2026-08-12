@@ -197,22 +197,38 @@ echo "  harness: $HARNESS   auth: $AUTH_NOTE   cap ~\$$BUDGET notional / ${MAX_M
 # specs against code that moved. Dispatch does not care: worktree-up.sh fetches
 # and branches from origin/<base>, so ticket work always starts current.
 #
-# Policy: always fetch. Fast-forward only when the tree is CLEAN — --ff-only
-# cannot create a merge commit or lose work, so it is safe to do unattended.
-# When the tree is dirty, do nothing and say so: the main checkout routinely
-# holds uncommitted human work, and touching it to save a slightly stale spec is
-# a far worse trade.
+# Policy: always fetch. Fast-forward only when behind origin/$REPO_BASE and the
+# tree is CLEAN — --ff-only cannot create a merge commit or lose work, so it is
+# safe to do unattended. When the tree is dirty, do nothing and say so: the
+# main checkout routinely holds uncommitted human work, and touching it to save
+# a slightly stale spec is a far worse trade.
 #
-# NOT a subshell: when the tree stays behind, the agent has to be TOLD. Echoing
+# Compare against origin/$REPO_BASE by name, never @{upstream} — that depends
+# on tracking config the checkout may not have (or may point somewhere other
+# than the repo's configured base), and silently compares against the wrong
+# thing, or nothing, when it doesn't.
+#
+# NOT a subshell: when the tree stays stale, the agent has to be TOLD. Echoing
 # it here only reaches a human reading the log afterwards, which is exactly how
 # a sweep judged tickets against code that had already moved (OPS-190). The
 # facts get appended to the prompt below.
-git -C "$REPO_PATH" fetch --quiet 2>/dev/null || true
+FETCH_OK=1
+git -C "$REPO_PATH" fetch --quiet 2>/dev/null || FETCH_OK=0
 BRANCH="$(git -C "$REPO_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-BEHIND="$(git -C "$REPO_PATH" rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
 DIRTY="$(git -C "$REPO_PATH" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
 
-if [[ "$BEHIND" != "0" && "$DIRTY" == "0" ]]; then
+# Fail closed: a fetch that failed, or a base ref that doesn't resolve after a
+# fetch that "succeeded" (renamed branch, wrong REPO_BASE), leaves BEHIND/AHEAD
+# as "unknown" rather than defaulting to 0. `0 || echo 0` on a failed rev-list
+# reads as "not behind" when the honest answer is "could not check" — that is
+# failing open on the exact question this whole block exists to answer.
+BEHIND="unknown"; AHEAD="unknown"
+if [[ "$FETCH_OK" == "1" ]] && git -C "$REPO_PATH" rev-parse --verify -q "origin/$REPO_BASE" >/dev/null; then
+  BEHIND="$(git -C "$REPO_PATH" rev-list --count "HEAD..origin/$REPO_BASE" 2>/dev/null)" || BEHIND="unknown"
+  AHEAD="$(git -C "$REPO_PATH" rev-list --count "origin/$REPO_BASE..HEAD" 2>/dev/null)" || AHEAD="unknown"
+fi
+
+if [[ "$BEHIND" != "0" && "$BEHIND" != "unknown" && "$DIRTY" == "0" ]]; then
   if git -C "$REPO_PATH" pull --ff-only --quiet 2>/dev/null; then
     echo "  branch: $BRANCH  fast-forwarded $BEHIND commit(s) — now current"
     BEHIND=0
@@ -220,20 +236,28 @@ if [[ "$BEHIND" != "0" && "$DIRTY" == "0" ]]; then
     echo "  branch: $BRANCH  behind: $BEHIND  ! fast-forward refused (diverged) — fix by hand"
   fi
 else
-  echo "  branch: $BRANCH  behind: $BEHIND  uncommitted: $DIRTY"
+  echo "  branch: $BRANCH  behind: $BEHIND  ahead: $AHEAD  uncommitted: $DIRTY"
 fi
 
-if [[ "$BEHIND" != "0" ]]; then
-  DIRTY_NOTE=""
-  if [[ "$DIRTY" != "0" ]]; then
-    echo "  ! $DIRTY uncommitted file(s) — not pulling, they would be clobbered; specs may reference moved code"
-    DIRTY_NOTE=" and holds $DIRTY uncommitted file(s), so it was deliberately not pulled"
-  fi
+# Trustworthy only when clean AND neither behind nor ahead of origin/$REPO_BASE
+# — that is the one state where the tree's content equals the remote's. Dirty
+# alone and ahead alone are stale too (queued local work the remote doesn't
+# have yet is not what "shipped" means to anyone reading origin), not just the
+# behind-and-dirty case this used to special-case.
+if [[ "$BEHIND" != "0" || "$AHEAD" != "0" || "$DIRTY" != "0" ]]; then
+  REASON=""
+  [[ "$FETCH_OK" == "0" ]] && REASON="${REASON}git fetch failed; "
+  [[ "$BEHIND" == "unknown" || "$AHEAD" == "unknown" ]] && REASON="${REASON}behind/ahead could not be determined against origin/$REPO_BASE; "
+  [[ "$BEHIND" != "0" && "$BEHIND" != "unknown" ]] && REASON="${REASON}$BEHIND commit(s) behind origin/$REPO_BASE; "
+  [[ "$AHEAD" != "0" && "$AHEAD" != "unknown" ]] && REASON="${REASON}$AHEAD unpushed commit(s) ahead of origin/$REPO_BASE; "
+  [[ "$DIRTY" != "0" ]] && REASON="${REASON}$DIRTY uncommitted file(s), not pulled — they would be clobbered; "
+  REASON="${REASON%; }"
+  echo "  ! checkout is not reliable evidence: $REASON"
   # One line appended to the prompt, not a paragraph: it rides in the context
   # window for the whole session and is re-sent on every turn.
   PROMPT="$PROMPT
 
-[checkout] The working tree at $REPO_PATH is $BEHIND commit(s) behind origin/$REPO_BASE$DIRTY_NOTE. Do NOT treat the files on disk as current. Per the floor's Checkout freshness rule, take code evidence from origin/$REPO_BASE (git log origin/$REPO_BASE -- <path>, git show origin/$REPO_BASE:<file>) and name that ref in your report."
+[checkout] The working tree at $REPO_PATH is not a reliable stand-in for origin/$REPO_BASE ($REASON). Do NOT treat the files on disk as current. Per the floor's Checkout freshness rule, take code evidence from origin/$REPO_BASE (git log origin/$REPO_BASE -- <path>, git show origin/$REPO_BASE:<file>) and name that ref in your report."
 fi
 echo
 

@@ -115,10 +115,15 @@ for (const repo of repos) {
 
   // `git fetch` updates remote-tracking refs only — it never touches the
   // working tree or your branches, so it stays within this script's read-only
-  // contract. Without it the check below compares against whatever origin/*
-  // happened to be cached, which is the same staleness it exists to catch.
-  sh("git fetch --quiet", p);
-  const hasBase = sh(`git rev-parse --verify origin/${repo.base}`, p).status === 0;
+  // contract. Its exit status matters, not just its side effect: a failed
+  // fetch (offline, auth expired) that gets ignored leaves the check below
+  // comparing against whatever origin/* happened to be cached, which is the
+  // exact staleness this exists to catch — failing open on the question it
+  // exists to answer.
+  const fetched = sh("git fetch --quiet", p).status === 0;
+  check(fetched, "fetch origin", fetched ? "" : "offline or auth expired",
+    fetched ? null : "check network/`gh auth status` — freshness below is unverified until this succeeds");
+  const hasBase = fetched && sh(`git rev-parse --verify origin/${repo.base}`, p).status === 0;
   check(hasBase, `base branch origin/${repo.base}`, "", "git fetch origin");
 
   // The read-only stages (sweep, triage, audit) read THIS checkout and judge
@@ -127,16 +132,27 @@ for (const repo of repos) {
   // specs against code that moved (OPS-190). Warn rather than fail — a checkout
   // a few commits back is normal, and run-agent.sh fast-forwards a clean tree
   // before each run anyway. What needs surfacing is a checkout that is rotting.
+  //
+  // Fail closed on the count itself too: `sh(...).stdout` is "" on a failed
+  // rev-list, and `"" || 0` reads that as "0 commits behind" — the same
+  // failing-open bug as ignoring fetch's exit status, just one line later.
   if (hasBase) {
-    const behind = Number(sh(`git rev-list --count HEAD..origin/${repo.base}`, p).stdout.trim() || 0);
+    const behindResult = sh(`git rev-list --count HEAD..origin/${repo.base}`, p);
+    const behindOk = behindResult.status === 0;
+    const behind = behindOk ? Number(behindResult.stdout.trim() || 0) : null;
     const dirty = sh("git status --porcelain", p).stdout.trim().split("\n").filter(Boolean).length;
-    check(behind < BEHIND_WARN ? true : "warn", "checkout current",
-      `${behind} commit(s) behind origin/${repo.base}${dirty ? `, ${dirty} uncommitted` : ""}`,
-      behind >= BEHIND_WARN
-        ? dirty
-          ? `commit or stash first, then \`git -C ${repo.path} pull --ff-only\` — stages must read origin/${repo.base}, not this tree`
-          : `git -C ${repo.path} pull --ff-only`
-        : null);
+    if (!behindOk) {
+      check("warn", "checkout current", "rev-list failed — behind-count unknown",
+        `git -C ${repo.path} rev-list --count HEAD..origin/${repo.base}   (run by hand to see the error)`);
+    } else {
+      check(behind < BEHIND_WARN ? true : "warn", "checkout current",
+        `${behind} commit(s) behind origin/${repo.base}${dirty ? `, ${dirty} uncommitted` : ""}`,
+        behind >= BEHIND_WARN
+          ? dirty
+            ? `commit or stash first, then \`git -C ${repo.path} pull --ff-only\` — stages must read origin/${repo.base}, not this tree`
+            : `git -C ${repo.path} pull --ff-only`
+          : null);
+    }
   }
 
   const commandsDir = path.join(p, ".claude", "commands");

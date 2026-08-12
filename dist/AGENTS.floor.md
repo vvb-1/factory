@@ -94,19 +94,25 @@ Measured on real runs: single `sleep 180` and `sleep 75` calls, plus a `sleep 60
 
 ### Checkout freshness
 
-**Code evidence cites a ref, not a path.** Any claim about what the code currently does — "already shipped", "that flow no longer exists", "the acceptance criteria are met" — is a claim about the trunk, and the main checkout is not the trunk. It is a working copy that may be days behind and may hold someone's uncommitted work. Before you read the tree as evidence:
+**Code evidence cites a ref, not a path.** Any claim about what the code currently does — "already shipped", "that flow no longer exists", "the acceptance criteria are met" — is a claim about the trunk, and the main checkout is not the trunk. It is a working copy that may be behind, may be ahead of what's pushed, and may hold someone's uncommitted work. Before you read the tree as evidence, compare against `origin/<base>` by name — never `@{upstream}`, which depends on tracking config the checkout may not have and silently compares against the wrong branch (or none) when it doesn't:
 
 ```bash
 git fetch --quiet
-git rev-list --count HEAD..@{upstream}    # 0 means the tree is trustworthy
+git rev-list --count HEAD..origin/<base>     # >0 means behind
+git rev-list --count origin/<base>..HEAD     # >0 means ahead (unpushed local commits)
+git status --porcelain                       # non-empty means dirty
 ```
 
-Behind and **clean** → `git pull --ff-only`. It cannot create a merge commit or lose work, so it is safe to do unattended. Behind and **dirty** → leave the checkout alone and read the remote ref instead:
+The tree is trustworthy only when all three come back clean — not behind, not ahead, not dirty. Behind and otherwise **clean** → `git pull --ff-only`; it cannot create a merge commit or lose work, so it is safe to do unattended. **Dirty, or ahead, or behind-and-dirty** → leave the checkout alone and read the remote ref instead:
 
 ```bash
 git log origin/<base> --oneline -- <path>   # was it actually shipped?
 git show origin/<base>:<file>               # what does it say now?
 ```
+
+Ahead-only (clean, not behind, but carrying unpushed commits) still routes to `origin/<base>` — those commits are real, but they are not what "shipped" means to anyone reading the remote, so evidence has to come from the ref others can check.
+
+**A failed `git fetch` or a failed `rev-list` is not "assume clean."** No network, no configured remote, a renamed base branch — any of these make the comparison fail, and letting a non-zero exit fall through to a default of `0` reads as "not behind" when the honest answer is "don't know." Fail closed: on failure, report freshness as **unknown**, say so in the report, and fall back to reading `origin/<base>` directly rather than trusting the tree.
 
 Never pull over uncommitted work to get a fresher read — those files are a human's in-flight change, and losing them costs far more than a slightly stale spec. Reading `origin/<base>` gets the same correctness without touching the tree.
 

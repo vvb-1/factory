@@ -8,7 +8,7 @@ Find tickets in this project's backlog that no longer need to exist, and retire 
 
 Resolve the team/project from the repo via `~/Develop/hdkiller/docs/orgs/linear.md` §1–2, or from `$ARGUMENTS` if a project name is given. Use the Linear MCP; on failure retry once then fall back to `linear_common` GraphQL per the global rule.
 
-**First, before judging anything: `git fetch --quiet` and check `git rev-list --count HEAD..@{upstream}`.** This stage's entire job is deciding what is already true of the code, so it is the stage a stale checkout hurts most — a feature merged last week reads as unshipped and its ticket keeps a dispatch slot it no longer deserves. Follow the floor's **Checkout freshness** rule: fast-forward a clean tree, and read `origin/<base>` rather than the working tree when it is dirty. State the ref you swept against at the top of the report.
+**First, before judging anything: `git fetch --quiet` and check `git rev-list --count HEAD..origin/<base>`** (never `@{upstream}` — it depends on tracking config the checkout may not have). This stage's entire job is deciding what is already true of the code, so it is the stage a stale checkout hurts most — a feature merged last week reads as unshipped and its ticket keeps a dispatch slot it no longer deserves. Follow the floor's **Checkout freshness** rule: fast-forward a clean tree, and read `origin/<base>` rather than the working tree when it's dirty, ahead, or the fetch/rev-list itself fails. State the ref you swept against at the top of the report.
 
 ## Scope
 
