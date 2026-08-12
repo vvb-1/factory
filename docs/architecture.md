@@ -182,6 +182,7 @@ The plugin is a convenience layer, not the safety floor. It reaches Claude Code 
 
 ## 5. Related
 
+- [`event-runtime.md`](event-runtime.md) — proposal for isolated, event-driven, structured one-off agents with generic workspaces
 - [`README.md`](../README.md) — how to run it
 - [`SETUP.md`](../SETUP.md) — first-time setup and known gaps
 - [linear.md](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md) — the execution protocol (source of truth)
