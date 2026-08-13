@@ -23,15 +23,6 @@ import {
 const FEED_CAP = 50;
 
 /**
- * Workers has no jump callback from App (there is no `onJumpWorker`), so write
- * the hash the router already reads — a cross-view write, which pushes history
- * exactly like the nav rail does.
- */
-function jumpWorkers(workerId?: string): void {
-  window.location.hash = `#/${hashPath("workers", workerId)}`;
-}
-
-/**
  * Live activity feed off GET /journal: first fetch seeds the latest entries,
  * then each 2 s poll asks only for `since=<last head>` and prepends what is
  * new — an append-only log consumed incrementally, capped at FEED_CAP shown.
@@ -83,7 +74,7 @@ export function Overview({
   onJumpProposal: (id: string) => void;
   onJumpEvents: (focus: EventFocus) => void;
   onJumpRuns: (state?: string) => void;
-  onNavigate: (view: string) => void;
+  onNavigate: (path: string) => void;
   onJumpExpired: () => void;
   onJumpGraph: () => void;
   onInject: () => void;
@@ -183,7 +174,7 @@ export function Overview({
         // the host are the parts an operator can lose and still act.
         text: `stalled worker ${w.workerId} still holds run ${w.runId} — last heartbeat ${ago(w.lastSeen, now)} on ${w.host}`,
         links: [
-          { label: "View worker", go: () => jumpWorkers(w.workerId) },
+          { label: "View worker", go: () => onNavigate(hashPath("workers", w.workerId)) },
           { label: "View run", go: () => onJumpRun(w.runId) },
         ],
       });
@@ -195,7 +186,7 @@ export function Overview({
       anomalyRows.push({
         text: `${queued} queued run${queued === 1 ? "" : "s"} and no live worker to claim ${queued === 1 ? "it" : "them"} — nothing will start until one registers`,
         links: [
-          { label: "View workers", go: () => jumpWorkers() },
+          { label: "View workers", go: () => onNavigate("workers") },
           { label: "View queued runs", go: () => onJumpRuns("QUEUED") },
         ],
       });
@@ -256,19 +247,19 @@ export function Overview({
             label="workers · live"
             value={s.workers.live}
             hue={s.workers.live > 0 ? "var(--hue-ok)" : undefined}
-            onClick={() => jumpWorkers()}
+            onClick={() => onNavigate("workers")}
           />
           <StatTile
             label="workers · busy"
             value={s.workers.busy}
             hue={s.workers.busy > 0 ? "var(--hue-info)" : undefined}
-            onClick={() => jumpWorkers()}
+            onClick={() => onNavigate("workers")}
           />
           <StatTile
             label="workers · stale"
             value={s.workers.stale}
             hue={s.workers.stale > 0 ? "var(--hue-warn)" : undefined}
-            onClick={() => jumpWorkers()}
+            onClick={() => onNavigate("workers")}
           />
         </div>
       )}
