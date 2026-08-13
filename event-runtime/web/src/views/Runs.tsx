@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
@@ -81,15 +81,24 @@ export function Runs({
   const selectedId = focusRunId;
   const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
 
-  // Deep link: switch to ALL if the run isn't on this tab. Hash stays put.
+  // Deep link / jump: switch to ALL if the run isn't on this tab. Hash stays put.
+  // Reveal (clear filter) once per focus id, after the run is in `rows` so a
+  // late arrival still surfaces. Typing a filter does not re-reveal.
+  const revealedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusRunId) return;
+    if (!focusRunId) {
+      revealedFor.current = null;
+      return;
+    }
     if (rows.some((r) => r.runId === focusRunId)) {
-      setFilter("");
+      if (revealedFor.current !== focusRunId) {
+        revealedFor.current = focusRunId;
+        if (!visible.some((r) => r.runId === focusRunId)) setFilter("");
+      }
       return;
     }
     if (tab !== "ALL") setTab("ALL");
-  }, [focusRunId, rows, tab]);
+  }, [focusRunId, rows, tab, visible]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
@@ -404,7 +413,7 @@ export function Runs({
                     {new Date(e.at).toLocaleTimeString([], { hour12: false })}
                   </span>
                   <span className="shrink-0">
-                    <StateBadge state={e.to_state} />
+                    {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
                   </span>
                   <span className="truncate text-(--text-faint)">
                     {e.actor}
