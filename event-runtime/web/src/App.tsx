@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { eventsHash, hashPath, hashSearch } from "./hash";
-import { keyGuard, useHashRoute, useTheme } from "./hooks";
+import { keyGuard, useHashRoute, useTheme, type Theme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
@@ -30,10 +30,15 @@ const NAV = [
   { key: "graph", label: "Graph", go: "g" },
 ] as const;
 
+// Display-only mirror of the cycle useTheme() implements: both the footer
+// control and the ⌘K label promise what one click does, so the promise has to
+// name the same order the hook advances in.
+const THEME_ORDER: readonly Theme[] = ["dark", "light", "contrast"];
+
 export function App() {
   const [route, navigate] = useHashRoute();
   const view = route[0];
-  const [, cycleTheme] = useTheme();
+  const [theme, cycleTheme] = useTheme();
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -176,6 +181,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
+  const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+
   const paletteActions: PaletteAction[] = [
     ...NAV.map((n) => ({
       label: `Go to ${n.label}`,
@@ -198,7 +205,7 @@ export function App() {
     },
     { label: "Copy link to this page", run: copyLink },
     { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },
-    { label: "Cycle theme (dark → light → contrast)", run: cycleTheme },
+    { label: `Cycle theme (${THEME_ORDER.join(" → ")})`, run: cycleTheme },
   ];
 
   return (
@@ -331,6 +338,19 @@ export function App() {
             <span className="mono">o/e/p/r/t/w/g</span> · <span className="mono">/</span> filter ·{" "}
             <span className="mono">i</span> inject · <span className="mono">?</span> keys
           </div>
+          {/* Named, not just toggled: "contrast" is the accessibility theme, and
+              an operator who lands in it by accident needs to read where they
+              are before the swatch tells them anything. */}
+          <button
+            type="button"
+            onClick={cycleTheme}
+            title={`Theme ${theme} — click for ${nextTheme}`}
+            aria-label={`Theme: ${theme}. Switch to ${nextTheme}.`}
+            className="mt-2 flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-(--border-strong) px-1.5 py-0.5 text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+          >
+            <span>Theme</span>
+            <span className="text-(--text)">{theme}</span>
+          </button>
         </div>
       </nav>
 
