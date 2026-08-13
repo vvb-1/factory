@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { buildTemplates, triggerId, type TriggerTemplate } from "../templates";
 import { Button, Dialog, VerbError, notify } from "./ui";
@@ -110,6 +110,20 @@ export function InjectDialog({
     }
     inject.mutate(envelope);
   }
+
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        submitRef.current();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -270,13 +284,13 @@ export function InjectDialog({
         {confirming ? (
           <>
             <Button onClick={() => setConfirming(false)}>Back</Button>
-            <Button variant="primary" onClick={submit} disabled={inject.isPending}>
+            <Button variant="primary" onClick={submit} disabled={inject.isPending} autoFocus>
               Confirm inject
             </Button>
           </>
         ) : (
           <Button variant="primary" onClick={submit} disabled={inject.isPending}>
-            Inject…
+            Inject… <span className="ml-1 font-normal opacity-70">⌘↵</span>
           </Button>
         )}
       </div>

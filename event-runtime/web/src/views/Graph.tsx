@@ -92,16 +92,35 @@ export function Graph({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "Escape") onSelectNode(null);
+      if (e.key === "Escape") {
+        onSelectNode(null);
+        return;
+      }
       if (e.key === "c" && focusNodeId) {
         e.preventDefault();
         const node = graph?.nodes.find((n) => n.id === focusNodeId);
         if (node) copyText(node.label, node.kind === "agent" ? "agent ref" : "id");
+        return;
+      }
+      const order = positioned
+        ? [...positioned.nodes]
+            .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+            .map((n) => n.id)
+        : (graph?.nodes.map((n) => n.id) ?? []);
+      if (!order.length) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const idx = focusNodeId ? order.indexOf(focusNodeId) : -1;
+        onSelectNode(order[Math.min(idx + 1, order.length - 1)]);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const idx = focusNodeId ? order.indexOf(focusNodeId) : order.length;
+        onSelectNode(order[Math.max(idx - 1, 0)]);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onSelectNode, focusNodeId, graph]);
+  }, [onSelectNode, focusNodeId, graph, positioned]);
 
   const emptyCopy = registry.isPending
     ? "Loading the capability map…"

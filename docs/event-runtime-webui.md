@@ -185,8 +185,10 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 - `⌘K` — cmdk palette: navigate to any view, jump to a run/proposal by ID,
   and invoke the verbs valid for the current selection.
 - `i` — inject event. `?` — keyboard cheatsheet. `c` — copy the selected id.
-- `j`/`k` or arrows — move list selection; `Enter`/`o` — open detail panel;
-  `Esc` — close it.
+- `/` — focus the list filter. Esc in the filter clears it, then blurs.
+- `j`/`k` or arrows — move list (and Graph node) selection; `Enter`/`o` —
+  open detail panel; `Esc` — close it, then clear the filter.
+- `⌘↵` — confirm inject (from the envelope textarea too).
 - On a selected proposal: `a` approve (opens the confirm with the spec in
   view), `x` reject (focuses the reason field).
 - `g o` / `g p` / `g r` — go to Overview / Proposals / Runs.
@@ -434,16 +436,18 @@ Follow-up to the Events-as-a-node pass (OPS-226). Same design language (§5.1);
 no new API.
 
 - **Shareable hashes.** Selection lives in the hash: `#/runs/:id`,
-  `#/events/:source/:eventId`, `#/proposals/:id`, `#/agents/:ref`,
-  `#/graph/:nodeId`. Jumps write the full path; refresh restores the row.
-  Nav-rail clicks still go to the view root. Overview status tiles remain
-  ephemeral (tab/filter, not a URL).
+  `#/events/:source/:eventId`, `#/events?type=`, `#/proposals/:id`,
+  `#/agents/:ref`, `#/graph/:nodeId`. Jumps write the full path; refresh
+  restores the row. Nav-rail clicks still go to the view root. Overview
+  status tiles remain ephemeral (tab/filter, not a URL) except Graph's
+  event-type jump, which is `#/events?type=`.
 - **Health banner.** When `/health` has failed (not while first pending), a
   status banner sits above every view: the factory is unreachable, lists may
-  show cache, verbs stay disabled. The nav chip still says `disconnected`.
-- **Graph on the same rails.** Selected event-type → Events filtered by type;
-  selected agent → Agents. Copy id, Esc closes the panel, honest empty when
-  `/agents` is down. `#/graph/:nodeId`.
+  show cache, verbs stay disabled. **Retry** refetches `/health`. The nav
+  chip still says `disconnected`; click it to copy `env.home`.
+- **Graph on the same rails.** Selected event-type → Events filtered by type
+  (`#/events?type=`); selected agent → Agents. Copy id, `j`/`k` walk nodes,
+  Esc closes the panel, honest empty when `/agents` is down. `#/graph/:nodeId`.
 - **Inject confirm.** Inject and Trigger again require confirm before
   `POST /replay`. Template chips are a radiogroup (arrow keys). Copy keeps
   Requeue (re-plan) / Replay (same id through intake) / Trigger again (fresh
@@ -457,4 +461,6 @@ no new API.
   the id). Inject `i` admits then jumps to the event. `?` lists the keys.
   Empty Events inbox offers Inject as a button. Outbox types jump to the
   origin event when the envelope carries source+eventId. Trigger again
-  selects a "this envelope" chip.
+  selects a "this envelope" chip. `/` focuses the filter. Dialog Tab cycles
+  stay inside the dialog. The document title follows the hash
+  (`factory · Runs · run_id`).

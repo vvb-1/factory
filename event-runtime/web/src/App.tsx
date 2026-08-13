@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { hashPath } from "./hash";
+import { eventsHash, hashPath, hashSearch } from "./hash";
 import { keyGuard, useHashRoute, useTheme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
-import { ToastContainer, copyLink } from "./components/ui";
+import { ToastContainer, copyLink, copyText } from "./components/ui";
 import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Graph } from "./views/Graph";
@@ -46,8 +46,15 @@ export function App() {
     view === "events" && route[1] && route[2]
       ? { source: route[1], eventId: route[2] }
       : null;
+  const typeFromHash = view === "events" ? hashSearch(window.location.hash).get("type") : null;
   const focusEvent =
-    view === "events" ? { ...(ephemeralEvent ?? {}), ...(hashEvent ?? {}) } : null;
+    view === "events"
+      ? {
+          ...(ephemeralEvent ?? {}),
+          ...(typeFromHash ? { type: typeFromHash } : {}),
+          ...(hashEvent ?? {}),
+        }
+      : null;
   const hasEventFocus =
     !!(focusEvent && (focusEvent.source || focusEvent.eventId || focusEvent.status || focusEvent.type));
 
@@ -65,6 +72,11 @@ export function App() {
     if (focus.source && focus.eventId) {
       setEphemeralEvent(focus.status || focus.type ? { status: focus.status, type: focus.type } : null);
       navigate(hashPath("events", focus.source, focus.eventId));
+      return;
+    }
+    if (focus.type) {
+      setEphemeralEvent(focus.status ? { status: focus.status } : null);
+      navigate(eventsHash(null, null, focus.type));
       return;
     }
     setEphemeralEvent(focus);
@@ -114,6 +126,15 @@ export function App() {
   );
 
   useEffect(() => {
+    const nav = NAV.find((n) => n.key === view);
+    const label = nav?.label ?? "Overview";
+    const id = route.length > 1 ? route[route.length - 1] : null;
+    const typeQ = hashSearch(window.location.hash).get("type");
+    const detail = id ?? typeQ;
+    document.title = detail ? `factory · ${label} · ${detail}` : `factory · ${label}`;
+  }, [route, view]);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "i") {
@@ -122,6 +143,9 @@ export function App() {
       } else if (e.key === "?") {
         e.preventDefault();
         setHelpOpen((open) => !open);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>("[data-view-filter]")?.focus();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -131,6 +155,11 @@ export function App() {
   const paletteActions: PaletteAction[] = [
     ...NAV.map((n) => ({ label: `Go to ${n.label}`, hint: `g ${n.go}`, run: () => navigate(n.key) })),
     { label: "Inject event…", hint: "i", run: () => setInjectOpen(true) },
+    {
+      label: "Focus filter",
+      hint: "/",
+      run: () => document.querySelector<HTMLInputElement>("[data-view-filter]")?.focus(),
+    },
     { label: "Copy link to this page", run: copyLink },
     { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },
     { label: "Cycle theme (dark → light → contrast)", run: cycleTheme },
@@ -144,20 +173,22 @@ export function App() {
             <img src="/watt-mind-logo.svg" alt="Watt Mind" className="size-5.5 shrink-0" />
             <span className="display text-[14px] font-semibold">factory</span>
           </div>
-          <span
+          <button
+            type="button"
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
             title={
               env
-                ? `${env.home} · policy ${health.data?.policyVersion}`
+                ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
                 : "runtime unreachable"
             }
             style={{
               color: envHue,
               background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
             }}
+            onClick={() => env?.home && copyText(env.home, "runtime home")}
           >
             {envLabel}
-          </span>
+          </button>
         </div>
         <div className="flex-1 px-2">
           {NAV.map((n) => {
@@ -220,8 +251,8 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/e/p/r/t/g</span> · <span className="mono">i</span> inject ·{" "}
-            <span className="mono">?</span> keys
+            <span className="mono">o/e/p/r/t/g</span> · <span className="mono">/</span> filter ·{" "}
+            <span className="mono">i</span> inject · <span className="mono">?</span> keys
           </div>
         </div>
       </nav>
@@ -237,8 +268,23 @@ export function App() {
               borderColor: "color-mix(in oklch, var(--hue-err) 35%, var(--border))",
             }}
           >
-            Runtime unreachable — lists show last cached data; verbs are disabled until{" "}
-            <span className="mono">/health</span> responds. This is not an empty factory.
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                Runtime unreachable — lists show last cached data; verbs are disabled until{" "}
+                <span className="mono">/health</span> responds. This is not an empty factory.
+              </span>
+              <button
+                type="button"
+                onClick={() => health.refetch()}
+                className="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium"
+                style={{
+                  color: "var(--hue-err)",
+                  borderColor: "color-mix(in oklch, var(--hue-err) 40%, var(--border))",
+                }}
+              >
+                Retry
+              </button>
+            </div>
           </div>
         )}
         <div className="min-h-0 flex-1">
@@ -280,7 +326,12 @@ export function App() {
               connected={connected}
               focusEvent={hasEventFocus ? focusEvent : null}
               onFocusConsumed={() => setEphemeralEvent(null)}
-              onSelectEvent={(source, eventId) => navigate(hashPath("events", source, eventId))}
+              onSelectEvent={(source, eventId) =>
+                navigate(eventsHash(source, eventId, typeFromHash))
+              }
+              onSelectType={(type) =>
+                navigate(eventsHash(hashEvent?.source, hashEvent?.eventId, type))
+              }
               onJumpProposal={jumpToProposal}
               onJumpRun={jumpToRun}
               onTriggerAgain={(envelope) => {

@@ -63,8 +63,15 @@ export function FilterInput({
 }) {
   return (
     <input
+      data-view-filter
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        if (value) onChange("");
+        else e.currentTarget.blur();
+      }}
       placeholder={placeholder}
       aria-label={label}
       className="w-56 shrink-0 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
@@ -364,6 +371,32 @@ export function Button({
   );
 }
 
+const FOCUSABLE =
+  "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+function tabCycle(root: HTMLElement, e: KeyboardEvent) {
+  const nodes = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  );
+  if (nodes.length === 0) {
+    e.preventDefault();
+    root.focus();
+    return;
+  }
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey) {
+    if (active === first || !root.contains(active)) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else if (active === last || !root.contains(active)) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 export function Dialog({
   title,
   onClose,
@@ -381,6 +414,7 @@ export function Dialog({
     modal.depth += 1;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
     };
     window.addEventListener("keydown", onKey);
     const root = panelRef.current;

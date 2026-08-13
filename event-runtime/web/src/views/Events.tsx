@@ -62,6 +62,7 @@ export function Events({
   focusEvent,
   onFocusConsumed,
   onSelectEvent,
+  onSelectType,
   onJumpProposal,
   onJumpRun,
   onTriggerAgain,
@@ -71,6 +72,7 @@ export function Events({
   focusEvent: EventFocus | null;
   onFocusConsumed: () => void;
   onSelectEvent: (source: string | null, eventId?: string) => void;
+  onSelectType: (type: string | null) => void;
   onJumpProposal: (id: string) => void;
   onJumpRun: (runId: string) => void;
   onTriggerAgain: (envelope: Record<string, unknown>) => void;
@@ -194,7 +196,15 @@ export function Events({
       const e = visible[i];
       onSelectEvent(e ? e.source : null, e?.eventId);
     },
-    onClose: () => onSelectEvent(null),
+    onClose: () => {
+      if (selectedKey) onSelectEvent(null);
+      else if (filter || typeFilter || sourceFilter) {
+        setFilter("");
+        setTypeFilter(null);
+        setSourceFilter(null);
+        onSelectType(null);
+      }
+    },
     keys: {
       // `q` not `r`: `r` is the `g r` navigation suffix, and both listeners
       // see the same keydown — `g r` with a selection must never requeue.
@@ -268,7 +278,11 @@ export function Events({
                 key={t}
                 type="button"
                 aria-pressed={typeFilter === t}
-                onClick={() => setTypeFilter((cur) => (cur === t ? null : t))}
+                onClick={() => {
+                  const next = typeFilter === t ? null : t;
+                  setTypeFilter(next);
+                  onSelectType(next);
+                }}
                 className={`rounded-md px-2 py-0.5 text-[11px] ${
                   typeFilter === t
                     ? "bg-(--surface-3) text-(--text)"

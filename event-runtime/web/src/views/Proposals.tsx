@@ -191,7 +191,13 @@ export function Proposals({
     count: visible.length,
     selected: selectedIndex,
     onSelect: (i) => onSelectProposal(visible[i]?.id ?? null),
-    onClose: () => onSelectProposal(null),
+    onClose: () => {
+      if (selectedId) onSelectProposal(null);
+      else {
+        if (filter) setFilter("");
+        if (expiredOnly) setExpiredOnly(false);
+      }
+    },
     keys: {
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
       a: () => canApprove && connected && setConfirmApprove(true),

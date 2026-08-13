@@ -52,7 +52,10 @@ export function Agents({
     count: visible.length,
     selected: selectedIndex,
     onSelect: (i) => onSelectAgent(visible[i]?.ref ?? null),
-    onClose: () => onSelectAgent(null),
+    onClose: () => {
+      if (selectedRef) onSelectAgent(null);
+      else if (filter) setFilter("");
+    },
     keys: {
       c: () => sel && copyText(sel.ref, "agent ref"),
     },

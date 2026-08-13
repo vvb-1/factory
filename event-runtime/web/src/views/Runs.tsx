@@ -142,7 +142,10 @@ export function Runs({
     count: visible.length,
     selected: selectedIndex,
     onSelect: (i) => onSelectRun(visible[i]?.runId ?? null),
-    onClose: () => onSelectRun(null),
+    onClose: () => {
+      if (selectedId) onSelectRun(null);
+      else if (filter) setFilter("");
+    },
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
       x: () => sel && connected && !TERMINAL.includes(sel.state) && setConfirm("cancel"),

@@ -15,8 +15,14 @@ export function keyGuard(e: KeyboardEvent): boolean {
 export function useHashRoute(): [string[], (path: string) => void] {
   const read = () => parseHash(window.location.hash);
   const [route, setRoute] = useState<string[]>(read);
+  // Query-only hash changes (`#/events?type=`) keep the same path segments;
+  // tick so readers of window.location.hash re-render.
+  const [, setHash] = useState(window.location.hash);
   useEffect(() => {
-    const onChange = () => setRoute(read());
+    const onChange = () => {
+      setRoute(read());
+      setHash(window.location.hash);
+    };
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
