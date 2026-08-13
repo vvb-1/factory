@@ -55,7 +55,9 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 3. **Copy-Paste Fidelity**: Copying text from the rendered JSON yields clean, unpolluted JSON text.
 4. **Sub-millisecond Tokenization**: Fast rendering even with 500+ line payloads.
 
-### 3.2 Implemented Architecture (`highlight.ts` & `JsonBlock.tsx`)
+### 3.2 Implemented Architecture (`highlight.ts` & `JsonBlock.tsx`) — [Shipped in OPS-355]
+
+Every JSON payload in the UI already renders through this tokenizer — there is no plain `<pre>` JSON left to replace. Covered by [`highlight.test.ts`](../event-runtime/web/src/highlight.test.ts).
 
 - **Shipped**: Zero-dependency regex tokenizer in [`highlight.ts`](../event-runtime/web/src/highlight.ts) and [`JsonBlock`](../event-runtime/web/src/components/ui.tsx) categorizing:
   - Object keys: `TOKEN_CLASSES.key` (`text-(--text) font-medium`)
@@ -65,9 +67,29 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
   - Nulls: `TOKEN_CLASSES.null` (`text-[color:var(--hue-err)] font-semibold`)
   - Syntax punctuation: `TOKEN_CLASSES.punctuation` (`text-(--text-faint)`)
 
+### 3.3 Not Built (Tier 2)
+
+- **Collapsible JSON tree**: fold/unfold of objects and arrays, subtree copy, and click-to-copy JSONPath. `JsonBlock` is a flat highlighted block today. No ticket filed — raise one before starting.
+
 ---
 
 ## 4. Prioritized UX Improvement Proposals
+
+**Read this before implementing anything below.** Much of it is already on `develop`. A proposal without a status marker has not been verified in this pass — search Linear before treating it as unbuilt.
+
+**Already on `develop` — do not rebuild:**
+
+- Syntax-highlighted `JsonBlock` — [`highlight.ts`](../event-runtime/web/src/highlight.ts), [`ui.tsx`](../event-runtime/web/src/components/ui.tsx) — **OPS-355**
+- Operator context tabs (All / repo / In flight) — [`ContextTabs.tsx`](../event-runtime/web/src/components/ContextTabs.tsx) — **OPS-356**
+- Trace filter chips, expand/collapse all, `Copy CLI` inspect — [`RunTrace.tsx`](../event-runtime/web/src/components/RunTrace.tsx), [`Runs.tsx`](../event-runtime/web/src/views/Runs.tsx) — **OPS-358**
+- Proposal Spec Highlights safety card — [`Proposals.tsx`](../event-runtime/web/src/views/Proposals.tsx) — **OPS-359**
+- Overview stage pipeline & promoted doctor deck — [`Overview.tsx`](../event-runtime/web/src/views/Overview.tsx) — **OPS-360**
+- Inject `Format JSON` action, validity indicator, required-field lint — [`InjectDialog.tsx`](../event-runtime/web/src/components/InjectDialog.tsx) — **OPS-361**
+- Inject two-column template sidebar with instant search — [`InjectDialog.tsx`](../event-runtime/web/src/components/InjectDialog.tsx) — **OPS-363**
+
+**Filed, not built:** Proposal 2 remainder (**OPS-375**), Proposal 4 faceted search (**OPS-382**), Proposal 6 graph phase 2 (**OPS-227**), Proposal 7 pinned run tabs (**OPS-357**, on hold), Proposal 8 waterfall (**OPS-374**), Proposal 9 Markdown inspector (**OPS-371**).
+
+Items marked `unfiled` had no Linear issue at last check. Search before filing; do not treat a missing marker as proof, and do not widen an unrelated ticket.
 
 ### Proposal 1: Overview Triage Cockpit (Pipeline Hierarchy) — [Shipped in OPS-360]
 
@@ -81,17 +103,17 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 
 ---
 
-### Proposal 2: Watched Approval "Spec Highlights & Blast Radius" Card
+### Proposal 2: Watched Approval "Spec Highlights & Blast Radius" Card — [Card shipped in OPS-359]
 
 **Goal**: Accelerate safe proposal review in [`Proposals.tsx`](../event-runtime/web/src/views/Proposals.tsx).
 
-- **Summary Safety Card**: Displayed above the raw RunSpec disclosure:
-  - **Action Target**: Pinned repository, host, issue ID, or target environment.
-  - **Mutation Risk**: `Read-Only` (slate badge) vs. `Mutating` (red warning badge with target filesystem branch).
-  - **Egress & Services**: Permitted network endpoints (e.g. `api.github.com`, `linear.app`).
-  - **Resource Envelope**: Declared attempts ceiling, timeout budget ($s$), and token ceiling.
-- **One-Click Rejection Canned Feedback**: Quick buttons to prefill the mandatory rejection reason (`"Scope too wide"`, `"Wrong target branch"`, `"Needs dry-run confirmation"`, `"Token limit excessive"`).
-- **Historical Comparison**: One-click "Compare with last successful run of this agent" diff view.
+- **Summary Safety Card** — _shipped_ as the `Spec Highlights — safety check` section above the raw RunSpec disclosure:
+  - **Action Target**: agent and adapter, workspace type, and placement (pinned repository / host).
+  - **Mutation Risk**: `read-only` (green badge) vs. an amber capability-count badge listing the declared capabilities.
+  - **Resource Envelope**: timeout budget ($s$) and declared attempts ceiling.
+  - _Not built; tracked in OPS-375_: per-endpoint egress list (`api.github.com`, `linear.app`) and token ceiling. `RunSpec` carries neither — egress would have to be joined in from the agent registry (`capabilities.services` on `GET /agents`), and a token ceiling does not exist in the runtime at all.
+- **One-Click Rejection Canned Feedback** — _not built; tracked in OPS-375_ — quick buttons to prefill the mandatory rejection reason (`"Scope too wide"`, `"Wrong target branch"`, `"Needs dry-run confirmation"`, `"Token limit excessive"`). The reject flow ships today as a free-text required reason.
+- **Historical Comparison** — _not built; tracked in OPS-375_ — one-click "Compare with last successful run of this agent" diff view.
 
 ---
 
@@ -110,9 +132,9 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 
 ---
 
-### Proposal 4: Faceted Search & Filter Tags
+### Proposal 4: Faceted Search & Filter Tags — [Not built; tracked in OPS-382]
 
-**Goal**: Elevate list search across `Runs`, `Events`, `Projects`, and `Proposals`.
+**Goal**: Elevate list search across `Runs`, `Events`, `Projects`, and `Proposals`. `FilterInput` is plain substring matching today.
 
 - **Structured Query Syntax**: Support key-value filters in [`FilterInput`](../event-runtime/web/src/components/ui.tsx):
   - `agent:ci-doctor`
@@ -130,11 +152,12 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 
 - **Two-Column Sidebar Layout**: Left sidebar with instant template search and keyboard radio navigation; right side houses envelope editor.
 - **Format JSON Action**: Dedicated format button and shortcut (`⌘⇧F` / `⌥⇧F`) to beautify pasted envelopes.
-- **Pre-submission Schema Linting**: Client-side validation checking required fields (`schemaVersion`, `eventId`, `type`, `source`, `occurredAt`) and warning on unregistered event types.
+- **Pre-submission Schema Linting**: Client-side validation checking required fields (`schemaVersion`, `eventId`, `type`, `source`, `occurredAt`), a live valid/invalid JSON indicator, and an explicit acknowledgement step for unregistered event types.
+- **Not pursued**: a CodeMirror editor or a generated form/JSON dual mode. The textarea plus `Format JSON`, the validity dot, and the required-field lint cover the failure this proposal was about (envelope syntax errors); an editor dependency is bundle weight for no operator gain. Re-open only with a concrete case the current editor cannot handle.
 
 ---
 
-### Proposal 6: Topology Canvas Live State (Graph Phase 2)
+### Proposal 6: Topology Canvas Live State (Graph Phase 2) — [Not built; tracked in OPS-227]
 
 **Goal**: Evolve [`Graph.tsx`](../event-runtime/web/src/views/Graph.tsx) into a live runtime health map.
 
@@ -145,9 +168,9 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 
 ---
 
-### Proposal 7: Pinned Document & Run Multi-Tab Workbench (OPS-357)
+### Proposal 7: Pinned Document & Run Multi-Tab Workbench — [Not built; OPS-357 on hold]
 
-**Goal**: Allow operators to maintain multiple open inspection tabs (runs, proposals, events) across view switches.
+**Goal**: Allow operators to maintain multiple open inspection tabs (runs, proposals, events) across view switches. The context strip itself ships (All / repo / In flight, OPS-356); only the pinned run/proposal tabs on its right-hand side are outstanding.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -161,7 +184,7 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 
 ---
 
-### Proposal 8: Trace Execution Waterfall, Live Auto-Scroll & In-Stream Search
+### Proposal 8: Trace Execution Waterfall, Live Auto-Scroll & In-Stream Search — [Not built; tracked in OPS-374]
 
 **Goal**: Provide deep runtime observability for long agent execution sessions in [`RunTrace.tsx`](../event-runtime/web/src/components/RunTrace.tsx).
 
@@ -181,18 +204,18 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 
 ---
 
-### Proposal 9: Rich Artifact, Diff & Test Log Inspector
+### Proposal 9: Rich Artifact, Diff & Test Log Inspector — [Partial; Markdown tracked in OPS-371]
 
 **Goal**: Elevate secondary artifact inspection from raw plain-text into readable operational documents.
 
-- **Interactive Markdown Renderer**: Automatic rendered preview for markdown reports (`report`, `summary.md`, `verdict.md`) with toggle to raw source.
-- **Side-by-Side Unified Patch Viewer**: For code patch artifacts (`diff`), display git diffs with green/red syntax highlighting, line numbers, and collapsible unchanged file hunks.
+- **Interactive Markdown Renderer** — _not built; tracked in OPS-371_: Automatic rendered preview for markdown reports (`report`, `summary.md`, `verdict.md`) with toggle to raw source.
+- **Side-by-Side Unified Patch Viewer** — _not built, unfiled_: For code patch artifacts (`diff`), display git diffs with green/red syntax highlighting, line numbers, and collapsible unchanged file hunks.
 - **Structured Test Log Formatter**: Detect ANSI escape codes and stack traces in build/test logs, providing one-click "Jump to first failure line".
 - **Evidence JSONPath Querying**: For large structured evidence payloads (`result.evidence`), offer interactive subtree folding and click-to-copy JSONPath.
 
 ---
 
-### Proposal 10: Master-Detail Adaptive Density & Resizable Split Pane
+### Proposal 10: Master-Detail Adaptive Density & Resizable Split Pane — [Not built, unfiled]
 
 **Goal**: Eliminate table column squashing when the detail panel is opened in `Runs`, `Events`, `Workers`, and `Projects`.
 
@@ -277,35 +300,40 @@ High-performance, zero-dependency tokenized JSON rendering across all detail pan
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           DELIVERY SEQUENCING                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Milestone 1 — Ergonomics & Highlighting [SHIPPED]                          │
-│ • Zero-dependency Syntax Highlighted JsonBlock (highlight.ts)               │
-│ • Run Trace filter pills (Errors, Tools, Reasoning) & Collapse/Expand all   │
-│ • CLI inspect command copy helper in Run Detail                             │
-│ • Overview 3-stage pipeline layout (Intake ➔ Gate ➔ Fleet)                  │
-│ • InjectDialog 2-column sidebar & JSON formatting tools                     │
+│ Milestone 1 — Ergonomics & Highlighting                          [SHIPPED]  │
+│ • Zero-dependency syntax-highlighted JsonBlock (highlight.ts)     OPS-355   │
+│ • Run Trace filter pills & Collapse/Expand all                    OPS-358   │
+│ • CLI inspect command copy helper in Run Detail                   OPS-358   │
+│ • Overview 3-stage pipeline layout (Intake ➔ Gate ➔ Fleet)        OPS-360   │
+│ • InjectDialog 2-column sidebar & JSON formatting tools       OPS-361/363   │
+│ • Operator context tabs (All / repo / In flight)                  OPS-356   │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Milestone 2 — Triage Velocity & Proposal Blast Radius                       │
-│ • Proposal Spec Highlights & Blast Radius safety assessment card            │
-│ • Rejection canned feedback templates                                       │
-│ • Responsive column shedding on detail panel open                           │
-│ • In-trace text search (⌘F) and live auto-scroll lock                       │
+│ Milestone 2 — Triage Velocity & Proposal Blast Radius             [PARTIAL] │
+│ • Proposal Spec Highlights & Blast Radius safety card             OPS-359   │
+│ • Rejection canned feedback templates                             OPS-375   │
+│ • Responsive column shedding on detail panel open                 unfiled   │
+│ • In-trace text search (⌘F) and live auto-scroll lock             OPS-374   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Milestone 3 — Deep Observability & Multi-Run Workbench                      │
-│ • Multi-run pinned document tab strip (OPS-357)                             │
-│ • Side-by-side run comparison workbench                                     │
-│ • Trace execution timing waterfall & token burn accumulator                 │
-│ • Rich Markdown & syntax-highlighted git diff artifact inspector           │
+│ • Multi-run pinned document tab strip                    OPS-357 (on hold)  │
+│ • Side-by-side run comparison workbench                           unfiled   │
+│ • Trace execution timing waterfall & token burn accumulator       OPS-374   │
+│ • Rich Markdown artifact inspector (report/summary)               OPS-371   │
+│ • Syntax-highlighted git diff artifact inspector                  unfiled   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Milestone 4 — Fleet Telemetry & Topology Canvas Phase 2                     │
-│ • Graph live runtime telemetry overlay & load heatmaps                      │
-│ • Worker fleet capacity gauges & stale lease recovery wizard                │
-│ • End-to-end event-to-outbox lineage trail breadcrumbs                      │
-│ • Faceted search syntax (agent:, state:, source:) & saved view bookmarks    │
+│ • Graph live runtime telemetry overlay & load heatmaps            OPS-227   │
+│ • Faceted search syntax (agent:, state:, source:)                 OPS-382   │
+│ • Worker fleet capacity gauges & stale lease recovery wizard      unfiled   │
+│ • End-to-end event-to-outbox lineage trail breadcrumbs            unfiled   │
+│ • Saved view bookmarks & deep hash state                          unfiled   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Milestone 5 — Batch Operations & Power Ergonomics                           │
-│ • Multi-row selection & bulk triage action bar (requeue, dismiss, export)   │
-│ • Dead-letter root cause pattern clustering                                 │
-│ • Vim-grade navigation chords (gg, G, Ctrl+d/u)                             │
-│ • Full deep URL hash serialization for all view filter states               │
+│ • Multi-row selection & bulk triage action bar                    unfiled   │
+│ • Dead-letter root cause pattern clustering                       unfiled   │
+│ • Vim-grade navigation chords (gg, G, Ctrl+d/u)                   unfiled   │
+│ • Full deep URL hash serialization for all view filter states     unfiled   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+`unfiled` is a point-in-time claim from the last Linear sweep: no issue existed then, so file one (correct team, `type:*` + `area:*`, evidence-based priority) before starting rather than folding it into whatever ticket is open. Search Linear before treating a marker as current.
