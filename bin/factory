@@ -71,6 +71,7 @@ case "$cmd" in
   friction)     run_bun orchestrator/friction.mjs "$@" ;;
   economics)    run_bun orchestrator/economics.mjs "$@" ;;
   ci)           run_bun orchestrator/ci.mjs "$@" ;;
+  actions-cache) run_bun orchestrator/actions-cache.mjs "$@" ;;
   label-guard)  run_bun orchestrator/label-guard.mjs "$@" ;;
   digest)       run_bun orchestrator/digest.mjs "$@" ;;
   doctor)       run_bun orchestrator/doctor.mjs "$@" ;;
@@ -160,6 +161,7 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   friction      orchestrator/friction.mjs
   economics     orchestrator/economics.mjs
   ci            orchestrator/ci.mjs
+  actions-cache Actions cache usage guard (exits non-zero at warning threshold)
   label-guard   orchestrator/label-guard.mjs
   digest        orchestrator/digest.mjs
   doctor        orchestrator/doctor.mjs
