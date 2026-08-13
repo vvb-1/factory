@@ -8,14 +8,20 @@
  *           judgment applies
  * Exit 2  — a listed surface is in the diff; NEVER auto-merge, hand to a human
  * Exit 3  — the gate could not be evaluated (unknown repo, no `escalate_paths`
- *           key, `gh pr diff` failed). NOT a pass: treat the PR as escalated
- *           until the check can actually run.
+ *           key, `gh pr diff` failed or named no files at all). NOT a pass:
+ *           treat the PR as escalated until the check can actually run.
  *
- * "Nothing matched" and "there was no list to match against" are different
- * answers and must never share exit 0 — a stale checkout whose config/repos.yaml
- * predates a repo's escalate_paths would otherwise read as a clean gate
- * (WM-15). A repo that deliberately has nothing to check mechanically says so
- * with an explicit `escalate_paths: []`.
+ * "Nothing matched" and "there was nothing to match" are different answers and
+ * must never share exit 0. Two shapes of the second:
+ *
+ *   - no list to match against — a stale checkout whose config/repos.yaml
+ *     predates a repo's escalate_paths would otherwise read as a clean gate
+ *     (WM-15). A repo that deliberately has nothing to check mechanically says
+ *     so with an explicit `escalate_paths: []`.
+ *   - no files to match — a PR always changes at least one file, so an empty
+ *     changed-file list means the diff was never read: wrong PR number, a `gh`
+ *     that failed while still exiting 0, or the test seam exported empty
+ *     (WM-48). Matching zero files against any glob list trivially "passes".
  *
  * This turns the `escalate_paths` lists in config/repos.yaml from documentation
  * into a gate. It is deliberately one-directional: a match here forces
@@ -26,6 +32,8 @@
  * Test seams (tests only; unset in normal use):
  *   FACTORY_ESCALATE_REPOS_YAML  read this config instead of config/repos.yaml
  *   FACTORY_ESCALATE_DIFF_FILES  newline-separated changed files, skips `gh`
+ *                                (only when non-empty — exported-but-empty is
+ *                                not an injected answer)
  */
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -59,6 +67,22 @@ export function resolveEscalateGlobs(repo) {
   if (!Array.isArray(raw) || raw.some((g) => typeof g !== "string" || !g.trim()))
     return { ok: false, reason: `escalate_paths for "${name}" is not a list of path globs` };
   return { ok: true, globs: raw };
+}
+
+/**
+ * The changed files in a `--name-only` list, or why the gate cannot be
+ * evaluated. Unlike `escalate_paths: []`, a zero-length file list is never a
+ * valid answer — no PR changes nothing, so an empty list means the diff was not
+ * read rather than read and found harmless.
+ */
+export function resolveChangedFiles(raw) {
+  const files = String(raw ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!files.length)
+    return { ok: false, reason: "the changed-file list is empty — the diff was never read" };
+  return { ok: true, files };
 }
 
 /** Git facts about the checkout that supplied the config. Never throws. */
@@ -146,9 +170,11 @@ if (import.meta.main) {
   }
   const globs = resolved.globs;
 
+  // Non-empty is the whole test for an injection: an exported-but-empty seam is
+  // an absent answer, not a diff with no files in it.
   const injected = process.env.FACTORY_ESCALATE_DIFF_FILES;
   let raw;
-  if (injected !== undefined) {
+  if (injected?.trim()) {
     raw = injected;
   } else {
     const repoPath = String(repo.path).replace(/^~/, homedir());
@@ -161,7 +187,15 @@ if (import.meta.main) {
     raw = diff.stdout;
   }
 
-  const files = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+  const changed = resolveChangedFiles(raw);
+  if (!changed.ok) {
+    console.error(`CANNOT EVALUATE — PR #${pr}: ${changed.reason}`);
+    console.error(`zero files match every glob list => treat PR #${pr} as ESCALATED, not as clean`);
+    console.error(`Check: \`gh pr diff ${pr} --name-only\` in ${repo.name} — an empty result usually means the wrong PR number, a closed or cross-fork PR, or a \`gh\` auth failure.`);
+    process.exit(EXIT.CANNOT_EVALUATE);
+  }
+  const files = changed.files;
+
   const hits = matchEscalations(files, globs);
   if (hits.length) {
     console.log(`ESCALATE — PR #${pr} touches ${hits.length} protected file(s) in ${repo.name}:`);
