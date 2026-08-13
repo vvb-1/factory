@@ -112,16 +112,19 @@ export function Proposals({
   const reasonRef = useRef<HTMLInputElement>(null);
 
   const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
+  // The expired chip only exists on Open; History rows have no live TTL. Derive
+  // the gate once so the row filter and the empty copy can never disagree.
+  const expiredFilter = expiredOnly && tab === "open";
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return rows.filter((p) => {
-      if (expiredOnly && tab === "open" && !p.expired) return false;
+      if (expiredFilter && !p.expired) return false;
       if (!q) return true;
       return [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
         (v ?? "").toLowerCase().includes(q),
       );
     });
-  }, [rows, filter, expiredOnly, tab]);
+  }, [rows, filter, expiredFilter]);
 
   const selectedId = focusProposalId;
   const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
@@ -153,11 +156,16 @@ export function Proposals({
   }, [focusProposalId, rows, visible, expiredOnly]);
 
   // Deep link: open tab first, then history if the id is a decided proposal.
-  // Hash stays; we only switch tabs so the row is in `visible`.
+  // Hash stays; we only switch tabs so the row is in `visible` — the selection
+  // is the whole point of the deep link, so unlike selectTab we keep it. The
+  // chip is cleared like selectTab does: it belongs to Open only.
   useEffect(() => {
     if (!focusProposalId) return;
     if (rows.some((p) => p.id === focusProposalId)) return;
-    if (tab === "open") setTab("history");
+    if (tab === "open") {
+      setTab("history");
+      setExpiredOnly(false);
+    }
   }, [focusProposalId, rows, tab]);
 
   useEffect(() => {
@@ -415,10 +423,10 @@ export function Proposals({
               <ListEmpty
                 colSpan={tab === "open" ? 6 : 7}
                 query={tab === "open" ? query : history}
-                filtered={expiredOnly ? false : rows.length > 0}
+                filtered={expiredFilter ? false : rows.length > 0}
                 noun="proposals"
                 empty={
-                  expiredOnly
+                  expiredFilter
                     ? "No expired open proposals."
                     : tab === "open"
                       ? "No open proposals — the operator's work is done, for now."
