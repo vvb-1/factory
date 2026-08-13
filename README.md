@@ -109,6 +109,18 @@ labels failures to fetch or missing metadata as **unknown**—never as a stale
 deploy—and distinguishes an older deploy from an unrelated revision. It also
 shows when the reaper and per-repository janitor last ran.
 
+### GitHub Actions cache storage guard
+
+`factory actions-cache` reports the organization-wide GitHub Actions cache footprint by repository and exits non-zero once it reaches the configured warning percentage. It is read-only; it does not delete caches.
+
+```bash
+factory actions-cache
+factory actions-cache --json
+factory actions-cache --included-gb 73 --warning-percent 60
+```
+
+The organization, included allowance, and warning threshold live in `config/policy.yaml`. Confirm the allowance against GitHub billing when it changes; the initial 73 GB value was inferred from the August 2026 90%-used alert.
+
 ### CLI notification wrapper
 
 `factory notify` is the cwd-independent human interrupt channel used by the factory floor:
