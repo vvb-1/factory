@@ -78,8 +78,9 @@ function emptySurvey(repo) {
   };
 }
 
-async function survey(repo) {
+async function survey(repo, { apply }) {
   const result = emptySurvey(repo);
+  result.apply = apply;
   const root = expand(repo.worktree_root ?? "");
   const repoPath = expand(repo.path);
   if (!root || !existsSync(root)) {
@@ -110,7 +111,7 @@ async function survey(repo) {
   result.unknown = tickets.filter((t) => !states[t]);
   result.reclaimable = finished.map((t) => ({ id: t, state: states[t].name }));
 
-  if (!APPLY || !finished.length) return result;
+  if (!apply || !finished.length) return result;
 
   // `report_only` disables dispatch, not safe cleanup. A repo with its own
   // configured teardown script can be reclaimed; one without it is surveyed
@@ -175,7 +176,8 @@ function printHuman(repo, result) {
 
 const surveys = [];
 for (const repo of repos) {
-  const result = await survey(repo);
+  // `--gate` is a probe: it must never tear down, even if `--apply` is also set.
+  const result = await survey(repo, { apply: APPLY && !GATE });
   surveys.push(result);
   if (GATE) continue;
   if (!quiet) printHuman(repo, result);

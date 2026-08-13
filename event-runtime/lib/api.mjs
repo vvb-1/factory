@@ -15,12 +15,12 @@ import { createReadStream, readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { findArtifact } from "./artifacts.mjs";
-import { API_HOST, DEFAULT_PORT, FACTORY_ROOT, artifactsRoot, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
+import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
 import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
-import { loadRepos, RepoError, reposView } from "./repos.mjs";
+import { loadRepos, RepoError, reposRoot, reposView } from "./repos.mjs";
 import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
@@ -350,6 +350,22 @@ function runView(db, runId) {
   };
 }
 
+/** Bound so a hung Linear call cannot freeze serve forever (OPS-301 review). */
+const JANITOR_TIMEOUT_MS = 120_000;
+const JANITOR_MAX_BUFFER = 1_000_000;
+
+/**
+ * Argv for one repos.yaml name. `--force` is not a flag and must never become
+ * one — the worktree_down refusal on dirty trees is the safety property.
+ * Spawn runs against `reposRoot()` so FACTORY_REPOS_ROOT cannot survey one
+ * yaml and tear down another.
+ */
+export function janitorArgv(name, { apply = false } = {}) {
+  const args = [path.join(reposRoot(), "orchestrator", "janitor.mjs"), "--repo", name, "--json"];
+  if (apply === true) args.push("--apply");
+  return args;
+}
+
 /**
  * Spawn `orchestrator/janitor.mjs --json` for one repos.yaml name (OPS-301).
  * Never passes `--force`. Injectable on createApi so tests never hit Linear
@@ -357,10 +373,19 @@ function runView(db, runId) {
  * spawn, the same trust as typing `factory janitor` on the machine.
  */
 export function spawnFactoryJanitor(name, { apply = false } = {}) {
-  const script = path.join(FACTORY_ROOT, "orchestrator", "janitor.mjs");
-  const args = [script, "--repo", name, "--json"];
-  if (apply === true) args.push("--apply");
-  const r = spawnSync(process.execPath, args, { encoding: "utf8", cwd: FACTORY_ROOT });
+  const args = janitorArgv(name, { apply });
+  const root = reposRoot();
+  const r = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    cwd: root,
+    timeout: JANITOR_TIMEOUT_MS,
+    maxBuffer: JANITOR_MAX_BUFFER,
+  });
+  if (r.error?.code === "ETIMEDOUT") {
+    const err = new Error("janitor timed out");
+    err.status = 504;
+    throw err;
+  }
   const stdout = (r.stdout || "").trim();
   if (r.status === 2) {
     const err = new Error(`unknown repo ${name}`);
@@ -372,7 +397,13 @@ export function spawnFactoryJanitor(name, { apply = false } = {}) {
     err.status = 500;
     throw err;
   }
-  return JSON.parse(stdout);
+  const parsed = JSON.parse(stdout);
+  if (parsed && Array.isArray(parsed.results)) {
+    const err = new Error("janitor returned multiple repos; expected one");
+    err.status = 500;
+    throw err;
+  }
+  return parsed;
 }
 
 /**

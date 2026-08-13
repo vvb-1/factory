@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
-import { startApi } from "./api.mjs";
+import { janitorArgv, startApi } from "./api.mjs";
 import { apiClient } from "./client.mjs";
 import { openDb } from "./db.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
@@ -827,5 +827,17 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
       close();
       server.close();
     }
+  });
+
+  test("janitorArgv never includes --force and adds --apply only when asked (OPS-301)", () => {
+    const dry = janitorArgv("bj29");
+    expect(dry).toContain("--json");
+    expect(dry).toContain("bj29");
+    expect(dry).not.toContain("--force");
+    expect(dry).not.toContain("--apply");
+    const apply = janitorArgv("bj29", { apply: true });
+    expect(apply).toContain("--apply");
+    expect(apply).not.toContain("--force");
+    expect(apply.filter((a) => a === "--apply")).toHaveLength(1);
   });
 });
