@@ -280,6 +280,57 @@ describe("worker", () => {
     expect(() => cancelRun(db, spec.runId, { actor: "operator" })).toThrow(IllegalTransition);
   });
 
+  test("cancelRun on a PROPOSED run closes its unique open proposal", () => {
+    const db = openDb(":memory:");
+    const spec = makeSpec();
+    createRun(db, {
+      runId: spec.runId, idempotencyKey: spec.idempotencyKey,
+      spec, specJson: canonicalJson(spec), specHash: hashJson(spec),
+      actor: "test", policyVersion: "test", now: T0,
+    });
+    linkEvent(db, spec.runId);
+    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    expect(runState(db, spec.runId)).toBe("CANCELLED");
+    const proposal = db.query(`SELECT * FROM proposals WHERE run_id = ?`).get(spec.runId);
+    expect(proposal.status).toBe("rejected");
+    expect(proposal.reason).toBe("run_cancelled");
+    expect(proposal.decided_by).toBe("operator");
+    expect(proposal.decided_at).toBe(new Date(T0).toISOString());
+  });
+
+  test("cancelRun with no open proposal still cancels", () => {
+    const db = openDb(":memory:");
+    const spec = makeSpec();
+    createRun(db, {
+      runId: spec.runId, idempotencyKey: spec.idempotencyKey,
+      spec, specJson: canonicalJson(spec), specHash: hashJson(spec),
+      actor: "test", policyVersion: "test", now: T0,
+    });
+    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    expect(runState(db, spec.runId)).toBe("CANCELLED");
+    expect(db.query(`SELECT COUNT(*) AS n FROM proposals`).get().n).toBe(0);
+  });
+
+  test("cancelRun with two open proposals for the run closes neither", () => {
+    const db = openDb(":memory:");
+    const spec = makeSpec();
+    createRun(db, {
+      runId: spec.runId, idempotencyKey: spec.idempotencyKey,
+      spec, specJson: canonicalJson(spec), specHash: hashJson(spec),
+      actor: "test", policyVersion: "test", now: T0,
+    });
+    linkEvent(db, spec.runId);
+    const at = new Date(T0).toISOString();
+    db.query(
+      `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
+       VALUES (?, ?, ?, ?, 'RUN_SPEC', ?, 1800)`,
+    ).run(`prop-${spec.runId}-extra`, "test", `evt-${spec.runId}`, spec.runId, at);
+    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    expect(runState(db, spec.runId)).toBe("CANCELLED");
+    const open = db.query(`SELECT COUNT(*) AS n FROM proposals WHERE run_id = ? AND status = 'open'`).get(spec.runId);
+    expect(open.n).toBe(2);
+  });
+
   test("retryRun: exhausted attempts throw without force, re-queue with force", async () => {
     const db = openDb(":memory:");
     const spec = queueRun(db, makeSpec({ input: { repos: ["crash"] } }));

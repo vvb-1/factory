@@ -3,7 +3,7 @@ import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
 import { lifecycleOf, runState } from "./lifecycle.mjs";
 import { planEvent } from "./planner.mjs";
-import { approveProposal, getProposal, openProposals, rejectProposal } from "./proposals.mjs";
+import { approveProposal, closeOpenProposalForRun, getProposal, openProposals, rejectProposal } from "./proposals.mjs";
 import { loadRegistry } from "./registry.mjs";
 
 const registry = loadRegistry();
@@ -99,6 +99,44 @@ describe("rejectProposal", () => {
     expect(journal.at(-1).to_state).toBe("CANCELLED");
     expect(journal.at(-1).reason).toBe("proposal_rejected");
     expect(journal.at(-1).actor).toBe("operator");
+  });
+});
+
+describe("closeOpenProposalForRun", () => {
+  test("closes the unique open proposal with reason run_cancelled", () => {
+    const { db, proposal, runId } = planned();
+    const later = NOW + 1000;
+    expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: later }))
+      .toEqual({ closed: true, id: proposal.id });
+    const row = getProposal(db, proposal.id);
+    expect(row.status).toBe("rejected");
+    expect(row.reason).toBe("run_cancelled");
+    expect(row.decided_by).toBe("operator");
+    expect(row.decided_at).toBe(new Date(later).toISOString());
+    expect(openProposals(db, { now: later })).toHaveLength(0);
+  });
+
+  test("no-op when the run has no open proposal", () => {
+    const { db, proposal, runId } = planned();
+    approveProposal(db, registry, proposal.id, { actor: "operator", now: NOW });
+    expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }))
+      .toEqual({ closed: false });
+    expect(getProposal(db, proposal.id).status).toBe("approved");
+    expect(closeOpenProposalForRun(db, "run_missing", { actor: "operator", now: NOW }))
+      .toEqual({ closed: false });
+  });
+
+  test("leaves every proposal untouched when more than one is open for the run", () => {
+    const { db, proposal, runId } = planned();
+    const at = new Date(NOW).toISOString();
+    db.query(
+      `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
+       VALUES (?, ?, ?, ?, 'run', ?, 1800)`,
+    ).run("prop_extra", proposal.event_source, proposal.event_id, runId, at);
+    expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }))
+      .toEqual({ closed: false });
+    expect(getProposal(db, proposal.id).status).toBe("open");
+    expect(getProposal(db, "prop_extra").status).toBe("open");
   });
 });
 
