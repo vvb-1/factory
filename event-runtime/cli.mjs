@@ -52,6 +52,7 @@ usage: bun event-runtime/cli.mjs <command>
   proposals                      open proposals with TTL age
   agents                         registered agent definitions and event routing
   workers                        worker processes: host, labels, state, heartbeat
+  repos                          factory repos: team, base, dispatch vs report-only
   approve <proposal-id>          approve an open proposal
   reject <proposal-id> <reason>  reject an open proposal
   inject <envelope.json|->       replay an event envelope (same intake as the webhook)
@@ -548,6 +549,25 @@ async function workers(client) {
   }
 }
 
+/**
+ * The factory repo registry (OPS-299). MODE is the column an operator actually
+ * scans for — a report-only repo is one the loop reports on but never dispatches
+ * to — and CLEANUP says whether the janitor has a teardown script to call.
+ */
+async function repos(client) {
+  const { repos: rows } = await client.repos();
+  if (rows.length === 0) {
+    console.log("no repos in config/repos.yaml");
+    return;
+  }
+  console.log(`${pad("REPO", 16)}${pad("TEAM", 6)}${pad("MODE", 12)}${pad("BASE", 10)}${pad("DEPLOY", 10)}${pad("CAP", 5)}${pad("CLEANUP", 9)}WORKTREE ROOT`);
+  for (const r of rows) {
+    console.log(
+      `${pad(r.name, 16)}${pad(r.team, 6)}${pad(r.reportOnly ? "report-only" : "dispatch", 12)}${pad(r.base, 10)}${pad(r.deployBranch, 10)}${pad(r.maxInFlight, 5)}${pad(r.hasWorktreeDown ? "yes" : "no", 9)}${r.worktreeRoot ?? "-"}`,
+    );
+  }
+}
+
 async function agents(client) {
   const { agents: defs } = await client.agents();
   for (const d of defs) {
@@ -604,6 +624,9 @@ async function main() {
 
     case "workers":
       return withClient(workers);
+
+    case "repos":
+      return withClient(repos);
 
     case "approve": {
       if (!args[0]) fail("usage: approve <proposal-id>");

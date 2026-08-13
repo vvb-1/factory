@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
@@ -9,6 +9,7 @@ import { apiClient } from "./client.mjs";
 import { openDb } from "./db.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
 import { loadRegistry } from "./registry.mjs";
+import { loadRepos } from "./repos.mjs";
 import { runOnce } from "./worker.mjs";
 
 const registry = loadRegistry();
@@ -45,13 +46,14 @@ function sign(rawBody, timestamp, secret = SECRET) {
   return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex")}`;
 }
 
-async function makeServer({ secret = SECRET } = {}) {
+async function makeServer({ secret = SECRET, ...opts } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-api-"));
   const db = openDb(path.join(dir, "runtime.db"));
   const onEvents = [];
   const server = startApi({
     db, registry, secret, policyVersion: PV, port: 0,
     onEvent: (kind) => onEvents.push(kind),
+    ...opts,
   });
   await new Promise((resolve) => server.on("listening", resolve));
   const port = server.address().port;
@@ -654,6 +656,58 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
       expect(def.mutating).toBe(false);
       expect(contracts["factory.agent-result/v1"].properties.terminalState.enum).toContain("refused");
     } finally {
+      server.close();
+    }
+  });
+
+  test("GET /repos serves the repos.yaml registry, dispatch mode included (OPS-299)", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "evrt-api-repos-"));
+    mkdirSync(path.join(root, "config"), { recursive: true });
+    writeFileSync(
+      path.join(root, "config", "repos.yaml"),
+      `repos:\n  - name: dispatchable\n    path: ~/Develop/dispatchable\n    github: watt-mind/dispatchable\n    team: CLNT\n    base: develop\n    deploy_branch: master\n    worktree_down: bin/worktree-down.sh\n    worktree_root: ~/Develop/.worktrees/dispatchable\n    max_in_flight: 20\n    escalate_paths:\n      - src/auth/**\n  - name: watched\n    path: ~/Develop/watched\n    team: OPS\n    report_only: true\n`,
+    );
+    const { server, port, close } = await makeServer({ repos: () => loadRepos({ root }) });
+    const client = apiClient({ port });
+    try {
+      const { repos: rows } = await client.repos();
+      expect(rows.map((r) => r.name)).toEqual(["dispatchable", "watched"]);
+      expect(rows[0]).toEqual({
+        name: "dispatchable",
+        path: path.join(process.env.HOME ?? "", "Develop/dispatchable"),
+        github: "watt-mind/dispatchable",
+        team: "CLNT",
+        project: null,
+        base: "develop",
+        deployBranch: "master",
+        reportOnly: false,
+        maxInFlight: 20,
+        worktreeRoot: path.join(process.env.HOME ?? "", "Develop/.worktrees/dispatchable"),
+        hasWorktreeUp: false,
+        hasWorktreeDown: true,
+        hasWorktreeWarm: false,
+        verify: null,
+      });
+      expect(rows[1]).toMatchObject({ reportOnly: true, maxInFlight: null, hasWorktreeDown: false });
+      // Merge-policy paths are config, not registry: the wire never carries them.
+      expect(JSON.stringify(rows)).not.toContain("src/auth");
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
+  test("GET /repos names a missing repos.yaml instead of a bare internal_error", async () => {
+    const empty = mkdtempSync(path.join(os.tmpdir(), "evrt-api-norepos-"));
+    const { server, port, close } = await makeServer({ repos: () => loadRepos({ root: empty }) });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/repos`);
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toContain("no repos config at");
+      expect(body.error).not.toBe("internal_error");
+    } finally {
+      close();
       server.close();
     }
   });
