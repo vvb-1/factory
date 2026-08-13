@@ -130,6 +130,28 @@ export function Projects({
     },
   });
 
+  // Distributed Agent Dispatch mutation (OPS-368)
+  const dispatchEventMutation = useMutation({
+    mutationFn: async ({ repo, apply }: { repo: string; apply: boolean }) => {
+      const type = apply ? "factory.janitor-apply.requested" : "factory.janitor-scan.requested";
+      const eventId = `janitor-${apply ? "apply" : "scan"}-${repo}-${Date.now()}`;
+      return api.replay({
+        source: "factory-web",
+        eventId,
+        type,
+        payload: { repo },
+      });
+    },
+    onSuccess: (_res, vars) => {
+      notify(`Injected ${vars.apply ? "factory.janitor-apply.requested" : "factory.janitor-scan.requested"} event`);
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      queryClient.invalidateQueries({ queryKey: ["proposals"] });
+    },
+    onError: (err: ApiError) => {
+      notify(`Agent dispatch failed: ${err.message}`);
+    },
+  });
+
   // Context actions for ⌘K palette
   useEffect(() => {
     if (!sel) {
@@ -412,7 +434,7 @@ export function Projects({
                   checks their Linear ticket states, and reclaims finished ticket checkouts.
                 </div>
 
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Button
                     disabled={!connected || dryMutation.isPending || applyMutation.isPending}
                     onClick={() => dryMutation.mutate(sel.name)}
@@ -436,6 +458,17 @@ export function Projects({
                   >
                     Clean Reclaimable Worktrees…
                   </Button>
+
+                  <Button
+                    disabled={!connected || dispatchEventMutation.isPending}
+                    onClick={() => dispatchEventMutation.mutate({ repo: sel.name, apply: false })}
+                  >
+                    {dispatchEventMutation.isPending ? "Dispatching…" : "Dispatch Scan Event"}
+                  </Button>
+                </div>
+
+                <div className="mt-2 text-[11px] text-(--text-faint)">
+                  Supports direct execution or asynchronous placement dispatch via <code>janitor-scan@1</code> & <code>janitor-apply@1</code> events.
                 </div>
 
                 {sel.reportOnly && !sel.hasWorktreeDown && (

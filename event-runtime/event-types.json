@@ -64,5 +64,21 @@
       "inputHash"
     ],
     "proposalTtlSeconds": 1800
+  },
+  "factory.janitor-scan.requested": {
+    "agent": "janitor-scan@1",
+    "adapter": "command",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.janitor-apply.requested": {
+    "agent": "janitor-apply@1",
+    "adapter": "command",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
   }
 }

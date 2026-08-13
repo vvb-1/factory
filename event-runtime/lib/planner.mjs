@@ -45,6 +45,7 @@ export function idempotencyKeyFor(mapping, def, envelope, inputHash) {
 export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion, adapterOverride, now = Date.now() } = {}) {
   const def = getAgent(registry, mapping.agent);
   const inputHash = hashJson(envelope.payload);
+  const placement = def.placement ?? mapping.placement ?? undefined;
   return {
     schemaVersion: "factory.run-spec/v1",
     runId,
@@ -60,6 +61,7 @@ export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion
     timeoutSeconds: def.limits.timeout_seconds,
     maxAttempts: def.limits.attempts,
     idempotencyKey: idempotencyKeyFor(mapping, def, envelope, inputHash),
+    ...(placement ? { placement } : {}),
   };
 }
 
