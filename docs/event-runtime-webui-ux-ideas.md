@@ -75,7 +75,7 @@ Every JSON payload in the UI already renders through this tokenizer — there is
 
 ## 4. Prioritized UX Improvement Proposals
 
-**Read this before implementing anything below.** Much of it is already on `develop`; a proposal without a status marker is genuinely unbuilt.
+**Read this before implementing anything below.** Much of it is already on `develop`. A proposal without a status marker has not been verified in this pass — search Linear before treating it as unbuilt.
 
 **Already on `develop` — do not rebuild:**
 
@@ -87,9 +87,9 @@ Every JSON payload in the UI already renders through this tokenizer — there is
 - Inject `Format JSON` action, validity indicator, required-field lint — [`InjectDialog.tsx`](../event-runtime/web/src/components/InjectDialog.tsx) — **OPS-361**
 - Inject two-column template sidebar with instant search — [`InjectDialog.tsx`](../event-runtime/web/src/components/InjectDialog.tsx) — **OPS-363**
 
-**Filed, not built:** Proposal 4 faceted search (**OPS-382**), Proposal 6 graph phase 2 (**OPS-227**), Proposal 7 pinned run tabs (**OPS-357**, on hold).
+**Filed, not built:** Proposal 2 remainder (**OPS-375**), Proposal 4 faceted search (**OPS-382**), Proposal 6 graph phase 2 (**OPS-227**), Proposal 7 pinned run tabs (**OPS-357**, on hold), Proposal 8 waterfall (**OPS-374**), Proposal 9 Markdown inspector (**OPS-371**).
 
-Everything else below is unbuilt and unfiled — file a Linear issue before implementing it rather than widening an unrelated ticket.
+Items marked `unfiled` had no Linear issue at last check. Search before filing; do not treat a missing marker as proof, and do not widen an unrelated ticket.
 
 ### Proposal 1: Overview Triage Cockpit (Pipeline Hierarchy) — [Shipped in OPS-360]
 
@@ -111,9 +111,9 @@ Everything else below is unbuilt and unfiled — file a Linear issue before impl
   - **Action Target**: agent and adapter, workspace type, and placement (pinned repository / host).
   - **Mutation Risk**: `read-only` (green badge) vs. an amber capability-count badge listing the declared capabilities.
   - **Resource Envelope**: timeout budget ($s$) and declared attempts ceiling.
-  - _Not built, unfiled_: per-endpoint egress list (`api.github.com`, `linear.app`) and token ceiling. `RunSpec` carries neither — egress would have to be joined in from the agent registry (`capabilities.services` on `GET /agents`), and a token ceiling does not exist in the runtime at all.
-- **One-Click Rejection Canned Feedback** — _not built, unfiled_ — quick buttons to prefill the mandatory rejection reason (`"Scope too wide"`, `"Wrong target branch"`, `"Needs dry-run confirmation"`, `"Token limit excessive"`). The reject flow ships today as a free-text required reason.
-- **Historical Comparison** — _not built, unfiled_ — one-click "Compare with last successful run of this agent" diff view.
+  - _Not built; tracked in OPS-375_: per-endpoint egress list (`api.github.com`, `linear.app`) and token ceiling. `RunSpec` carries neither — egress would have to be joined in from the agent registry (`capabilities.services` on `GET /agents`), and a token ceiling does not exist in the runtime at all.
+- **One-Click Rejection Canned Feedback** — _not built; tracked in OPS-375_ — quick buttons to prefill the mandatory rejection reason (`"Scope too wide"`, `"Wrong target branch"`, `"Needs dry-run confirmation"`, `"Token limit excessive"`). The reject flow ships today as a free-text required reason.
+- **Historical Comparison** — _not built; tracked in OPS-375_ — one-click "Compare with last successful run of this agent" diff view.
 
 ---
 
@@ -184,7 +184,7 @@ Everything else below is unbuilt and unfiled — file a Linear issue before impl
 
 ---
 
-### Proposal 8: Trace Execution Waterfall, Live Auto-Scroll & In-Stream Search — [Not built, unfiled]
+### Proposal 8: Trace Execution Waterfall, Live Auto-Scroll & In-Stream Search — [Not built; tracked in OPS-374]
 
 **Goal**: Provide deep runtime observability for long agent execution sessions in [`RunTrace.tsx`](../event-runtime/web/src/components/RunTrace.tsx).
 
@@ -204,12 +204,12 @@ Everything else below is unbuilt and unfiled — file a Linear issue before impl
 
 ---
 
-### Proposal 9: Rich Artifact, Diff & Test Log Inspector
+### Proposal 9: Rich Artifact, Diff & Test Log Inspector — [Partial; Markdown tracked in OPS-371]
 
 **Goal**: Elevate secondary artifact inspection from raw plain-text into readable operational documents.
 
-- **Interactive Markdown Renderer**: Automatic rendered preview for markdown reports (`report`, `summary.md`, `verdict.md`) with toggle to raw source.
-- **Side-by-Side Unified Patch Viewer**: For code patch artifacts (`diff`), display git diffs with green/red syntax highlighting, line numbers, and collapsible unchanged file hunks.
+- **Interactive Markdown Renderer** — _not built; tracked in OPS-371_: Automatic rendered preview for markdown reports (`report`, `summary.md`, `verdict.md`) with toggle to raw source.
+- **Side-by-Side Unified Patch Viewer** — _not built, unfiled_: For code patch artifacts (`diff`), display git diffs with green/red syntax highlighting, line numbers, and collapsible unchanged file hunks.
 - **Structured Test Log Formatter**: Detect ANSI escape codes and stack traces in build/test logs, providing one-click "Jump to first failure line".
 - **Evidence JSONPath Querying**: For large structured evidence payloads (`result.evidence`), offer interactive subtree folding and click-to-copy JSONPath.
 
@@ -310,15 +310,16 @@ Everything else below is unbuilt and unfiled — file a Linear issue before impl
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Milestone 2 — Triage Velocity & Proposal Blast Radius             [PARTIAL] │
 │ • Proposal Spec Highlights & Blast Radius safety card             OPS-359   │
-│ • Rejection canned feedback templates                             unfiled   │
+│ • Rejection canned feedback templates                             OPS-375   │
 │ • Responsive column shedding on detail panel open                 unfiled   │
-│ • In-trace text search (⌘F) and live auto-scroll lock             unfiled   │
+│ • In-trace text search (⌘F) and live auto-scroll lock             OPS-374   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Milestone 3 — Deep Observability & Multi-Run Workbench                      │
 │ • Multi-run pinned document tab strip                    OPS-357 (on hold)  │
 │ • Side-by-side run comparison workbench                           unfiled   │
-│ • Trace execution timing waterfall & token burn accumulator       unfiled   │
-│ • Rich Markdown & syntax-highlighted git diff artifact inspector  unfiled   │
+│ • Trace execution timing waterfall & token burn accumulator       OPS-374   │
+│ • Rich Markdown artifact inspector (report/summary)               OPS-371   │
+│ • Syntax-highlighted git diff artifact inspector                  unfiled   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Milestone 4 — Fleet Telemetry & Topology Canvas Phase 2                     │
 │ • Graph live runtime telemetry overlay & load heatmaps            OPS-227   │
@@ -335,4 +336,4 @@ Everything else below is unbuilt and unfiled — file a Linear issue before impl
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-`unfiled` means exactly that: no Linear issue exists, so file one (correct team, `type:*` + `area:*`, evidence-based priority) before starting rather than folding it into whatever ticket is open.
+`unfiled` is a point-in-time claim from the last Linear sweep: no issue existed then, so file one (correct team, `type:*` + `area:*`, evidence-based priority) before starting rather than folding it into whatever ticket is open. Search Linear before treating a marker as current.
