@@ -3,7 +3,7 @@ import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
 import { lifecycleOf, runState } from "./lifecycle.mjs";
 import { planEvent } from "./planner.mjs";
-import { approveProposal, closeOpenProposalForRun, getProposal, openProposals, rejectProposal } from "./proposals.mjs";
+import { ambiguousOpenProposalRuns, approveProposal, closeOpenProposalForRun, getProposal, openProposals, rejectProposal } from "./proposals.mjs";
 import { loadRegistry } from "./registry.mjs";
 
 const registry = loadRegistry();
@@ -128,15 +128,17 @@ describe("closeOpenProposalForRun", () => {
 
   test("leaves every proposal untouched when more than one is open for the run", () => {
     const { db, proposal, runId } = planned();
+    expect(ambiguousOpenProposalRuns(db)).toEqual([]);
     const at = new Date(NOW).toISOString();
     db.query(
       `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
        VALUES (?, ?, ?, ?, 'run', ?, 1800)`,
     ).run("prop_extra", proposal.event_source, proposal.event_id, runId, at);
     expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }))
-      .toEqual({ closed: false });
+      .toEqual({ closed: false, ambiguous: true, count: 2 });
     expect(getProposal(db, proposal.id).status).toBe("open");
     expect(getProposal(db, "prop_extra").status).toBe("open");
+    expect(ambiguousOpenProposalRuns(db)).toEqual([{ runId, count: 2 }]);
   });
 });
 
