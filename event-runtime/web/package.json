@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "build:fast": "vite build"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.5",

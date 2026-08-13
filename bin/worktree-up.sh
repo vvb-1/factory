@@ -93,8 +93,20 @@ info "installing dependencies (bun install, root + web)"
 (cd "$WT" && bun install --frozen-lockfile >/dev/null) || die "bun install failed in $WT"
 (cd "$WT/event-runtime/web" && bun install --frozen-lockfile >/dev/null) || die "bun install failed in $WT/event-runtime/web"
 
-info "building the web bundle"
-(cd "$WT/event-runtime/web" && bun run build >/dev/null) || die "web build failed — run it manually: cd $WT/event-runtime/web && bun run build"
+# Rebuild only when the build inputs changed since the last successful build.
+# The stamp lives inside dist/, so vite wiping the output dir also wipes the
+# stamp and a half-finished build can never masquerade as current. build:fast
+# skips `tsc --noEmit` — type-checking belongs to verification/CI, not env
+# bring-up (`bun run build` in ci.yml still type-checks).
+WEB_DIR="$WT/event-runtime/web"
+WEB_HASH="$(web_build_hash "$WEB_DIR")"
+if [[ -f "$WEB_DIR/dist/index.html" && "$(cat "$WEB_DIR/dist/.buildstamp" 2>/dev/null)" == "$WEB_HASH" ]]; then
+  info "web bundle up to date — skipping build"
+else
+  info "building the web bundle"
+  (cd "$WEB_DIR" && bun run build:fast >/dev/null) || die "web build failed — run it manually: cd $WEB_DIR && bun run build"
+  printf '%s\n' "$WEB_HASH" >"$WEB_DIR/dist/.buildstamp"
+fi
 
 # ---------------------------------------------------------------- daemons ---
 FRESH=0
@@ -119,6 +131,17 @@ else
   ) &
   echo $! >"$RUN_DIR/serve.pid"
 fi
+
+# Wait for /health BEFORE starting the worker: on a fresh DB, serve and worker
+# opening the database concurrently race on the WAL journal-mode switch and
+# the loser dies with SQLITE_BUSY (OPS-376). Health up ⇒ serve owns a settled
+# DB, so the worker joins an existing WAL. Costs nothing — this poll happened
+# after the daemon block anyway.
+for _ in {1..50}; do
+  curl -sf -m 1 "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && break
+  sleep 0.1
+done
+curl -sf -m 2 "http://127.0.0.1:$API_PORT/health" >/dev/null || die "control API never came up on $API_PORT — see $RUN_DIR/serve.log"
 
 # The worker is its own process (OPS-233): restarting the runtime or the web
 # server must never interrupt a running agent.
@@ -148,12 +171,6 @@ else
   echo $! >"$RUN_DIR/web.pid"
 fi
 
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  curl -sf -m 1 "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1 && break
-  sleep 0.5
-done
-curl -sf -m 2 "http://127.0.0.1:$API_PORT/health" >/dev/null || die "control API never came up on $API_PORT — see $RUN_DIR/serve.log"
-
 # ------------------------------------------------------------------- seed ---
 if [[ "$SEED" -eq 1 && ( "$FRESH" -eq 1 || "$RESEED" -eq 1 ) ]]; then
   PREFIX="demo"
@@ -166,7 +183,10 @@ else
   warn "skipping demo seed (--no-seed)"
 fi
 
-if [[ "$SEED" -eq 1 ]]; then
+# Verify only when this run actually (re)seeded — on an idempotent re-run the
+# fixture was already verified when it was created, and /health above is the
+# liveness signal. `bun ... verify.mjs` stays in the report for on-demand use.
+if [[ "$SEED" -eq 1 && ( "$FRESH" -eq 1 || "$RESEED" -eq 1 ) ]]; then
   info "verifying the e2e fixture"
   (cd "$WT" && bun event-runtime/demo/verify.mjs --port "$API_PORT") || die "fixture verification failed"
 fi
