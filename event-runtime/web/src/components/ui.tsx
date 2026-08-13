@@ -62,20 +62,30 @@ export function FilterInput({
   label: string;
 }) {
   return (
-    <input
-      data-view-filter
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        e.preventDefault();
-        if (value) onChange("");
-        else e.currentTarget.blur();
-      }}
-      placeholder={placeholder}
-      aria-label={label}
-      className="w-56 shrink-0 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
-    />
+    <span className="relative inline-flex w-56 shrink-0">
+      <input
+        data-view-filter
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          e.preventDefault();
+          if (value) onChange("");
+          else e.currentTarget.blur();
+        }}
+        placeholder={placeholder}
+        aria-label={label}
+        className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 pr-7 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
+      />
+      {!value && (
+        <kbd
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 rounded border border-(--border) px-1 font-sans text-[10px] text-(--text-faint)"
+        >
+          /
+        </kbd>
+      )}
+    </span>
   );
 }
 
@@ -210,6 +220,24 @@ export function ago(iso: string | null | undefined, now: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+/** Relative time with the absolute ISO on hover — operators check both. */
+export function Ago({
+  iso,
+  now,
+  className,
+}: {
+  iso: string | null | undefined;
+  now: number;
+  className?: string;
+}) {
+  if (!iso) return <span className={className}>-</span>;
+  return (
+    <span className={className} title={iso}>
+      {ago(iso, now)}
+    </span>
+  );
 }
 
 export function humanSize(bytes: number): string {

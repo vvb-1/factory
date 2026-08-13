@@ -5,7 +5,7 @@ import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { RunState } from "../types";
 import {
-  ago,
+  Ago,
   Button,
   Dialog,
   Disclosure,
@@ -280,8 +280,8 @@ export function Runs({
                     (r.eventId ?? "-")
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={r.updated_at}>
-                  {ago(r.updated_at, now)}
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  <Ago iso={r.updated_at} now={now} />
                 </td>
               </tr>
             ))}

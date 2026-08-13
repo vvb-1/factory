@@ -6,7 +6,7 @@ import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import { SpecDiff } from "../components/SpecDiff";
 import {
-  ago,
+  Ago,
   Button,
   Countdown,
   DECISION_HUES,
@@ -362,8 +362,8 @@ export function Proposals({
                       <StateBadge state={p.status} hues={PROPOSAL_STATUS_HUES} />
                     </td>
                     <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.decided_by ?? "-"}</td>
-                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={p.decided_at ?? undefined}>
-                      {p.decided_at ? ago(p.decided_at, now) : "-"}
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                      <Ago iso={p.decided_at} now={now} />
                     </td>
                   </>
                 )}
@@ -379,8 +379,8 @@ export function Proposals({
                     (p.eventId ?? "-")
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={p.created_at}>
-                  {ago(p.created_at, now)}
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  <Ago iso={p.created_at} now={now} />
                 </td>
                 <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.reason ?? "-"}</td>
               </tr>

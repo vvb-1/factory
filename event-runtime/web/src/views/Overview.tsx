@@ -4,7 +4,7 @@ import { api } from "../api";
 import { useNow } from "../hooks";
 import type { JournalEntry, EventFocus } from "../types";
 import {
-  ago,
+  Ago,
   Button,
   Disclosure,
   EVENT_STATUS_HUES,
@@ -221,7 +221,7 @@ export function Overview({
             <div className="rounded-md border border-(--border) px-3 py-1">
               {feed.entries.map((e) => (
                 <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                  <span className="mono w-[52px] shrink-0 text-(--text-faint)">{ago(e.at, now)}</span>
+                  <Ago iso={e.at} now={now} className="mono w-[52px] shrink-0 text-(--text-faint)" />
                   <JumpLink
                     onClick={() => onJumpRun(e.runId)}
                     title={e.runId}
@@ -274,7 +274,7 @@ export function Overview({
                       );
                     })()}
                     {o.published_at ? (
-                      <span className="mono shrink-0 text-(--text-faint)">{ago(o.published_at, now)}</span>
+                      <Ago iso={o.published_at} now={now} className="mono shrink-0 text-(--text-faint)" />
                     ) : (
                       <span className="shrink-0 text-[11px]" style={{ color: "var(--hue-warn)" }}>
                         unpublished

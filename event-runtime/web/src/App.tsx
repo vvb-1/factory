@@ -37,6 +37,7 @@ export function App() {
   const [focusRunState, setFocusRunState] = useState<string | null>(null);
   const [focusExpired, setFocusExpired] = useState(false);
   const [ephemeralEvent, setEphemeralEvent] = useState<EventFocus | null>(null);
+  const [filterFocus, setFilterFocus] = useState(false);
 
   const focusRunId = view === "runs" ? (route[1] ?? null) : null;
   const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
@@ -135,6 +136,14 @@ export function App() {
   }, [route, view]);
 
   useEffect(() => {
+    if (!filterFocus) return;
+    const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+    if (!el) return;
+    el.focus();
+    setFilterFocus(false);
+  }, [filterFocus, view]);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "i") {
@@ -145,12 +154,17 @@ export function App() {
         setHelpOpen((open) => !open);
       } else if (e.key === "/") {
         e.preventDefault();
-        document.querySelector<HTMLInputElement>("[data-view-filter]")?.focus();
+        const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+        if (el) el.focus();
+        else {
+          setFilterFocus(true);
+          navigate("events");
+        }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [navigate]);
 
   const paletteActions: PaletteAction[] = [
     ...NAV.map((n) => ({ label: `Go to ${n.label}`, hint: `g ${n.go}`, run: () => navigate(n.key) })),
@@ -158,7 +172,14 @@ export function App() {
     {
       label: "Focus filter",
       hint: "/",
-      run: () => document.querySelector<HTMLInputElement>("[data-view-filter]")?.focus(),
+      run: () => {
+        const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+        if (el) el.focus();
+        else {
+          setFilterFocus(true);
+          navigate("events");
+        }
+      },
     },
     { label: "Copy link to this page", run: copyLink },
     { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },

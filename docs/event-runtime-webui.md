@@ -186,6 +186,7 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
   and invoke the verbs valid for the current selection.
 - `i` — inject event. `?` — keyboard cheatsheet. `c` — copy the selected id.
 - `/` — focus the list filter. Esc in the filter clears it, then blurs.
+  From Overview or Graph (no filter), `/` opens Events and focuses there.
 - `j`/`k` or arrows — move list (and Graph node) selection; `Enter`/`o` —
   open detail panel; `Esc` — close it, then clear the filter.
 - `[` / `]` — previous / next status tab (Events, Proposals, Runs). Changing
@@ -463,7 +464,9 @@ no new API.
   the id). Inject `i` admits then jumps to the event. `?` lists the keys.
   Empty Events inbox offers Inject as a button. Outbox types jump to the
   origin event when the envelope carries source+eventId. Trigger again
-  selects a "this envelope" chip. `/` focuses the filter. Dialog Tab cycles
-  stay inside the dialog and focus returns to the opener on close. `[` / `]`
-  cycle status tabs. Click a toast to dismiss it. The document title follows
-  the hash (`factory · Runs · run_id`).
+  selects a "this envelope" chip. `/` focuses the filter — from Overview or
+  Graph it opens Events first. The empty filter shows a `/` hint. Dialog Tab
+  cycles stay inside the dialog and focus returns to the opener on close.
+  `[` / `]` cycle status tabs. Graph `j`/`k` pans the selected node into
+  view. Relative timestamps show the ISO instant on hover. Click a toast to
+  dismiss it. The document title follows the hash (`factory · Runs · run_id`).

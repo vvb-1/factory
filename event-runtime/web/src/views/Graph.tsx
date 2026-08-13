@@ -8,7 +8,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { keyGuard } from "../hooks";
 import { buildCapabilityGraph, type GraphNode } from "../graph/model";
@@ -36,6 +36,17 @@ export function Graph({
 }) {
   const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 10_000 });
   const [positioned, setPositioned] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
+  const flowRef = useRef<{
+    getZoom: () => number;
+    fitView: (opts: {
+      nodes?: Array<{ id: string }>;
+      padding?: number;
+      duration?: number;
+      minZoom?: number;
+      maxZoom?: number;
+    }) => void;
+  } | null>(null);
+  const [flowReady, setFlowReady] = useState(0);
 
   const graph = useMemo(
     () => (registry.data ? buildCapabilityGraph(registry.data) : null),
@@ -122,6 +133,18 @@ export function Graph({
     return () => window.removeEventListener("keydown", onKey);
   }, [onSelectNode, focusNodeId, graph, positioned]);
 
+  useEffect(() => {
+    if (!focusNodeId || !flowRef.current) return;
+    const zoom = flowRef.current.getZoom();
+    flowRef.current.fitView({
+      nodes: [{ id: focusNodeId }],
+      padding: 0.45,
+      duration: 180,
+      minZoom: zoom,
+      maxZoom: zoom,
+    });
+  }, [focusNodeId, flowReady, positioned]);
+
   const emptyCopy = registry.isPending
     ? "Loading the capability map…"
     : registry.isError
@@ -146,6 +169,10 @@ export function Graph({
             nodeTypes={nodeTypes}
             onNodeClick={(_, node) => onSelectNode(node.id)}
             onPaneClick={() => onSelectNode(null)}
+            onInit={(inst) => {
+              flowRef.current = inst;
+              setFlowReady((n) => n + 1);
+            }}
             nodesFocusable
             fitView
             fitViewOptions={{ padding: 0.25 }}

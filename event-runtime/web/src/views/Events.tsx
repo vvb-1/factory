@@ -6,7 +6,7 @@ import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { AdmittedEvent, EventFocus } from "../types";
 import {
-  ago,
+  Ago,
   Button,
   Dialog,
   Disclosure,
@@ -351,7 +351,9 @@ export function Events({
                     </span>
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{ago(e.admittedAt, now)}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  <Ago iso={e.admittedAt} now={now} />
+                </td>
               </tr>
             ))}
             {visible.length === 0 && (

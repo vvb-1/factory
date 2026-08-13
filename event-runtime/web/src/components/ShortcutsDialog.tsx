@@ -4,7 +4,7 @@ const ROWS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
   { keys: "g o / e / p / r / t / g", does: "Overview / Events / Proposals / Runs / Agents / Graph" },
   { keys: "i", does: "inject event" },
-  { keys: "/", does: "focus the list filter" },
+  { keys: "/", does: "focus filter (Events, if none on this view)" },
   { keys: "j k  ↑↓", does: "move list (or graph) selection" },
   { keys: "[ ]", does: "previous / next status tab" },
   { keys: "Enter / o", does: "open detail" },
