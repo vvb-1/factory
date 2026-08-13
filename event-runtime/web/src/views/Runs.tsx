@@ -448,9 +448,10 @@ export function Runs({
                     {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
                   </span>
                   <span className="truncate text-(--text-faint)">
-                    {/* `.mono` is 11.5px; the actors beside it are 13px prose,
-                        so the clickable one must not read as the smallest text. */}
-                    <ActorRef actor={e.actor} className="text-[13px]" />
+                    {/* `.mono` is unlayered author CSS at 11.5px; a utility
+                        `text-[13px]` loses the cascade. The important modifier
+                        is what actually matches the 13px prose beside it. */}
+                    <ActorRef actor={e.actor} className="text-[13px]!" />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
                 </div>
