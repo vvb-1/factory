@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { goSequence } from "../goSequence";
 import { keyGuard, modal } from "../hooks";
 import { useContextActions } from "../palette";
 
@@ -253,21 +254,18 @@ export function CommandPalette({
   );
 }
 
-/** g-then-letter navigation sequences (spec §5): g o, g p, g r, g e. */
+/** g-then-letter navigation sequences (spec §5): g g, g o, g p, g r, g e. */
 export function useGoSequences(map: Record<string, () => void>) {
   useEffect(() => {
-    let pendingG = 0;
+    const press = goSequence((key) => key in map);
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "g") {
-        pendingG = Date.now();
-        return;
-      }
-      if (pendingG && Date.now() - pendingG < 800 && map[e.key]) {
-        e.preventDefault();
-        map[e.key]();
-      }
-      pendingG = 0;
+      // A held `g` auto-repeats: without this, resting on the key would arm
+      // the prefix and then immediately spend it on the Graph view.
+      if (e.repeat) return;
+      if (!press(e.key)) return;
+      e.preventDefault();
+      map[e.key]();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
