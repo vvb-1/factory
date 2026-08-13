@@ -173,6 +173,15 @@ export function Overview({
         ],
       });
     }
+    for (const amb of anomalies.ambiguousOpenProposals ?? []) {
+      anomalyRows.push({
+        text: `ambiguous open proposals: ${amb.count} open proposals exist for run ${amb.runId}`,
+        links: [
+          { label: "View run", go: () => onJumpRun(amb.runId) },
+          { label: "View proposals", go: () => onNavigate("proposals") },
+        ],
+      });
+    }
     if (anomalies.noWorkers) {
       const queued = s?.runs.byState.QUEUED ?? 0;
       anomalyRows.push({

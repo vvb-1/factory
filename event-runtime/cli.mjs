@@ -408,6 +408,9 @@ async function status(client) {
   if (a.staleLeases > 0) anomalyLines.push(`stale leases: ${a.staleLeases}`);
   if (a.unpublishedOutbox > 0) anomalyLines.push(`unpublished outbox rows: ${a.unpublishedOutbox}`);
   for (const d of a.deadLettered) anomalyLines.push(`dead-lettered (${d.source}, ${d.eventId}): ${d.lastError}`);
+  for (const amb of a.ambiguousOpenProposals ?? []) {
+    anomalyLines.push(`ambiguous open proposals for run ${amb.runId}: ${amb.count} open proposals exist for one run`);
+  }
   if (anomalyLines.length === 0) console.log(`${pad("anomalies", 11)}none`);
   else for (const line of anomalyLines) console.log(`${pad("anomalies", 11)}${line}`);
 }
