@@ -105,9 +105,9 @@ The landing view. Stat tiles for event counts by status (`admitted`,
 `planned`, `noop`, `human_needed`, `dead_lettered`), open/expired proposal
 counts, and runs by FSM state. Below them, the **doctor panel** — the §13
 anomalies rendered as a list, empty state included: expired open proposals,
-stale leases, unpublished outbox rows, and dead-lettered events with their
-`lastError`. A dead-letter row offers **replay** (`POST /replay` with the
-stored envelope — which requires the UI to have the envelope body; see §7).
+ambiguous open proposals, stale leases, unpublished outbox rows, and dead-lettered
+events with their `lastError`. A dead-letter row offers **replay** (`POST /replay`
+with the stored envelope — which requires the UI to have the envelope body; see §7).
 
 `GET /health` drives a connection indicator in the nav rail: green with the
 reported `policyVersion`, red "runtime unreachable" when polling fails. Every

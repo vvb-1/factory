@@ -5,7 +5,7 @@ import { hashPath } from "../hash";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
-import type { Attempt, RunState } from "../types";
+import type { Attempt, ArtifactRef, RunState } from "../types";
 import {
   Ago,
   Button,
@@ -203,6 +203,99 @@ export function ActorRef({ actor, className }: { actor: string; className?: stri
     >
       {actor}
     </JumpLink>
+  );
+}
+
+function isTextArtifact(kind: string) {
+  const k = kind.toLowerCase();
+  return (
+    k === "transcript" ||
+    k === "diff" ||
+    k === "report" ||
+    k === "evidence" ||
+    k.endsWith(".txt") ||
+    k.endsWith(".json") ||
+    k.endsWith(".jsonl") ||
+    k.endsWith(".md") ||
+    k.endsWith(".log")
+  );
+}
+
+function ArtifactRow({ a }: { a: ArtifactRef }) {
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const textFriendly = isTextArtifact(a.kind);
+
+  const togglePreview = async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (content === null && !loading) {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(artifactUrl(a.sha256));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const txt = await res.text();
+        setContent(txt);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  return (
+    <div className="border-b border-(--border) py-1.5 last:border-0">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="truncate">
+          {a.kind}
+          <span className="mono ml-2 text-[11px] text-(--text-faint)" title={a.sha256}>
+            {a.sha256.slice(0, 12)}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-baseline gap-3">
+          <span className="tabular-nums text-(--text-faint)">{humanSize(a.sizeBytes)}</span>
+          {textFriendly && (
+            <button
+              type="button"
+              onClick={togglePreview}
+              className="text-[12px] text-(--text-dim) hover:text-(--accent)"
+            >
+              {open ? "Hide" : "Preview"}
+            </button>
+          )}
+          <a
+            href={artifactUrl(a.sha256)}
+            target="_blank"
+            rel="noreferrer"
+            className="text-(--accent) hover:underline"
+          >
+            Open
+          </a>
+        </span>
+      </div>
+      {open && (
+        <div className="mt-2">
+          {loading && <div className="text-[11px] text-(--text-faint)">Loading artifact preview…</div>}
+          {error && (
+            <div className="text-[11px]" style={{ color: "var(--hue-err)" }}>
+              Failed to load preview: {error}
+            </div>
+          )}
+          {content !== null && (
+            <pre className="mono max-h-64 overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-2.5 text-[11.5px] leading-relaxed whitespace-pre-wrap">
+              {content}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -572,6 +665,7 @@ export function Runs({
             <KV k="workspace" v={d.workspace} />
             <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
             <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
+            <KV k="placement" v={d.run.spec.placement ? JSON.stringify(d.run.spec.placement) : "any worker"} />
             <Disclosure label="immutable RunSpec" defaultOpen>
               <JsonBlock value={d.run.spec} />
             </Disclosure>
@@ -728,28 +822,7 @@ export function Runs({
               ) : (
                 <div className="rounded-md border border-(--border) px-3 py-1">
                   {(d.result.artifacts ?? []).map((a) => (
-                    <div
-                      key={a.sha256}
-                      className="flex items-baseline justify-between gap-3 border-b border-(--border) py-1.5 last:border-0"
-                    >
-                      <span className="truncate">
-                        {a.kind}
-                        <span className="mono ml-2 text-[11px] text-(--text-faint)" title={a.sha256}>
-                          {a.sha256.slice(0, 12)}
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-baseline gap-3">
-                        <span className="tabular-nums text-(--text-faint)">{humanSize(a.sizeBytes)}</span>
-                        <a
-                          href={artifactUrl(a.sha256)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-(--accent) hover:underline"
-                        >
-                          Open
-                        </a>
-                      </span>
-                    </div>
+                    <ArtifactRow key={a.sha256} a={a} />
                   ))}
                 </div>
               )}

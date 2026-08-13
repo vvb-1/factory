@@ -648,7 +648,7 @@ lifecycle transitions with the operator as actor:
   state, lease ages, retained workspaces, dead-lettered events.
 - **cancel** — any run before `RUNNING` (§8); a running attempt gets TERM then
   KILL. In the same transaction, the unique open proposal for that run is
-  closed with reason `run_cancelled`; none, or more than one, is left
+  closed with reason `run_cancelled`; none, or more than one (`ambiguousOpenProposals`), is left
   untouched.
 - **retry** — a new attempt under a new attempt identity. Retrying past
   `maxAttempts` requires an explicit operator override and records it.
@@ -669,7 +669,8 @@ attempts) parks as dead-lettered with its last error, visible in status and
 eligible for replay after a fix. A poison event must not wedge the planner or
 silently vanish.
 
-**Doctor checks.** Expired leases not reclaimed, proposals past TTL, outbox
+**Doctor checks.** Expired leases not reclaimed, proposals past TTL, ambiguous
+open proposals (more than one open proposal referencing the same run), outbox
 rows never published, workspace directories with no corresponding run,
 journal sequence gaps, a worker holding a run whose heartbeat has gone stale
 (its lease may still be valid, so nothing has reclaimed the run yet), and
