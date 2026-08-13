@@ -12,7 +12,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { keyGuard } from "../hooks";
 import { buildCapabilityGraph, type GraphNode } from "../graph/model";
-import { layoutGraph, NODE_HEIGHT, NODE_WIDTH } from "../graph/layout";
 import { nodeTypes } from "../graph/nodes";
 import type { EventFocus } from "../types";
 import { Button, DetailPane, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
@@ -56,34 +55,39 @@ export function Graph({
   useEffect(() => {
     if (!graph) return;
     let cancelled = false;
-    layoutGraph(graph).then((positions) => {
-      if (cancelled) return;
-      setPositioned({
-        nodes: graph.nodes.map((node) => ({
-          id: node.id,
-          type: node.kind,
-          position: positions.get(node.id) ?? { x: 0, y: 0 },
-          data: { node },
-          draggable: true,
-          width: NODE_WIDTH,
-          height: NODE_HEIGHT,
-        })),
-        edges: graph.edges.map((edge) => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label,
-          animated: false,
-          style: {
-            stroke: edge.kind === "recommends" ? "var(--accent)" : "var(--border-strong)",
-            strokeWidth: 1.5,
-            strokeDasharray: edge.kind === "recommends" ? "4 3" : undefined,
-          },
-          labelStyle: { fill: "var(--text-faint)", fontSize: 10 },
-          labelBgStyle: { fill: "var(--surface-0)" },
-        })),
-      });
-    });
+    // elkjs is ~1.4 MB of pre-minified layout engine, so it rides in its own
+    // async chunk (OPS-255) — fetched the first time there is a graph to lay
+    // out, never by the list views.
+    import("../graph/layout").then(({ layoutGraph, NODE_HEIGHT, NODE_WIDTH }) =>
+      layoutGraph(graph).then((positions) => {
+        if (cancelled) return;
+        setPositioned({
+          nodes: graph.nodes.map((node) => ({
+            id: node.id,
+            type: node.kind,
+            position: positions.get(node.id) ?? { x: 0, y: 0 },
+            data: { node },
+            draggable: true,
+            width: NODE_WIDTH,
+            height: NODE_HEIGHT,
+          })),
+          edges: graph.edges.map((edge) => ({
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            label: edge.label,
+            animated: false,
+            style: {
+              stroke: edge.kind === "recommends" ? "var(--accent)" : "var(--border-strong)",
+              strokeWidth: 1.5,
+              strokeDasharray: edge.kind === "recommends" ? "4 3" : undefined,
+            },
+            labelStyle: { fill: "var(--text-faint)", fontSize: 10 },
+            labelBgStyle: { fill: "var(--surface-0)" },
+          })),
+        });
+      }),
+    );
     return () => {
       cancelled = true;
     };
