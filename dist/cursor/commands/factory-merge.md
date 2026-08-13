@@ -66,12 +66,18 @@ If the repo has GitHub's native merge queue enabled, prefer it over any of this 
 
 After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
 
-Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch:
+Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, check that no **other open PR** still has it as its head (WM-17):
 
 ```bash
 HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
-git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+HOLDERS="$(gh pr list --head "$HEAD_REF" --state open --json number -q '.[].number')"
+[ -z "$HOLDERS" ] || { echo "keeping $HEAD_REF — still the head of open PR $HOLDERS"; }
+git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"   # only when $HOLDERS is empty
 ```
+
+Deleting a branch that still heads an open PR makes GitHub **auto-close that PR**, and its commits become unreachable. That is not hypothetical: on legalease, PR #261 (a data-corruption fix) was closed at 08:34Z when this cleanup deleted `feat/CLNT-520` after merging PR #253, and the work had to be recovered from a dangling commit and re-opened as PR #263. A second agent branching further work off the same head is normal in a batched run, so treat a non-empty `$HOLDERS` as a stop: leave the branch and its worktree alone, note it in the report, and let the run that lands the holding PR clean it up.
+
+The same hold applies to the worktree teardown — `factory janitor` enforces it mechanically (`orchestrator/janitor.mjs`, `openPrHold`) and will report such a worktree as **held**, naming the PR, rather than reclaiming it. A held worktree is therefore not a WM-16 miss to go and finish by hand: **WM-16 is cleanup skipped** (stale worktrees and branches pile up, chase them down), **WM-17 is cleanup too eager** (it deletes what another agent is still using). Forcing a held one through re-creates the incident above; it clears itself when the holding PR closes.
 
 Per the floor's **Protected branches** rule, if `$HEAD_REF` comes back as the repo's `base` or `deploy_branch` (`develop`, `master`, `main`), stop — you are cleaning up the wrong PR. These repos have no branch protection to catch it for you.
 
