@@ -4,10 +4,18 @@ import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
 import { Button, DetailPane, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, ListPane, Section, copyText, copyLink } from "../components/ui";
+import { eventsHash } from "../hash";
 import { setContextActions } from "../palette";
 
 const caps = (a: AgentDef) =>
   [a.capabilities.filesystem, ...(a.capabilities.services ?? [])].filter(Boolean).join(", ") || "none";
+
+/**
+ * Events already owns `#/events?type=` (the same target Graph jumps to). A real
+ * link, not a callback through App, keeps that route single-owner and makes the
+ * jump behave like one: middle-click, copy link, Back.
+ */
+const eventsTypeHref = (type: string) => `#/${eventsHash(null, null, type)}`;
 
 /**
  * Agents (webui doc §10.6) — the registry, fully readable. An operator
@@ -228,13 +236,18 @@ export function Agents({
             ) : (
               <div className="rounded-md border border-(--border) px-3 py-1">
                 {sel.eventTypes.map((r) => (
-                  <div key={r.type} className="border-b border-(--border) py-1.5 last:border-0">
-                    <div className="mono">{r.type}</div>
+                  <a
+                    key={r.type}
+                    href={eventsTypeHref(r.type)}
+                    title={`Show ${r.type} in Events`}
+                    className="group -mx-3 block border-b border-(--border) px-3 py-1.5 last:border-0 hover:bg-(--surface-1)"
+                  >
+                    <div className="mono text-(--accent) group-hover:underline">{r.type}</div>
                     <div className="text-[11px] text-(--text-faint)">
                       adapter {r.adapter} · idempotency {r.idempotencyScope}
                       {r.proposalTtlSeconds != null ? ` · proposal TTL ${r.proposalTtlSeconds}s` : ""}
                     </div>
-                  </div>
+                  </a>
                 ))}
               </div>
             )}
