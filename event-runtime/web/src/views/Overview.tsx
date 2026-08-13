@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { hashPath } from "../hash";
 import { useNow } from "../hooks";
-import type { JournalEntry, EventFocus } from "../types";
+import type { JournalEntry, EventFocus, RunState } from "../types";
 import {
   Ago,
   Button,
@@ -54,9 +54,9 @@ function useJournalFeed(): { entries: JournalEntry[]; isPending: boolean; isErro
 }
 
 /**
- * Overview (webui spec §4.1 + doc §10.4) — the dashboard: stat tiles, the
- * doctor panel with anomalies linking to their views, the live journal feed,
- * and the latest published result events from the outbox.
+ * Overview (webui spec §4.1 + doc §10.4, pipeline OPS-360) — the dashboard:
+ * promoted doctor anomaly deck, 3-stage pipeline layout (Intake -> Watched Gate -> Execution),
+ * live journal feed, and outbox results.
  */
 export function Overview({
   connected,
@@ -113,8 +113,6 @@ export function Overview({
           await new Promise((r) => setTimeout(r, 250));
         }
       } catch {
-        // The requeue itself landed; only the confirmation poll broke, so say
-        // that rather than claiming no proposal appeared.
         if (alive.current) notify(`Requeued ${eventId} — could not confirm a proposal appeared`, "err");
         return;
       }
@@ -166,12 +164,8 @@ export function Overview({
         requeue: { source: d.source, eventId: d.eventId },
       });
     }
-    // A stale worker still holding a run: the process is gone but nothing has
-    // reclaimed the run yet, so both ends of that gap need a jump.
     for (const w of anomalies.stalledWorkers) {
       anomalyRows.push({
-        // Both ids lead, because the row truncates from the right: the age and
-        // the host are the parts an operator can lose and still act.
         text: `stalled worker ${w.workerId} still holds run ${w.runId} — last heartbeat ${ago(w.lastSeen, now)} on ${w.host}`,
         links: [
           { label: "View worker", go: () => onNavigate(hashPath("workers", w.workerId)) },
@@ -180,8 +174,6 @@ export function Overview({
       });
     }
     if (anomalies.noWorkers) {
-      // The count comes from the same snapshot the runtime derived noWorkers
-      // from, so the sentence and the runs tile can never disagree.
       const queued = s?.runs.byState.QUEUED ?? 0;
       anomalyRows.push({
         text: `${queued} queued run${queued === 1 ? "" : "s"} and no live worker to claim ${queued === 1 ? "it" : "them"} — nothing will start until one registers`,
@@ -192,6 +184,11 @@ export function Overview({
       });
     }
   }
+
+  const hasAnomalies = anomalyRows.length > 0;
+
+  const activeRunStates: RunState[] = ["QUEUED", "LEASED", "RUNNING", "VERIFYING"];
+  const terminalRunStates: RunState[] = ["COMPLETED", "FAILED", "REFUSED", "TIMED_OUT", "CANCELLED"];
 
   return (
     <div className="h-full min-w-0 overflow-auto p-5">
@@ -207,75 +204,19 @@ export function Overview({
         </div>
       </div>
 
-      {status.isPending && !s && <div className="mb-5 text-(--text-faint)">Loading status…</div>}
-      {status.isError && !s && (
-        <div className="mb-5 text-(--text-faint)">Cannot reach the control API — tiles will appear when it is up.</div>
-      )}
-
-      {s && (
-        <div className="mb-5 grid grid-cols-4 gap-2 xl:grid-cols-8">
-          {Object.entries(s.events).map(([k, v]) => (
-            <StatTile
-              key={k}
-              label={`events · ${k}`}
-              value={v}
-              hue={v > 0 ? EVENT_STATUS_HUES[k] : undefined}
-              onClick={() => onJumpEvents({ status: k })}
-            />
-          ))}
-          <StatTile
-            label="proposals · open"
-            value={s.proposals.open}
-            hue={s.proposals.open > 0 ? "var(--hue-info)" : undefined}
-            onClick={() => onNavigate("proposals")}
-          />
-          <StatTile
-            label="proposals · expired"
-            value={s.proposals.expired}
-            hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined}
-            onClick={onJumpExpired}
-          />
-          {Object.entries(s.runs.byState).map(([k, v]) => (
-            <StatTile
-              key={k}
-              label={`runs · ${k.toLowerCase()}`}
-              value={v ?? 0}
-              onClick={() => onJumpRuns(k)}
-            />
-          ))}
-          <StatTile
-            label="workers · live"
-            value={s.workers.live}
-            hue={s.workers.live > 0 ? "var(--hue-ok)" : undefined}
-            onClick={() => onNavigate("workers")}
-          />
-          <StatTile
-            label="workers · busy"
-            value={s.workers.busy}
-            hue={s.workers.busy > 0 ? "var(--hue-info)" : undefined}
-            onClick={() => onNavigate("workers")}
-          />
-          <StatTile
-            label="workers · stale"
-            value={s.workers.stale}
-            hue={s.workers.stale > 0 ? "var(--hue-warn)" : undefined}
-            onClick={() => onNavigate("workers")}
-          />
-        </div>
-      )}
-
-      <Section title="Doctor">
-        {!s ? (
-          <div className="text-(--text-faint)">
-            {status.isError ? "Cannot reach the control API." : "Loading anomalies…"}
+      {/* Promoted Doctor Deck when anomalies exist */}
+      {hasAnomalies && (
+        <div className="mb-5 rounded-lg border border-[color:var(--hue-warn)] bg-[color:color-mix(in_oklch,var(--hue-warn)_8%,var(--surface-1))] p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-[color:var(--hue-warn)] uppercase tracking-wide">
+              <span className="size-2 rounded-full bg-[color:var(--hue-warn)] animate-pulse" />
+              Doctor Anomaly Deck · {anomalyRows.length} active issue{anomalyRows.length === 1 ? "" : "s"}
+            </div>
           </div>
-        ) : anomalyRows.length === 0 ? (
-          <div className="text-(--text-faint)">No anomalies.</div>
-        ) : (
-          <div className="rounded-md border border-(--border)">
+          <div className="rounded-md border border-(--border) bg-(--surface-1)">
             {anomalyRows.map((a, i) => (
               <div key={i} className="flex items-center justify-between gap-3 border-b border-(--border) px-3 py-2 last:border-0">
-                <span className="truncate" title={a.text} style={{ color: "var(--hue-warn)" }}>
+                <span className="truncate text-[12px]" title={a.text} style={{ color: "var(--hue-warn)" }}>
                   {a.text}
                 </span>
                 <span className="flex shrink-0 gap-2">
@@ -297,9 +238,116 @@ export function Overview({
               </div>
             ))}
           </div>
-        )}
-        <VerbError error={requeue.error} />
-      </Section>
+          <VerbError error={requeue.error} />
+        </div>
+      )}
+
+      {status.isPending && !s && <div className="mb-5 text-(--text-faint)">Loading status…</div>}
+      {status.isError && !s && (
+        <div className="mb-5 text-(--text-faint)">Cannot reach the control API — tiles will appear when it is up.</div>
+      )}
+
+      {/* 3-Stage Pipeline Overview */}
+      {s && (
+        <div className="mb-6 space-y-4">
+          {/* Stage 1: Intake & Gate */}
+          <div className="grid gap-3 lg:grid-cols-12">
+            <div className="lg:col-span-7">
+              <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+                1. Event Intake & Triage
+              </div>
+              <div className="grid grid-cols-5 gap-2">
+                {Object.entries(s.events).map(([k, v]) => (
+                  <StatTile
+                    key={k}
+                    label={`events · ${k}`}
+                    value={v}
+                    hue={v > 0 ? EVENT_STATUS_HUES[k] : undefined}
+                    onClick={() => onJumpEvents({ status: k })}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="lg:col-span-5">
+              <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+                2. Watched Approval Gate
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <StatTile
+                  label="proposals · open"
+                  value={s.proposals.open}
+                  hue={s.proposals.open > 0 ? "var(--hue-info)" : undefined}
+                  onClick={() => onNavigate("proposals")}
+                />
+                <StatTile
+                  label="proposals · expired"
+                  value={s.proposals.expired}
+                  hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined}
+                  onClick={onJumpExpired}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Stage 2: Execution Fleet & Workers */}
+          <div>
+            <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              3. Execution Fleet & Capacity
+            </div>
+            <div className="grid grid-cols-4 gap-2 xl:grid-cols-8">
+              {activeRunStates.map((k) => (
+                <StatTile
+                  key={k}
+                  label={`active · ${k.toLowerCase()}`}
+                  value={s.runs.byState[k] ?? 0}
+                  hue={(s.runs.byState[k] ?? 0) > 0 ? "var(--hue-warn)" : undefined}
+                  onClick={() => onJumpRuns(k)}
+                />
+              ))}
+              {terminalRunStates.map((k) => (
+                <StatTile
+                  key={k}
+                  label={`runs · ${k.toLowerCase()}`}
+                  value={s.runs.byState[k] ?? 0}
+                  hue={k === "FAILED" && (s.runs.byState[k] ?? 0) > 0 ? "var(--hue-err)" : undefined}
+                  onClick={() => onJumpRuns(k)}
+                />
+              ))}
+              <StatTile
+                label="workers · live"
+                value={s.workers.live}
+                hue={s.workers.live > 0 ? "var(--hue-ok)" : undefined}
+                onClick={() => onNavigate("workers")}
+              />
+              <StatTile
+                label="workers · busy"
+                value={s.workers.busy}
+                hue={s.workers.busy > 0 ? "var(--hue-info)" : undefined}
+                onClick={() => onNavigate("workers")}
+              />
+              <StatTile
+                label="workers · stale"
+                value={s.workers.stale}
+                hue={s.workers.stale > 0 ? "var(--hue-warn)" : undefined}
+                onClick={() => onNavigate("workers")}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!hasAnomalies && (
+        <Section title="Doctor">
+          {!s ? (
+            <div className="text-(--text-faint)">
+              {status.isError ? "Cannot reach the control API." : "Loading anomalies…"}
+            </div>
+          ) : (
+            <div className="text-(--text-faint)">No anomalies.</div>
+          )}
+        </Section>
+      )}
 
       <div className="grid gap-x-5 xl:grid-cols-2">
         <Section title={`Activity · latest ${Math.min(feed.entries.length, FEED_CAP)}`}>
