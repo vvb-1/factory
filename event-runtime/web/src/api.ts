@@ -5,7 +5,9 @@ import type {
   EnvIdentity,
   JournalView,
   OutboxRow,
+  JanitorResult,
   Proposal,
+  RepoItem,
   RunDetail,
   RunListItem,
   StatusView,
@@ -79,6 +81,11 @@ export const api = {
   agents: () => call<AgentsView>("GET", "/agents"),
   // The worker registry: which processes are alive, where, and what they run.
   workers: () => call<{ workers: Worker[] }>("GET", "/workers"),
+  // Configured factory repositories (config/repos.yaml)
+  repos: () => call<{ repos: RepoItem[] }>("GET", "/repos"),
+  // Janitor worktree scan and cleanup (apply: false for dry run, apply: true for teardown)
+  janitor: (name: string, apply = false) =>
+    call<JanitorResult>("POST", `/repos/${encodeURIComponent(name)}/janitor`, { apply }),
 };
 
 /** Browser URL for a stored artifact's bytes (streamed by the control API). */

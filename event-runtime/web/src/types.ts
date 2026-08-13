@@ -326,3 +326,35 @@ export interface EventFocus {
   eventId?: string;
   type?: string;
 }
+
+/** Configured factory repository (GET /repos). */
+export interface RepoItem {
+  name: string;
+  path: string;
+  github: string | null;
+  team: string | null;
+  project: string | null;
+  base: string;
+  deployBranch: string | null;
+  reportOnly: boolean;
+  maxInFlight: number | null;
+  worktreeRoot: string | null;
+  hasWorktreeUp: boolean;
+  hasWorktreeDown: boolean;
+  hasWorktreeWarm: boolean;
+  verify: string | null;
+}
+
+/** Janitor scan/cleanup result (POST /repos/:name/janitor). */
+export interface JanitorResult {
+  repo: string;
+  apply: boolean;
+  actor: string;
+  reclaimable: { id: string; state: string }[];
+  kept: { id: string; state: string }[];
+  named: string[];
+  unknown: string[];
+  removed: string[];
+  refused: { id: string; reason: string }[];
+  skippedApplyReason?: string;
+}

@@ -60,7 +60,7 @@ function vendorChunk(id: string): string | undefined {
 // the exact regression this guards — landed at 479 kB and still passed. Slack
 // this thin means ordinary feature work will eventually trip it; that is the
 // trade, and re-baselining is a normal move (see the error message below).
-const ENTRY_CHUNK_BUDGET_BYTES = 420 * 1000;
+const ENTRY_CHUNK_BUDGET_BYTES = 450 * 1000;
 
 function entryChunkBudget(): Plugin {
   return {

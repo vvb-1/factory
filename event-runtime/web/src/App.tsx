@@ -12,6 +12,7 @@ import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Graph } from "./views/Graph";
 import { Overview } from "./views/Overview";
+import { Projects } from "./views/Projects";
 import { Proposals } from "./views/Proposals";
 import { RunFull } from "./views/RunFull";
 import { Runs } from "./views/Runs";
@@ -26,6 +27,7 @@ const NAV = [
   { key: "events", label: "Events", go: "e" },
   { key: "proposals", label: "Proposals", go: "p" },
   { key: "runs", label: "Runs", go: "r" },
+  { key: "projects", label: "Projects", go: "f" },
   { key: "agents", label: "Agents", go: "t" },
   { key: "workers", label: "Workers", go: "w" },
   { key: "graph", label: "Graph", go: "g" },
@@ -53,6 +55,7 @@ export function App() {
   // crossing from `#/runs/:id` pushes history and Back restores the panel.
   const fullRunId = view === "run" ? (route[1] ?? null) : null;
   const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
+  const focusRepoName = view === "projects" ? (route[1] ?? null) : null;
   const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
   const focusWorkerId = view === "workers" ? (route[1] ?? null) : null;
   const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
@@ -99,6 +102,7 @@ export function App() {
   };
   const jumpToAgent = (ref: string) => navigate(hashPath("agents", ref));
   const jumpToWorker = (id: string) => navigate(hashPath("workers", id));
+  const jumpToProject = (name: string) => navigate(hashPath("projects", name));
   const jumpToGraph = (nodeId?: string) => navigate(hashPath("graph", nodeId));
 
   const health = useQuery({
@@ -420,6 +424,12 @@ export function App() {
               onJumpAgent={jumpToAgent}
               onJumpEvent={jumpToEvent}
             />
+          ) : view === "projects" ? (
+            <Projects
+              connected={connected}
+              focusRepoName={focusRepoName}
+              onSelectRepo={(name) => navigate(hashPath("projects", name))}
+            />
           ) : view === "graph" ? (
             <Graph
               focusNodeId={focusGraphNode}
@@ -482,6 +492,7 @@ export function App() {
         onJumpEvent={jumpToEvent}
         onJumpAgent={jumpToAgent}
         onJumpWorker={jumpToWorker}
+        onJumpProject={jumpToProject}
       />
       {injectOpen && (
         <InjectDialog

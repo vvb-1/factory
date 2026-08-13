@@ -3,8 +3,8 @@ import { Dialog } from "./ui";
 const ROWS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
   {
-    keys: "g → o / e / p / r / t / w / g",
-    does: "Overview / Events / Proposals / Runs / Agents / Workers / Graph",
+    keys: "g → o / e / p / r / f / t / w / g",
+    does: "Overview / Events / Proposals / Runs / Projects / Agents / Workers / Graph",
   },
   { keys: "i", does: "inject event" },
   { keys: "/", does: "focus filter (Events, if none on this view)" },

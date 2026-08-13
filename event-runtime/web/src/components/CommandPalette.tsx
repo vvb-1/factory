@@ -21,6 +21,7 @@ export function CommandPalette({
   onJumpEvent,
   onJumpAgent,
   onJumpWorker,
+  onJumpProject,
 }: {
   actions: PaletteAction[];
   onJumpRun: (runId: string) => void;
@@ -28,6 +29,7 @@ export function CommandPalette({
   onJumpEvent: (source: string, eventId: string) => void;
   onJumpAgent: (ref: string) => void;
   onJumpWorker: (id: string) => void;
+  onJumpProject?: (name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const contextActions = useContextActions();
@@ -43,6 +45,7 @@ export function CommandPalette({
   const events = useQuery({ queryKey: ["events", "all"], queryFn: () => api.events(), enabled: open });
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents, enabled: open });
   const workers = useQuery({ queryKey: ["workers"], queryFn: api.workers, enabled: open });
+  const repos = useQuery({ queryKey: ["repos"], queryFn: api.repos, enabled: open });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -240,6 +243,29 @@ export function CommandPalette({
             </Command.Item>
             );
           })}
+            </Command.Group>
+          )}
+          {(repos.data?.repos ?? []).length > 0 && (
+            <Command.Group heading="Projects">
+              {(repos.data?.repos ?? []).map((r) => (
+                <Command.Item
+                  key={r.name}
+                  value={`project repo ${r.name} ${r.team ?? ""} ${r.project ?? ""} ${r.github ?? ""}`}
+                  onSelect={() => {
+                    setOpen(false);
+                    onJumpProject?.(r.name);
+                  }}
+                  className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+                >
+                  <span className="mono truncate">
+                    {r.name}
+                    {r.project ? <span className="ml-2 font-sans text-(--text-dim)">{r.project}</span> : null}
+                  </span>
+                  <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">
+                    project · {r.reportOnly ? "report-only" : "dispatchable"}
+                  </span>
+                </Command.Item>
+              ))}
             </Command.Group>
           )}
         </Command.List>
