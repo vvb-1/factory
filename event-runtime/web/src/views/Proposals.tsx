@@ -115,13 +115,13 @@ export function Proposals({
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return rows.filter((p) => {
-      if (expiredOnly && !p.expired) return false;
+      if (expiredOnly && tab === "open" && !p.expired) return false;
       if (!q) return true;
       return [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
         (v ?? "").toLowerCase().includes(q),
       );
     });
-  }, [rows, filter, expiredOnly]);
+  }, [rows, filter, expiredOnly, tab]);
 
   const selectedId = focusProposalId;
   const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
@@ -131,18 +131,26 @@ export function Proposals({
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  // Reveal a hash-selected proposal only when current filters hide it. A click
-  // on a visible row (including under the expired chip) must not wipe them.
+  // Reveal a hash-selected proposal only when current filters hide it. Latch
+  // until the row exists in `rows` (tab switch / re-plan / poll); decide once
+  // so a later 2s poll does not wipe a typed filter. Click on a visible row
+  // (including under the expired chip) keeps the filters.
+  const pendingReveal = useRef<string | null>(null);
+  const lastKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusProposalId) return;
-    if (rows.some((p) => p.id === focusProposalId) && !visible.some((p) => p.id === focusProposalId)) {
-      setFilter("");
-      const row = rows.find((p) => p.id === focusProposalId);
-      if (expiredOnly && row && !row.expired) setExpiredOnly(false);
+    if (focusProposalId !== lastKey.current) {
+      lastKey.current = focusProposalId;
+      pendingReveal.current = focusProposalId;
     }
-    // rows/visible/expiredOnly from the selection-change render; polls must not re-run this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusProposalId]);
+    const key = pendingReveal.current;
+    if (!key || key !== focusProposalId) return;
+    if (!rows.some((p) => p.id === key)) return; // tab switch / poll still pending
+    pendingReveal.current = null; // decided once
+    if (visible.some((p) => p.id === key)) return; // visible: keep the filters
+    setFilter("");
+    const row = rows.find((p) => p.id === key);
+    if (expiredOnly && row && !row.expired) setExpiredOnly(false);
+  }, [focusProposalId, rows, visible, expiredOnly]);
 
   // Deep link: open tab first, then history if the id is a decided proposal.
   // Hash stays; we only switch tabs so the row is in `visible`.
