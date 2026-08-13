@@ -387,7 +387,7 @@ export function Runs({
             <div className="rounded-md border border-(--border) px-3 py-1">
               {d.lifecycle.map((e) => (
                 <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                  <span className="mono w-[64px] shrink-0 text-(--text-faint)">
+                  <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.at}>
                     {new Date(e.at).toLocaleTimeString([], { hour12: false })}
                   </span>
                   <span className="shrink-0">
@@ -413,6 +413,20 @@ export function Runs({
                   <div className="mono truncate text-[11px] text-(--text-faint)">
                     {a.reason_code ?? ""} {a.workspace_path ?? ""}
                   </div>
+                  {(a.started_at || a.finished_at) && (
+                    <div className="mt-1 flex gap-3 text-[11px] text-(--text-faint)">
+                      {a.started_at && (
+                        <span>
+                          started <Ago iso={a.started_at} now={now} />
+                        </span>
+                      )}
+                      {a.finished_at && (
+                        <span>
+                          finished <Ago iso={a.finished_at} now={now} />
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </Section>

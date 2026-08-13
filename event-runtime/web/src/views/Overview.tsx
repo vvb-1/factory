@@ -14,6 +14,7 @@ import {
   StateBadge,
   StatTile,
   VerbError,
+  copyText,
 } from "../components/ui";
 
 const FEED_CAP = 50;
@@ -190,6 +191,7 @@ export function Overview({
                   {a.text}
                 </span>
                 <span className="flex shrink-0 gap-2">
+                  <Button onClick={() => copyText(a.text, "anomaly")}>Copy</Button>
                   {a.requeue && (
                     <Button
                       disabled={!connected || requeue.isPending}

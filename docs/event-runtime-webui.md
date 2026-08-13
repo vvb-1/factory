@@ -470,6 +470,8 @@ no new API.
   `[` / `]` cycle status tabs. Graph `j`/`k` pans the selected node into
   view; **Show on canvas** does the same from the panel. List title/tabs/filter
   stay pinned while the table scrolls. ⌘K splits This item / Go / Commands.
-  Relative timestamps show the ISO instant on hover (lists and detail KV).
-  Click a toast to dismiss it. The document title follows the hash
+  Relative timestamps show the ISO instant on hover (lists, detail KV, run
+  lifecycle clock, attempt start/finish). Doctor anomalies copy. A filtered
+  empty list reminds that Esc clears. Selection wash is denser so j/k is
+  obvious. Click a toast to dismiss it. The document title follows the hash
   (`factory · Runs · run_id`).

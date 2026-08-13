@@ -119,11 +119,14 @@ export function ListEmpty({
   if (query.isPending && !query.data) msg = `Loading ${noun}…`;
   else if (query.isError && !query.data) {
     msg = `Cannot reach the control API — ${noun} will appear when it is up.`;
-  } else if (filtered) msg = `No ${noun} match this filter.`;
+  }   else if (filtered) msg = `No ${noun} match this filter.`;
   return (
     <tr>
       <td colSpan={colSpan} className="px-3 py-8 text-center text-(--text-faint)">
         <div>{msg}</div>
+        {filtered && !query.isPending && (
+          <div className="mt-2 text-[11px]">Esc clears the filter</div>
+        )}
         {action && !query.isPending && !query.isError && !filtered && <div className="mt-3">{action}</div>}
       </td>
     </tr>
