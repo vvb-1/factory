@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { hashPath } from "../hash";
 import { useNow } from "../hooks";
 import type { JournalEntry, EventFocus } from "../types";
 import {
@@ -14,11 +15,21 @@ import {
   StateBadge,
   StatTile,
   VerbError,
+  ago,
   copyText,
   notify,
 } from "../components/ui";
 
 const FEED_CAP = 50;
+
+/**
+ * Workers has no jump callback from App (there is no `onJumpWorker`), so write
+ * the hash the router already reads — a cross-view write, which pushes history
+ * exactly like the nav rail does.
+ */
+function jumpWorkers(workerId?: string): void {
+  window.location.hash = `#/${hashPath("workers", workerId)}`;
+}
 
 /**
  * Live activity feed off GET /journal: first fetch seeds the latest entries,
@@ -123,31 +134,70 @@ export function Overview({
 
   const s = status.data;
   const anomalies = s?.anomalies;
-  const anomalyRows: { text: string; linkLabel: string; link: () => void; requeue?: { source: string; eventId: string } }[] = [];
+  const anomalyRows: {
+    text: string;
+    links: { label: string; go: () => void }[];
+    requeue?: { source: string; eventId: string };
+  }[] = [];
   if (anomalies) {
     for (const id of anomalies.expiredOpenProposals) {
-      anomalyRows.push({ text: `expired open proposal ${id}`, linkLabel: "View proposal", link: () => onJumpProposal(id) });
+      anomalyRows.push({
+        text: `expired open proposal ${id}`,
+        links: [{ label: "View proposal", go: () => onJumpProposal(id) }],
+      });
     }
     if (anomalies.staleLeases > 0) {
       anomalyRows.push({
         text: `stale leases: ${anomalies.staleLeases}`,
-        linkLabel: "View leased runs",
-        link: () => onJumpRuns("LEASED"),
+        links: [{ label: "View leased runs", go: () => onJumpRuns("LEASED") }],
       });
     }
     if (anomalies.unpublishedOutbox > 0) {
       anomalyRows.push({
         text: `unpublished outbox rows: ${anomalies.unpublishedOutbox}`,
-        linkLabel: "View outbox",
-        link: () => document.getElementById("outbox")?.scrollIntoView({ block: "start" }),
+        links: [
+          {
+            label: "View outbox",
+            go: () => document.getElementById("outbox")?.scrollIntoView({ block: "start" }),
+          },
+        ],
       });
     }
     for (const d of anomalies.deadLettered) {
       anomalyRows.push({
         text: `dead-lettered (${d.source}, ${d.eventId}): ${d.lastError ?? "unknown error"}`,
-        linkLabel: "View event",
-        link: () => onJumpEvents({ status: "dead_lettered", source: d.source, eventId: d.eventId }),
+        links: [
+          {
+            label: "View event",
+            go: () => onJumpEvents({ status: "dead_lettered", source: d.source, eventId: d.eventId }),
+          },
+        ],
         requeue: { source: d.source, eventId: d.eventId },
+      });
+    }
+    // A stale worker still holding a run: the process is gone but nothing has
+    // reclaimed the run yet, so both ends of that gap need a jump.
+    for (const w of anomalies.stalledWorkers) {
+      anomalyRows.push({
+        // Both ids lead, because the row truncates from the right: the age and
+        // the host are the parts an operator can lose and still act.
+        text: `stalled worker ${w.workerId} still holds run ${w.runId} — last heartbeat ${ago(w.lastSeen, now)} on ${w.host}`,
+        links: [
+          { label: "View worker", go: () => jumpWorkers(w.workerId) },
+          { label: "View run", go: () => onJumpRun(w.runId) },
+        ],
+      });
+    }
+    if (anomalies.noWorkers) {
+      // The count comes from the same snapshot the runtime derived noWorkers
+      // from, so the sentence and the runs tile can never disagree.
+      const queued = s?.runs.byState.QUEUED ?? 0;
+      anomalyRows.push({
+        text: `${queued} queued run${queued === 1 ? "" : "s"} and no live worker to claim ${queued === 1 ? "it" : "them"} — nothing will start until one registers`,
+        links: [
+          { label: "View workers", go: () => jumpWorkers() },
+          { label: "View queued runs", go: () => onJumpRuns("QUEUED") },
+        ],
       });
     }
   }
@@ -202,6 +252,24 @@ export function Overview({
               onClick={() => onJumpRuns(k)}
             />
           ))}
+          <StatTile
+            label="workers · live"
+            value={s.workers.live}
+            hue={s.workers.live > 0 ? "var(--hue-ok)" : undefined}
+            onClick={() => jumpWorkers()}
+          />
+          <StatTile
+            label="workers · busy"
+            value={s.workers.busy}
+            hue={s.workers.busy > 0 ? "var(--hue-info)" : undefined}
+            onClick={() => jumpWorkers()}
+          />
+          <StatTile
+            label="workers · stale"
+            value={s.workers.stale}
+            hue={s.workers.stale > 0 ? "var(--hue-warn)" : undefined}
+            onClick={() => jumpWorkers()}
+          />
         </div>
       )}
 
@@ -216,7 +284,7 @@ export function Overview({
           <div className="rounded-md border border-(--border)">
             {anomalyRows.map((a, i) => (
               <div key={i} className="flex items-center justify-between gap-3 border-b border-(--border) px-3 py-2 last:border-0">
-                <span className="truncate" style={{ color: "var(--hue-warn)" }}>
+                <span className="truncate" title={a.text} style={{ color: "var(--hue-warn)" }}>
                   {a.text}
                 </span>
                 <span className="flex shrink-0 gap-2">
@@ -229,7 +297,11 @@ export function Overview({
                       Requeue
                     </Button>
                   )}
-                  <Button onClick={a.link}>{a.linkLabel}</Button>
+                  {a.links.map((l) => (
+                    <Button key={l.label} onClick={l.go}>
+                      {l.label}
+                    </Button>
+                  ))}
                 </span>
               </div>
             ))}
