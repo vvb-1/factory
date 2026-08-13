@@ -14,16 +14,19 @@ import { Graph } from "./views/Graph";
 import { Overview } from "./views/Overview";
 import { Proposals } from "./views/Proposals";
 import { Runs } from "./views/Runs";
+import { Workers } from "./views/Workers";
 
 // Agents rides `g t` ("what is this agent?"): o/e/p/r are taken, and `g a`
 // would double-fire the proposals view's `a` (approve) list key — chord
-// suffixes must never collide with single-key verbs.
+// suffixes must never collide with single-key verbs. Workers keeps its
+// natural `g w`: `w` is no view's list verb.
 const NAV = [
   { key: "overview", label: "Overview", go: "o" },
   { key: "events", label: "Events", go: "e" },
   { key: "proposals", label: "Proposals", go: "p" },
   { key: "runs", label: "Runs", go: "r" },
   { key: "agents", label: "Agents", go: "t" },
+  { key: "workers", label: "Workers", go: "w" },
   { key: "graph", label: "Graph", go: "g" },
 ] as const;
 
@@ -42,6 +45,7 @@ export function App() {
   const focusRunId = view === "runs" ? (route[1] ?? null) : null;
   const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
   const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
+  const focusWorkerId = view === "workers" ? (route[1] ?? null) : null;
   const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
   const hashEvent: EventFocus | null =
     view === "events" && route[1] && route[2]
@@ -84,6 +88,7 @@ export function App() {
     navigate("events");
   };
   const jumpToAgent = (ref: string) => navigate(hashPath("agents", ref));
+  const jumpToWorker = (id: string) => navigate(hashPath("workers", id));
   const jumpToGraph = (nodeId?: string) => navigate(hashPath("graph", nodeId));
 
   const health = useQuery({
@@ -104,6 +109,8 @@ export function App() {
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
   const eventAttention =
     (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
+  const busyWorkers = status.data?.workers.busy ?? 0;
+  const staleWorkers = status.data?.workers.stale ?? 0;
 
   const env = health.data?.env;
   const envHue = !connected
@@ -218,14 +225,31 @@ export function App() {
         </div>
         <div className="flex-1 px-2">
           {NAV.map((n) => {
-            const count =
+            // Workers is the one badge whose meaning can flip: a stale
+            // heartbeat is a worker that is gone while claiming to work, so it
+            // outranks the busy count. The word carries that — reading the
+            // count off the tone alone fails in the contrast theme.
+            const badge: { count: number; hue: string; word?: string; title?: string } =
               n.key === "proposals"
-                ? openProposals
+                ? { count: openProposals, hue: "var(--accent)" }
                 : n.key === "runs"
-                  ? activeRuns
+                  ? { count: activeRuns, hue: "var(--accent)" }
                   : n.key === "events"
-                    ? eventAttention
-                    : 0;
+                    ? { count: eventAttention, hue: "var(--accent)" }
+                    : n.key === "workers"
+                      ? staleWorkers > 0
+                        ? {
+                            count: staleWorkers,
+                            hue: "var(--hue-warn)",
+                            word: "stale",
+                            title: `${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`,
+                          }
+                        : {
+                            count: busyWorkers,
+                            hue: "var(--accent)",
+                            title: `${busyWorkers} worker${busyWorkers === 1 ? "" : "s"} busy`,
+                          }
+                      : { count: 0, hue: "var(--accent)" };
             return (
               <button
                 key={n.key}
@@ -239,15 +263,17 @@ export function App() {
                 }`}
               >
                 <span>{n.label}</span>
-                {count > 0 && (
+                {badge.count > 0 && (
                   <span
                     className="rounded px-1.5 text-[11px] tabular-nums"
+                    title={badge.title}
                     style={{
-                      color: "var(--accent)",
-                      background: "color-mix(in oklch, var(--accent) 14%, transparent)",
+                      color: badge.hue,
+                      background: `color-mix(in oklch, ${badge.hue} 14%, transparent)`,
                     }}
                   >
-                    {count}
+                    {badge.count}
+                    {badge.word && <span className="ml-1">{badge.word}</span>}
                   </span>
                 )}
               </button>
@@ -277,7 +303,7 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/e/p/r/t/g</span> · <span className="mono">/</span> filter ·{" "}
+            <span className="mono">o/e/p/r/t/w/g</span> · <span className="mono">/</span> filter ·{" "}
             <span className="mono">i</span> inject · <span className="mono">?</span> keys
           </div>
         </div>
@@ -347,6 +373,11 @@ export function App() {
               focusAgentRef={focusAgentRef}
               onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
             />
+          ) : view === "workers" ? (
+            <Workers
+              focusWorkerId={focusWorkerId}
+              onSelectWorker={(id) => navigate(hashPath("workers", id))}
+            />
           ) : view === "events" ? (
             <Events
               connected={connected}
@@ -391,6 +422,7 @@ export function App() {
         onJumpProposal={jumpToProposal}
         onJumpEvent={jumpToEvent}
         onJumpAgent={jumpToAgent}
+        onJumpWorker={jumpToWorker}
       />
       {injectOpen && (
         <InjectDialog

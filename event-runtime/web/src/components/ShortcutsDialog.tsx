@@ -2,7 +2,10 @@ import { Dialog } from "./ui";
 
 const ROWS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
-  { keys: "g o / e / p / r / t / g", does: "Overview / Events / Proposals / Runs / Agents / Graph" },
+  {
+    keys: "g → o / e / p / r / t / w / g",
+    does: "Overview / Events / Proposals / Runs / Agents / Workers / Graph",
+  },
   { keys: "i", does: "inject event" },
   { keys: "/", does: "focus filter (Events, if none on this view)" },
   { keys: "j k  ↑↓", does: "move list (or graph) selection" },
