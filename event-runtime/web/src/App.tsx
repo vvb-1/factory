@@ -111,6 +111,9 @@ export function App() {
     (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
   const busyWorkers = status.data?.workers.busy ?? 0;
   const staleWorkers = status.data?.workers.stale ?? 0;
+  // null until the first status lands: reading "no workers" off a pending
+  // fetch is the same false alarm as flashing "unreachable" on first load.
+  const liveWorkers = status.data?.workers.live ?? null;
 
   const env = health.data?.env;
   const envHue = !connected
@@ -290,12 +293,34 @@ export function App() {
         <div className="border-t border-(--border) px-4 py-3 text-[11px]">
           <div className="flex items-center gap-2">
             <span
-              className="size-2 rounded-full"
+              className="size-2 shrink-0 rounded-full"
               style={{ background: connected ? "var(--hue-ok)" : "var(--hue-err)" }}
             />
             {connected ? (
               <span className="text-(--text-dim)">
                 connected · <span className="mono">{health.data?.policyVersion}</span>
+                {liveWorkers !== null && (
+                  <>
+                    {" "}
+                    {/* One unbreakable token: at this nav width the fragment
+                        always wraps, and a bare "1" ending the line above its
+                        own "worker" reads as a different number. */}
+                    <span
+                      className="whitespace-nowrap"
+                      style={staleWorkers > 0 ? { color: "var(--hue-warn)" } : undefined}
+                      title={
+                        staleWorkers > 0
+                          ? `${liveWorkers} live · ${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`
+                          : `${liveWorkers} live worker${liveWorkers === 1 ? "" : "s"}`
+                      }
+                    >
+                      ·{" "}
+                      {liveWorkers === 0
+                        ? "no workers"
+                        : `${liveWorkers} worker${liveWorkers === 1 ? "" : "s"}`}
+                    </span>
+                  </>
+                )}
               </span>
             ) : (
               <span style={{ color: "var(--hue-err)" }}>runtime unreachable</span>
