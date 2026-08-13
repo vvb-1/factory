@@ -16,6 +16,7 @@ import { artifactsRoot } from "./config.mjs";
 import { nextCounter, tx, txImmediate } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
 import { IllegalTransition, transition } from "./lifecycle.mjs";
+import { closeOpenProposalForRun } from "./proposals.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { satisfiesPlacement } from "./workers.mjs";
 import { createWorkspace, destroyWorkspace } from "./workspace.mjs";
@@ -335,10 +336,16 @@ export async function runOnce(db, registry, adapters, opts = {}) {
 
 /**
  * Operator cancel (§13): legal from any state before VERIFYING; a VERIFYING
- * or terminal run throws IllegalTransition to the caller.
+ * or terminal run throws IllegalTransition to the caller. A still-open
+ * proposal for the run is closed in the same transaction (reason
+ * `run_cancelled`); none, or more than one, is left untouched.
  */
 export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = Date.now(), policyVersion } = {}) {
-  return transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+  return tx(db, () => {
+    const result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+    closeOpenProposalForRun(db, runId, { actor, now });
+    return result;
+  });
 }
 
 /**

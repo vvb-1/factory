@@ -119,6 +119,29 @@ export function approveProposal(db, registry, id, { actor, now = Date.now(), pol
 }
 
 /**
+ * Close the unique open proposal for a cancelled run (reason `run_cancelled`).
+ *
+ * Keyed on `run_id` + `status = 'open'`. Zero matches is a no-op — cancelling
+ * a QUEUED/LEASED/RUNNING run whose proposal is already decided must still
+ * succeed. Two or more open rows for the same run is ambiguous: leave them
+ * all untouched rather than guess which one to close. Caller must already
+ * hold the transaction that performed the CANCELLED transition.
+ *
+ * @returns {{ closed: true, id: string } | { closed: false }}
+ */
+export function closeOpenProposalForRun(db, runId, { actor, now = Date.now() } = {}) {
+  const open = db
+    .query(`SELECT id FROM proposals WHERE run_id = ? AND status = 'open'`)
+    .all(runId);
+  if (open.length !== 1) return { closed: false };
+  const at = new Date(now).toISOString();
+  db.query(
+    `UPDATE proposals SET status = 'rejected', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`,
+  ).run(at, actor, "run_cancelled", open[0].id);
+  return { closed: true, id: open[0].id };
+}
+
+/**
  * Reject an open proposal. A run still sitting in PROPOSED is cancelled with
  * reason 'proposal_rejected' and the operator recorded as actor (§8).
  */
