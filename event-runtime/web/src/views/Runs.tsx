@@ -368,6 +368,9 @@ export function Runs({
             <KV k="workspace" v={d.workspace} />
             <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
             <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
+            <Disclosure label="immutable RunSpec">
+              <JsonBlock value={d.run.spec} />
+            </Disclosure>
           </Section>
 
           <div className="mb-4 flex gap-2">
@@ -503,12 +506,6 @@ export function Runs({
               ))}
             </Section>
           )}
-
-          <Section title="Spec">
-            <Disclosure label="immutable RunSpec">
-              <JsonBlock value={d.run.spec} />
-            </Disclosure>
-          </Section>
             </>
           )}
         </DetailPane>
