@@ -5,7 +5,7 @@ import { hashPath } from "../hash";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
-import type { RunState } from "../types";
+import type { Attempt, RunState } from "../types";
 import {
   Ago,
   Button,
@@ -31,6 +31,143 @@ const STATE_TABS: (RunState | "ALL")[] = [
   "ALL", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
 ];
 const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
+
+/**
+ * The two states `reapExpiredLeases` sweeps (lib/worker.mjs) — so exactly the
+ * states where the current attempt is racing a deadline. A VERIFYING run has
+ * already exited its agent and is never reaped, so it has no clock to show.
+ */
+const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING"];
+
+/** `m:ss` while seconds decide, coarser once they stop mattering. */
+const dur = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  return `${Math.floor(s / 86400)}d${Math.floor((s % 86400) / 3600)}h`;
+};
+
+/** `off`: no deadline running yet. `spent`: the deadline passed; the runtime has not caught up. */
+type Clock = { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };
+
+/** A deadline we cannot read is no deadline: better silent than counting down to NaN. */
+const clockTo = (iso: string, offsetMs: number, now: number): Clock => {
+  const deadline = Date.parse(iso) + offsetMs;
+  if (Number.isNaN(deadline)) return { kind: "off" };
+  // Whole seconds, rounded up: the last fraction of a second reads 0:01, so
+  // only a genuinely spent deadline reads `spent`.
+  const left = Math.ceil((deadline - now) / 1000) * 1000;
+  return left <= 0 ? { kind: "spent" } : { kind: "live", leftMs: left };
+};
+
+/**
+ * The two deadlines an in-flight attempt is racing, both from what the API
+ * already serves:
+ *
+ * - the agent's budget — the worker hands `spec.timeoutSeconds` to the adapter
+ *   when it starts the attempt and records TIMED_OUT if the child outlives it,
+ *   so the deadline is `started_at + timeoutSeconds`, a shade early because
+ *   workspace setup happens between the two;
+ * - the lease — minted once at claim for the budget plus a fixed grace and
+ *   never renewed, so when it passes `reapExpiredLeases` re-queues the run
+ *   whatever the worker believes it is doing.
+ */
+function deadlinesOf(a: Attempt, timeoutSeconds: number, now: number): { timeout: Clock; lease: Clock } {
+  return {
+    timeout: a.started_at ? clockTo(a.started_at, timeoutSeconds * 1000, now) : { kind: "off" },
+    lease: a.lease_expires_at ? clockTo(a.lease_expires_at, 0, now) : { kind: "off" },
+  };
+}
+
+/** One hue per clock, so the countdown and the meter never disagree. */
+const budgetHue = (c: Clock, timeoutSeconds: number): string | undefined => {
+  if (c.kind === "spent") return "var(--hue-err)";
+  // The last tenth of the declared budget — long enough to notice on a long run.
+  if (c.kind === "live" && c.leftMs <= timeoutSeconds * 100) return "var(--hue-warn)";
+  return undefined;
+};
+
+/**
+ * How long this agent has left before the worker stops it. The arithmetic is
+ * local and the verdict stays the runtime's: a spent budget says so rather than
+ * claiming the run is TIMED_OUT, which is the state badge's call on the next poll.
+ */
+function BudgetClock({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }) {
+  const budget = `${timeoutSeconds}s budget`;
+  if (c.kind === "off")
+    return (
+      <span className="text-(--text-faint)" title={`The ${budget} starts when a worker starts the agent; this attempt is only leased so far.`}>
+        {budget}, not started
+      </span>
+    );
+  const hue = budgetHue(c, timeoutSeconds);
+  if (c.kind === "spent")
+    return (
+      <span
+        style={{ color: hue }}
+        title={`The ${budget} is spent — the worker stops the agent and records TIMED_OUT. A run still sitting here has lost its worker, and the lease is what takes it back.`}
+      >
+        budget spent
+      </span>
+    );
+  return (
+    <span
+      style={{ color: hue }}
+      title={`TIMED_OUT in ${dur(c.leftMs)} unless the agent finishes first — the ${budget}, measured from when the attempt started.`}
+    >
+      timeout in {dur(c.leftMs)}
+    </span>
+  );
+}
+
+/**
+ * How long until the runtime takes the run back. While the budget still has
+ * room the lease is grace nobody needs to watch, so it only goes loud once the
+ * budget is spent — the case where the worker is gone and the reaper is the
+ * only thing left that will move this run.
+ */
+function LeaseClock({ c, urgent }: { c: Clock; urgent: boolean }) {
+  if (c.kind === "off")
+    return (
+      <span title="This attempt records no lease, so nothing expires and the reaper will not take the run back.">
+        no lease
+      </span>
+    );
+  if (c.kind === "spent")
+    return (
+      <span
+        style={{ color: "var(--hue-err)" }}
+        title="The lease has run out — the reaper re-queues this run on its next sweep, and the state badge catches up then."
+      >
+        reap due
+      </span>
+    );
+  return (
+    <span
+      style={urgent ? { color: "var(--hue-warn)" } : undefined}
+      title={`Unless the attempt finishes first, the reaper re-queues this run in ${dur(c.leftMs)}. Leases are not renewed.`}
+    >
+      reaped in {dur(c.leftMs)}
+    </span>
+  );
+}
+
+/** How much of the budget is spent — the glance; `BudgetClock` is the number. */
+function BudgetMeter({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }) {
+  if (c.kind === "off" || timeoutSeconds <= 0) return null;
+  const spent = c.kind === "spent" ? 1 : 1 - c.leftMs / (timeoutSeconds * 1000);
+  return (
+    <div className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)" aria-hidden="true">
+      <div
+        className="h-full rounded-full transition-[width,background-color] duration-1000 ease-linear"
+        style={{
+          width: `${Math.min(100, Math.max(2, spent * 100))}%`,
+          background: budgetHue(c, timeoutSeconds) ?? "var(--hue-ok)",
+        }}
+      />
+    </div>
+  );
+}
 
 function rowWash(state: string): string {
   if (state === "FAILED" || state === "TIMED_OUT") return "row-wash-err";
@@ -205,6 +342,14 @@ export function Runs({
 
   const d = detail.data;
   const attemptsExhausted = d ? d.run.attempts >= d.run.spec.maxAttempts : false;
+
+  // The reaper keys off the run's current attempt (`a.attempt = r.attempts`),
+  // so that is the only attempt whose deadlines are still running.
+  const current =
+    d && IN_FLIGHT.includes(d.run.state)
+      ? (d.attempts.find((a) => a.attempt === d.run.attempts) ?? null)
+      : null;
+  const clocks = d && current ? deadlinesOf(current, d.run.spec.timeoutSeconds, now) : null;
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
@@ -414,6 +559,44 @@ export function Runs({
               <JsonBlock value={d.run.spec} />
             </Disclosure>
           </Section>
+
+          {/* What a live run is racing, above the verbs: cancelling is the
+              answer to a budget about to be spent on a hung agent. */}
+          {current && clocks && (
+            <Section title="Deadlines">
+              <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums">
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-(--text-faint)">
+                    attempt #{current.attempt}{" "}
+                    {current.started_at ? (
+                      <>
+                        started <Ago iso={current.started_at} now={now} className="text-(--text-dim)" />
+                      </>
+                    ) : (
+                      "not started"
+                    )}
+                  </span>
+                  <BudgetClock c={clocks.timeout} timeoutSeconds={d.run.spec.timeoutSeconds} />
+                </div>
+                <BudgetMeter c={clocks.timeout} timeoutSeconds={d.run.spec.timeoutSeconds} />
+                <div className="mt-2 flex items-baseline justify-between gap-4 text-[11px] text-(--text-faint)">
+                  <span className="flex items-baseline gap-1.5 truncate">
+                    lease owner
+                    {current.lease_owner ? (
+                      <ActorRef actor={current.lease_owner} />
+                    ) : (
+                      <span className="mono">unclaimed</span>
+                    )}
+                  </span>
+                  <LeaseClock c={clocks.lease} urgent={clocks.timeout.kind === "spent"} />
+                </div>
+                <div className="mt-2 text-[11px] text-(--text-faint)">
+                  The lease outlasts the budget by a fixed grace and is never renewed: the worker is meant to stop
+                  the agent first, and the reaper only takes the run back when the worker itself is gone.
+                </div>
+              </div>
+            </Section>
+          )}
 
           <div className="mb-4 flex gap-2">
             {!TERMINAL.includes(d.run.state) && (
