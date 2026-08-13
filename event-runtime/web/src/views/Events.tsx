@@ -376,12 +376,22 @@ export function Events({
                 <td className="max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
                   {e.subject ?? "-"}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5">
-                  <StateBadge state={e.status} hues={EVENT_STATUS_HUES} />
-                  {e.planFailures > 0 && (
-                    <span className="ml-2 text-[11px]" style={{ color: "var(--hue-err)" }}>
-                      {e.planFailures} plan failure{e.planFailures === 1 ? "" : "s"}
-                    </span>
+                <td className="max-w-56 border-b border-(--border) px-3 py-1.5">
+                  <div>
+                    <StateBadge state={e.status} hues={EVENT_STATUS_HUES} />
+                    {e.planFailures > 0 && (
+                      <span className="ml-2 whitespace-nowrap text-[11px]" style={{ color: "var(--hue-err)" }}>
+                        {e.planFailures} plan failure{e.planFailures === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+                  {/* Why the event is parked, on the row: `.mono` carries its own
+                      11.5px, so no size utility (it is unlayered and would win).
+                      The detail pane keeps the untruncated error. */}
+                  {e.lastPlanError && (
+                    <div className="mono mt-0.5 truncate text-(--text-dim)" title={e.lastPlanError}>
+                      {e.lastPlanError}
+                    </div>
                   )}
                 </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
