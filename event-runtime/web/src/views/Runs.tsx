@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
@@ -81,12 +81,20 @@ export function Runs({
   const selectedId = focusRunId;
   const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
 
-  // Deep link: switch to ALL if the run isn't on this tab. Hash stays put.
-  // Clear the filter only when the selected run is on this tab but hidden by it.
+  // Deep link / jump: switch to ALL if the run isn't on this tab. Hash stays put.
+  // Reveal (clear filter) once per focus id, after the run is in `rows` so a
+  // late arrival still surfaces. Typing a filter does not re-reveal.
+  const revealedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusRunId) return;
+    if (!focusRunId) {
+      revealedFor.current = null;
+      return;
+    }
     if (rows.some((r) => r.runId === focusRunId)) {
-      if (!visible.some((r) => r.runId === focusRunId)) setFilter("");
+      if (revealedFor.current !== focusRunId) {
+        revealedFor.current = focusRunId;
+        if (!visible.some((r) => r.runId === focusRunId)) setFilter("");
+      }
       return;
     }
     if (tab !== "ALL") setTab("ALL");
