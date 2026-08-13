@@ -184,6 +184,7 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 
 - `⌘K` — cmdk palette: navigate to any view, jump to a run/proposal by ID,
   and invoke the verbs valid for the current selection.
+- `i` — inject event. `?` — keyboard cheatsheet. `c` — copy the selected id.
 - `j`/`k` or arrows — move list selection; `Enter`/`o` — open detail panel;
   `Esc` — close it.
 - On a selected proposal: `a` approve (opens the confirm with the spec in
@@ -450,4 +451,10 @@ no new API.
 - **Overview.** Expired-proposals tile lands on the Open tab with the expired
   chip on. Quiet Graph and Inject jumps in the header.
 - **⌘K** includes decided proposals (`GET /proposals?status=all`). Dialogs
-  expose `role=dialog` `aria-modal`. Runs state tabs scroll on one row.
+  expose `role=dialog` `aria-modal`. Runs state tabs scroll on one row
+  (LEASED and VERIFYING included — the Overview stale-lease jump lands there).
+- **Copy link** on every detail panel copies the shareable hash (`c` copies
+  the id). Inject `i` admits then jumps to the event. `?` lists the keys.
+  Empty Events inbox offers Inject as a button. Outbox types jump to the
+  origin event when the envelope carries source+eventId. Trigger again
+  selects a "this envelope" chip.

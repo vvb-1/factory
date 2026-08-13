@@ -23,6 +23,7 @@ import {
   StateBadge,
   VerbError,
   copyText,
+  copyLink,
 } from "../components/ui";
 
 /**
@@ -195,20 +196,30 @@ export function Proposals({
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
       a: () => canApprove && connected && setConfirmApprove(true),
       x: () => isOpen && connected && openReject(),
+      c: () => sel && copyText(sel.id, "proposal id"),
     },
   });
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
-    if (!sel || !connected || !isOpen) {
+    if (!sel) {
       setContextActions([]);
     } else {
-      setContextActions([
-        ...(canApprove
-          ? [{ label: `Approve ${sel.agent ?? sel.id}…`, hint: "a", run: () => setConfirmApprove(true) }]
-          : []),
-        { label: `Reject ${sel.agent ?? sel.id}…`, hint: "x", run: openReject },
-      ]);
+      const copy = [
+        { label: `Copy ${sel.id}`, hint: "c", run: () => copyText(sel.id, "proposal id") },
+        { label: "Copy link to this proposal", run: copyLink },
+      ];
+      if (!connected || !isOpen) {
+        setContextActions(copy);
+      } else {
+        setContextActions([
+          ...(canApprove
+            ? [{ label: `Approve ${sel.agent ?? sel.id}…`, hint: "a", run: () => setConfirmApprove(true) }]
+            : []),
+          { label: `Reject ${sel.agent ?? sel.id}…`, hint: "x", run: openReject },
+          ...copy,
+        ]);
+      }
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -390,6 +401,7 @@ export function Proposals({
             </div>
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.id, "proposal id")}>Copy id</Button>
+              <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectProposal(null)}>Close</Button>
             </div>
           </div>

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { buildTemplates, triggerId, type TriggerTemplate } from "../templates";
-import { Button, Dialog, VerbError } from "./ui";
+import { Button, Dialog, VerbError, notify } from "./ui";
 
 const REQUIRED = ["schemaVersion", "eventId", "type", "source", "occurredAt"];
 
@@ -34,9 +34,11 @@ const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
  */
 export function InjectDialog({
   onClose,
+  onAdmitted,
   initialEnvelope,
 }: {
   onClose: () => void;
+  onAdmitted?: (source: string, eventId: string) => void;
   initialEnvelope?: Record<string, unknown>;
 }) {
   const queryClient = useQueryClient();
@@ -55,10 +57,16 @@ export function InjectDialog({
   const [confirming, setConfirming] = useState(false);
 
   const inject = useMutation({
-    mutationFn: (envelope: unknown) => api.replay(envelope),
-    onSuccess: () => {
+    mutationFn: (envelope: Record<string, unknown>) => api.replay(envelope),
+    onSuccess: (data, envelope) => {
       queryClient.invalidateQueries();
       setConfirming(false);
+      notify(
+        data.duplicate ? `Duplicate event ${data.eventId}` : `Admitted event ${data.eventId}`,
+        data.duplicate ? "info" : "ok",
+      );
+      const source = typeof envelope.source === "string" ? envelope.source : "web-trigger";
+      onAdmitted?.(source, data.eventId);
     },
   });
 
@@ -108,9 +116,12 @@ export function InjectDialog({
       if (e.target instanceof HTMLTextAreaElement) return;
       const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
       if (!keys.includes(e.key)) return;
-      if (templates.length === 0) return;
       e.preventDefault();
-      const ids = [...templates.map((t) => t.eventType), null];
+      const ids: Array<string | null> = [
+        ...(initialEnvelope ? ["__given__"] : []),
+        ...templates.map((t) => t.eventType),
+        null,
+      ];
       const idx = selected === null ? ids.length - 1 : Math.max(ids.indexOf(selected), 0);
       const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
       const next = ids[(idx + delta + ids.length) % ids.length];
@@ -122,12 +133,20 @@ export function InjectDialog({
         inject.reset();
         return;
       }
+      if (next === "__given__" && initialEnvelope) {
+        setSelected("__given__");
+        setText(pretty(initialEnvelope));
+        setUnregisteredAck(false);
+        setConfirming(false);
+        inject.reset();
+        return;
+      }
       const t = templates.find((x) => x.eventType === next);
       if (t) choose(t);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [templates, selected]);
+  }, [templates, selected, initialEnvelope, openedAt]);
 
   const outcome = inject.data;
   const seeded = Boolean(initialEnvelope);
@@ -149,6 +168,27 @@ export function InjectDialog({
       )}
 
       <div className="mb-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Event type templates">
+        {initialEnvelope && (
+          <button
+            type="button"
+            role="radio"
+            aria-checked={selected === "__given__"}
+            onClick={() => {
+              setSelected("__given__");
+              setText(pretty(initialEnvelope));
+              setUnregisteredAck(false);
+              setConfirming(false);
+              inject.reset();
+            }}
+            className={`rounded-md border px-2 py-1 text-[11.5px] ${
+              selected === "__given__"
+                ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
+            }`}
+          >
+            this envelope
+          </button>
+        )}
         {templates.map((t) => (
           <button
             key={t.eventType}

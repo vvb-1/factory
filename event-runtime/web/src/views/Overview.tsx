@@ -101,8 +101,8 @@ export function Overview({
     if (anomalies.staleLeases > 0) {
       anomalyRows.push({
         text: `stale leases: ${anomalies.staleLeases}`,
-        linkLabel: "View runs",
-        link: () => onJumpRuns(),
+        linkLabel: "View leased runs",
+        link: () => onJumpRuns("LEASED"),
       });
     }
     if (anomalies.unpublishedOutbox > 0) {
@@ -257,7 +257,22 @@ export function Overview({
               {(outbox.data?.outbox ?? []).map((o) => (
                 <div key={o.seq} className="border-b border-(--border) py-1.5 last:border-0">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-(--text-dim)">{String(o.event.type ?? "unknown event")}</span>
+                    {(() => {
+                      const type = String(o.event.type ?? "unknown event");
+                      const source = typeof o.event.source === "string" ? o.event.source : null;
+                      const eventId = typeof o.event.eventId === "string" ? o.event.eventId : null;
+                      return source && eventId ? (
+                        <JumpLink
+                          onClick={() => onJumpEvents({ source, eventId })}
+                          title="Open origin event"
+                          className="max-w-[70%] truncate"
+                        >
+                          {type}
+                        </JumpLink>
+                      ) : (
+                        <span className="truncate text-(--text-dim)">{type}</span>
+                      );
+                    })()}
                     {o.published_at ? (
                       <span className="mono shrink-0 text-(--text-faint)">{ago(o.published_at, now)}</span>
                     ) : (

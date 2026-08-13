@@ -21,6 +21,7 @@ import {
   StateBadge,
   VerbError,
   copyText,
+  copyLink,
 } from "../components/ui";
 
 const STATUS_TABS = ["all", "admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
@@ -64,6 +65,7 @@ export function Events({
   onJumpProposal,
   onJumpRun,
   onTriggerAgain,
+  onInject,
 }: {
   connected: boolean;
   focusEvent: EventFocus | null;
@@ -72,6 +74,7 @@ export function Events({
   onJumpProposal: (id: string) => void;
   onJumpRun: (runId: string) => void;
   onTriggerAgain: (envelope: Record<string, unknown>) => void;
+  onInject: () => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -196,6 +199,7 @@ export function Events({
       // `q` not `r`: `r` is the `g r` navigation suffix, and both listeners
       // see the same keydown — `g r` with a selection must never requeue.
       q: () => canRequeue && connected && sel && requeue.mutate(sel),
+      c: () => sel && copyText(sel.eventId, "event id"),
     },
   });
 
@@ -213,6 +217,8 @@ export function Events({
           label: `Trigger ${sel.type} again (new event id)…`,
           run: () => onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now())),
         },
+        { label: `Copy ${sel.eventId}`, hint: "c", run: () => copyText(sel.eventId, "event id") },
+        { label: "Copy link to this event", run: copyLink },
       ]);
     }
     return () => setContextActions([]);
@@ -336,8 +342,13 @@ export function Events({
                 noun="events"
                 empty={
                   tab === "all"
-                    ? "No events yet — inject one with ⌘K → Inject event."
+                    ? "No events yet."
                     : `No ${TAB_LABEL[tab].toLowerCase()} events.`
+                }
+                action={
+                  tab === "all" ? (
+                    <Button onClick={onInject}>Inject event…</Button>
+                  ) : undefined
                 }
               />
             )}
@@ -353,6 +364,7 @@ export function Events({
             </div>
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.eventId, "event id")}>Copy id</Button>
+              <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectEvent(null)}>Close</Button>
             </div>
           </div>

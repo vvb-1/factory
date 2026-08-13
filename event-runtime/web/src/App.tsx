@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { hashPath } from "./hash";
-import { useHashRoute, useTheme } from "./hooks";
+import { keyGuard, useHashRoute, useTheme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
-import { ToastContainer } from "./components/ui";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
+import { ToastContainer, copyLink } from "./components/ui";
 import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Graph } from "./views/Graph";
@@ -32,6 +33,7 @@ export function App() {
   const [, cycleTheme] = useTheme();
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [focusRunState, setFocusRunState] = useState<string | null>(null);
   const [focusExpired, setFocusExpired] = useState(false);
   const [ephemeralEvent, setEphemeralEvent] = useState<EventFocus | null>(null);
@@ -111,9 +113,26 @@ export function App() {
     ),
   );
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "i") {
+        e.preventDefault();
+        setInjectOpen(true);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const paletteActions: PaletteAction[] = [
     ...NAV.map((n) => ({ label: `Go to ${n.label}`, hint: `g ${n.go}`, run: () => navigate(n.key) })),
-    { label: "Inject event…", run: () => setInjectOpen(true) },
+    { label: "Inject event…", hint: "i", run: () => setInjectOpen(true) },
+    { label: "Copy link to this page", run: copyLink },
+    { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },
     { label: "Cycle theme (dark → light → contrast)", run: cycleTheme },
   ];
 
@@ -182,7 +201,7 @@ export function App() {
             onClick={() => setInjectOpen(true)}
             className="mt-2 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2)"
           >
-            Inject event…
+            Inject event… <span className="mono ml-1 text-(--text-faint)">i</span>
           </button>
         </div>
         <div className="border-t border-(--border) px-4 py-3 text-[11px]">
@@ -201,7 +220,8 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/e/p/r/t/g</span> navigate
+            <span className="mono">o/e/p/r/t/g</span> · <span className="mono">i</span> inject ·{" "}
+            <span className="mono">?</span> keys
           </div>
         </div>
       </nav>
@@ -267,6 +287,7 @@ export function App() {
                 setInjectSeed(envelope);
                 setInjectOpen(true);
               }}
+              onInject={() => setInjectOpen(true)}
             />
           ) : (
             <Overview
@@ -301,8 +322,14 @@ export function App() {
             setInjectOpen(false);
             setInjectSeed(undefined);
           }}
+          onAdmitted={(source, eventId) => {
+            setInjectOpen(false);
+            setInjectSeed(undefined);
+            jumpToEvent(source, eventId);
+          }}
         />
       )}
+      {helpOpen && <ShortcutsDialog onClose={() => setHelpOpen(false)} />}
       <ToastContainer />
     </div>
   );

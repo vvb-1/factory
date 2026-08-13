@@ -20,10 +20,11 @@ import {
   StateBadge,
   VerbError,
   copyText,
+  copyLink,
 } from "../components/ui";
 
 const STATE_TABS: (RunState | "ALL")[] = [
-  "ALL", "QUEUED", "RUNNING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
+  "ALL", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
 ];
 const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
 
@@ -145,6 +146,7 @@ export function Runs({
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
       x: () => sel && connected && !TERMINAL.includes(sel.state) && setConfirm("cancel"),
+      c: () => sel && copyText(sel.runId, "run id"),
     },
   });
 
@@ -153,25 +155,34 @@ export function Runs({
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
-    if (!d || !connected) {
+    if (!sel) {
       setContextActions([]);
     } else {
-      setContextActions([
-        ...(!TERMINAL.includes(d.run.state)
-          ? [{ label: `Cancel ${d.run.runId}…`, run: () => setConfirm("cancel") }]
-          : []),
-        ...(d.run.state === "FAILED"
-          ? [
-              attemptsExhausted
-                ? { label: `Force retry ${d.run.runId}…`, run: () => setConfirm("force-retry") }
-                : { label: `Retry ${d.run.runId}`, run: () => retry.mutate({ id: d.run.runId, force: false }) },
-            ]
-          : []),
-      ]);
+      const copy = [
+        { label: `Copy ${sel.runId}`, hint: "c", run: () => copyText(sel.runId, "run id") },
+        { label: "Copy link to this run", run: copyLink },
+      ];
+      if (!d || !connected) {
+        setContextActions(copy);
+      } else {
+        setContextActions([
+          ...(!TERMINAL.includes(d.run.state)
+            ? [{ label: `Cancel ${d.run.runId}…`, hint: "x", run: () => setConfirm("cancel") }]
+            : []),
+          ...(d.run.state === "FAILED"
+            ? [
+                attemptsExhausted
+                  ? { label: `Force retry ${d.run.runId}…`, run: () => setConfirm("force-retry") }
+                  : { label: `Retry ${d.run.runId}`, run: () => retry.mutate({ id: d.run.runId, force: false }) },
+              ]
+            : []),
+          ...copy,
+        ]);
+      }
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d?.run.runId, d?.run.state, attemptsExhausted, connected]);
+  }, [sel?.runId, d?.run.runId, d?.run.state, attemptsExhausted, connected]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -284,6 +295,7 @@ export function Runs({
             <StateBadge state={sel.state} />
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
+              <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectRun(null)}>Close</Button>
             </div>
           </div>

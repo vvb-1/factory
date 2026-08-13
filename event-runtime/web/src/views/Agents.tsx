@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
-import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, Section, copyText } from "../components/ui";
+import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, Section, copyText, copyLink } from "../components/ui";
+import { setContextActions } from "../palette";
 
 const caps = (a: AgentDef) =>
   [a.capabilities.filesystem, ...(a.capabilities.services ?? [])].filter(Boolean).join(", ") || "none";
@@ -52,7 +53,22 @@ export function Agents({
     selected: selectedIndex,
     onSelect: (i) => onSelectAgent(visible[i]?.ref ?? null),
     onClose: () => onSelectAgent(null),
+    keys: {
+      c: () => sel && copyText(sel.ref, "agent ref"),
+    },
   });
+
+  useEffect(() => {
+    if (!sel) {
+      setContextActions([]);
+    } else {
+      setContextActions([
+        { label: `Copy ${sel.ref}`, hint: "c", run: () => copyText(sel.ref, "agent ref") },
+        { label: "Copy link to this agent", run: copyLink },
+      ]);
+    }
+    return () => setContextActions([]);
+  }, [sel?.ref]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -139,6 +155,7 @@ export function Agents({
             </div>
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.ref, "agent ref")}>Copy ref</Button>
+              <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectAgent(null)}>Close</Button>
             </div>
           </div>

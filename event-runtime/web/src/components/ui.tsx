@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { modal, useNow } from "../hooks";
 
 /** One fixed hue map for the closed §8 lifecycle — identical in every view. */
@@ -45,6 +45,11 @@ export function copyText(text: string, label: string) {
   notify(`Copied ${label}`, "info");
 }
 
+/** Shareable hash of the current selection — the payoff of hash-as-source-of-truth. */
+export function copyLink() {
+  copyText(window.location.href, "link");
+}
+
 export function FilterInput({
   value,
   onChange,
@@ -74,12 +79,14 @@ export function ListEmpty({
   filtered,
   noun,
   empty,
+  action,
 }: {
   colSpan: number;
   query: { isPending: boolean; isError: boolean; data?: unknown };
   filtered?: boolean;
   noun: string;
   empty: string;
+  action?: ReactNode;
 }) {
   let msg = empty;
   if (query.isPending && !query.data) msg = `Loading ${noun}…`;
@@ -89,7 +96,8 @@ export function ListEmpty({
   return (
     <tr>
       <td colSpan={colSpan} className="px-3 py-8 text-center text-(--text-faint)">
-        {msg}
+        <div>{msg}</div>
+        {action && !query.isPending && !query.isError && !filtered && <div className="mt-3">{action}</div>}
       </td>
     </tr>
   );
@@ -368,12 +376,16 @@ export function Dialog({
   wide?: boolean;
 }) {
   const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     modal.depth += 1;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
+    const root = panelRef.current;
+    const pref = root?.querySelector<HTMLElement>("[autofocus]");
+    (pref ?? root)?.focus();
     return () => {
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
@@ -385,10 +397,12 @@ export function Dialog({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`${wide ? "w-[720px]" : "w-[480px]"} max-h-[70vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl`}
+        tabIndex={-1}
+        className={`${wide ? "w-[720px]" : "w-[480px]"} max-h-[70vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl outline-none`}
       >
         <div id={titleId} className="display mb-3 text-[15px] font-semibold">
           {title}

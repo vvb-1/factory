@@ -15,7 +15,7 @@ import { buildCapabilityGraph, type GraphNode } from "../graph/model";
 import { layoutGraph, NODE_HEIGHT, NODE_WIDTH } from "../graph/layout";
 import { nodeTypes } from "../graph/nodes";
 import type { EventFocus } from "../types";
-import { Button, JsonBlock, JumpLink, KV, Section, copyText } from "../components/ui";
+import { Button, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
 
 /**
  * Graph (webui roadmap / OPS-224 phase 1, chrome OPS-230): the capability map
@@ -93,10 +93,15 @@ export function Graph({
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") onSelectNode(null);
+      if (e.key === "c" && focusNodeId) {
+        e.preventDefault();
+        const node = graph?.nodes.find((n) => n.id === focusNodeId);
+        if (node) copyText(node.label, node.kind === "agent" ? "agent ref" : "id");
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onSelectNode]);
+  }, [onSelectNode, focusNodeId, graph]);
 
   const emptyCopy = registry.isPending
     ? "Loading the capability map…"
@@ -158,6 +163,7 @@ export function Graph({
               <Button onClick={() => copyText(selected.label, selected.kind === "agent" ? "agent ref" : "id")}>
                 {selected.kind === "agent" ? "Copy ref" : "Copy id"}
               </Button>
+              <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectNode(null)}>Close</Button>
             </div>
           </div>
