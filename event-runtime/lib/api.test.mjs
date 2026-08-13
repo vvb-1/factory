@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
-import { janitorArgv, startApi } from "./api.mjs";
+import { janitorArgv, repoNamesFromInput, startApi } from "./api.mjs";
 import { apiClient } from "./client.mjs";
 import { openDb } from "./db.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
@@ -67,6 +67,17 @@ async function makeServer({ secret = SECRET, ...opts } = {}) {
     },
   };
 }
+
+describe("repoNamesFromInput (OPS-356)", () => {
+  test("unscoped is []; repoPin / repo / repos[] (string or {name}); dedupes", () => {
+    expect(repoNamesFromInput(null)).toEqual([]);
+    expect(repoNamesFromInput({})).toEqual([]);
+    expect(repoNamesFromInput({ repoPin: { repo: "bj29" } })).toEqual(["bj29"]);
+    expect(repoNamesFromInput({ repo: "coach-wattz" })).toEqual(["coach-wattz"]);
+    expect(repoNamesFromInput({ repos: ["ok", { name: "bj29" }] })).toEqual(["ok", "bj29"]);
+    expect(repoNamesFromInput({ repo: "bj29", repoPin: { repo: "bj29" }, repos: ["bj29"] })).toEqual(["bj29"]);
+  });
+});
 
 describe("webhook intake (§14)", () => {
   let s;
@@ -149,6 +160,7 @@ describe("webhook intake (§14)", () => {
     expect(events[0].eventId).toBe("hook-1");
     expect(events[0].status).toBe("admitted");
     expect(events[0].envelope.payload).toEqual({ repos: ["ok"] });
+    expect(events[0].repos).toEqual(["ok"]);
     expect(events[0].envelope.eventId).toBe("hook-1");
     expect(events[0].proposalId).toBeNull();
     expect(events[0].runId).toBeNull();
@@ -203,6 +215,23 @@ describe("missing configured secret fails closed (§14)", () => {
   });
 });
 
+describe("list views carry repos[] (OPS-356)", () => {
+  test("GET /events exposes repos from payload; unscoped is []", async () => {
+    const s = await makeServer();
+    try {
+      await s.client.replay(envelope({ eventId: "repos-ok", payload: { repos: ["ok"] } }));
+      await s.client.replay(envelope({ eventId: "repos-pin", payload: { repoPin: { repo: "bj29", ref: "develop" } } }));
+      await s.client.replay(envelope({ eventId: "repos-none", payload: {} }));
+      const { events } = await s.client.events();
+      expect(events.find((e) => e.eventId === "repos-ok").repos).toEqual(["ok"]);
+      expect(events.find((e) => e.eventId === "repos-pin").repos).toEqual(["bj29"]);
+      expect(events.find((e) => e.eventId === "repos-none").repos).toEqual([]);
+    } finally {
+      s.close();
+    }
+  });
+});
+
 describe("watched flow and operator verbs (§12, §13, §15)", () => {
   let s;
   let flowProposalId;
@@ -246,6 +275,7 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     expect(prop.decision).toBe("run");
     expect(prop.expired).toBe(false);
     expect(prop.agent).toBe("factory-status-report@1");
+    expect(prop.repos).toEqual(["ok"]);
     expect(prop.spec.adapter).toBe("claude");
     expect(prop.ttl_seconds).toBe(1800);
     flowProposalId = prop.id;
@@ -276,6 +306,7 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     const list = await s.client.runs();
     expect(list.runs.map((r) => r.runId)).toContain(flowRunId);
     expect(list.runs[0].agent).toBe("factory-status-report@1");
+    expect(list.runs[0].repos).toEqual(["ok"]);
     expect((await s.client.runs("COMPLETED")).runs).toHaveLength(1);
     expect((await s.client.runs("QUEUED")).runs).toHaveLength(0);
 

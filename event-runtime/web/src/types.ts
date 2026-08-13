@@ -47,6 +47,8 @@ export interface Proposal {
   eventSource: string | null;
   agent: string | null;
   spec: RunSpec | null;
+  /** Repos the spec input names. Empty if unscoped. */
+  repos: string[];
 }
 
 export interface AdmittedEvent {
@@ -64,6 +66,8 @@ export interface AdmittedEvent {
   proposalId: string | null;
   runId: string | null;
   envelope: Record<string, unknown>;
+  /** Repos this envelope names (`repoPin.repo` / `repo` / `repos[]`). Empty if unscoped. */
+  repos: string[];
 }
 
 export interface RunListItem {
@@ -78,6 +82,8 @@ export interface RunListItem {
   eventSource: string | null;
   created_at: string;
   updated_at: string;
+  /** Repos the spec input names. Empty if unscoped. */
+  repos: string[];
 }
 
 /** One append-only journal row (GET /journal) — the runtime's activity feed. */

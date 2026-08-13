@@ -14,7 +14,9 @@ import { keyGuard } from "../hooks";
 import { buildCapabilityGraph, type GraphNode } from "../graph/model";
 import { nodeTypes } from "../graph/nodes";
 import type { EventFocus } from "../types";
+import type { OperatorContext } from "../context";
 import { Button, DetailPane, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
+import { ScopeCaption } from "../components/ContextTabs";
 
 /**
  * Graph (webui roadmap / OPS-224 phase 1, chrome OPS-230): the capability map
@@ -23,11 +25,13 @@ import { Button, DetailPane, JsonBlock, JumpLink, KV, Section, copyText, copyLin
  * honest empty when /agents is down. Phase 2 overlays live run state.
  */
 export function Graph({
+  context,
   focusNodeId,
   onSelectNode,
   onJumpAgent,
   onJumpEvents,
 }: {
+  context: OperatorContext;
   focusNodeId: string | null;
   onSelectNode: (id: string | null) => void;
   onJumpAgent: (ref: string) => void;
@@ -182,6 +186,7 @@ export function Graph({
           <div className="text-[11px] text-(--text-faint)">
             what this runtime can do — registered routes and recommendation edges
           </div>
+          <ScopeCaption context={context} surface="graph" />
         </div>
         {positioned && graph && graph.nodes.length > 0 ? (
           <ReactFlow

@@ -4,6 +4,9 @@ import { api } from "../api";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
+import type { OperatorContext } from "../context";
+import { matchesRepo } from "../context";
+import { ScopeCaption } from "../components/ContextTabs";
 import { SpecDiff } from "../components/SpecDiff";
 import {
   Ago,
@@ -39,6 +42,7 @@ const PROPOSAL_TABS = ["open", "history"] as const;
  */
 export function Proposals({
   connected,
+  context,
   onRunQueued,
   focusProposalId,
   onSelectProposal,
@@ -48,6 +52,7 @@ export function Proposals({
   onJumpEvent,
 }: {
   connected: boolean;
+  context: OperatorContext;
   onRunQueued: (runId: string) => void;
   focusProposalId: string | null;
   onSelectProposal: (id: string | null) => void;
@@ -75,6 +80,10 @@ export function Proposals({
         ? (query.data?.proposals ?? [])
         : (history.data?.proposals ?? []).filter((p) => p.status !== "open"),
     [tab, query.data, history.data],
+  );
+  const scoped = useMemo(
+    () => rows.filter((p) => p.id === focusProposalId || matchesRepo(p.repos, context)),
+    [rows, context, focusProposalId],
   );
 
   // Origin event type, resolved from the shared events cache (cheap: same
@@ -115,24 +124,28 @@ export function Proposals({
   // The expired chip only exists on Open; History rows have no live TTL. Derive
   // the gate once so the row filter and the empty copy can never disagree.
   const expiredFilter = expiredOnly && tab === "open";
+  const expiredCount =
+    context.kind === "repo"
+      ? scoped.filter((p) => p.expired).length
+      : (statusQ.data?.proposals.expired ?? 0);
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return rows.filter((p) => {
+    return scoped.filter((p) => {
       if (expiredFilter && !p.expired) return false;
       if (!q) return true;
       return [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
         (v ?? "").toLowerCase().includes(q),
       );
     });
-  }, [rows, filter, expiredFilter]);
+  }, [scoped, filter, expiredFilter]);
 
   // What the list would show without the text filter. An empty list under the
   // expired chip has two causes and needs two messages: no expired opens exist
   // (chip copy, nothing for Esc to clear) or the text filter hid the expired
   // ones (filter copy + the Esc hint).
   const unfilteredCount = useMemo(
-    () => (expiredFilter ? rows.filter((p) => p.expired).length : rows.length),
-    [rows, expiredFilter],
+    () => (expiredFilter ? scoped.filter((p) => p.expired).length : scoped.length),
+    [scoped, expiredFilter],
   );
 
   // Esc clears the text filter and the expired chip together, so the hint is
@@ -292,14 +305,19 @@ export function Proposals({
         chrome={
           <>
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
+        {context.kind === "inflight" && <ScopeCaption context={context} surface="fleet" />}
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex gap-1" role="tablist" aria-label="Proposal status">
             {PROPOSAL_TABS.map((t) => {
               const count =
                 t === "open"
-                  ? (statusQ.data?.proposals.open ?? 0)
-                  : (history.data?.proposals.filter((p) => p.status !== "open").length ?? 0);
+                  ? context.kind === "repo"
+                    ? (query.data?.proposals ?? []).filter((p) => matchesRepo(p.repos, context)).length
+                    : (statusQ.data?.proposals.open ?? 0)
+                  : (history.data?.proposals ?? []).filter(
+                      (p) => p.status !== "open" && matchesRepo(p.repos, context),
+                    ).length;
               return (
                 <button
                   key={t}
@@ -335,9 +353,9 @@ export function Proposals({
               }`}
             >
               expired
-              {(statusQ.data?.proposals.expired ?? 0) > 0 && (
+              {expiredCount > 0 && (
                 <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                  {statusQ.data?.proposals.expired}
+                  {expiredCount}
                 </span>
               )}
             </button>
@@ -445,9 +463,11 @@ export function Proposals({
                 empty={
                   expiredFilter
                     ? "No expired open proposals."
-                    : tab === "open"
-                      ? "No open proposals — the operator's work is done, for now."
-                      : "No decided proposals yet."
+                    : context.kind === "repo"
+                      ? `No proposals naming ${context.name}.`
+                      : tab === "open"
+                        ? "No open proposals — the operator's work is done, for now."
+                        : "No decided proposals yet."
                 }
                 action={
                   escClearsFilter ? <span className="text-[11px]">Esc clears the filter</span> : undefined

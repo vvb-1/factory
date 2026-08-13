@@ -24,6 +24,7 @@ Operators can dynamically group any view by:
 
 ### 1.3 Filter Engine & Saved Views
 * **Structured Query Bar**: Dropdown chips for multi-attribute queries (e.g. `status:failed agent:factory-status-report adapter:claude created:>1h`).
+* **Context tabs (OPS-356)**: All / In flight / a factory-repo *filter* above the inverted-L. Not a container for agents; unscoped work stays in All. Pin-a-run document tabs are OPS-357.
 * **Saved Views (Bookmarks)**: Custom view tabs saved in top bar or sidebar bookmarks:
   * *"Failed Runs Today"* (`status:failed created:>24h`)
   * *"Pending Approvals"* (`status:open decision:run`)

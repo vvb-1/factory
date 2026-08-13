@@ -1,7 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { eventsHash, hashPath, hashSearch } from "./hash";
+import { ContextTabs } from "./components/ContextTabs";
+import {
+  CONTEXT_STORAGE_KEY,
+  contextFromProject,
+  projectFromContext,
+  readContextTabs,
+  rememberOpenRepo,
+  type OperatorContext,
+} from "./context";
+import { eventsHash, hashPath, hashProject, hashSearch, withProject } from "./hash";
 import { keyGuard, useHashRoute, useTheme, type Theme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
@@ -39,8 +48,59 @@ const NAV = [
 const THEME_ORDER: readonly Theme[] = ["dark", "light", "contrast"];
 
 export function App() {
-  const [route, navigate] = useHashRoute();
+  const [route, navigateRaw] = useHashRoute();
   const view = route[0];
+  const project = hashProject(window.location.hash);
+  const context = contextFromProject(project);
+  const [openRepos, setOpenRepos] = useState<string[]>(() => {
+    try {
+      return readContextTabs(sessionStorage.getItem(CONTEXT_STORAGE_KEY)).openRepos;
+    } catch {
+      return [];
+    }
+  });
+  const navigate = useCallback(
+    (path: string) => navigateRaw(withProject(path, hashProject(window.location.hash))),
+    [navigateRaw],
+  );
+  const hashPathNow = () => window.location.hash.replace(/^#\/?/, "") || "overview";
+  const selectContext = (next: OperatorContext) => {
+    const nextProject = projectFromContext(next);
+    if (next.kind === "inflight" && view !== "runs") {
+      navigateRaw(withProject("runs", nextProject));
+      return;
+    }
+    navigateRaw(withProject(hashPathNow(), nextProject));
+  };
+  const openRepo = (name: string) => {
+    setOpenRepos((prev) => rememberOpenRepo(prev, name));
+    navigateRaw(withProject(hashPathNow(), name));
+  };
+  const closeRepo = (name: string) => {
+    setOpenRepos((prev) => prev.filter((n) => n !== name));
+    if (context.kind === "repo" && context.name === name) {
+      navigateRaw(withProject(hashPathNow(), null));
+    }
+  };
+
+  const reposQ = useQuery({ queryKey: ["repos"], queryFn: api.repos, refetchInterval: 30_000 });
+
+  useEffect(() => {
+    if (!project || project === "all" || project === "inflight") return;
+    setOpenRepos((prev) => rememberOpenRepo(prev, project));
+  }, [project]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        CONTEXT_STORAGE_KEY,
+        JSON.stringify({ openRepos, active: project ?? "all" }),
+      );
+    } catch {
+      // Private mode / blocked storage: the strip still works for this load.
+    }
+  }, [openRepos, project]);
+
   const [theme, cycleTheme] = useTheme();
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
@@ -123,6 +183,8 @@ export function App() {
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
   const eventAttention =
     (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
+  const scopedNav = context.kind === "repo";
+  const scopedRunsNav = context.kind !== "all";
   const busyWorkers = status.data?.workers.busy ?? 0;
   const staleWorkers = status.data?.workers.stale ?? 0;
   // null until the first status lands: reading "no workers" off a pending
@@ -218,7 +280,17 @@ export function App() {
   ];
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen flex-col">
+      <ContextTabs
+        repos={reposQ.data?.repos ?? []}
+        reposError={reposQ.isError}
+        openRepos={openRepos}
+        active={context}
+        onSelect={selectContext}
+        onOpen={openRepo}
+        onClose={closeRepo}
+      />
+      <div className="flex min-h-0 flex-1">
       <nav className="flex w-52 shrink-0 flex-col border-r border-(--border) bg-(--surface-1)">
         <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
           <div className="flex items-center gap-2">
@@ -250,11 +322,11 @@ export function App() {
             // count off the tone alone fails in the contrast theme.
             const badge: { count: number; hue: string; word?: string; title?: string } =
               n.key === "proposals"
-                ? { count: openProposals, hue: "var(--accent)" }
+                ? { count: scopedNav ? 0 : openProposals, hue: "var(--accent)" }
                 : n.key === "runs"
-                  ? { count: activeRuns, hue: "var(--accent)" }
+                  ? { count: scopedRunsNav ? 0 : activeRuns, hue: "var(--accent)" }
                   : n.key === "events"
-                    ? { count: eventAttention, hue: "var(--accent)" }
+                    ? { count: scopedNav ? 0 : eventAttention, hue: "var(--accent)" }
                     : n.key === "workers"
                       ? staleWorkers > 0
                         ? {
@@ -397,6 +469,7 @@ export function App() {
           {view === "proposals" ? (
             <Proposals
               connected={connected}
+              context={context}
               onRunQueued={jumpToRun}
               focusProposalId={focusProposalId}
               onSelectProposal={(id) => navigate(hashPath("proposals", id))}
@@ -416,6 +489,7 @@ export function App() {
           ) : view === "runs" || view === "run" ? (
             <Runs
               connected={connected}
+              context={context}
               focusRunId={focusRunId}
               onSelectRun={(id) => navigate(hashPath("runs", id))}
               onOpenFull={openRunFull}
@@ -432,6 +506,7 @@ export function App() {
             />
           ) : view === "graph" ? (
             <Graph
+              context={context}
               focusNodeId={focusGraphNode}
               onSelectNode={(id) => navigate(hashPath("graph", id))}
               onJumpAgent={jumpToAgent}
@@ -439,17 +514,20 @@ export function App() {
             />
           ) : view === "agents" ? (
             <Agents
+              context={context}
               focusAgentRef={focusAgentRef}
               onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
             />
           ) : view === "workers" ? (
             <Workers
+              context={context}
               focusWorkerId={focusWorkerId}
               onSelectWorker={(id) => navigate(hashPath("workers", id))}
             />
           ) : view === "events" ? (
             <Events
               connected={connected}
+              context={context}
               focusEvent={hasEventFocus ? focusEvent : null}
               onFocusConsumed={() => setEphemeralEvent(null)}
               onSelectEvent={(source, eventId) =>
@@ -469,6 +547,7 @@ export function App() {
           ) : (
             <Overview
               connected={connected}
+              context={context}
               onJumpRun={jumpToRun}
               onJumpProposal={jumpToProposal}
               onJumpEvents={jumpToEvents}
@@ -484,6 +563,7 @@ export function App() {
           )}
         </div>
       </main>
+      </div>
 
       <CommandPalette
         actions={paletteActions}
