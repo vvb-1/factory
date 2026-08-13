@@ -374,7 +374,7 @@ export function Disclosure({
   children,
   defaultOpen,
 }: {
-  label: string;
+  label: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
 }) {

@@ -550,3 +550,40 @@ the Overview doctor tiles for `stalledWorkers` / `noWorkers` (OPS-267) and
 `lease_owner` jumps from a run's attempts to the owning worker (OPS-268) — the
 API already returns all three fields (§7), but no Overview or Runs UI reads
 them yet.
+
+### 10.10 Live trace in run detail (OPS-295)
+
+`GET /runs/:id/trace` (factory.trace/v1, `lib/trace.mjs`) answers the
+question the lifecycle journal cannot: *what is the agent saying and which
+tools is it calling, right now.* The run detail gains a **Trace** section
+between Lifecycle and Attempts, rendering the stream chronologically:
+
+- `assistant_text` as plain text blocks; `tool_use` as a compact "🔧 name"
+  row with the input JSON behind a disclosure; `tool_result` collapsed by
+  default (this is the bulky, least-read kind), error-toned when `isError`;
+  `usage` as a muted summary line (turns · duration · cost, token detail
+  behind a disclosure); `lifecycle` notes muted — except `trace_truncated`,
+  which renders visibly in the warning tone as "trace truncated — N events
+  dropped past the cap". Payloads the recorder clipped in place
+  (`{truncated, preview, originalBytes}`) say so and show the preview.
+- **Live behavior.** While the run is `LEASED`/`RUNNING`/`VERIFYING` the
+  section polls every ~1.5 s with `since=<last received seq>` (the §10.4
+  journal-feed pattern) and appends; a live badge shows, and the scroll pins
+  to the newest entry. Polling stops on any other state, with one final
+  catch-up read on the live→terminal transition so the tail written between
+  the last poll and the terminal flip is not lost. Terminal runs fetch once
+  on open — historical traces are browsable, not just live ones. The cursor
+  is the last *received* seq, never the server `head` (which would skip rows
+  whenever a read filled a whole 500-row page); full pages loop until caught
+  up, bounded by the recorder's 2000-row cap.
+- **Multi-attempt runs** get an "Attempt #n" divider whenever the attempt
+  number changes (entries are seq-ascending, so attempts are contiguous);
+  single-attempt traces carry no labels.
+- **Empty states** distinguish loading, an unreachable API, a live run that
+  has not emitted yet, and the honest terminal case: "No trace — this
+  adapter does not stream events" (fake runs seeded before this feature and
+  command-adapter runs have none).
+
+Nothing global changes: no nav entry, no chord — the trace lives inside the
+run detail only, and the shared `Disclosure` label widened from `string` to
+`ReactNode` to allow the error-toned tool-result summary.

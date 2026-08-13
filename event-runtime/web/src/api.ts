@@ -9,6 +9,7 @@ import type {
   RunDetail,
   RunListItem,
   StatusView,
+  TraceView,
   Worker,
 } from "./types";
 
@@ -59,6 +60,9 @@ export const api = {
   runs: (state?: string) =>
     call<{ runs: RunListItem[] }>("GET", `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`),
   run: (id: string) => call<RunDetail>("GET", `/runs/${encodeURIComponent(id)}`),
+  // Live agent trace, ascending by seq; `since` is the last seen seq (incremental).
+  trace: (id: string, since = 0, limit = 500) =>
+    call<TraceView>("GET", `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`),
   cancel: (id: string, reason?: string) =>
     call<{ cancelled: boolean }>("POST", `/runs/${encodeURIComponent(id)}/cancel`, reason ? { reason } : {}),
   retry: (id: string, force = false) =>

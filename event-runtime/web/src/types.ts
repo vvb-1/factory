@@ -127,6 +127,48 @@ export interface Attempt {
   workspace_path: string | null;
 }
 
+/**
+ * One factory.trace/v1 payload (closed kind set, adapter-supplied). Every
+ * field is optional: which ones exist depends on `kind`, and the recorder
+ * may have replaced the whole payload with `{truncated, preview, originalBytes}`.
+ */
+export interface TracePayload {
+  /** assistant_text */
+  text?: string;
+  /** tool_use */
+  name?: string;
+  input?: unknown;
+  /** tool_result */
+  content?: unknown;
+  isError?: boolean;
+  /** usage */
+  durationMs?: number | null;
+  numTurns?: number | null;
+  costUSD?: number | null;
+  usage?: Record<string, number>;
+  /** lifecycle (e.g. {note: "trace_truncated", dropped}) */
+  note?: string;
+  dropped?: number;
+  /** recorder truncation marker — replaces any oversize payload in place */
+  truncated?: boolean;
+  preview?: string;
+  originalBytes?: number;
+}
+
+/** One live-trace row (GET /runs/:id/trace) — ascending by seq. */
+export interface TraceEntry {
+  seq: number;
+  attempt: number;
+  ts: string;
+  kind: string;
+  payload: TracePayload | null;
+}
+
+export interface TraceView {
+  head: number;
+  entries: TraceEntry[];
+}
+
 /** Durable, content-addressed artifact — bytes stream from GET /artifacts/:sha256. */
 export interface ArtifactRef {
   kind: string;

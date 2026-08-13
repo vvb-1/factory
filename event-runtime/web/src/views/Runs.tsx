@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
+import { RunTrace } from "../components/RunTrace";
 import type { RunState } from "../types";
 import {
   Ago,
@@ -423,6 +424,9 @@ export function Runs({
               ))}
             </div>
           </Section>
+
+          {/* key: a run switch must reset the feed's cursor and scroll state. */}
+          <RunTrace key={d.run.runId} runId={d.run.runId} state={d.run.state} />
 
           {d.attempts.length > 0 && (
             <Section title="Attempts">
