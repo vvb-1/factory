@@ -106,7 +106,11 @@ repos:
     project: Corporate Marketing
     base: develop
     deploy_branch: master
-    report_only: true            # No isolated worktree lifecycle tooling yet.
+    worktree_up: bin/worktree-up.sh
+    worktree_down: bin/worktree-down.sh
+    worktree_warm: bin/worktree-warm.sh
+    worktree_root: ~/Develop/.worktrees/wm-home
+    max_in_flight: 10
     verify: npm run typecheck && npm run lint && npm run format:check
     smoke_workflow: smoke-prod.yml
     smoke_url: https://watt-mind.com
