@@ -100,14 +100,21 @@ export function Overview({
       queryClient.invalidateQueries();
       notify(`Requeued event ${eventId}`, "ok");
       const deadline = Date.now() + 8000;
-      while (alive.current && Date.now() < deadline) {
-        const { proposals } = await api.proposals();
-        const match = proposals.find((p) => p.eventSource === source && p.eventId === eventId);
-        if (match && alive.current) {
-          onJumpProposal(match.id);
-          return;
+      try {
+        while (alive.current && Date.now() < deadline) {
+          const { proposals } = await api.proposals();
+          const match = proposals.find((p) => p.eventSource === source && p.eventId === eventId);
+          if (match && alive.current) {
+            onJumpProposal(match.id);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 250));
         }
-        await new Promise((r) => setTimeout(r, 250));
+      } catch {
+        // The requeue itself landed; only the confirmation poll broke, so say
+        // that rather than claiming no proposal appeared.
+        if (alive.current) notify(`Requeued ${eventId} — could not confirm a proposal appeared`, "err");
+        return;
       }
       if (alive.current) notify(`Requeued ${eventId} — no open proposal appeared`, "info");
     },
