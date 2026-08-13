@@ -7,6 +7,7 @@ import {
   checkoutFreshness,
   freshnessWarnings,
   matchEscalations,
+  resolveChangedFiles,
   resolveEscalateGlobs,
 } from "./escalate.mjs";
 
@@ -96,6 +97,17 @@ test("a missing escalate_paths key is not an empty list", () => {
   expect(resolveEscalateGlobs({ name: "declared", escalate_paths: [] })).toEqual({ ok: true, globs: [] });
 });
 
+test("a changed-file list only answers the question when it names a file", () => {
+  expect(resolveChangedFiles("src/auth/session.ts\ndocs/notes.md\n")).toEqual({
+    ok: true,
+    files: ["src/auth/session.ts", "docs/notes.md"],
+  });
+  // No PR changes nothing, so these are all "the diff was not read".
+  expect(resolveChangedFiles("").ok).toBe(false);
+  expect(resolveChangedFiles("\n  \n").ok).toBe(false);
+  expect(resolveChangedFiles(undefined).ok).toBe(false);
+});
+
 test("freshness warns when behind, when dirty, and when it cannot tell", () => {
   expect(freshnessWarnings({ upstream: "origin/main", behind: 0, dirtyConfig: false })).toEqual([]);
 
@@ -130,8 +142,21 @@ writeFileSync(
     escalate_paths: []
   - name: unguarded
     path: ~/Develop/unguarded
+  - name: stubbed
+    path: ${tmp}
+    escalate_paths:
+      - src/auth/**
 `,
 );
+
+// A `gh` that prints exactly what the test tells it to, so the CLI's real diff
+// path can be exercised without the network — including the case that matters
+// most here: exit 0 with no files named.
+const stubBin = path.join(tmp, "stub-bin");
+mkdirSync(stubBin, { recursive: true });
+writeFileSync(path.join(stubBin, "gh"), `#!/bin/sh\nprintf '%s' "$FACTORY_TEST_GH_FILES"\n`, {
+  mode: 0o755,
+});
 
 test("checkoutFreshness sees a locally modified config wherever it sits in the checkout", () => {
   const repo = mkdtempSync(path.join(tmp, "checkout-"));
@@ -153,13 +178,14 @@ test("checkoutFreshness sees a locally modified config wherever it sits in the c
 
 const CLI = path.join(import.meta.dir, "escalate.mjs");
 
-function runCli(repo, files = []) {
+function runCli(repo, files, env = {}) {
   const result = Bun.spawnSync({
     cmd: ["bun", CLI, "--repo", repo, "--pr", "123"],
     env: {
       ...process.env,
       FACTORY_ESCALATE_REPOS_YAML: configPath,
       FACTORY_ESCALATE_DIFF_FILES: files.join("\n"),
+      ...env,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -196,6 +222,35 @@ test("an explicitly empty escalate_paths list is a real answer => exit 0", () =>
   const result = runCli("declared-empty", ["src/auth/session.ts"]);
   expect(result.exitCode).toBe(EXIT.CLEAN);
   expect(result.stdout).toContain("explicitly empty");
+});
+
+// The seam is empty in both, so these run the CLI's real `gh pr diff` branch
+// against the stub — which is the point: an exported-but-empty seam must not
+// short-circuit as "a diff with no files".
+const withStubGh = (ghFiles) => ({
+  PATH: `${stubBin}${path.delimiter}${process.env.PATH}`,
+  FACTORY_TEST_GH_FILES: ghFiles,
+});
+
+test("a gh pr diff that names no files cannot be evaluated, never exit 0", () => {
+  const result = runCli("stubbed", [], withStubGh(""));
+  expect(result.exitCode).not.toBe(EXIT.CLEAN);
+  expect(result.exitCode).toBe(EXIT.CANNOT_EVALUATE);
+  expect(result.stderr).toContain("CANNOT EVALUATE");
+  expect(result.stderr).toContain("changed-file list is empty");
+  expect(result.stderr).toContain("ESCALATED");
+});
+
+test("an empty diff seam falls through to gh rather than passing as zero files", () => {
+  const result = runCli("stubbed", [], withStubGh("src/dashboard/Page.tsx\n"));
+  expect(result.exitCode).toBe(EXIT.CLEAN);
+  expect(result.stdout).toContain("none of 1 changed file(s)");
+});
+
+test("a whitespace-only diff seam is not an injected answer either", () => {
+  const result = runCli("stubbed", ["  ", ""], withStubGh(""));
+  expect(result.exitCode).toBe(EXIT.CANNOT_EVALUATE);
+  expect(result.stderr).toContain("changed-file list is empty");
 });
 
 test("an unknown repo cannot be evaluated either", () => {
