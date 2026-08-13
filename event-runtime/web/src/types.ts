@@ -238,7 +238,8 @@ export interface Worker {
 export interface StalledWorker {
   workerId: string;
   host: string;
-  runId: string | null;
+  /** Always set: the projection only emits workers that hold a run. */
+  runId: string;
   lastSeen: string;
 }
 
