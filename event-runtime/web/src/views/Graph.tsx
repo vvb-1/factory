@@ -93,8 +93,9 @@ export function Graph({
       )
       // A stale index.html after a redeploy points at a chunk that is no longer
       // there; without this the view sits on "Laying out…" and reads as busy.
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
+        console.error("graph layout failed", err);
         setLayoutFailed(true);
       });
     return () => {
