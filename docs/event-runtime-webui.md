@@ -113,7 +113,10 @@ detail panel showing **the full immutable `RunSpec`, rendered raw** — agent
 and version, input, `inputHash`, capabilities, timeout, attempts,
 `idempotencyKey`, workspace type — plus the planner's reason. §12 is explicit
 that the operator approves a specific spec, not a summary of one; the spec
-JSON is therefore always visible, not behind a disclosure.
+JSON therefore sits in a disclosure that defaults open while the proposal is
+undecided, so it is in front of the operator without being asked for. Once the
+proposal is decided the panel is an audit record rather than something to act
+on, and the disclosure defaults closed.
 
 Verbs:
 
