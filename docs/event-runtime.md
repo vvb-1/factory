@@ -634,7 +634,9 @@ lifecycle transitions with the operator as actor:
 - **status** — admitted events, open proposals and their TTL age, runs by
   state, lease ages, retained workspaces, dead-lettered events.
 - **cancel** — any run before `RUNNING` (§8); a running attempt gets TERM then
-  KILL.
+  KILL. In the same transaction, the unique open proposal for that run is
+  closed with reason `run_cancelled`; none, or more than one, is left
+  untouched.
 - **retry** — a new attempt under a new attempt identity. Retrying past
   `maxAttempts` requires an explicit operator override and records it.
 - **inspect** — the retained workspace path, receipt, and transcript for any
