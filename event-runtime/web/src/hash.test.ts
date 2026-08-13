@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { eventsHash, hashPath, hashSearch, hashView, parseHash, shouldReplaceHash } from "./hash";
+import type { HashWriteScheduler } from "./hash";
+import {
+  createHashWriter,
+  eventsHash,
+  hashPath,
+  hashSearch,
+  hashView,
+  HASH_WRITE_INTERVAL_MS,
+  parseHash,
+  shouldReplaceHash,
+} from "./hash";
 
 describe("parseHash", () => {
   test("empty hash is overview's empty route", () => {
@@ -103,6 +113,129 @@ describe("eventsHash", () => {
     expect(eventsHash("web", "evt_1", "factory.ticket.ready")).toBe(
       "events/web/evt_1?type=factory.ticket.ready",
     );
+  });
+});
+
+/** Manual clock: the coalescing is about elapsed time, not about real waiting. */
+function fakeScheduler() {
+  let now = 0;
+  let timers: Array<{ at: number; fn: () => void }> = [];
+  const scheduler: HashWriteScheduler = {
+    now: () => now,
+    after: (fn, ms) => {
+      const timer = { at: now + ms, fn };
+      timers.push(timer);
+      return () => {
+        timers = timers.filter((t) => t !== timer);
+      };
+    },
+  };
+  return {
+    scheduler,
+    advance(ms: number) {
+      now += ms;
+      const due = timers.filter((t) => t.at <= now);
+      timers = timers.filter((t) => t.at > now);
+      for (const t of due) t.fn();
+    },
+  };
+}
+
+describe("createHashWriter", () => {
+  function harness(write?: (hash: string, replace: boolean) => void) {
+    const clock = fakeScheduler();
+    const writes: Array<{ hash: string; replace: boolean }> = [];
+    const writer = createHashWriter((hash, replace) => {
+      writes.push({ hash, replace });
+      write?.(hash, replace);
+    }, clock.scheduler);
+    return { writer, writes, advance: clock.advance };
+  }
+
+  test("a single same-view write lands immediately, as a replace", () => {
+    const { writer, writes } = harness();
+    writer.replace("#/runs/run_01");
+    expect(writes).toEqual([{ hash: "#/runs/run_01", replace: true }]);
+  });
+
+  test("a burst inside one interval collapses to the last row", () => {
+    const { writer, writes, advance } = harness();
+    for (let i = 1; i <= 100; i++) writer.replace(`#/runs/run_${i}`);
+    expect(writes).toEqual([{ hash: "#/runs/run_1", replace: true }]);
+    advance(HASH_WRITE_INTERVAL_MS);
+    expect(writes).toEqual([
+      { hash: "#/runs/run_1", replace: true },
+      { hash: "#/runs/run_100", replace: true },
+    ]);
+  });
+
+  test("holding j for 30s stays under Safari's ~100 writes per 30s", () => {
+    const { writer, writes, advance } = harness();
+    // Key repeat is ~30/s once the hold takes; the old code wrote every one.
+    for (let i = 1; i <= 900; i++) {
+      writer.replace(`#/runs/run_${i}`);
+      advance(33);
+    }
+    expect(writes.length).toBeLessThan(100);
+    expect(writes.every((w) => w.replace)).toBe(true);
+    // Releasing the key lands the row the operator stopped on, so the URL is
+    // still shareable after a hold (OPS-230).
+    advance(HASH_WRITE_INTERVAL_MS);
+    expect(writes.at(-1)?.hash).toBe("#/runs/run_900");
+  });
+
+  test("a view change pushes, landing the buffered selection first", () => {
+    const { writer, writes } = harness();
+    writer.replace("#/runs/run_01");
+    writer.replace("#/runs/run_02");
+    writer.push("#/events");
+    expect(writes).toEqual([
+      { hash: "#/runs/run_01", replace: true },
+      { hash: "#/runs/run_02", replace: true },
+      { hash: "#/events", replace: false },
+    ]);
+  });
+
+  test("a throwing write does not escape into the keydown handler", () => {
+    const { writer, writes, advance } = harness(() => {
+      throw new Error("SecurityError: history write cap");
+    });
+    expect(() => writer.replace("#/runs/run_01")).not.toThrow();
+    writer.replace("#/runs/run_02");
+    expect(() => advance(HASH_WRITE_INTERVAL_MS)).not.toThrow();
+    expect(() => writer.push("#/events")).not.toThrow();
+    expect(writes.length).toBe(3);
+  });
+
+  test("cancel drops the buffered write so Back is not clobbered", () => {
+    const { writer, writes, advance } = harness();
+    writer.replace("#/runs/run_01");
+    writer.replace("#/runs/run_02");
+    writer.cancel();
+    advance(HASH_WRITE_INTERVAL_MS * 2);
+    expect(writes).toEqual([{ hash: "#/runs/run_01", replace: true }]);
+  });
+
+  test("flush lands a buffered write now, and only once", () => {
+    const { writer, writes, advance } = harness();
+    writer.replace("#/events");
+    writer.replace("#/events?type=factory.ticket.ready");
+    writer.flush();
+    expect(writes).toEqual([
+      { hash: "#/events", replace: true },
+      { hash: "#/events?type=factory.ticket.ready", replace: true },
+    ]);
+    advance(HASH_WRITE_INTERVAL_MS * 2);
+    expect(writes.length).toBe(2);
+  });
+
+  test("a write after the interval is immediate again", () => {
+    const { writer, writes, advance } = harness();
+    writer.replace("#/runs/run_01");
+    advance(HASH_WRITE_INTERVAL_MS);
+    writer.replace("#/runs/run_02");
+    expect(writes.length).toBe(2);
+    expect(writes.at(-1)?.hash).toBe("#/runs/run_02");
   });
 });
 
