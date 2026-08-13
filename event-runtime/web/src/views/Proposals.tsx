@@ -135,6 +135,14 @@ export function Proposals({
     [rows, expiredFilter],
   );
 
+  // Esc clears the text filter and the expired chip together, so the hint is
+  // owed whenever either is set — including when the unfiltered set is itself
+  // empty, where `filtered` is false so the copy can stay specific ("No expired
+  // open proposals."). ListEmpty renders its own hint from `filtered` and its
+  // `action` slot in exactly the complementary case, so this lands in the same
+  // cell — never doubled — and stays quiet while loading or the API is down.
+  const escClearsFilter = filter.trim() !== "" || expiredFilter;
+
   const selectedId = focusProposalId;
   const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
@@ -440,6 +448,9 @@ export function Proposals({
                     : tab === "open"
                       ? "No open proposals — the operator's work is done, for now."
                       : "No decided proposals yet."
+                }
+                action={
+                  escClearsFilter ? <span className="text-[11px]">Esc clears the filter</span> : undefined
                 }
               />
             )}
