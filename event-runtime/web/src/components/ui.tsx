@@ -528,11 +528,13 @@ export function Dialog({
   onClose,
   children,
   wide,
+  extraWide,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  extraWide?: boolean;
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -555,7 +557,7 @@ export function Dialog({
   }, [onClose]);
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[12vh]"
+      className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[10vh]"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -564,7 +566,7 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`${wide ? "w-[720px]" : "w-[480px]"} max-h-[70vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl outline-none`}
+        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[80vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl outline-none`}
       >
         <div id={titleId} className="display mb-3 text-[15px] font-semibold">
           {title}
