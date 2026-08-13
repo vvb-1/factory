@@ -54,7 +54,13 @@ function vendorChunk(id: string): string | undefined {
 // it. Budget the entry chunk only — async chunks (elk, xyflow) are not entries,
 // are fetched on demand, and are deliberately over the limit. kB is 1000 bytes
 // here to match how Vite reports sizes.
-const ENTRY_CHUNK_LIMIT_BYTES = 500 * 1000;
+//
+// The budget tracks the measured entry (391 kB as of OPS-303) with ~7% of slack,
+// not a round number well above it: at 500 kB, dropping @xyflow/react alone —
+// the exact regression this guards — landed at 479 kB and still passed. Slack
+// this thin means ordinary feature work will eventually trip it; that is the
+// trade, and re-baselining is a normal move (see the error message below).
+const ENTRY_CHUNK_BUDGET_BYTES = 420 * 1000;
 
 function entryChunkBudget(): Plugin {
   return {
@@ -65,17 +71,20 @@ function entryChunkBudget(): Plugin {
       for (const output of Object.values(bundle)) {
         if (output.type !== "chunk" || !output.isEntry) continue;
         const bytes = Buffer.byteLength(output.code, "utf8");
-        if (bytes > ENTRY_CHUNK_LIMIT_BYTES) {
+        if (bytes > ENTRY_CHUNK_BUDGET_BYTES) {
           oversized.push(`${output.fileName} is ${(bytes / 1000).toFixed(2)} kB`);
         }
       }
       if (oversized.length === 0) return;
       const detail = oversized.join(", ");
       throw new Error(
-        `Entry chunk budget exceeded: ${detail} (limit ${ENTRY_CHUNK_LIMIT_BYTES / 1000} kB). ` +
-          "A dependency that used to be split out is back in the entry chunk — most likely a " +
-          "@xyflow/react transitive dep missing from VENDOR_CHUNKS in vite.config.ts. Add it " +
-          "there (or code-split the new import); do not raise the limit.",
+        `Entry chunk budget exceeded: ${detail} (budget ${ENTRY_CHUNK_BUDGET_BYTES / 1000} kB). ` +
+          "Check the chunk list above first: if the xyflow chunk shrank or vanished, a " +
+          "@xyflow/react transitive dep is missing from VENDOR_CHUNKS in vite.config.ts — add it " +
+          "there (or code-split the new import) rather than raising the budget. If the split " +
+          "chunks look right and this is genuine app growth, re-baseline ENTRY_CHUNK_BUDGET_BYTES " +
+          "to the measured size plus a little slack, in its own commit, so the raise is a " +
+          "reviewable decision instead of a silent drift.",
       );
     },
   };
