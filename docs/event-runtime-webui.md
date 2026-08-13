@@ -357,8 +357,11 @@ countdown behaves as §4.2 specified.
 The list gains adapter, latest `reasonCode`, attempts as `n/maxAttempts`,
 the origin `eventId` (a jump to the Events inbox), and the agent ref (a jump
 to Agents). Failed and timed-out rows carry an error wash, refused a warning
-wash; selection wins. Client-side filter, tab counts from `/status`, Copy id,
-and a detail panel that opens while the run payload is still loading. The
+wash; selection wins. Client-side filter (selecting a visible row keeps it;
+it clears only when the selected run is hidden by the filter, or the status
+tab switches to All to surface a deep-linked run), tab counts from
+`/status`, Copy id, and a detail panel that opens while the run payload is
+still loading. The
 detail panel additionally renders the result's declared `evidence`
 (collapsible pretty JSON, per §4.3's result block) and the origin event; `x`
 cancels the selected run from the list, matching the proposals-view verb

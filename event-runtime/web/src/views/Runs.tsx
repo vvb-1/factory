@@ -82,14 +82,15 @@ export function Runs({
   const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
 
   // Deep link: switch to ALL if the run isn't on this tab. Hash stays put.
+  // Clear the filter only when the selected run is on this tab but hidden by it.
   useEffect(() => {
     if (!focusRunId) return;
     if (rows.some((r) => r.runId === focusRunId)) {
-      setFilter("");
+      if (!visible.some((r) => r.runId === focusRunId)) setFilter("");
       return;
     }
     if (tab !== "ALL") setTab("ALL");
-  }, [focusRunId, rows, tab]);
+  }, [focusRunId, rows, tab, visible]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
@@ -404,7 +405,7 @@ export function Runs({
                     {new Date(e.at).toLocaleTimeString([], { hour12: false })}
                   </span>
                   <span className="shrink-0">
-                    <StateBadge state={e.to_state} />
+                    {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
                   </span>
                   <span className="truncate text-(--text-faint)">
                     {e.actor}
