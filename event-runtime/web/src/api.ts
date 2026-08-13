@@ -71,6 +71,20 @@ export const api = {
     call<{ queued: boolean }>("POST", `/runs/${encodeURIComponent(id)}/retry`, { force }),
   replay: (envelope: unknown) =>
     call<{ admitted: boolean; duplicate: boolean; eventId: string }>("POST", "/replay", envelope),
+  injectEvent: (type: string, payload: Record<string, unknown>, source = "factory-web", subject = "factory") => {
+    const eventId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const envelope = {
+      schemaVersion: "factory.event/v1",
+      eventId,
+      type,
+      source,
+      subject,
+      occurredAt: new Date().toISOString(),
+      correlationId: eventId,
+      payload,
+    };
+    return call<{ admitted: boolean; duplicate: boolean; eventId: string }>("POST", "/replay", envelope);
+  },
   // Append-only lifecycle feed: entries newest-first, `since` is the last seen head.
   journal: (since = 0, limit = 100) => call<JournalView>("GET", `/journal?since=${since}&limit=${limit}`),
   outbox: (limit = 20) => call<{ outbox: OutboxRow[] }>("GET", `/outbox?limit=${limit}`),

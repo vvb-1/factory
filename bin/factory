@@ -81,6 +81,7 @@ case "$cmd" in
   janitor)      run_bun orchestrator/janitor.mjs "$@" ;;
   warm)         run_bun orchestrator/warm.mjs "$@" ;;
   tick)         run_bun orchestrator/tick.mjs "$@" ;;
+  dispatch)     run_bun tools/dispatch.mjs "$@" ;;
   events)       run_bun event-runtime/cli.mjs "$@" ;;
   serve)
     _has_web=0
@@ -171,6 +172,7 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   janitor       orchestrator/janitor.mjs
   warm          orchestrator/warm.mjs
   tick          orchestrator/tick.mjs
+  dispatch      tools/dispatch.mjs (swift event task runner: triage, status, janitor)
   events        event-runtime/cli.mjs (status, ps, runs, proposals, approve, reject, inject, requeue)
   serve         start event runtime control API (use --web or --all to launch web UI too)
   web           start event runtime web UI server (use --dev for Vite live HMR mode)

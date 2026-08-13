@@ -130,25 +130,19 @@ export function Projects({
     },
   });
 
-  // Distributed Agent Dispatch mutation (OPS-368)
-  const dispatchEventMutation = useMutation({
-    mutationFn: async ({ repo, apply }: { repo: string; apply: boolean }) => {
-      const type = apply ? "factory.janitor-apply.requested" : "factory.janitor-scan.requested";
-      const eventId = `janitor-${apply ? "apply" : "scan"}-${repo}-${Date.now()}`;
-      return api.replay({
-        source: "factory-web",
-        eventId,
-        type,
-        payload: { repo },
-      });
+  // Quick Dispatch mutation for factory agent events
+  const quickDispatchMutation = useMutation({
+    mutationFn: async ({ type, payload, label }: { type: string; payload: Record<string, unknown>; label: string }) => {
+      return { label, res: await api.injectEvent(type, payload) };
     },
-    onSuccess: (_res, vars) => {
-      notify(`Injected ${vars.apply ? "factory.janitor-apply.requested" : "factory.janitor-scan.requested"} event`);
+    onSuccess: (data) => {
+      notify(`Dispatched ${data.label}`);
       queryClient.invalidateQueries({ queryKey: ["events"] });
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
     },
     onError: (err: ApiError) => {
-      notify(`Agent dispatch failed: ${err.message}`);
+      notify(`Dispatch failed: ${err.message}`);
     },
   });
 
@@ -160,6 +154,36 @@ export function Projects({
     }
     const r = sel;
     setContextActions([
+      {
+        label: `⚡ Dispatch Triage Scan on ${r.name}`,
+        hint: "triage",
+        run: () =>
+          quickDispatchMutation.mutate({
+            type: "factory.triage.requested",
+            payload: { repo: r.name },
+            label: `Triage Scan on ${r.name}`,
+          }),
+      },
+      {
+        label: `⚡ Dispatch Status Report for ${r.name}`,
+        hint: "status",
+        run: () =>
+          quickDispatchMutation.mutate({
+            type: "factory.status-report.requested",
+            payload: { repos: [r.name] },
+            label: `Status Report for ${r.name}`,
+          }),
+      },
+      {
+        label: `⚡ Dispatch Janitor Scan on ${r.name}`,
+        hint: "janitor",
+        run: () =>
+          quickDispatchMutation.mutate({
+            type: "factory.janitor-scan.requested",
+            payload: { repo: r.name },
+            label: `Janitor Scan on ${r.name}`,
+          }),
+      },
       {
         label: `Copy path for ${r.name}`,
         run: () => copyText(r.path, "repo path"),
@@ -183,7 +207,7 @@ export function Projects({
         : []),
     ]);
     return () => setContextActions([]);
-  }, [sel, dryMutation]);
+  }, [sel, dryMutation, quickDispatchMutation]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -345,6 +369,50 @@ export function Projects({
           }
         >
           <div className="space-y-4">
+            <Section title="⚡ Quick Dispatch (Agent Tasks)">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={!connected || quickDispatchMutation.isPending}
+                  onClick={() =>
+                    quickDispatchMutation.mutate({
+                      type: "factory.triage.requested",
+                      payload: { repo: sel.name },
+                      label: `Triage Scan on ${sel.name}`,
+                    })
+                  }
+                >
+                  ⚡ Triage Scan
+                </Button>
+                <Button
+                  disabled={!connected || quickDispatchMutation.isPending}
+                  onClick={() =>
+                    quickDispatchMutation.mutate({
+                      type: "factory.status-report.requested",
+                      payload: { repos: [sel.name] },
+                      label: `Status Report for ${sel.name}`,
+                    })
+                  }
+                >
+                  ⚡ Status Report
+                </Button>
+                <Button
+                  disabled={!connected || quickDispatchMutation.isPending}
+                  onClick={() =>
+                    quickDispatchMutation.mutate({
+                      type: "factory.janitor-scan.requested",
+                      payload: { repo: sel.name },
+                      label: `Janitor Scan on ${sel.name}`,
+                    })
+                  }
+                >
+                  ⚡ Janitor Scan
+                </Button>
+              </div>
+              <div className="mt-1.5 text-[11px] text-(--text-faint)">
+                Injects an event into the queue for worker lease with live trace streaming.
+              </div>
+            </Section>
+
             <Section title="Configuration">
               <KV k="Name" v={sel.name} />
               {sel.project && <KV k="Project" v={sel.project} />}
@@ -460,10 +528,16 @@ export function Projects({
                   </Button>
 
                   <Button
-                    disabled={!connected || dispatchEventMutation.isPending}
-                    onClick={() => dispatchEventMutation.mutate({ repo: sel.name, apply: false })}
+                    disabled={!connected || quickDispatchMutation.isPending}
+                    onClick={() =>
+                      quickDispatchMutation.mutate({
+                        type: "factory.janitor-scan.requested",
+                        payload: { repo: sel.name },
+                        label: `Janitor Scan on ${sel.name}`,
+                      })
+                    }
                   >
-                    {dispatchEventMutation.isPending ? "Dispatching…" : "Dispatch Scan Event"}
+                    {quickDispatchMutation.isPending ? "Dispatching…" : "Dispatch Scan Event"}
                   </Button>
                 </div>
 
