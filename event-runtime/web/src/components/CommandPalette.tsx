@@ -8,6 +8,7 @@ import { useContextActions } from "../palette";
 export interface PaletteAction {
   label: string;
   hint?: string;
+  group?: "Go" | "Commands";
   run: () => void;
 }
 
@@ -84,20 +85,56 @@ export function CommandPalette({
           <Command.Empty className="px-3 py-6 text-center text-(--text-faint)">
             No matching command
           </Command.Empty>
+          {contextActions.length > 0 && (
+            <Command.Group heading="This item">
+              {contextActions.map((a) => (
+                <Command.Item
+                  key={a.label}
+                  onSelect={() => {
+                    setOpen(false);
+                    a.run();
+                  }}
+                  className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+                >
+                  <span>{a.label}</span>
+                  {a.hint && <span className="mono text-[11px] text-(--text-faint)">{a.hint}</span>}
+                </Command.Item>
+              ))}
+            </Command.Group>
+          )}
+          <Command.Group heading="Go">
+            {actions
+              .filter((a) => a.group === "Go")
+              .map((a) => (
+                <Command.Item
+                  key={a.label}
+                  onSelect={() => {
+                    setOpen(false);
+                    a.run();
+                  }}
+                  className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+                >
+                  <span>{a.label}</span>
+                  {a.hint && <span className="mono text-[11px] text-(--text-faint)">{a.hint}</span>}
+                </Command.Item>
+              ))}
+          </Command.Group>
           <Command.Group heading="Commands">
-          {[...contextActions, ...actions].map((a) => (
-            <Command.Item
-              key={a.label}
-              onSelect={() => {
-                setOpen(false);
-                a.run();
-              }}
-              className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
-            >
-              <span>{a.label}</span>
-              {a.hint && <span className="mono text-[11px] text-(--text-faint)">{a.hint}</span>}
-            </Command.Item>
-          ))}
+            {actions
+              .filter((a) => a.group !== "Go")
+              .map((a) => (
+                <Command.Item
+                  key={a.label}
+                  onSelect={() => {
+                    setOpen(false);
+                    a.run();
+                  }}
+                  className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+                >
+                  <span>{a.label}</span>
+                  {a.hint && <span className="mono text-[11px] text-(--text-faint)">{a.hint}</span>}
+                </Command.Item>
+              ))}
           </Command.Group>
           {(proposals.data?.proposals ?? []).length > 0 && (
             <Command.Group heading="Proposals">

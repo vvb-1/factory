@@ -12,6 +12,7 @@ import {
   Disclosure,
   EVENT_STATUS_HUES,
   FilterInput,
+  ListPane,
   JsonBlock,
   JumpLink,
   KV,
@@ -247,7 +248,9 @@ export function Events({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Events</h1>
 
         <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Event status">
@@ -315,6 +318,9 @@ export function Events({
               </button>
             ))}
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -376,7 +382,7 @@ export function Events({
             )}
           </tbody>
         </table>
-      </div>
+      </ListPane>
 
       {sel && (
         <div className="w-[440px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
@@ -397,9 +403,9 @@ export function Events({
             <KV k="subject" v={sel.subject} />
             <KV k="status" v={<StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />} />
             <KV k="correlationId" v={sel.correlationId} />
-            <KV k="occurredAt" v={sel.occurredAt} />
-            <KV k="receivedAt" v={sel.receivedAt} />
-            <KV k="admittedAt" v={sel.admittedAt} />
+            <KV k="occurredAt" v={<Ago iso={sel.occurredAt} now={now} />} />
+            <KV k="receivedAt" v={<Ago iso={sel.receivedAt} now={now} />} />
+            <KV k="admittedAt" v={<Ago iso={sel.admittedAt} now={now} />} />
             <KV
               k="proposal"
               v={

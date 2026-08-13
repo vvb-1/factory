@@ -468,5 +468,8 @@ no new API.
   Graph it opens Events first. The empty filter shows a `/` hint. Dialog Tab
   cycles stay inside the dialog and focus returns to the opener on close.
   `[` / `]` cycle status tabs. Graph `j`/`k` pans the selected node into
-  view. Relative timestamps show the ISO instant on hover. Click a toast to
-  dismiss it. The document title follows the hash (`factory · Runs · run_id`).
+  view; **Show on canvas** does the same from the panel. List title/tabs/filter
+  stay pinned while the table scrolls. ⌘K splits This item / Go / Commands.
+  Relative timestamps show the ISO instant on hover (lists and detail KV).
+  Click a toast to dismiss it. The document title follows the hash
+  (`factory · Runs · run_id`).

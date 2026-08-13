@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
-import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, Section, copyText, copyLink } from "../components/ui";
+import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, ListPane, Section, copyText, copyLink } from "../components/ui";
 import { setContextActions } from "../palette";
 
 const caps = (a: AgentDef) =>
@@ -75,7 +75,9 @@ export function Agents({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Agents</h1>
         <div className="mb-3">
           <FilterInput
@@ -85,6 +87,9 @@ export function Agents({
             label="Filter agents"
           />
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -148,7 +153,7 @@ export function Agents({
             ))}
           </Section>
         </div>
-      </div>
+      </ListPane>
 
       {sel && (
         <div className="w-[520px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">

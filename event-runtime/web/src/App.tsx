@@ -167,7 +167,12 @@ export function App() {
   }, [navigate]);
 
   const paletteActions: PaletteAction[] = [
-    ...NAV.map((n) => ({ label: `Go to ${n.label}`, hint: `g ${n.go}`, run: () => navigate(n.key) })),
+    ...NAV.map((n) => ({
+      label: `Go to ${n.label}`,
+      hint: `g ${n.go}`,
+      group: "Go" as const,
+      run: () => navigate(n.key),
+    })),
     { label: "Inject event…", hint: "i", run: () => setInjectOpen(true) },
     {
       label: "Focus filter",

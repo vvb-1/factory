@@ -89,6 +89,16 @@ export function FilterInput({
   );
 }
 
+/** Pinned title/tabs/filter; only the table (and anything below it) scrolls. */
+export function ListPane({ chrome, children }: { chrome: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="shrink-0 px-5 pt-5 pb-3">{chrome}</div>
+      <div className="min-h-0 flex-1 overflow-auto px-5 pb-5">{children}</div>
+    </div>
+  );
+}
+
 /** Empty / loading / error row for the dense lists. Never say "none" while pending. */
 export function ListEmpty({
   colSpan,

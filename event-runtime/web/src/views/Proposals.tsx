@@ -13,6 +13,7 @@ import {
   Dialog,
   Disclosure,
   FilterInput,
+  ListPane,
   JsonBlock,
   JumpLink,
   KV,
@@ -242,7 +243,9 @@ export function Proposals({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -295,6 +298,9 @@ export function Proposals({
             </button>
           )}
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -402,7 +408,7 @@ export function Proposals({
             )}
           </tbody>
         </table>
-      </div>
+      </ListPane>
 
       {sel && (
         <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
@@ -447,7 +453,8 @@ export function Proposals({
                 v={<Countdown createdAt={sel.created_at} ttlSeconds={sel.ttl_seconds} />}
               />
             )}
-            {sel.decided_at && <KV k="decided at" v={sel.decided_at} />}
+            <KV k="created" v={<Ago iso={sel.created_at} now={now} />} />
+            {sel.decided_at && <KV k="decided at" v={<Ago iso={sel.decided_at} now={now} />} />}
             {sel.decided_by && <KV k="decided by" v={sel.decided_by} />}
             {sel.reason && <KV k="planner reason" v={sel.reason} />}
           </Section>

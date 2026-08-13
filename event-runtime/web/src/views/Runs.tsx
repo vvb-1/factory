@@ -10,6 +10,7 @@ import {
   Dialog,
   Disclosure,
   FilterInput,
+  ListPane,
   humanSize,
   JsonBlock,
   JumpLink,
@@ -195,7 +196,9 @@ export function Runs({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
 
         <div className="mb-3 flex items-center gap-2">
@@ -230,6 +233,9 @@ export function Runs({
             label="Filter runs"
           />
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -296,7 +302,7 @@ export function Runs({
             )}
           </tbody>
         </table>
-      </div>
+      </ListPane>
 
       {sel && (
         <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
@@ -350,6 +356,8 @@ export function Runs({
             <KV k="idempotencyKey" v={d.run.idempotencyKey} />
             <KV k="specHash" v={d.run.specHash} />
             <KV k="workspace" v={d.workspace} />
+            <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
+            <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
           </Section>
 
           <div className="mb-4 flex gap-2">

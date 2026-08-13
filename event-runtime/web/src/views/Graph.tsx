@@ -133,7 +133,7 @@ export function Graph({
     return () => window.removeEventListener("keydown", onKey);
   }, [onSelectNode, focusNodeId, graph, positioned]);
 
-  useEffect(() => {
+  const revealSelected = () => {
     if (!focusNodeId || !flowRef.current) return;
     const zoom = flowRef.current.getZoom();
     flowRef.current.fitView({
@@ -143,6 +143,11 @@ export function Graph({
       minZoom: zoom,
       maxZoom: zoom,
     });
+  };
+
+  useEffect(() => {
+    revealSelected();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNodeId, flowReady, positioned]);
 
   const emptyCopy = registry.isPending
@@ -210,6 +215,7 @@ export function Graph({
                 {selected.kind === "agent" ? "Copy ref" : "Copy id"}
               </Button>
               <Button onClick={copyLink}>Copy link</Button>
+              <Button onClick={revealSelected}>Show on canvas</Button>
               <Button onClick={() => onSelectNode(null)}>Close</Button>
             </div>
           </div>
