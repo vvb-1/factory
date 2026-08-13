@@ -305,6 +305,11 @@ function dismissToast(id: string) {
   toastListeners.forEach((l) => l(activeToasts));
 }
 
+/**
+ * Both regions stay mounted even while empty: a screen reader only announces
+ * nodes inserted into a live region that already existed, so mounting the
+ * region together with its first toast would swallow that toast.
+ */
 export function ToastContainer() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   useEffect(() => {
@@ -314,13 +319,30 @@ export function ToastContainer() {
     };
   }, []);
 
-  if (toasts.length === 0) return null;
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <ToastRegion role="status" live="polite" toasts={toasts.filter((t) => t.type !== "err")} />
+      <ToastRegion role="alert" live="assertive" toasts={toasts.filter((t) => t.type === "err")} />
+    </div>
+  );
+}
+
+function ToastRegion({
+  role,
+  live,
+  toasts,
+}: {
+  role: "status" | "alert";
+  live: "polite" | "assertive";
+  toasts: ToastMessage[];
+}) {
+  return (
+    // aria-atomic="false" — both roles default to atomic, which re-reads every
+    // surviving toast whenever one is added or dismissed.
+    <div role={role} aria-live={live} aria-atomic="false" className="flex flex-col gap-2">
       {toasts.map((t) => (
         <div
           key={t.id}
-          role="status"
           title="Dismiss"
           onClick={() => dismissToast(t.id)}
           className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
