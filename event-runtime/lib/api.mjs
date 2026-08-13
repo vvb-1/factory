@@ -10,15 +10,17 @@
  * no signature. Operator verbs record "operator" as actor — authenticated
  * actor identity is the web-app step, not this one.
  */
+import { spawnSync } from "node:child_process";
 import { createReadStream, readFileSync } from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { findArtifact } from "./artifacts.mjs";
 import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
 import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
-import { loadRepos, RepoError, reposView } from "./repos.mjs";
+import { loadRepos, RepoError, reposRoot, reposView } from "./repos.mjs";
 import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
@@ -348,6 +350,62 @@ function runView(db, runId) {
   };
 }
 
+/** Bound so a hung Linear call cannot freeze serve forever (OPS-301 review). */
+const JANITOR_TIMEOUT_MS = 120_000;
+const JANITOR_MAX_BUFFER = 1_000_000;
+
+/**
+ * Argv for one repos.yaml name. `--force` is not a flag and must never become
+ * one — the worktree_down refusal on dirty trees is the safety property.
+ * Spawn runs against `reposRoot()` so FACTORY_REPOS_ROOT cannot survey one
+ * yaml and tear down another.
+ */
+export function janitorArgv(name, { apply = false } = {}) {
+  const args = [path.join(reposRoot(), "orchestrator", "janitor.mjs"), "--repo", name, "--json"];
+  if (apply === true) args.push("--apply");
+  return args;
+}
+
+/**
+ * Spawn `orchestrator/janitor.mjs --json` for one repos.yaml name (OPS-301).
+ * Never passes `--force`. Injectable on createApi so tests never hit Linear
+ * or real worktrees. Actor is the loopback operator — this is a host-side
+ * spawn, the same trust as typing `factory janitor` on the machine.
+ */
+export function spawnFactoryJanitor(name, { apply = false } = {}) {
+  const args = janitorArgv(name, { apply });
+  const root = reposRoot();
+  const r = spawnSync(process.execPath, args, {
+    encoding: "utf8",
+    cwd: root,
+    timeout: JANITOR_TIMEOUT_MS,
+    maxBuffer: JANITOR_MAX_BUFFER,
+  });
+  if (r.error?.code === "ETIMEDOUT") {
+    const err = new Error("janitor timed out");
+    err.status = 504;
+    throw err;
+  }
+  const stdout = (r.stdout || "").trim();
+  if (r.status === 2) {
+    const err = new Error(`unknown repo ${name}`);
+    err.status = 404;
+    throw err;
+  }
+  if (r.status !== 0) {
+    const err = new Error((r.stderr || "").trim() || `janitor exit ${r.status}`);
+    err.status = 500;
+    throw err;
+  }
+  const parsed = JSON.parse(stdout);
+  if (parsed && Array.isArray(parsed.results)) {
+    const err = new Error("janitor returned multiple repos; expected one");
+    err.status = 500;
+    throw err;
+  }
+  return parsed;
+}
+
 /**
  * Both admission routes converge here — the §15 requirement that webhook and
  * replay call the same intake function. onEvent("admitted") lets a foreground
@@ -383,6 +441,9 @@ export function createApi({
   // until someone restarted serve. Injectable so tests can point at a fixture
   // instead of whichever repos exist on the machine.
   repos = () => loadRepos(),
+  // Host-side janitor spawn (OPS-301). Tests inject a fake; production
+  // shells out to orchestrator/janitor.mjs --json, never --force.
+  janitor = spawnFactoryJanitor,
 } = {}) {
   const ACTOR = "operator"; // one local operator in the MVP (§14)
 
@@ -448,6 +509,40 @@ export function createApi({
           // "internal_error" and send them reading the runtime's source.
           if (err instanceof RepoError) return send(res, 500, { error: err.message });
           throw err;
+        }
+      }
+
+      // Loopback janitor (OPS-301): Dry is the default; Apply never --force.
+      // Same actor as every other operator verb. UI confirm lives in OPS-362.
+      const janitorPost = url.pathname.match(/^\/repos\/([^/]+)\/janitor$/);
+      if (req.method === "POST" && janitorPost) {
+        const name = decodeURIComponent(janitorPost[1]);
+        let registry;
+        try {
+          registry = repos();
+        } catch (err) {
+          if (err instanceof RepoError) return send(res, 500, { error: err.message });
+          throw err;
+        }
+        const repo = registry.get(name);
+        if (!repo) return send(res, 404, { error: `unknown repo ${name}` });
+        const body = parseJson(await readBody(req)).value ?? {};
+        if (body.apply !== undefined && typeof body.apply !== "boolean") {
+          return send(res, 422, { error: "apply must be a boolean" });
+        }
+        const apply = body.apply === true;
+        if (apply && repo.reportOnly && !repo.worktreeDown) {
+          return send(res, 409, {
+            error: `report-only repo "${name}" has no worktree_down script; refusing apply`,
+          });
+        }
+        try {
+          const result = await janitor(name, { apply, repo, actor: ACTOR });
+          return send(res, 200, { actor: ACTOR, apply, ...result });
+        } catch (err) {
+          const status = Number.isInteger(err.status) ? err.status : 500;
+          if (status === 500) return send(res, 500, { error: "internal_error" });
+          return send(res, status, { error: err.message });
         }
       }
 

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
-import { startApi } from "./api.mjs";
+import { janitorArgv, startApi } from "./api.mjs";
 import { apiClient } from "./client.mjs";
 import { openDb } from "./db.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
@@ -710,5 +710,134 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
       close();
       server.close();
     }
+  });
+
+  test("POST /repos/:name/janitor dry-runs by default and never calls apply (OPS-301)", async () => {
+    const calls = [];
+    const fixture = new Map([
+      ["dispatchable", { name: "dispatchable", reportOnly: false, worktreeDown: "bin/worktree-down.sh" }],
+    ]);
+    const { server, port, close } = await makeServer({
+      repos: () => fixture,
+      janitor: async (name, opts) => {
+        calls.push({ name, apply: opts.apply });
+        return { name, reclaimable: [{ id: "OPS-1", state: "Done" }], kept: [], named: [], unknown: [], removed: [], refused: [] };
+      },
+    });
+    const client = apiClient({ port });
+    try {
+      const body = await client.janitor("dispatchable");
+      expect(body.actor).toBe("operator");
+      expect(body.apply).toBe(false);
+      expect(body.reclaimable).toEqual([{ id: "OPS-1", state: "Done" }]);
+      expect(calls).toEqual([{ name: "dispatchable", apply: false }]);
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
+  test("POST /repos/:name/janitor apply true reaches the injected janitor (OPS-301)", async () => {
+    const calls = [];
+    const fixture = new Map([
+      ["dispatchable", { name: "dispatchable", reportOnly: false, worktreeDown: "bin/worktree-down.sh" }],
+    ]);
+    const { server, port, close } = await makeServer({
+      repos: () => fixture,
+      janitor: async (name, opts) => {
+        calls.push({ name, apply: opts.apply });
+        return { name, reclaimable: [{ id: "OPS-1", state: "Done" }], removed: ["OPS-1"], refused: [], kept: [], named: [], unknown: [] };
+      },
+    });
+    const client = apiClient({ port });
+    try {
+      const body = await client.janitor("dispatchable", { apply: true });
+      expect(body.apply).toBe(true);
+      expect(body.removed).toEqual(["OPS-1"]);
+      expect(calls).toEqual([{ name: "dispatchable", apply: true }]);
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
+  test("POST /repos/:name/janitor 404s an unknown repo without spawning (OPS-301)", async () => {
+    let spawned = false;
+    const { server, port, close } = await makeServer({
+      repos: () => new Map([["dispatchable", { name: "dispatchable", reportOnly: false, worktreeDown: "bin/worktree-down.sh" }]]),
+      janitor: async () => {
+        spawned = true;
+        return {};
+      },
+    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/repos/nope/janitor`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "unknown repo nope" });
+      expect(spawned).toBe(false);
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
+  test("POST /repos/:name/janitor apply on report_only without worktree_down is 409 (OPS-301)", async () => {
+    let spawned = false;
+    const { server, port, close } = await makeServer({
+      repos: () => new Map([["watched", { name: "watched", reportOnly: true, worktreeDown: null }]]),
+      janitor: async () => {
+        spawned = true;
+        return {};
+      },
+    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/repos/watched/janitor`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apply: true }),
+      });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error).toMatch(/report-only repo "watched" has no worktree_down/);
+      expect(spawned).toBe(false);
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
+  test("POST /repos/:name/janitor rejects a non-boolean apply (OPS-301)", async () => {
+    const { server, port, close } = await makeServer({
+      repos: () => new Map([["dispatchable", { name: "dispatchable", reportOnly: false, worktreeDown: "bin/worktree-down.sh" }]]),
+      janitor: async () => ({}),
+    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/repos/dispatchable/janitor`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apply: "please" }),
+      });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toEqual({ error: "apply must be a boolean" });
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
+  test("janitorArgv never includes --force and adds --apply only when asked (OPS-301)", () => {
+    const dry = janitorArgv("bj29");
+    expect(dry).toContain("--json");
+    expect(dry).toContain("bj29");
+    expect(dry).not.toContain("--force");
+    expect(dry).not.toContain("--apply");
+    const apply = janitorArgv("bj29", { apply: true });
+    expect(apply).toContain("--apply");
+    expect(apply).not.toContain("--force");
+    expect(apply.filter((a) => a === "--apply")).toHaveLength(1);
   });
 });
