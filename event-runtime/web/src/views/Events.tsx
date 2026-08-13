@@ -144,12 +144,23 @@ export function Events({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusEvent?.status, focusEvent?.type]);
 
+  // Reveal a hash-selected row only when current filters hide it. A j/k/click
+  // on a visible row, or a 2s poll, must not wipe the typed filter / chips.
+  useEffect(() => {
+    if (!focusEvent?.source || !focusEvent?.eventId) return;
+    const key = `${focusEvent.source}:${focusEvent.eventId}`;
+    if (rows.some((e) => keyOf(e) === key) && !visible.some((e) => keyOf(e) === key)) {
+      setFilter("");
+      setSourceFilter(null);
+      if (!focusEvent.type) setTypeFilter(null);
+    }
+    // rows/visible from the selection-change render; polls must not re-run this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusEvent?.source, focusEvent?.eventId]);
+
   // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
   useEffect(() => {
     if (!focusEvent?.source || !focusEvent?.eventId) return;
-    setFilter("");
-    setSourceFilter(null);
-    if (!focusEvent.type) setTypeFilter(null);
     const key = `${focusEvent.source}:${focusEvent.eventId}`;
     if (!rows.some((e) => keyOf(e) === key) && tab !== "all") setTab("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps

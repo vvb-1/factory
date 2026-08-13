@@ -131,12 +131,23 @@ export function Proposals({
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
+  // Reveal a hash-selected proposal only when current filters hide it. A click
+  // on a visible row (including under the expired chip) must not wipe them.
+  useEffect(() => {
+    if (!focusProposalId) return;
+    if (rows.some((p) => p.id === focusProposalId) && !visible.some((p) => p.id === focusProposalId)) {
+      setFilter("");
+      const row = rows.find((p) => p.id === focusProposalId);
+      if (expiredOnly && row && !row.expired) setExpiredOnly(false);
+    }
+    // rows/visible/expiredOnly from the selection-change render; polls must not re-run this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusProposalId]);
+
   // Deep link: open tab first, then history if the id is a decided proposal.
   // Hash stays; we only switch tabs so the row is in `visible`.
   useEffect(() => {
     if (!focusProposalId) return;
-    setFilter("");
-    setExpiredOnly(false);
     if (rows.some((p) => p.id === focusProposalId)) return;
     if (tab === "open") setTab("history");
   }, [focusProposalId, rows, tab]);
