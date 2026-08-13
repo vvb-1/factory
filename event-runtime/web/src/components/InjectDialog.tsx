@@ -24,13 +24,11 @@ function blankEnvelope(nowMs: number) {
 const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
 /**
- * Inject dialog (webui spec §4.4, templates per OPS-214, confirm per OPS-230).
+ * Inject dialog (webui spec §4.4, templates per OPS-214, confirm per OPS-230, format OPS-361).
  *
  * Templates are derived from the registry — one per registered event type,
  * with the payload skeleton built from that event's agent input schema — so
- * they cannot drift from what the runtime will actually accept. Inject is the
- * same intake path as Replay; it is not Requeue (re-plan) and not Trigger
- * again (which only seeds this dialog with a fresh event id).
+ * they cannot drift from what the runtime will actually accept.
  */
 export function InjectDialog({
   onClose,
@@ -106,13 +104,6 @@ export function InjectDialog({
     return [...(initialEnvelope ? ["__given__"] : []), ...templates.map((t) => t.eventType), null];
   }
 
-  /**
-   * The chip that owns the group's single tabIndex 0. Normally `selected`, but
-   * a registry refetch can drop the selected event type while the dialog is
-   * open; the blank chip always renders, so it takes over rather than leaving
-   * no chip tabbable and Tab skipping the group. The envelope text is left
-   * alone — it may hold the user's edits.
-   */
   const checkedChip = templateIds().includes(selected) ? selected : null;
 
   function radioA11y(id: string | null) {
@@ -124,10 +115,6 @@ export function InjectDialog({
     };
   }
 
-  /**
-   * Roving tabindex: arrows move selection and DOM focus together, and only
-   * while a chip is focused — not the envelope textarea, not ⌘K.
-   */
   function onTemplateKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
     if (!keys.includes(e.key)) return;
@@ -140,6 +127,20 @@ export function InjectDialog({
     applyChip(ids[nextIdx]);
     e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[nextIdx]?.focus();
   }
+
+  function formatJson() {
+    try {
+      const parsed = JSON.parse(text);
+      setText(pretty(parsed));
+      setClientError(null);
+      notify("Formatted JSON envelope", "info");
+    } catch (err) {
+      setClientError(`Cannot format: ${(err as Error).message}`);
+    }
+  }
+
+  const formatJsonRef = useRef(formatJson);
+  formatJsonRef.current = formatJson;
 
   function submit() {
     setClientError(null);
@@ -176,7 +177,6 @@ export function InjectDialog({
   const submitRef = useRef(submit);
   submitRef.current = submit;
 
-  // Dialog focuses `[autofocus]` on open; React's autoFocus prop does not set that attribute.
   useLayoutEffect(() => {
     groupRef.current
       ?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
@@ -185,6 +185,11 @@ export function InjectDialog({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        formatJsonRef.current();
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         submitRef.current();
@@ -193,6 +198,15 @@ export function InjectDialog({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  const isValidJson = useMemo(() => {
+    try {
+      JSON.parse(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [text]);
 
   const outcome = inject.data;
   const seeded = Boolean(initialEnvelope);
@@ -262,6 +276,24 @@ export function InjectDialog({
           }`}
         >
           blank
+        </button>
+      </div>
+
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[11px]">
+          <span
+            className="size-1.5 rounded-full"
+            style={{ background: isValidJson ? "var(--hue-ok)" : "var(--hue-err)" }}
+          />
+          <span className="text-(--text-faint)">{isValidJson ? "Valid JSON" : "Invalid JSON syntax"}</span>
+        </div>
+        <button
+          type="button"
+          onClick={formatJson}
+          className="text-[11px] text-(--text-dim) hover:text-(--accent)"
+          title="Format JSON (⌘⇧F)"
+        >
+          Format JSON <span className="mono opacity-70">⌘⇧F</span>
         </button>
       </div>
 
