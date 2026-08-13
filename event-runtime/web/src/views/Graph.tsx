@@ -35,6 +35,7 @@ export function Graph({
 }) {
   const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 10_000 });
   const [positioned, setPositioned] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
+  const [layoutFailed, setLayoutFailed] = useState(false);
   const flowRef = useRef<{
     getZoom: () => number;
     fitView: (opts: {
@@ -55,39 +56,47 @@ export function Graph({
   useEffect(() => {
     if (!graph) return;
     let cancelled = false;
+    setLayoutFailed(false);
     // elkjs is ~1.4 MB of pre-minified layout engine, so it rides in its own
     // async chunk (OPS-255) — fetched the first time there is a graph to lay
     // out, never by the list views.
-    import("../graph/layout").then(({ layoutGraph, NODE_HEIGHT, NODE_WIDTH }) =>
-      layoutGraph(graph).then((positions) => {
+    import("../graph/layout")
+      .then(({ layoutGraph, NODE_HEIGHT, NODE_WIDTH }) =>
+        layoutGraph(graph).then((positions) => {
+          if (cancelled) return;
+          setPositioned({
+            nodes: graph.nodes.map((node) => ({
+              id: node.id,
+              type: node.kind,
+              position: positions.get(node.id) ?? { x: 0, y: 0 },
+              data: { node },
+              draggable: true,
+              width: NODE_WIDTH,
+              height: NODE_HEIGHT,
+            })),
+            edges: graph.edges.map((edge) => ({
+              id: edge.id,
+              source: edge.source,
+              target: edge.target,
+              label: edge.label,
+              animated: false,
+              style: {
+                stroke: edge.kind === "recommends" ? "var(--accent)" : "var(--border-strong)",
+                strokeWidth: 1.5,
+                strokeDasharray: edge.kind === "recommends" ? "4 3" : undefined,
+              },
+              labelStyle: { fill: "var(--text-faint)", fontSize: 10 },
+              labelBgStyle: { fill: "var(--surface-0)" },
+            })),
+          });
+        }),
+      )
+      // A stale index.html after a redeploy points at a chunk that is no longer
+      // there; without this the view sits on "Laying out…" and reads as busy.
+      .catch(() => {
         if (cancelled) return;
-        setPositioned({
-          nodes: graph.nodes.map((node) => ({
-            id: node.id,
-            type: node.kind,
-            position: positions.get(node.id) ?? { x: 0, y: 0 },
-            data: { node },
-            draggable: true,
-            width: NODE_WIDTH,
-            height: NODE_HEIGHT,
-          })),
-          edges: graph.edges.map((edge) => ({
-            id: edge.id,
-            source: edge.source,
-            target: edge.target,
-            label: edge.label,
-            animated: false,
-            style: {
-              stroke: edge.kind === "recommends" ? "var(--accent)" : "var(--border-strong)",
-              strokeWidth: 1.5,
-              strokeDasharray: edge.kind === "recommends" ? "4 3" : undefined,
-            },
-            labelStyle: { fill: "var(--text-faint)", fontSize: 10 },
-            labelBgStyle: { fill: "var(--surface-0)" },
-          })),
-        });
-      }),
-    );
+        setLayoutFailed(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -160,7 +169,9 @@ export function Graph({
       ? "Cannot reach the control API — the graph will appear when /agents is up."
       : graph && graph.nodes.length === 0
         ? "No registered event types or agents."
-        : "Laying out the capability map…";
+        : layoutFailed
+          ? "Could not load the graph layout engine — reload the page; if it persists the deployed build is incomplete."
+          : "Laying out the capability map…";
 
   return (
     <div className="flex h-full min-w-0">
