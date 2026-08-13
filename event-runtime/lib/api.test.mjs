@@ -335,6 +335,24 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     expect(unknown.message).toBe("unknown run run_nope");
   });
 
+  test("cancel a PROPOSED run closes its open proposal", async () => {
+    const prop = await planned("can-proposed-1");
+    expect((await s.client.run(prop.runId)).run.state).toBe("PROPOSED");
+    expect((await s.client.proposals()).proposals.map((p) => p.id)).toContain(prop.id);
+
+    expect(await s.client.cancel(prop.runId, "never mind")).toEqual({ cancelled: true });
+    expect((await s.client.run(prop.runId)).run.state).toBe("CANCELLED");
+
+    const open = await s.client.proposals();
+    expect(open.proposals.map((p) => p.id)).not.toContain(prop.id);
+
+    const history = await s.client.proposals("all");
+    const decided = history.proposals.find((p) => p.id === prop.id);
+    expect(decided.status).toBe("rejected");
+    expect(decided.reason).toBe("run_cancelled");
+    expect(decided.decided_by).toBe("operator");
+  });
+
   test("retry: 404 on unknown run, 409 when attempts are exhausted, queued with force", async () => {
     const prop = await planned("retry-1");
     const { runId } = await s.client.approve(prop.id);
