@@ -57,6 +57,102 @@ export function hashPath(view: string, ...ids: Array<string | null | undefined>)
   return parts.join("/");
 }
 
+/**
+ * Safari throws `SecurityError` past ~100 history writes per 30s, and a held
+ * `j` fires ~30 keydowns a second — three seconds of hold used to break the
+ * write and freeze the selection. One history write per interval keeps a
+ * sustained hold an order of magnitude under the cap.
+ */
+export const HASH_WRITE_INTERVAL_MS = 500;
+
+/** Clock + timer seam so the coalescing is testable without real time. */
+export type HashWriteScheduler = {
+  now: () => number;
+  /** Runs `fn` after `ms`; the returned function cancels that pending run. */
+  after: (fn: () => void, ms: number) => () => void;
+};
+
+export type HashWriter = {
+  /** Same-view write: at most one per interval, last value wins. */
+  replace: (hash: string) => void;
+  /** View change: lands now, after any buffered same-view write. */
+  push: (hash: string) => void;
+  /** Write the buffered value now — for a change a reader must see at once. */
+  flush: () => void;
+  /** Drop the buffered value: the URL moved under us and it would clobber. */
+  cancel: () => void;
+};
+
+const timerScheduler: HashWriteScheduler = {
+  now: () => Date.now(),
+  after: (fn, ms) => {
+    const id = setTimeout(fn, ms);
+    return () => clearTimeout(id);
+  },
+};
+
+/**
+ * Rate-limits history writes. `write` gets the hash and whether it replaces;
+ * the caller keeps its own idea of the current hash, because the URL trails
+ * the intent by up to one interval while a key is held.
+ */
+export function createHashWriter(
+  write: (hash: string, replace: boolean) => void,
+  scheduler: HashWriteScheduler = timerScheduler,
+  intervalMs: number = HASH_WRITE_INTERVAL_MS,
+): HashWriter {
+  let buffered: string | null = null;
+  let cancelTimer: (() => void) | null = null;
+  let wroteAt = -Infinity;
+
+  const send = (hash: string, replace: boolean) => {
+    wroteAt = scheduler.now();
+    try {
+      write(hash, replace);
+    } catch {
+      // A history-rate SecurityError must not escape into the keydown handler
+      // that caused it: the selection has already moved, and the next write
+      // once the browser's window rolls over lands the real URL.
+    }
+  };
+  const drop = () => {
+    cancelTimer?.();
+    cancelTimer = null;
+    buffered = null;
+  };
+  const flush = () => {
+    const hash = buffered;
+    drop();
+    if (hash !== null) send(hash, true);
+  };
+
+  return {
+    replace(hash) {
+      const since = scheduler.now() - wroteAt;
+      if (since >= intervalMs) {
+        drop();
+        send(hash, true);
+        return;
+      }
+      buffered = hash;
+      if (!cancelTimer) {
+        cancelTimer = scheduler.after(() => {
+          cancelTimer = null;
+          flush();
+        }, intervalMs - since);
+      }
+    },
+    push(hash) {
+      // Land the buffered selection first so Back returns to the row the
+      // operator was actually on, not the one the last write happened to catch.
+      flush();
+      send(hash, false);
+    },
+    flush,
+    cancel: drop,
+  };
+}
+
 /** Events view hash, optionally with a shareable type filter. */
 export function eventsHash(
   source?: string | null,

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { parseHash, shouldReplaceHash } from "./hash";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { HashWriter } from "./hash";
+import { createHashWriter, hashSearch, parseHash, shouldReplaceHash } from "./hash";
 
 /** Open-modal depth: global list-navigation keys stand down while a dialog is up. */
 export const modal = { depth: 0 };
@@ -18,29 +19,58 @@ export function useHashRoute(): [string[], (path: string) => void] {
   // Query-only hash changes (`#/events?type=`) keep the same path segments;
   // tick so readers of window.location.hash re-render.
   const [, setHash] = useState(window.location.hash);
+  // Held j/k writes the URL at most once per interval, so the URL is not the
+  // current route while a key is down — this is.
+  const intended = useRef(window.location.hash);
+  const writer = useRef<HashWriter | null>(null);
+  if (!writer.current) {
+    writer.current = createHashWriter((hash, replace) => {
+      if (!replace) {
+        window.location.hash = hash;
+        return;
+      }
+      history.replaceState(
+        history.state,
+        "",
+        `${window.location.pathname}${window.location.search}${hash}`,
+      );
+      // replaceState does not fire hashchange — tick readers of the URL itself.
+      setHash(window.location.hash);
+    });
+  }
   useEffect(() => {
     const onChange = () => {
+      // Back, or a view writing window.location.hash directly: the URL is
+      // authoritative again, and a buffered write would clobber it.
+      writer.current?.cancel();
+      intended.current = window.location.hash;
       setRoute(read());
       setHash(window.location.hash);
     };
     window.addEventListener("hashchange", onChange);
-    return () => window.removeEventListener("hashchange", onChange);
+    return () => {
+      window.removeEventListener("hashchange", onChange);
+      writer.current?.cancel();
+    };
   }, []);
   const navigate = useCallback((path: string) => {
     const next = `#/${path}`;
-    if (window.location.hash === next) return;
-    if (shouldReplaceHash(window.location.hash, path)) {
-      // replaceState does not fire hashchange — tick route state here.
-      history.replaceState(
-        history.state,
-        "",
-        `${window.location.pathname}${window.location.search}${next}`,
-      );
-      setRoute(read());
-      setHash(window.location.hash);
+    if (intended.current === next) return;
+    const replace = shouldReplaceHash(intended.current, path);
+    // App reads `?type=` off window.location.hash as it renders, so a query
+    // change cannot sit buffered; only same-view path moves (j/k) coalesce.
+    const queryChanged = hashSearch(intended.current).toString() !== hashSearch(next).toString();
+    intended.current = next;
+    setRoute(parseHash(next));
+    setHash(next);
+    const write = writer.current;
+    if (!write) return;
+    if (!replace) {
+      write.push(next);
       return;
     }
-    window.location.hash = next;
+    write.replace(next);
+    if (queryChanged) write.flush();
   }, []);
   return [route.length ? route : ["overview"], navigate];
 }
