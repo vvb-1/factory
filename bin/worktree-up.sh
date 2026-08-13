@@ -25,11 +25,13 @@ SLUG=""
 HERE=0
 SEED=1
 RESEED=0
+LIVE=0
 POS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --here) HERE=1 ;;
+    --live) LIVE=1; SEED=0 ;;
     --no-seed) SEED=0 ;;
     --reseed) RESEED=1 ;;
     -h | --help)
@@ -98,16 +100,21 @@ info "building the web bundle"
 FRESH=0
 [[ -f "$HOME_DIR/runtime.db" ]] || FRESH=1
 
+ADAPTER_ARG=""
+if [[ "$LIVE" -ne 1 ]]; then
+  ADAPTER_ARG="--adapter-override fake"
+fi
+
 if pid_alive "$RUN_DIR/serve.pid"; then
   info "event runtime already running (pid $(cat "$RUN_DIR/serve.pid"), port $API_PORT)"
 else
-  info "starting event runtime on $API_PORT (fake adapter, home $HOME_DIR)"
+  info "starting event runtime on $API_PORT ($([[ "$LIVE" -eq 1 ]] && echo "live adapters" || echo "fake adapter"), home $HOME_DIR)"
   # exec so the subshell BECOMES bun: $! is the daemon's real pid, and no
   # bash wrapper lingers holding the caller's stdout open.
   (
     cd "$WT" || exit 1
     exec env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
-      bun event-runtime/cli.mjs serve --adapter-override fake \
+      bun event-runtime/cli.mjs serve ${ADAPTER_ARG} \
       </dev/null >"$RUN_DIR/serve.log" 2>&1
   ) &
   echo $! >"$RUN_DIR/serve.pid"
@@ -118,11 +125,11 @@ fi
 if pid_alive "$RUN_DIR/worker.pid"; then
   info "worker already running (pid $(cat "$RUN_DIR/worker.pid"))"
 else
-  info "starting worker (fake adapter)"
+  info "starting worker ($([[ "$LIVE" -eq 1 ]] && echo "live adapters" || echo "fake adapter"))"
   (
     cd "$WT" || exit 1
     exec env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
-      bun event-runtime/cli.mjs work --adapter-override fake \
+      bun event-runtime/cli.mjs work ${ADAPTER_ARG} \
       </dev/null >"$RUN_DIR/worker.log" 2>&1
   ) &
   echo $! >"$RUN_DIR/worker.pid"
@@ -171,7 +178,7 @@ $(info "ready — $LABEL")
 
   checkout   $WT
   event home $HOME_DIR
-  control    http://127.0.0.1:$API_PORT      (fake adapter — approvals are harmless)
+  control    http://127.0.0.1:$API_PORT      $([[ "$LIVE" -eq 1 ]] && echo "(live adapters)" || echo "(fake adapter — approvals are harmless)")
   web UI     http://127.0.0.1:$WEB_PORT
   logs       $RUN_DIR/{serve,worker,web}.log
 
