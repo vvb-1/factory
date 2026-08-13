@@ -28,6 +28,20 @@ export function parseHash(hash: string): string[] {
     });
 }
 
+/** First path segment; empty hash is the overview view. */
+export function hashView(hash: string): string {
+  return parseHash(hash)[0] ?? "overview";
+}
+
+/**
+ * Same-view hash writes (j/k selection, closing a panel, type query) should
+ * replace the current history entry. Crossing views (nav rail, `g e`) must
+ * push so Back returns to the previous view.
+ */
+export function shouldReplaceHash(currentHash: string, nextPath: string): boolean {
+  return hashView(currentHash) === hashView(`#/${nextPath}`);
+}
+
 /** Query after `?` in the hash (`#/events?type=…`). Empty when none. */
 export function hashSearch(hash: string): URLSearchParams {
   return new URLSearchParams(pathAndQuery(hash).query);

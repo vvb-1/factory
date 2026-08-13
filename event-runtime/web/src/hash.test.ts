@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { eventsHash, hashPath, hashSearch, parseHash } from "./hash";
+import { eventsHash, hashPath, hashSearch, hashView, parseHash, shouldReplaceHash } from "./hash";
 
 describe("parseHash", () => {
   test("empty hash is overview's empty route", () => {
@@ -27,6 +27,52 @@ describe("parseHash", () => {
       "graph",
       "event:factory.ticket.ready",
     ]);
+  });
+});
+
+describe("hashView", () => {
+  test("empty hash is overview", () => {
+    expect(hashView("")).toBe("overview");
+    expect(hashView("#")).toBe("overview");
+    expect(hashView("#/")).toBe("overview");
+    expect(hashView("#/overview")).toBe("overview");
+  });
+
+  test("reads the first path segment, ignoring ids and query", () => {
+    expect(hashView("#/runs/run_01")).toBe("runs");
+    expect(hashView("#/events?type=factory.ticket.ready")).toBe("events");
+    expect(hashView("#/events/web/evt_1")).toBe("events");
+  });
+});
+
+describe("shouldReplaceHash", () => {
+  test("j/k selection on the same view replaces", () => {
+    expect(shouldReplaceHash("#/runs", "runs/run_01")).toBe(true);
+    expect(shouldReplaceHash("#/runs/run_01", "runs/run_02")).toBe(true);
+    expect(shouldReplaceHash("#/runs/run_02", "runs")).toBe(true);
+    expect(shouldReplaceHash("#/events/web/evt_1", "events/web/evt_2")).toBe(true);
+    expect(shouldReplaceHash("#/agents", "agents/factory-status-report%401")).toBe(true);
+    expect(shouldReplaceHash("#/graph", "graph/event%3Afactory.ticket.ready")).toBe(true);
+  });
+
+  test("query-only changes on the same view replace", () => {
+    expect(shouldReplaceHash("#/events", "events?type=factory.ticket.ready")).toBe(true);
+    expect(shouldReplaceHash("#/events?type=a", "events?type=b")).toBe(true);
+    expect(shouldReplaceHash("#/events?type=a", "events/web/evt_1")).toBe(true);
+  });
+
+  test("crossing views pushes so Back returns", () => {
+    expect(shouldReplaceHash("#/events", "runs")).toBe(false);
+    expect(shouldReplaceHash("#/overview", "events")).toBe(false);
+    expect(shouldReplaceHash("", "events")).toBe(false);
+    expect(shouldReplaceHash("#/events/web/evt_1", "runs/run_01")).toBe(false);
+    expect(shouldReplaceHash("#/runs/run_01", "proposals")).toBe(false);
+    expect(shouldReplaceHash("#/graph", "agents")).toBe(false);
+  });
+
+  test("empty hash and #/overview are the same view", () => {
+    expect(shouldReplaceHash("", "overview")).toBe(true);
+    expect(shouldReplaceHash("#/overview", "overview")).toBe(true);
   });
 });
 
