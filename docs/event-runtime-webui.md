@@ -141,7 +141,7 @@ recognizable at a glance across every view.
 The detail panel shows the five blocks `GET /runs/:id` returns:
 
 - **run** — state, attempts, `idempotencyKey`, `specHash`, and the full spec
-  (same raw rendering as proposals);
+  in a disclosure that defaults open (same raw rendering as proposals);
 - **lifecycle** — the journal as a vertical timeline: state → state, actor,
   reason code, attempt, timestamp. This is the audit trail; it is the point
   of the page;

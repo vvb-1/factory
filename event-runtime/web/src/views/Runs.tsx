@@ -377,7 +377,7 @@ export function Runs({
             <KV k="workspace" v={d.workspace} />
             <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
             <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
-            <Disclosure label="immutable RunSpec">
+            <Disclosure label="immutable RunSpec" defaultOpen>
               <JsonBlock value={d.run.spec} />
             </Disclosure>
           </Section>

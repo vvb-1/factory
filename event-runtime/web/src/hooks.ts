@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { parseHash } from "./hash";
+import { parseHash, shouldReplaceHash } from "./hash";
 
 /** Open-modal depth: global list-navigation keys stand down while a dialog is up. */
 export const modal = { depth: 0 };
@@ -29,6 +29,17 @@ export function useHashRoute(): [string[], (path: string) => void] {
   const navigate = useCallback((path: string) => {
     const next = `#/${path}`;
     if (window.location.hash === next) return;
+    if (shouldReplaceHash(window.location.hash, path)) {
+      // replaceState does not fire hashchange — tick route state here.
+      history.replaceState(
+        history.state,
+        "",
+        `${window.location.pathname}${window.location.search}${next}`,
+      );
+      setRoute(read());
+      setHash(window.location.hash);
+      return;
+    }
     window.location.hash = next;
   }, []);
   return [route.length ? route : ["overview"], navigate];
