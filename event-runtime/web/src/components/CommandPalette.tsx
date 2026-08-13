@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { goSequence } from "../goSequence";
 import { keyGuard, modal } from "../hooks";
 import { useContextActions } from "../palette";
 
@@ -253,38 +254,19 @@ export function CommandPalette({
   );
 }
 
-const GO_CHORD_MS = 800;
-
-/**
- * Keydown handler behind `useGoSequences`, split out so the chord state
- * machine is reachable from a test without mounting a component.
- */
-export function goSequenceHandler(
-  map: Record<string, () => void>,
-  now: () => number = Date.now,
-) {
-  let pendingG = 0;
-  return function onKey(e: KeyboardEvent) {
-    if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-    // A held `g` auto-repeats: without this, resting on the key would arm the
-    // prefix and then immediately spend it on the Graph view.
-    if (e.repeat) return;
-    // The armed check runs before the `g` branch: `g` is both the prefix and
-    // the Graph suffix, so `g g` must be allowed to match the map.
-    if (pendingG && now() - pendingG < GO_CHORD_MS && map[e.key]) {
-      e.preventDefault();
-      pendingG = 0;
-      map[e.key]();
-      return;
-    }
-    pendingG = e.key === "g" ? now() : 0;
-  };
-}
-
 /** g-then-letter navigation sequences (spec §5): g g, g o, g p, g r, g e. */
 export function useGoSequences(map: Record<string, () => void>) {
   useEffect(() => {
-    const onKey = goSequenceHandler(map);
+    const press = goSequence((key) => key in map);
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // A held `g` auto-repeats: without this, resting on the key would arm
+      // the prefix and then immediately spend it on the Graph view.
+      if (e.repeat) return;
+      if (!press(e.key)) return;
+      e.preventDefault();
+      map[e.key]();
+    }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [map]);
