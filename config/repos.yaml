@@ -293,8 +293,8 @@ repos:
   # shared/ in place and its changes land by ordinary commit/PR, not worktree.
   - name: factory
     path: ~/Develop/factory
-    github: hdkiller/factory
+    github: watt-mind/factory
     team: OPS
-    base: main
+    base: develop
     report_only: true            # never a dispatch target — no worktree tooling
     verify: bun test && bun build/emit.mjs --check
