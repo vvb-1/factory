@@ -35,6 +35,128 @@ const WORKER_HUES: Record<string, string> = {
  */
 const health = (w: Worker) => (w.stale ? "stale" : w.state);
 
+/**
+ * Mirrors `HEARTBEAT_STALE_MS` in `event-runtime/lib/workers.mjs`. The web app
+ * never imports from the runtime's `lib/`, so moving the window there means
+ * changing it here too — the number is duplicated on purpose, not by accident.
+ */
+const HEARTBEAT_STALE_MS = 90_000;
+
+/** The last third of the window. A worker that checks in every tick never reaches it. */
+const HEARTBEAT_WARN_MS = 30_000;
+
+type Heartbeat = { kind: "stale"; overdueMs: number } | { kind: "live"; remainingMs: number } | { kind: "none" };
+
+/**
+ * Threshold arithmetic, not a second opinion on health: whether a worker *is*
+ * stale stays the server's call (`w.stale`, via `health`), and this only says how
+ * much of the 90s window is left or how far past it we are. A cleanly stopped
+ * worker stops checking in on purpose, so it has no deadline at all — counting
+ * down for it would invent an outage.
+ */
+const heartbeatOf = (w: Worker, now: number): Heartbeat => {
+  const deadline = Date.parse(w.lastSeen) + HEARTBEAT_STALE_MS;
+  if (w.stale) return { kind: "stale", overdueMs: Math.max(0, now - deadline) };
+  if (w.state === "stopped") return { kind: "none" };
+  // Whole seconds, rounded up: the last fraction of a second reads 0:01, and only
+  // a genuinely spent window reads 0 — which is what `overdue` keys off.
+  return { kind: "live", remainingMs: Math.max(0, Math.ceil((deadline - now) / 1000) * 1000) };
+};
+
+/** One hue per clock, so the age, the countdown and the meter never disagree. */
+const heartbeatHue = (hb: Heartbeat): string | undefined => {
+  if (hb.kind === "stale") return "var(--hue-err)";
+  if (hb.kind === "live" && hb.remainingMs <= HEARTBEAT_WARN_MS) return "var(--hue-warn)";
+  return undefined;
+};
+
+/** `m:ss` while seconds decide, coarser once they stop mattering. */
+const dur = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  return `${Math.floor(s / 86400)}d${Math.floor((s % 86400) / 3600)}h`;
+};
+
+/**
+ * The distance to the stale threshold, worded the same way in the row and the
+ * detail pane so an operator only has to learn one phrase. The countdown is local
+ * arithmetic and the verdict is the server's, so a spent window says `overdue`
+ * rather than counting down to a self-contradicting `stale in 0:00`: the badge
+ * catches up on the next poll, and until it does nothing here calls a worker dead
+ * a second before the runtime does.
+ */
+function StaleClock({ hb, className }: { hb: Heartbeat; className?: string }) {
+  const windowLabel = `${HEARTBEAT_STALE_MS / 1000}s`;
+  if (hb.kind === "none")
+    return (
+      <span
+        className={`text-(--text-faint) ${className ?? ""}`}
+        title="A cleanly stopped worker stops checking in on purpose, so it is never marked stale."
+      >
+        heartbeat off
+      </span>
+    );
+  const hue = heartbeatHue(hb);
+  if (hb.kind === "stale")
+    return (
+      <span
+        className={className}
+        style={{ color: hue }}
+        title={`No check-in for ${dur(hb.overdueMs)} longer than the ${windowLabel} window allows.`}
+      >
+        stale for {dur(hb.overdueMs)}
+      </span>
+    );
+  if (hb.remainingMs === 0)
+    return (
+      <span
+        className={className}
+        style={{ color: hue }}
+        title={`The ${windowLabel} window is spent — the runtime marks this worker stale on its next read.`}
+      >
+        overdue
+      </span>
+    );
+  return (
+    <span
+      className={className}
+      style={{ color: hue }}
+      title={`Goes stale unless this worker checks in within ${dur(hb.remainingMs)} (${windowLabel} window).`}
+    >
+      stale in {dur(hb.remainingMs)}
+    </span>
+  );
+}
+
+/** Age and countdown on one line: in a 90s window neither number means much alone. */
+function HeartbeatCell({ w, now }: { w: Worker; now: number }) {
+  const hb = heartbeatOf(w, now);
+  return (
+    <>
+      <span style={{ color: heartbeatHue(hb) }}>
+        <Ago iso={w.lastSeen} now={now} />
+      </span>
+      <span className="px-1.5">·</span>
+      <StaleClock hb={hb} className="text-[11px]" />
+    </>
+  );
+}
+
+/** How much of the window is spent — the glance; `StaleClock` is the number. */
+function HeartbeatMeter({ hb }: { hb: Heartbeat }) {
+  if (hb.kind === "none") return null;
+  const spent = hb.kind === "stale" ? 1 : 1 - hb.remainingMs / HEARTBEAT_STALE_MS;
+  return (
+    <div className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)" aria-hidden="true">
+      <div
+        className="h-full rounded-full transition-[width,background-color] duration-1000 ease-linear"
+        style={{ width: `${Math.min(100, Math.max(2, spent * 100))}%`, background: heartbeatHue(hb) ?? "var(--hue-ok)" }}
+      />
+    </div>
+  );
+}
+
 const labelText = (labels: Record<string, string>) =>
   Object.entries(labels)
     .map(([k, v]) => `${k}=${v}`)
@@ -79,6 +201,7 @@ export function Workers({
     [visible, selectedId],
   );
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
+  const selHeartbeat: Heartbeat = sel ? heartbeatOf(sel, now) : { kind: "none" };
 
   useEffect(() => {
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
@@ -145,7 +268,7 @@ export function Workers({
               <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Labels</th>
               <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Adapters</th>
               <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Current run</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Last seen</th>
+              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium" title={`Last check-in, and how far that is from the ${HEARTBEAT_STALE_MS / 1000}s stale threshold`}>Heartbeat</th>
             </tr>
           </thead>
           <tbody>
@@ -192,8 +315,8 @@ export function Workers({
                     "-"
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                  <Ago iso={w.lastSeen} now={now} className={w.stale ? "text-[color:var(--hue-err)]" : undefined} />
+                <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap tabular-nums text-(--text-faint)">
+                  <HeartbeatCell w={w} now={now} />
                 </td>
               </tr>
             ))}
@@ -229,7 +352,7 @@ export function Workers({
             </>
           }
         >
-          {sel.stale && (
+          {selHeartbeat.kind === "stale" && (
             <div
               className="mb-4 rounded-md px-2.5 py-1.5 text-[12px]"
               style={{
@@ -237,10 +360,28 @@ export function Workers({
                 background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
               }}
             >
-              Heartbeat has gone stale — this process is gone, whatever it last reported
+              Heartbeat went stale {dur(selHeartbeat.overdueMs)} ago — this process is gone, whatever it last reported
               {sel.currentRun ? ` (it still holds ${sel.currentRun}; the run is reclaimed when its lease expires)` : ""}.
             </div>
           )}
+
+          <Section title="Heartbeat">
+            <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums">
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-(--text-faint)">
+                  last check-in <Ago iso={sel.lastSeen} now={now} className="text-(--text-dim)" />
+                </span>
+                <StaleClock hb={selHeartbeat} />
+              </div>
+              <HeartbeatMeter hb={selHeartbeat} />
+              {selHeartbeat.kind !== "none" && (
+                <div className="mt-2 text-[11px] text-(--text-faint)">
+                  A worker that has not checked in for {HEARTBEAT_STALE_MS / 1000}s is treated as gone, whatever its
+                  last reported state was.
+                </div>
+              )}
+            </div>
+          </Section>
 
           <Section title="Process">
             <KV k="workerId" v={sel.workerId} />
@@ -268,7 +409,6 @@ export function Workers({
               }
             />
             <KV k="startedAt" v={<Ago iso={sel.startedAt} now={now} />} />
-            <KV k="lastSeen" v={<Ago iso={sel.lastSeen} now={now} />} />
             {sel.stoppedAt && <KV k="stoppedAt" v={<Ago iso={sel.stoppedAt} now={now} />} />}
           </Section>
 
