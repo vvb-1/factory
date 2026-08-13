@@ -4,7 +4,10 @@ import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
+import { ScopeCaption } from "../components/ContextTabs";
 import type { AdmittedEvent, EventFocus } from "../types";
+import type { OperatorContext } from "../context";
+import { matchesRepo } from "../context";
 import {
   Ago,
   Button,
@@ -61,6 +64,7 @@ function rowWash(status: string): string {
  */
 export function Events({
   connected,
+  context,
   focusEvent,
   onFocusConsumed,
   onSelectEvent,
@@ -71,6 +75,7 @@ export function Events({
   onInject,
 }: {
   connected: boolean;
+  context: OperatorContext;
   focusEvent: EventFocus | null;
   onFocusConsumed: () => void;
   onSelectEvent: (source: string | null, eventId?: string) => void;
@@ -96,20 +101,27 @@ export function Events({
     };
   }, []);
 
+  const fetchAll = context.kind === "repo";
   const list = useQuery({
-    queryKey: ["events", tab],
-    queryFn: () => api.events(tab === "all" ? undefined : tab),
+    queryKey: ["events", fetchAll ? "all" : tab],
+    queryFn: () => api.events(fetchAll || tab === "all" ? undefined : tab),
     refetchInterval: 2000,
   });
   const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const rows = list.data?.events ?? [];
+  const scoped = useMemo(() => {
+    const focusKey =
+      focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
+    return rows.filter((e) => keyOf(e) === focusKey || matchesRepo(e.repos, context));
+  }, [rows, context, focusEvent?.source, focusEvent?.eventId]);
 
-  const types = useMemo(() => [...new Set(rows.map((e) => e.type))].sort(), [rows]);
-  const sources = useMemo(() => [...new Set(rows.map((e) => e.source))].sort(), [rows]);
+  const types = useMemo(() => [...new Set(scoped.map((e) => e.type))].sort(), [scoped]);
+  const sources = useMemo(() => [...new Set(scoped.map((e) => e.source))].sort(), [scoped]);
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return rows.filter((e) => {
+    return scoped.filter((e) => {
+      if (fetchAll && tab !== "all" && e.status !== tab) return false;
       if (typeFilter && e.type !== typeFilter) return false;
       if (sourceFilter && e.source !== sourceFilter) return false;
       if (!q) return true;
@@ -120,7 +132,7 @@ export function Events({
         (e.subject ?? "").toLowerCase().includes(q)
       );
     });
-  }, [rows, filter, typeFilter, sourceFilter]);
+  }, [scoped, filter, typeFilter, sourceFilter, fetchAll, tab]);
 
   const selectedKey =
     focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
@@ -271,7 +283,14 @@ export function Events({
 
   const eventCounts = statusQ.data?.events ?? {};
   const allCount = Object.values(eventCounts).reduce((n, v) => n + v, 0);
-  const tabCount = (t: StatusTab) => (t === "all" ? allCount : (eventCounts[t] ?? 0));
+  const tabCount = (t: StatusTab) =>
+    fetchAll
+      ? t === "all"
+        ? scoped.length
+        : scoped.filter((e) => e.status === t).length
+      : t === "all"
+        ? allCount
+        : (eventCounts[t] ?? 0);
 
   return (
     <div className="flex h-full min-w-0">
@@ -279,6 +298,7 @@ export function Events({
         chrome={
           <>
         <h1 className="display mb-4 text-lg font-semibold">Events</h1>
+        {context.kind === "inflight" && <ScopeCaption context={context} surface="fleet" />}
 
         <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Event status">
           {STATUS_TABS.map((t) => {
@@ -403,10 +423,12 @@ export function Events({
               <ListEmpty
                 colSpan={6}
                 query={list}
-                filtered={rows.length > 0}
+                filtered={scoped.length > 0}
                 noun="events"
                 empty={
-                  tab === "all"
+                  context.kind === "repo"
+                    ? `No events naming ${context.name}.`
+                    : tab === "all"
                     ? "No events yet."
                     : `No ${TAB_LABEL[tab].toLowerCase()} events.`
                 }

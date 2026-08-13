@@ -5,6 +5,8 @@ import { hashPath } from "../hash";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
+import type { OperatorContext } from "../context";
+import { matchesInFlight, matchesRepo } from "../context";
 import type { Attempt, ArtifactRef, RunState } from "../types";
 import {
   Ago,
@@ -302,6 +304,7 @@ function ArtifactRow({ a }: { a: ArtifactRef }) {
 /** Runs (webui spec §4.3): state tabs, lifecycle timeline, guarded verbs. */
 export function Runs({
   connected,
+  context,
   focusRunId,
   onSelectRun,
   onOpenFull,
@@ -311,6 +314,7 @@ export function Runs({
   onJumpEvent,
 }: {
   connected: boolean;
+  context: OperatorContext;
   focusRunId: string | null;
   onSelectRun: (runId: string | null) => void;
   onOpenFull: (runId: string) => void;
@@ -326,22 +330,38 @@ export function Runs({
   const [confirm, setConfirm] = useState<"cancel" | "force-retry" | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
+  // A project / In-flight filter is client-side; fetching only the active
+  // status tab would make every other tab's badge a factory-wide lie.
+  const fetchAll = context.kind !== "all";
   const list = useQuery({
-    queryKey: ["runs", tab],
-    queryFn: () => api.runs(tab === "ALL" ? undefined : tab),
+    queryKey: ["runs", fetchAll ? "ALL" : tab],
+    queryFn: () => api.runs(fetchAll || tab === "ALL" ? undefined : tab),
     refetchInterval: 2000,
   });
   const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const rows = list.data?.runs ?? [];
+  const scoped = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          r.runId === focusRunId ||
+          (matchesRepo(r.repos, context) && matchesInFlight(r.state, context)),
+      ),
+    [rows, context, focusRunId],
+  );
+  const byTab = useMemo(
+    () => (!fetchAll || tab === "ALL" ? scoped : scoped.filter((r) => r.state === tab)),
+    [fetchAll, scoped, tab],
+  );
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
+    if (!q) return byTab;
+    return byTab.filter((r) =>
       [r.runId, r.state, r.agent, r.adapter, r.reasonCode, r.eventId].some((v) =>
         (v ?? "").toLowerCase().includes(q),
       ),
     );
-  }, [rows, filter]);
+  }, [byTab, filter]);
 
   const selectedId = focusRunId;
   const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
@@ -373,6 +393,12 @@ export function Runs({
       onFocusStateConsumed();
     }
   }, [focusState, onFocusStateConsumed]);
+
+  // In flight is LEASED+RUNNING; a COMPLETED (etc.) status tab would be empty.
+  useEffect(() => {
+    if (context.kind !== "inflight") return;
+    setTab((t) => (t === "LEASED" || t === "RUNNING" || t === "ALL" ? t : "ALL"));
+  }, [context.kind]);
 
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
 
@@ -493,8 +519,11 @@ export function Runs({
           <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label="Run state">
             {STATE_TABS.map((t) => {
               const byState = statusQ.data?.runs.byState ?? {};
-              const count =
-                t === "ALL"
+              const count = fetchAll
+                ? t === "ALL"
+                  ? scoped.length
+                  : scoped.filter((r) => r.state === t).length
+                : t === "ALL"
                   ? Object.values(byState).reduce((n, v) => n + (v ?? 0), 0)
                   : (byState[t] ?? 0);
               return (
@@ -583,9 +612,17 @@ export function Runs({
               <ListEmpty
                 colSpan={8}
                 query={list}
-                filtered={rows.length > 0}
+                filtered={scoped.length > 0}
                 noun="runs"
-                empty={tab === "ALL" ? "No runs." : `No runs in ${tab}.`}
+                empty={
+                  context.kind === "inflight"
+                    ? "No runs in flight."
+                    : context.kind === "repo"
+                      ? `No runs naming ${context.name}.`
+                      : tab === "ALL"
+                        ? "No runs."
+                        : `No runs in ${tab}.`
+                }
               />
             )}
           </tbody>

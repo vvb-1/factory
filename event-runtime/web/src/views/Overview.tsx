@@ -4,6 +4,8 @@ import { api } from "../api";
 import { hashPath } from "../hash";
 import { useNow } from "../hooks";
 import type { JournalEntry, EventFocus, RunState } from "../types";
+import type { OperatorContext } from "../context";
+import { ScopeCaption } from "../components/ContextTabs";
 import {
   Ago,
   Button,
@@ -60,6 +62,7 @@ function useJournalFeed(): { entries: JournalEntry[]; isPending: boolean; isErro
  */
 export function Overview({
   connected,
+  context,
   onJumpRun,
   onJumpProposal,
   onJumpEvents,
@@ -70,6 +73,7 @@ export function Overview({
   onInject,
 }: {
   connected: boolean;
+  context: OperatorContext;
   onJumpRun: (runId: string) => void;
   onJumpProposal: (id: string) => void;
   onJumpEvents: (focus: EventFocus) => void;
@@ -212,6 +216,7 @@ export function Overview({
           </button>
         </div>
       </div>
+      <ScopeCaption context={context} surface="overview" />
 
       {/* Promoted Doctor Deck when anomalies exist */}
       {hasAnomalies && (

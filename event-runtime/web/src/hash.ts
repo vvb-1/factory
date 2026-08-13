@@ -7,6 +7,10 @@
  * full-page run view — distinct first segment so expand/back get push
  * semantics) `#/agents` `#/agents/:ref` `#/workers` `#/workers/:id`
  * `#/graph` `#/graph/:nodeId`
+ *
+ * Optional `?project=` (OPS-356) restores the context-tab filter; `inflight`
+ * is reserved. The path still names the view. A pasted `#/runs/:id` without
+ * that query opens All.
  */
 
 function pathAndQuery(hash: string): { path: string; query: string } {
@@ -163,4 +167,23 @@ export function eventsHash(
 ): string {
   const path = hashPath("events", source, eventId);
   return type ? `${path}?type=${encodeURIComponent(type)}` : path;
+}
+
+/** `?project=` on the hash — the context strip's active filter, not the view. */
+export function hashProject(hash: string): string | null {
+  return hashSearch(hash).get("project");
+}
+
+/**
+ * Set or clear `project` on a hash path, preserving other query keys (`type=`).
+ * `project` null/empty strips it so All has no query of its own.
+ */
+export function withProject(path: string, project: string | null | undefined): string {
+  const i = path.indexOf("?");
+  const pathname = i >= 0 ? path.slice(0, i) : path;
+  const query = new URLSearchParams(i >= 0 ? path.slice(i + 1) : "");
+  if (project) query.set("project", project);
+  else query.delete("project");
+  const qs = query.toString();
+  return qs ? `${pathname}?${qs}` : pathname;
 }

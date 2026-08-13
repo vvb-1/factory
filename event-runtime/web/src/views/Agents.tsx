@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
+import type { OperatorContext } from "../context";
 import { Button, DetailPane, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, ListPane, Section, copyText, copyLink } from "../components/ui";
+import { ScopeCaption } from "../components/ContextTabs";
 import { eventsHash } from "../hash";
 import { setContextActions } from "../palette";
 
@@ -24,9 +26,11 @@ const eventsTypeHref = (type: string) => `#/${eventsHash(null, null, type)}`;
  * the registry has no mutation surface, by design.
  */
 export function Agents({
+  context,
   focusAgentRef,
   onSelectAgent,
 }: {
+  context: OperatorContext;
   focusAgentRef: string | null;
   onSelectAgent: (ref: string | null) => void;
 }) {
@@ -87,6 +91,7 @@ export function Agents({
         chrome={
           <>
         <h1 className="display mb-4 text-lg font-semibold">Agents</h1>
+        <ScopeCaption context={context} surface="registry" />
         <div className="mb-3">
           <FilterInput
             value={filter}

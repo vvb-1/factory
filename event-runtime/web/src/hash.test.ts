@@ -4,11 +4,13 @@ import {
   createHashWriter,
   eventsHash,
   hashPath,
+  hashProject,
   hashSearch,
   hashView,
   HASH_WRITE_INTERVAL_MS,
   parseHash,
   shouldReplaceHash,
+  withProject,
 } from "./hash";
 
 describe("parseHash", () => {
@@ -113,6 +115,31 @@ describe("eventsHash", () => {
     expect(eventsHash("web", "evt_1", "factory.ticket.ready")).toBe(
       "events/web/evt_1?type=factory.ticket.ready",
     );
+  });
+});
+
+describe("withProject / hashProject", () => {
+  test("adds, strips, and merges with type=", () => {
+    expect(withProject("runs", "bj29")).toBe("runs?project=bj29");
+    expect(withProject("runs", "inflight")).toBe("runs?project=inflight");
+    expect(withProject("runs?project=bj29", null)).toBe("runs");
+    expect(withProject("events?type=factory.ticket.ready", "bj29")).toBe(
+      "events?type=factory.ticket.ready&project=bj29",
+    );
+    expect(withProject("events?type=x&project=bj29", null)).toBe("events?type=x");
+    expect(withProject("runs/run_01", undefined)).toBe("runs/run_01");
+  });
+
+  test("hashProject reads the context filter off the hash", () => {
+    expect(hashProject("#/runs")).toBeNull();
+    expect(hashProject("#/runs?project=bj29")).toBe("bj29");
+    expect(hashProject("#/events?type=x&project=inflight")).toBe("inflight");
+  });
+
+  test("same-view project query still replaces", () => {
+    expect(shouldReplaceHash("#/runs", "runs?project=bj29")).toBe(true);
+    expect(shouldReplaceHash("#/runs?project=bj29", "runs")).toBe(true);
+    expect(shouldReplaceHash("#/events?project=bj29", "runs?project=bj29")).toBe(false);
   });
 });
 

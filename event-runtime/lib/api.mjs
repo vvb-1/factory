@@ -25,6 +25,27 @@ import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
 
+/**
+ * Repo names a run or event actually names — optional spec input, not a
+ * foreign key (OPS-356). Unscoped work is `[]` and belongs only under All.
+ */
+export function repoNamesFromInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+  const names = [];
+  const add = (value) => {
+    if (typeof value === "string" && value !== "" && !names.includes(value)) names.push(value);
+  };
+  if (input.repoPin && typeof input.repoPin === "object") add(input.repoPin.repo);
+  add(input.repo);
+  if (Array.isArray(input.repos)) {
+    for (const entry of input.repos) {
+      if (typeof entry === "string") add(entry);
+      else if (entry && typeof entry === "object") add(entry.name);
+    }
+  }
+  return names;
+}
+
 /** §14 size limit: a control-plane payload has no business being megabytes. */
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -77,6 +98,7 @@ function proposalView(row) {
     eventSource: row.event_source,
     agent: row.spec?.agent ?? null,
     spec: row.spec,
+    repos: repoNamesFromInput(row.spec?.input),
   };
 }
 
@@ -171,23 +193,27 @@ function eventsView(db, status) {
     ${status ? "WHERE e.status = ?" : ""}
     ORDER BY e.admitted_at DESC, e.rowid DESC`;
   const rows = status ? db.query(sql).all(status) : db.query(sql).all();
-  return rows.map((row) => ({
-    source: row.source,
-    eventId: row.event_id,
-    type: row.type,
-    subject: row.subject,
-    status: row.status,
-    occurredAt: row.occurred_at,
-    receivedAt: row.received_at,
-    correlationId: row.correlation_id,
-    causationId: row.causation_id,
-    planFailures: row.plan_failures,
-    lastPlanError: row.last_plan_error,
-    admittedAt: row.admitted_at,
-    proposalId: row.proposal_id ?? null,
-    runId: row.run_id ?? null,
-    envelope: JSON.parse(row.envelope_json),
-  }));
+  return rows.map((row) => {
+    const envelope = JSON.parse(row.envelope_json);
+    return {
+      source: row.source,
+      eventId: row.event_id,
+      type: row.type,
+      subject: row.subject,
+      status: row.status,
+      occurredAt: row.occurred_at,
+      receivedAt: row.received_at,
+      correlationId: row.correlation_id,
+      causationId: row.causation_id,
+      planFailures: row.plan_failures,
+      lastPlanError: row.last_plan_error,
+      admittedAt: row.admitted_at,
+      proposalId: row.proposal_id ?? null,
+      runId: row.run_id ?? null,
+      envelope,
+      repos: repoNamesFromInput(envelope.payload),
+    };
+  });
 }
 
 /**
@@ -220,6 +246,7 @@ function runsView(db, state) {
       eventSource: row.event_source ?? null,
       created_at: row.created_at,
       updated_at: row.updated_at,
+      repos: repoNamesFromInput(spec.input),
     };
   });
 }

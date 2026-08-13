@@ -4,6 +4,8 @@ import { api } from "../api";
 import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { Worker } from "../types";
+import type { OperatorContext } from "../context";
+import { ScopeCaption } from "../components/ContextTabs";
 import {
   Ago,
   Button,
@@ -177,9 +179,11 @@ const openRun = (runId: string) => {
  * `busy` and still holds a run, and that gap is the whole point of the column.
  */
 export function Workers({
+  context,
   focusWorkerId,
   onSelectWorker,
 }: {
+  context: OperatorContext;
   focusWorkerId: string | null;
   onSelectWorker: (id: string | null) => void;
 }) {
@@ -250,6 +254,7 @@ export function Workers({
         chrome={
           <>
             <h1 className="display mb-4 text-lg font-semibold">Workers</h1>
+            <ScopeCaption context={context} surface="fleet" />
             <div className="mb-3">
               <FilterInput
                 value={filter}

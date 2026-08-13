@@ -93,13 +93,13 @@ export const api = {
     call<{ requeued: boolean }>("POST", "/events/requeue", { source, eventId }),
   // The agent registry, fully readable: definitions, prompts, schemas, pins.
   agents: () => call<AgentsView>("GET", "/agents"),
-  // The worker registry: which processes are alive, where, and what they run.
-  workers: () => call<{ workers: Worker[] }>("GET", "/workers"),
-  // Configured factory repositories (config/repos.yaml)
+  // Configured factory repositories (config/repos.yaml) — context tabs open from this list.
   repos: () => call<{ repos: RepoItem[] }>("GET", "/repos"),
   // Janitor worktree scan and cleanup (apply: false for dry run, apply: true for teardown)
   janitor: (name: string, apply = false) =>
     call<JanitorResult>("POST", `/repos/${encodeURIComponent(name)}/janitor`, { apply }),
+  // The worker registry: which processes are alive, where, and what they run.
+  workers: () => call<{ workers: Worker[] }>("GET", "/workers"),
 };
 
 /** Browser URL for a stored artifact's bytes (streamed by the control API). */

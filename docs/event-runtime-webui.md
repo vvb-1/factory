@@ -658,3 +658,25 @@ wrong for *reading* — a trace deserves a page. `#/run/:id` is that page.
 - **Panel trace is now tail-only** (last 20 entries) with a "showing last 20
   of N — open full view" line: triage reads the newest activity, reading the
   whole thing is what the page is for.
+
+### 10.12 Operator context tabs (OPS-356)
+
+Linear-style strip **above** the inverted-L. A tab is a filter context, not a
+project container and not a second nav rail. Decisions: [product-decisions.md](product-decisions.md).
+
+- **All** — default, never closable. Today's UI. Unscoped work lives here.
+- **In flight** — Runs in `LEASED` or `RUNNING`, every repo. Not a fake
+  project. Selecting it lands on `#/runs`.
+- **A factory repo** — opened with `+` from `GET /repos`. Filters Events /
+  Proposals / Runs to rows whose `repos: string[]` (from spec input /
+  envelope payload: `repoPin.repo`, `repo`, `repos[]`) includes that name.
+  Empty `repos` only appear under All. Closing the tab returns to All.
+- **Agents / Workers / Graph / Inject** stay global. When a repo tab is
+  active they caption that they are not scoped to it.
+- **Hash.** View + selection stay in the path (`#/runs/:id`). Optional
+  `?project=` (`inflight` reserved) restores the active filter on refresh.
+  The open-repo set is `sessionStorage`. A pasted `#/runs/:id` without
+  `?project=` opens All. `g e` / j/k / Esc stay inside the context; `[` / `]`
+  still cycle status tabs.
+- Pinning a run as a document tab on this strip is OPS-357, not this
+  section. The Projects *view* (OPS-300) is a separate registry list.
