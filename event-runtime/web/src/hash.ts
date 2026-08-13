@@ -4,7 +4,7 @@
  *
  * `#/overview` `#/events` `#/events?type=` `#/events/:source/:eventId`
  * `#/proposals` `#/proposals/:id` `#/runs` `#/runs/:id` `#/agents`
- * `#/agents/:ref` `#/graph` `#/graph/:nodeId`
+ * `#/agents/:ref` `#/workers` `#/workers/:id` `#/graph` `#/graph/:nodeId`
  */
 
 function pathAndQuery(hash: string): { path: string; query: string } {

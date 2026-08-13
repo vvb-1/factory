@@ -11,6 +11,8 @@ describe("parseHash", () => {
   test("splits view and id", () => {
     expect(parseHash("#/runs/run_01")).toEqual(["runs", "run_01"]);
     expect(parseHash("#/events/web/evt_1")).toEqual(["events", "web", "evt_1"]);
+    expect(parseHash("#/workers")).toEqual(["workers"]);
+    expect(parseHash("#/workers/wkr_01")).toEqual(["workers", "wkr_01"]);
   });
 
   test("strips a query so ?type= cannot become a path segment", () => {
@@ -42,6 +44,7 @@ describe("hashView", () => {
     expect(hashView("#/runs/run_01")).toBe("runs");
     expect(hashView("#/events?type=factory.ticket.ready")).toBe("events");
     expect(hashView("#/events/web/evt_1")).toBe("events");
+    expect(hashView("#/workers/wkr_01")).toBe("workers");
   });
 });
 
@@ -53,6 +56,9 @@ describe("shouldReplaceHash", () => {
     expect(shouldReplaceHash("#/events/web/evt_1", "events/web/evt_2")).toBe(true);
     expect(shouldReplaceHash("#/agents", "agents/factory-status-report%401")).toBe(true);
     expect(shouldReplaceHash("#/graph", "graph/event%3Afactory.ticket.ready")).toBe(true);
+    expect(shouldReplaceHash("#/workers", "workers/wkr_01")).toBe(true);
+    expect(shouldReplaceHash("#/workers/wkr_01", "workers/wkr_02")).toBe(true);
+    expect(shouldReplaceHash("#/workers/wkr_01", "workers")).toBe(true);
   });
 
   test("query-only changes on the same view replace", () => {
@@ -68,6 +74,8 @@ describe("shouldReplaceHash", () => {
     expect(shouldReplaceHash("#/events/web/evt_1", "runs/run_01")).toBe(false);
     expect(shouldReplaceHash("#/runs/run_01", "proposals")).toBe(false);
     expect(shouldReplaceHash("#/graph", "agents")).toBe(false);
+    expect(shouldReplaceHash("#/runs/run_01", "workers/wkr_01")).toBe(false);
+    expect(shouldReplaceHash("#/workers/wkr_01", "runs")).toBe(false);
   });
 
   test("empty hash and #/overview are the same view", () => {
@@ -109,6 +117,8 @@ describe("hashPath", () => {
     expect(hashPath("graph", "event:factory.ticket.ready")).toBe(
       "graph/event%3Afactory.ticket.ready",
     );
+    expect(hashPath("workers")).toBe("workers");
+    expect(hashPath("workers", "wkr_01")).toBe("workers/wkr_01");
   });
 
   test("drops null/empty ids so a closed panel is the view root", () => {
@@ -120,5 +130,7 @@ describe("hashPath", () => {
   test("round-trips through parseHash", () => {
     const path = hashPath("agents", "factory-status-report@1");
     expect(parseHash(`#/${path}`)).toEqual(["agents", "factory-status-report@1"]);
+    const worker = hashPath("workers", "wkr_lab_4821");
+    expect(parseHash(`#/${worker}`)).toEqual(["workers", "wkr_lab_4821"]);
   });
 });

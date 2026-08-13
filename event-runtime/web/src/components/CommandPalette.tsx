@@ -19,12 +19,14 @@ export function CommandPalette({
   onJumpProposal,
   onJumpEvent,
   onJumpAgent,
+  onJumpWorker,
 }: {
   actions: PaletteAction[];
   onJumpRun: (runId: string) => void;
   onJumpProposal: (id: string) => void;
   onJumpEvent: (source: string, eventId: string) => void;
   onJumpAgent: (ref: string) => void;
+  onJumpWorker: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const contextActions = useContextActions();
@@ -39,6 +41,7 @@ export function CommandPalette({
   });
   const events = useQuery({ queryKey: ["events", "all"], queryFn: () => api.events(), enabled: open });
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents, enabled: open });
+  const workers = useQuery({ queryKey: ["workers"], queryFn: api.workers, enabled: open });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -211,6 +214,31 @@ export function CommandPalette({
               <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">agent · {a.outputContract}</span>
             </Command.Item>
           ))}
+            </Command.Group>
+          )}
+          {(workers.data?.workers ?? []).length > 0 && (
+            <Command.Group heading="Workers">
+          {(workers.data?.workers ?? []).map((w) => {
+            // A stale heartbeat outranks what the worker last reported, same
+            // as the Workers view — the palette must not call a dead process busy.
+            const state = w.stale ? "stale" : w.state;
+            return (
+            <Command.Item
+              key={w.workerId}
+              value={`worker ${w.workerId} ${w.host} ${state}`}
+              onSelect={() => {
+                setOpen(false);
+                onJumpWorker(w.workerId);
+              }}
+              className="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-[13px] data-[selected=true]:bg-(--surface-3)"
+            >
+              <span className="mono truncate">{w.workerId}</span>
+              <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">
+                worker · {w.host} · {state}
+              </span>
+            </Command.Item>
+            );
+          })}
             </Command.Group>
           )}
         </Command.List>
