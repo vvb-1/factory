@@ -60,6 +60,15 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     workers: () => call("GET", "/workers"),
     /** Factory repo registry from config/repos.yaml (OPS-299). */
     repos: () => call("GET", "/repos"),
+    /**
+     * Loopback janitor for one repos.yaml entry (OPS-301). `apply: false`
+     * (the default) is a dry survey; `apply: true` tears down finished-ticket
+     * worktrees via the repo's worktree_down, never `--force`.
+     */
+    janitor: (name, { apply = false } = {}) =>
+      call("POST", `/repos/${encodeURIComponent(name)}/janitor`, {
+        body: JSON.stringify({ apply: apply === true }),
+      }),
     approve: (id) => call("POST", `/proposals/${encodeURIComponent(id)}/approve`, { body: "{}" }),
     reject: (id, reason) =>
       call("POST", `/proposals/${encodeURIComponent(id)}/reject`, { body: JSON.stringify({ reason }) }),

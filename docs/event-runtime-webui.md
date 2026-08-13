@@ -44,16 +44,22 @@ Made by the operator, recorded here so nobody relitigates them mid-build:
 ## 2. Non-goals
 
 - No authentication, sessions, or multi-operator identity (see above).
-- No new mutation surface: the UI exposes exactly the verbs the API has —
-  approve, reject, cancel, retry, replay. Nothing else.
+- No new mutation surface except the loopback janitor verb
+  (`POST /repos/:name/janitor`, OPS-301): Dry and Apply, 127.0.0.1, actor
+  `operator`, same trust as typing `factory janitor` on the machine. Apply
+  never passes `--force`. The Projects-tab buttons (typed confirm, Dry
+  before Apply) are a follow-up (OPS-362); this records the API exception.
+  Everything else the UI exposes is still approve, reject, cancel, retry,
+  replay.
 - No database access, no imports from `event-runtime/lib/`.
 - No SSE/WebSocket work in the first version.
 - No transcript/artifact *content* viewer. `GET /runs/:id` returns the
   retained workspace *path*; a browser cannot read local paths, and an
   artifact-fetch endpoint is new API surface. Deferred (§8) — the UI shows
   the path and hashes, and `cli.mjs inspect` remains the deep-inspection tool.
-- No involvement in the emit pipeline, `shared/`, or the orchestrator (§3 of
-  the parent doc applies unchanged).
+- No involvement in the emit pipeline or `shared/`. The control API may
+  spawn `factory janitor` for the Projects verb (OPS-301); the web app still
+  does not import the orchestrator.
 
 ---
 
@@ -281,8 +287,13 @@ and shared with the CLI:
 - **`GET /outbox`** (`?limit=`) — emitted result events, the runtime's
   actual output.
 - **`POST /events/requeue`** — re-plan a dead-lettered or `human_needed`
-  event (CLI `requeue`); the only non-read addition, audited like every
-  other verb.
+  event (CLI `requeue`); audited like every other verb.
+- **`GET /repos`** — `config/repos.yaml` as an allow-listed registry (OPS-299).
+- **`POST /repos/:name/janitor`** — loopback spawn of `factory janitor`
+  `--json` for that one name (OPS-301). Body `{ apply: false | true }`;
+  omitted `apply` is Dry. Apply never `--force`. Unknown name 404; Apply on
+  a `report_only` repo without `worktree_down` 409. Actor `"operator"`. The
+  UI confirm is OPS-362, not this endpoint.
 - **`GET /artifacts/:sha256`** — content-addressed artifact/transcript bytes
   (the §8 deferral, since triggered and shipped).
 - **`GET /workers`** — the worker registry the CLI `workers` command prints,
