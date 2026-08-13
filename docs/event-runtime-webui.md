@@ -497,7 +497,7 @@ no new API.
   obvious. Click a toast to dismiss it. The document title follows the hash
   (`factory · Runs · run_id`).
 
-### 10.9 Workers view (`#/workers`, `g w`) — OPS-265, OPS-266
+### 10.9 Workers view (`#/workers`, `g w`) — OPS-265, OPS-266, OPS-267, OPS-268
 
 The fleet became plural (OPS-233), so §1's single-worker claim stopped being
 true and the registry needed a view. Workers answers one question: **who could
@@ -545,11 +545,24 @@ is the reason the view exists.
   there because tone alone does not survive the high-contrast theme. Counts
   come from `/status`'s `workers` block.
 
-Two AC items of the parent pass are **not on this tree and remain follow-ups**:
-the Overview doctor tiles for `stalledWorkers` / `noWorkers` (OPS-267) and
-`lease_owner` jumps from a run's attempts to the owning worker (OPS-268) — the
-API already returns all three fields (§7), but no Overview or Runs UI reads
-them yet.
+The two AC items of the parent pass that shipped separately are **now on this
+tree**, so the fields §7 already returned are all read by a view:
+
+- **Overview tiles and worker anomalies (OPS-267).** The Overview stat grid
+  gains `workers · live` / `busy` / `stale` from `/status`, each hued only when
+  non-zero (ok, info, warn) and each a jump to `#/workers`. The Overview doctor
+  panel gains a row per `stalledWorkers` entry — naming the worker, the run it
+  still holds, and the heartbeat age, with a jump to both ends of that gap —
+  and a row for `noWorkers` that counts the queued runs waiting on a
+  registration. Anomaly rows carry a link list rather than one link, because a
+  stalled worker legitimately has two destinations.
+- **`lease_owner` jumps (OPS-268).** A run's attempts now render their lease
+  owner, and both it and a lifecycle row's actor become a jump to
+  `#/workers/:id` when the string is a worker id (`worker_<pid>_<rand>`,
+  `lib/ids.mjs`). Every other actor the runtime records is a bare word
+  (`operator`, `planner`, `reaper`, or the `worker` fallback for an attempt
+  whose owner was lost) and stays inert text, since none of them addresses a
+  row in the fleet; a missing owner reads `unclaimed`.
 
 ### 10.10 Live trace in run detail (OPS-295)
 
