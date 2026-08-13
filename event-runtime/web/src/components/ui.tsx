@@ -400,12 +400,25 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 export function KV({ k, v }: { k: string; v: ReactNode }) {
+  const text = typeof v === "string" ? v : null;
+  const copyable = !!text && text !== "-";
   return (
     <div className="flex justify-between gap-4 border-b border-(--border) py-1 last:border-0">
       <span className="text-(--text-faint)">{k}</span>
-      <span className="mono truncate text-(--text-dim)" title={typeof v === "string" ? v : undefined}>
-        {v ?? "-"}
-      </span>
+      {copyable ? (
+        <button
+          type="button"
+          title={`Copy ${k}`}
+          onClick={() => copyText(text, k)}
+          className="mono max-w-[70%] truncate text-right text-(--text-dim) hover:text-(--accent)"
+        >
+          {text}
+        </button>
+      ) : (
+        <span className="mono truncate text-(--text-dim)" title={text ?? undefined}>
+          {v ?? "-"}
+        </span>
+      )}
     </div>
   );
 }

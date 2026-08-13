@@ -473,7 +473,7 @@ no new API.
   the spec scrolls. `[` / `]` also scrolls the selected Runs tab into view.
   ⌘K splits This item / Go / Commands.
   Relative timestamps show the ISO instant on hover (lists, detail KV, run
-  lifecycle clock, attempt start/finish). Doctor anomalies copy. A filtered
+  lifecycle clock, attempt start/finish). Click a string KV value to copy it. Doctor anomalies copy. A filtered
   empty list reminds that Esc clears. Selection wash is denser so j/k is
   obvious. Click a toast to dismiss it. The document title follows the hash
   (`factory · Runs · run_id`).
