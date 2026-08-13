@@ -527,7 +527,55 @@ export function Proposals({
           )}
 
           {sel.spec && (
-            <Section title="Run spec — what you approve">
+            <Section title="Spec Highlights — safety check">
+              <div className="mb-2 rounded-md border border-(--border) bg-(--surface-0) p-3">
+                <div className="mb-2 flex items-center justify-between gap-2 border-b border-(--border) pb-2">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <span className="mono">{sel.spec.agent}</span>
+                    <span className="text-[11px] text-(--text-faint)">({sel.spec.adapter})</span>
+                  </div>
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+                    style={
+                      sel.spec.capabilities && sel.spec.capabilities.length > 0
+                        ? {
+                            color: "var(--hue-warn)",
+                            background: "color-mix(in oklch, var(--hue-warn) 14%, transparent)",
+                          }
+                        : {
+                            color: "var(--hue-ok)",
+                            background: "color-mix(in oklch, var(--hue-ok) 14%, transparent)",
+                          }
+                    }
+                  >
+                    {sel.spec.capabilities && sel.spec.capabilities.length > 0
+                      ? `${sel.spec.capabilities.length} cap${sel.spec.capabilities.length === 1 ? "" : "s"}`
+                      : "read-only"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[12px]">
+                  <div>
+                    <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Workspace</div>
+                    <div className="mono text-(--text-dim) truncate">
+                      {sel.spec.workspace?.type ?? "default"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Timeout & SLA</div>
+                    <div className="mono text-(--text-dim)">
+                      {sel.spec.timeoutSeconds}s · max {sel.spec.maxAttempts} att
+                    </div>
+                  </div>
+                  {sel.spec.capabilities && sel.spec.capabilities.length > 0 && (
+                    <div className="col-span-2">
+                      <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Capabilities</div>
+                      <div className="mono text-(--text-dim) truncate">
+                        {sel.spec.capabilities.join(", ")}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
               <Disclosure label="immutable RunSpec" defaultOpen={isOpen}>
                 <JsonBlock value={sel.spec} />
               </Disclosure>

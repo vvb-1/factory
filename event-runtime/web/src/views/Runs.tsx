@@ -520,6 +520,9 @@ export function Runs({
                 Expand <span className="mono ml-1 opacity-70">o</span>
               </Button>
               <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
+              <Button onClick={() => copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command")}>
+                Copy CLI
+              </Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectRun(null)}>Close</Button>
             </>
