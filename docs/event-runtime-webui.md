@@ -371,7 +371,9 @@ proposals → Proposals, run state → that Runs tab). Added: (a) the **doctor p
 its view (expired proposal → that proposal, stale leases → runs,
 dead-lettered → that event's row on the Events dead_lettered tab, unpublished
 outbox → scroll to the outbox feed) and offers requeue
-directly on dead-letter rows; (b) a **live activity feed** off `GET /journal`
+directly on dead-letter rows — toast, poll for the new open proposal, jump to
+`#/proposals/:id` (or an honest toast if none appears, same 8s budget as Events);
+(b) a **live activity feed** off `GET /journal`
 — first fetch seeds the latest entries, then each poll passes
 `since=<last head>` and prepends only what is new, capped at 50 shown, each
 entry rendered as `run · FROM → TO by actor (reason)` with a relative
@@ -456,7 +458,8 @@ no new API.
   Requeue (re-plan) / Replay (same id through intake) / Trigger again (fresh
   id) / Inject (blank or template) distinct.
 - **Overview.** Expired-proposals tile lands on the Open tab with the expired
-  chip on. Quiet Graph and Inject jumps in the header.
+  chip on. Quiet Graph and Inject jumps in the header. Doctor Requeue jumps to
+  the new open proposal like Events.
 - **⌘K** includes decided proposals (`GET /proposals?status=all`). Dialogs
   expose `role=dialog` `aria-modal`. Runs state tabs scroll on one row
   (LEASED and VERIFYING included — the Overview stale-lease jump lands there).

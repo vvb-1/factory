@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useNow } from "../hooks";
 import type { JournalEntry, EventFocus } from "../types";
@@ -15,6 +15,7 @@ import {
   StatTile,
   VerbError,
   copyText,
+  notify,
 } from "../components/ui";
 
 const FEED_CAP = 50;
@@ -78,6 +79,13 @@ export function Overview({
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const outbox = useQuery({
     queryKey: ["outbox"],
@@ -88,7 +96,21 @@ export function Overview({
 
   const requeue = useMutation({
     mutationFn: ({ source, eventId }: { source: string; eventId: string }) => api.requeue(source, eventId),
-    onSuccess: () => queryClient.invalidateQueries(),
+    onSuccess: async (_, { source, eventId }) => {
+      queryClient.invalidateQueries();
+      notify(`Requeued event ${eventId}`, "ok");
+      const deadline = Date.now() + 8000;
+      while (alive.current && Date.now() < deadline) {
+        const { proposals } = await api.proposals();
+        const match = proposals.find((p) => p.eventSource === source && p.eventId === eventId);
+        if (match && alive.current) {
+          onJumpProposal(match.id);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (alive.current) notify(`Requeued ${eventId} — no open proposal appeared`, "info");
+    },
     onError: () => queryClient.invalidateQueries(),
   });
 
