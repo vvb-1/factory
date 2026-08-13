@@ -18,6 +18,7 @@ import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
+import { loadRepos, RepoError, reposView } from "./repos.mjs";
 import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
@@ -377,6 +378,11 @@ export function createApi({
   policyVersion = "unknown",
   env = { name: environmentName(), home: runtimeHome(), adapter: null },
   onEvent = () => {},
+  // Read per request, not once at startup: repos.yaml is a file an operator
+  // edits, and a registry cached at boot would answer with yesterday's config
+  // until someone restarted serve. Injectable so tests can point at a fixture
+  // instead of whichever repos exist on the machine.
+  repos = () => loadRepos(),
 } = {}) {
   const ACTOR = "operator"; // one local operator in the MVP (§14)
 
@@ -429,6 +435,20 @@ export function createApi({
 
       if (route === "GET /agents") {
         return send(res, 200, agentsView(registry));
+      }
+
+      // The factory repo registry (OPS-299): which projects exist, which are
+      // dispatch targets, and where their worktrees live.
+      if (route === "GET /repos") {
+        try {
+          return send(res, 200, { repos: reposView(repos()) });
+        } catch (err) {
+          // A missing or malformed repos.yaml is an operator-fixable config
+          // problem; the generic 500 below would hide it behind
+          // "internal_error" and send them reading the runtime's source.
+          if (err instanceof RepoError) return send(res, 500, { error: err.message });
+          throw err;
+        }
       }
 
       const artifactGet = url.pathname.match(/^\/artifacts\/([0-9a-f]{64})$/);

@@ -8,6 +8,9 @@
  *
  * Tier 1 uses `name`, `path`, `github`, and `base`. The `worktree_*` and
  * `verify` fields are read but unused until tier 2 (docs/event-runtime-workers.md).
+ * The registry fields (`team`, `project`, `report_only`, `max_in_flight`,
+ * `deploy_branch`) are what an operator needs to tell a dispatch target from a
+ * report-only one, and where its worktrees live (OPS-299).
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -44,7 +47,10 @@ export function expandHome(p) {
 
 /**
  * @returns {Map<string, {name: string, path: string, github: string|null, base: string,
- *                        worktreeUp: string|null, worktreeDown: string|null, verify: string|null}>}
+ *                        deployBranch: string|null, team: string|null, project: string|null,
+ *                        reportOnly: boolean, maxInFlight: number|null, worktreeRoot: string|null,
+ *                        worktreeUp: string|null, worktreeDown: string|null,
+ *                        worktreeWarm: string|null, verify: string|null}>}
  */
 export function loadRepos({ root = reposRoot() } = {}) {
   const file = reposConfigPath(root);
@@ -59,12 +65,57 @@ export function loadRepos({ root = reposRoot() } = {}) {
       path: expandHome(entry.path),
       github: entry.github ?? null,
       base: entry.base ?? "main",
+      deployBranch: entry.deploy_branch ?? null,
+      team: entry.team ?? null,
+      project: entry.project ?? null,
+      // Absent means dispatchable: report_only is the guard a repo opts into,
+      // so anything but an explicit `true` must read as false rather than
+      // "maybe" — an operator reading "dispatch" off a null would be wrong.
+      reportOnly: entry.report_only === true,
+      // Null, not a default: the cap's fallback lives with the dispatcher, and
+      // inventing a number here would state a limit this file never set.
+      maxInFlight: Number.isFinite(entry.max_in_flight) ? entry.max_in_flight : null,
+      worktreeRoot: entry.worktree_root ? expandHome(entry.worktree_root) : null,
       worktreeUp: entry.worktree_up ?? null,
       worktreeDown: entry.worktree_down ?? null,
+      worktreeWarm: entry.worktree_warm ?? null,
       verify: entry.verify ?? null,
     });
   }
   return repos;
+}
+
+/**
+ * The repo registry as the control API serves it (OPS-299): one row per
+ * repos.yaml entry, in file order.
+ *
+ * An explicit allow-list, not the parsed entry: repos.yaml also carries
+ * `escalate_paths`, `security`, and whatever the next policy field turns out to
+ * be, and a passthrough would publish each new key the moment someone adds it.
+ * Nothing here reads `.env` or any credential — these are paths, branches, and
+ * commands the repo already documents.
+ *
+ * `hasWorktree*` are booleans rather than the script paths because that is the
+ * question a reader has ("can the janitor tear this repo's worktrees down?");
+ * the path itself is only meaningful to the process that executes it.
+ */
+export function reposView(repos) {
+  return [...repos.values()].map((repo) => ({
+    name: repo.name,
+    path: repo.path,
+    github: repo.github,
+    team: repo.team,
+    project: repo.project,
+    base: repo.base,
+    deployBranch: repo.deployBranch,
+    reportOnly: repo.reportOnly,
+    maxInFlight: repo.maxInFlight,
+    worktreeRoot: repo.worktreeRoot,
+    hasWorktreeUp: repo.worktreeUp !== null,
+    hasWorktreeDown: repo.worktreeDown !== null,
+    hasWorktreeWarm: repo.worktreeWarm !== null,
+    verify: repo.verify,
+  }));
 }
 
 export function getRepo(repos, name) {

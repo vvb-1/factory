@@ -58,6 +58,8 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
       call("POST", "/events/requeue", { body: JSON.stringify({ source, eventId }) }),
     agents: () => call("GET", "/agents"),
     workers: () => call("GET", "/workers"),
+    /** Factory repo registry from config/repos.yaml (OPS-299). */
+    repos: () => call("GET", "/repos"),
     approve: (id) => call("POST", `/proposals/${encodeURIComponent(id)}/approve`, { body: "{}" }),
     reject: (id, reason) =>
       call("POST", `/proposals/${encodeURIComponent(id)}/reject`, { body: JSON.stringify({ reason }) }),
