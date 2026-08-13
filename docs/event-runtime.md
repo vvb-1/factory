@@ -128,6 +128,13 @@ runs **at most one event worker**, and coordination of the shared usage window
 between the two paths is an explicit open problem for the unattended stage, not
 an accident to discover later.
 
+Since OPS-233 that cap is a **deployment choice, not a structural one**: the
+worker is its own process (`cli.mjs work`), so running a second is starting a
+second process, and concurrent claims are already correct (`BEGIN IMMEDIATE`
+plus the existing leases and fencing tokens). Nothing prevents a second
+worker except this rule — which stands until the usage-window question has an
+answer.
+
 ---
 
 ## 4. Runtime model
@@ -355,7 +362,7 @@ Every run has an execution directory. It does not necessarily have source code.
 | :--- | :--- | :---: |
 | `ephemeral` | Empty directory populated only with declared inputs | yes |
 | `artifacts` | New directory materialized from prior accepted artifacts | later |
-| `repository` | Immutable Git checkout or repository-owned worktree | later |
+| `repository` | Read-only checkout pinned to a SHA, from a per-repo bare mirror (tier 1, OPS-228); full worktrees for repo-mutating work are tier 2 and held | tier 1 |
 | `mounted` | Explicit existing directory, normally read-only | later |
 | `container` | Isolated filesystem/volume in Docker or Kubernetes | later |
 | `persistent` | Named, versioned workspace protected by a single-writer lease | later |
@@ -503,8 +510,14 @@ host-local PIDs, locks, and paths. The physical substrate can start small:
   worker (§3), lease contention does not exist; `FOR UPDATE SKIP LOCKED` is the
   mechanism the day a second worker process arrives, and guards nothing before
   then.
-- **Second process: Postgres.** Same schema, same contracts; workers claim with
-  a database lease.
+- **Second process: still SQLite** (shipped, OPS-233). A correction to this
+  section's original plan: splitting the worker out of the API process did not
+  need Postgres. SQLite in WAL mode already serves multiple processes on one
+  machine — what it needed was `BEGIN IMMEDIATE` on the claim (the default
+  deferred transaction lets two workers read the same `QUEUED` row before
+  either writes) and `busy_timeout` set before `journal_mode`. Postgres with
+  `FOR UPDATE SKIP LOCKED` is the **remote node** requirement, not the
+  multi-process one.
 - **Remote workers: a possibility kept cheap, not a requirement built toward**
   (expanded into a staged, ticket-shaped design in
   [event-runtime-workers.md](event-runtime-workers.md))**.**
@@ -626,6 +639,9 @@ lifecycle transitions with the operator as actor:
   `maxAttempts` requires an explicit operator override and records it.
 - **inspect** — the retained workspace path, receipt, and transcript for any
   attempt.
+- **workers** — the registered worker processes: host, pid, labels, state,
+  current run, and heartbeat age. Leases prove an *attempt* is held; this
+  answers which processes are alive and what they may claim (OPS-233).
 - **replay** — re-inject a stored event body through the same intake function
   the webhook uses; dedup rules apply unchanged.
 - **requeue** — re-plan a dead-lettered or `human_needed` event in place:
@@ -639,8 +655,10 @@ eligible for replay after a fix. A poison event must not wedge the planner or
 silently vanish.
 
 **Doctor checks.** Expired leases not reclaimed, proposals past TTL, outbox
-rows never published, workspace directories with no corresponding run, and
-journal sequence gaps. Each is an anomaly report, not an automatic repair.
+rows never published, workspace directories with no corresponding run,
+journal sequence gaps, a worker holding a run whose heartbeat has gone stale
+(its lease may still be valid, so nothing has reclaimed the run yet), and
+queued runs with no live worker to claim them. Each is an anomaly report, not an automatic repair.
 
 ---
 
@@ -714,7 +732,8 @@ POST factory.status-report.requested
 
 The webhook may be replaced by a replay CLI during development; both call the
 same intake function. The output is displayed to the operator and causes no
-further action. The MVP runs a single event worker (§3).
+further action. The MVP runs a single event worker (§3) — since OPS-233 by
+running one `work` process, not because the runtime can only host one.
 
 MVP exit criteria:
 
