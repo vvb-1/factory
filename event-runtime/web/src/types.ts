@@ -214,6 +214,34 @@ export interface AgentsView {
   contracts: Record<string, unknown>;
 }
 
+/** A worker's own report of what it is doing; "stopped" is a clean exit. */
+export type WorkerState = "idle" | "busy" | "stopped";
+
+/** One registered worker process (GET /workers) — the fleet, not the leases. */
+export interface Worker {
+  workerId: string;
+  host: string;
+  pid: number;
+  /** Placement labels the worker declared, e.g. `{ node: "lab" }`. */
+  labels: Record<string, string>;
+  adapters: string[];
+  state: WorkerState;
+  currentRun: string | null;
+  lastSeen: string;
+  /** Heartbeat older than the stale window: gone, whatever `state` claims. */
+  stale: boolean;
+  startedAt: string;
+  stoppedAt: string | null;
+}
+
+/** A stale worker still holding a run — the doctor's projection, not the row. */
+export interface StalledWorker {
+  workerId: string;
+  host: string;
+  runId: string | null;
+  lastSeen: string;
+}
+
 /** Which runtime this UI is pointed at — live vs dev, adapter override. */
 export interface EnvIdentity {
   name: string;
@@ -226,11 +254,17 @@ export interface StatusView {
   events: Record<string, number>;
   proposals: { open: number; expired: number };
   runs: { byState: Partial<Record<RunState, number>> };
+  /** Fleet counts; `live` and `busy` exclude stale workers, as the API does. */
+  workers: { live: number; busy: number; stale: number };
   anomalies: {
     expiredOpenProposals: string[];
     staleLeases: number;
     unpublishedOutbox: number;
     deadLettered: { source: string; eventId: string; lastError: string | null }[];
+    stalledWorkers: StalledWorker[];
+    /** Queued runs with no live worker to claim them. */
+    noWorkers: boolean;
+    ambiguousOpenProposals: { runId: string; count: number }[];
   };
 }
 
