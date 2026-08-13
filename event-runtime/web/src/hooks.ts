@@ -90,6 +90,11 @@ export function useTabKeys<T extends string>(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [tabs, current, onSelect]);
+  useEffect(() => {
+    document
+      .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [current]);
 }
 
 const THEMES = ["dark", "light", "contrast"] as const;

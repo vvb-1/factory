@@ -13,6 +13,7 @@ import {
   EVENT_STATUS_HUES,
   FilterInput,
   ListPane,
+  DetailPane,
   JsonBlock,
   JumpLink,
   KV,
@@ -385,17 +386,17 @@ export function Events({
       </ListPane>
 
       {sel && (
-        <div className="w-[440px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display truncate text-[14px] font-semibold" title={sel.eventId}>
-              {sel.eventId}
-            </div>
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[440px]"
+          title={<span title={sel.eventId}>{sel.eventId}</span>}
+          actions={
+            <>
               <Button onClick={() => copyText(sel.eventId, "event id")}>Copy id</Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectEvent(null)}>Close</Button>
-            </div>
-          </div>
+            </>
+          }
+        >
 
           <Section title="Event">
             <KV k="source" v={sel.source} />
@@ -479,7 +480,7 @@ export function Events({
             </div>
           </div>
           <VerbError error={requeue.error ?? replay.error} />
-        </div>
+        </DetailPane>
       )}
 
       {confirmReplay && sel && (

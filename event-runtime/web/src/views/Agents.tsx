@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
-import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, ListPane, Section, copyText, copyLink } from "../components/ui";
+import { Button, DetailPane, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, ListPane, Section, copyText, copyLink } from "../components/ui";
 import { setContextActions } from "../palette";
 
 const caps = (a: AgentDef) =>
@@ -156,17 +156,21 @@ export function Agents({
       </ListPane>
 
       {sel && (
-        <div className="w-[520px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display mono truncate text-[14px] font-semibold" title={sel.ref}>
+        <DetailPane
+          widthClass="w-[520px]"
+          title={
+            <span className="mono" title={sel.ref}>
               {sel.ref}
-            </div>
-            <div className="flex shrink-0 gap-1.5">
+            </span>
+          }
+          actions={
+            <>
               <Button onClick={() => copyText(sel.ref, "agent ref")}>Copy ref</Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectAgent(null)}>Close</Button>
-            </div>
-          </div>
+            </>
+          }
+        >
 
           <Section title="Definition">
             <KV k="id" v={sel.id} />
@@ -235,7 +239,7 @@ export function Agents({
               </div>
             )}
           </Section>
-        </div>
+        </DetailPane>
       )}
     </div>
   );

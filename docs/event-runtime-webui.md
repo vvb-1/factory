@@ -469,7 +469,9 @@ no new API.
   cycles stay inside the dialog and focus returns to the opener on close.
   `[` / `]` cycle status tabs. Graph `j`/`k` pans the selected node into
   view; **Show on canvas** does the same from the panel. List title/tabs/filter
-  stay pinned while the table scrolls. ⌘K splits This item / Go / Commands.
+  stay pinned while the table scrolls. Detail Copy/Close stays pinned while
+  the spec scrolls. `[` / `]` also scrolls the selected Runs tab into view.
+  ⌘K splits This item / Go / Commands.
   Relative timestamps show the ISO instant on hover (lists, detail KV, run
   lifecycle clock, attempt start/finish). Doctor anomalies copy. A filtered
   empty list reminds that Esc clears. Selection wash is denser so j/k is

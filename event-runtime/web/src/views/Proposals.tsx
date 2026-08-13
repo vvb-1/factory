@@ -14,6 +14,7 @@ import {
   Disclosure,
   FilterInput,
   ListPane,
+  DetailPane,
   JsonBlock,
   JumpLink,
   KV,
@@ -411,17 +412,17 @@ export function Proposals({
       </ListPane>
 
       {sel && (
-        <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display truncate text-[14px] font-semibold" title={sel.id}>
-              {sel.agent ?? sel.id}
-            </div>
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[460px]"
+          title={<span title={sel.id}>{sel.agent ?? sel.id}</span>}
+          actions={
+            <>
               <Button onClick={() => copyText(sel.id, "proposal id")}>Copy id</Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectProposal(null)}>Close</Button>
-            </div>
-          </div>
+            </>
+          }
+        >
 
           <Section title="Proposal">
             <KV k="id" v={sel.id} />
@@ -539,7 +540,7 @@ export function Proposals({
           )}
 
           <VerbError error={approve.error ?? reject.error} />
-        </div>
+        </DetailPane>
       )}
 
       {confirmApprove && sel && (

@@ -11,6 +11,7 @@ import {
   Disclosure,
   FilterInput,
   ListPane,
+  DetailPane,
   humanSize,
   JsonBlock,
   JumpLink,
@@ -305,15 +306,24 @@ export function Runs({
       </ListPane>
 
       {sel && (
-        <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <StateBadge state={sel.state} />
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[460px]"
+          title={
+            <span className="flex min-w-0 items-center gap-2">
+              <StateBadge state={sel.state} />
+              <span className="mono truncate" title={sel.runId}>
+                {sel.runId}
+              </span>
+            </span>
+          }
+          actions={
+            <>
               <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectRun(null)}>Close</Button>
-            </div>
-          </div>
+            </>
+          }
+        >
 
           {!d && (
             <div className="text-(--text-faint)">{detail.isError ? "Could not load run detail." : "Loading run…"}</div>
@@ -501,7 +511,7 @@ export function Runs({
           </Section>
             </>
           )}
-        </div>
+        </DetailPane>
       )}
 
       {confirm === "cancel" && d && (

@@ -15,7 +15,7 @@ import { buildCapabilityGraph, type GraphNode } from "../graph/model";
 import { layoutGraph, NODE_HEIGHT, NODE_WIDTH } from "../graph/layout";
 import { nodeTypes } from "../graph/nodes";
 import type { EventFocus } from "../types";
-import { Button, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
+import { Button, DetailPane, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
 
 /**
  * Graph (webui roadmap / OPS-224 phase 1, chrome OPS-230): the capability map
@@ -207,18 +207,20 @@ export function Graph({
       </div>
 
       {selected && (
-        <div className="w-[420px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display truncate text-[14px] font-semibold">{selected.label}</div>
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[420px]"
+          title={selected.label}
+          actions={
+            <>
               <Button onClick={() => copyText(selected.label, selected.kind === "agent" ? "agent ref" : "id")}>
                 {selected.kind === "agent" ? "Copy ref" : "Copy id"}
               </Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={revealSelected}>Show on canvas</Button>
               <Button onClick={() => onSelectNode(null)}>Close</Button>
-            </div>
-          </div>
+            </>
+          }
+        >
 
           {selected.kind === "eventType" && (
             <>
@@ -279,7 +281,7 @@ export function Graph({
               <Button onClick={() => onJumpAgent(agentDef.ref)}>Open in Agents</Button>
             </>
           )}
-        </div>
+        </DetailPane>
       )}
     </div>
   );
