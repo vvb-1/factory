@@ -57,6 +57,7 @@ usage: bun event-runtime/cli.mjs <command>
   cancel <run-id> [reason]       cancel a run before it is RUNNING
   retry <run-id> [--force]       re-queue a FAILED run (--force past maxAttempts)
   inspect <run-id>               spec, lifecycle journal, result, receipt, workspace
+  trace <run-id>                 live agent trace: assistant text, tool calls, usage
   update-pins                    re-pin agent definition content hashes (edits repo files)
 
 All commands except serve and update-pins are clients of the control API and
@@ -498,6 +499,39 @@ async function inspect(client, runId) {
   }
 }
 
+/** One line of `trace` output: kind-aware payload summary, single line. */
+function traceSummary(e) {
+  const clip = (value, n = 120) => {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    return text.length > n ? `${text.slice(0, n)}…` : text;
+  };
+  const p = e.payload ?? {};
+  switch (e.kind) {
+    case "assistant_text":
+      return clip(p.text);
+    case "tool_use":
+      return `${p.name ?? "?"} ${clip(JSON.stringify(p.input ?? {}), 100)}`;
+    case "tool_result":
+      return `${p.isError ? "ERROR " : ""}${clip(p.content)}`;
+    case "usage":
+      return `${p.durationMs ?? "-"}ms   turns ${p.numTurns ?? "-"}   $${p.costUSD ?? "-"}`;
+    default:
+      return clip(JSON.stringify(p));
+  }
+}
+
+/** Live agent trace (factory.trace/v1): what the agent said and ran. */
+async function trace(client, runId) {
+  const view = await client.trace(runId, { limit: 500 });
+  if (view.entries.length === 0) {
+    console.log(`no trace recorded for run ${runId}`);
+    return;
+  }
+  for (const e of view.entries) {
+    console.log(`[${e.ts}] ${pad(e.kind, 16)}${traceSummary(e)}`);
+  }
+}
+
 async function workers(client) {
   const { workers: rows } = await client.workers();
   if (rows.length === 0) {
@@ -618,6 +652,11 @@ async function main() {
     case "inspect": {
       if (!args[0]) fail("usage: inspect <run-id>");
       return withClient((client) => inspect(client, args[0]));
+    }
+
+    case "trace": {
+      if (!args[0]) fail("usage: trace <run-id>");
+      return withClient((client) => trace(client, args[0]));
     }
 
     case "update-pins": {

@@ -340,6 +340,19 @@ passing conformance test covering structured output, timeout and shutdown
 behavior, and workspace confinement. The first registry contains one entry —
 the runtime does not inherit the current runner's entire adapter surface.
 
+**Live trace is an optional adapter capability (`factory.trace/v1`).** An
+adapter may stream what the agent is doing mid-run — via the `onTrace`
+callback the worker passes to `execute()` — as events from a closed kind set:
+`assistant_text`, `tool_use`, `tool_result`, `usage`, `lifecycle`. The trace
+is agent-influenced output and treated as untrusted under the §14 size rules:
+unknown kinds are dropped (and counted, never thrown), each event's payload is
+byte-bounded and truncated in place when oversize, and an attempt records at
+most 2,000 events — at the cap the runtime writes exactly one `lifecycle`
+marker row (`trace_truncated`) and ignores the rest. Adapters that never call
+`onTrace` remain fully conformant; the trace is observability, not part of the
+result contract, and never affects verification or the run's terminal state.
+Operators read it through `GET /runs/:id/trace` (or `cli.mjs trace <run-id>`).
+
 **Two version schemes, one rule.** An agent's identity is `id@version`. The
 registry pins each version to exact content hashes of its prompt and schema
 files; editing a pinned file without bumping `version` is a registration error

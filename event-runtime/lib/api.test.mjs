@@ -596,6 +596,51 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
     }
   });
 
+  test("GET /runs/:id/trace pages incrementally; 404 unknown; empty for an untraced run (OPS-295)", async () => {
+    const { db, server, port } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "trace-1", payload: { repos: ["ok"] } }));
+      planAdmittedEvents(db, registry, { policyVersion: PV, adapterOverride: "fake" });
+      await client.approve((await client.proposals()).proposals[0].id);
+      const summary = await runOnce(db, registry, { claude: fake, fake }, {
+        workspacesRoot: mkdtempSync(path.join(os.tmpdir(), "evrt-ws-")),
+        owner: "test-worker", policyVersion: PV,
+      });
+      expect(summary.terminalState).toBe("COMPLETED");
+
+      // Page 1: two entries; head already points at the last row for the run.
+      const first = await client.trace(summary.runId, { limit: 2 });
+      expect(first.entries.map((e) => e.kind)).toEqual(["assistant_text", "tool_use"]);
+      expect(first.head).toBeGreaterThan(first.entries.at(-1).seq);
+
+      // Page 2: resume from the last seen seq, get the rest.
+      const rest = await client.trace(summary.runId, { since: first.entries.at(-1).seq });
+      expect(rest.entries.map((e) => e.kind)).toEqual(["tool_result", "usage"]);
+      expect(rest.head).toBe(rest.entries.at(-1).seq);
+      expect(rest.entries[0].attempt).toBe(1);
+      expect(typeof rest.entries[0].ts).toBe("string");
+
+      // Caught up: since=head → no entries, head unchanged.
+      const done = await client.trace(summary.runId, { since: rest.head });
+      expect(done).toEqual({ head: rest.head, entries: [] });
+
+      // Unknown run → 404, matching GET /runs/:id.
+      const unknown = await rejection(client.trace("run_nope"));
+      expect(unknown.status).toBe(404);
+      expect(unknown.message).toBe("unknown run run_nope");
+
+      // A run that exists but never traced → head 0, empty entries.
+      await client.replay(envelope({ eventId: "trace-2", payload: { repos: ["ok"] } }));
+      planAdmittedEvents(db, registry, { policyVersion: PV, adapterOverride: "fake" });
+      const open = (await client.proposals()).proposals[0];
+      const { runId: queuedRun } = await client.approve(open.id);
+      expect(await client.trace(queuedRun)).toEqual({ head: 0, entries: [] });
+    } finally {
+      server.close();
+    }
+  });
+
   test("GET /agents exposes definitions, prompt text, schemas, pins, and routing", async () => {
     const { server, port } = await makeServer();
     const client = apiClient({ port });

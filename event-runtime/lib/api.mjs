@@ -18,6 +18,7 @@ import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
+import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
 
@@ -510,6 +511,21 @@ export function createApi({
           }
           throw err;
         }
+      }
+
+      // Live agent trace (factory.trace/v1): incremental read via ?since=.
+      const traceGet = url.pathname.match(/^\/runs\/([^/]+)\/trace$/);
+      if (req.method === "GET" && traceGet) {
+        const runId = traceGet[1];
+        if (!db.query(`SELECT run_id FROM runs WHERE run_id = ?`).get(runId)) {
+          return send(res, 404, { error: `unknown run ${runId}` });
+        }
+        const since = Number(url.searchParams.get("since") ?? 0);
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 500);
+        return send(res, 200, traceOf(db, runId, {
+          since: Number.isFinite(since) ? since : 0,
+          limit: Number.isFinite(limit) ? limit : 100,
+        }));
       }
 
       const runGet = url.pathname.match(/^\/runs\/([^/]+)$/);

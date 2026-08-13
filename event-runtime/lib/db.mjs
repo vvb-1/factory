@@ -126,10 +126,20 @@ CREATE TABLE IF NOT EXISTS counters (
   value INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS attempt_trace (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id       TEXT NOT NULL,
+  attempt      INTEGER NOT NULL,
+  ts           TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs (state);
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals (status);
 CREATE INDEX IF NOT EXISTS idx_lifecycle_run ON lifecycle_events (run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_workers_last_seen ON workers (last_seen);
+CREATE INDEX IF NOT EXISTS idx_attempt_trace_run ON attempt_trace (run_id, seq);
 `;
 
 export function openDb(file = dbPath()) {

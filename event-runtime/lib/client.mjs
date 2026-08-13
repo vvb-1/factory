@@ -63,6 +63,9 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
       call("POST", `/proposals/${encodeURIComponent(id)}/reject`, { body: JSON.stringify({ reason }) }),
     runs: (state) => call("GET", `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`),
     run: (id) => call("GET", `/runs/${encodeURIComponent(id)}`),
+    /** Live agent trace (factory.trace/v1): pass head back as since to poll. */
+    trace: (id, { since = 0, limit = 100 } = {}) =>
+      call("GET", `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`),
     cancel: (id, reason) =>
       call("POST", `/runs/${encodeURIComponent(id)}/cancel`, {
         body: JSON.stringify(reason ? { reason } : {}),

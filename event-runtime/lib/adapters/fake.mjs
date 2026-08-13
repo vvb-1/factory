@@ -9,6 +9,20 @@
  */
 import { writeFileSync } from "node:fs";
 import path from "node:path";
+import { TRACE_EVENTS_CAP } from "../trace.mjs";
+
+/**
+ * Deterministic factory.trace/v1 sequence for the happy-path modes, so tests
+ * can assert exact rows. Guarded: an adapter must never assume onTrace is
+ * provided — adapters that ignore it (or callers that omit it) stay conformant.
+ */
+function emitTrace(onTrace, mode) {
+  if (typeof onTrace !== "function") return;
+  onTrace("assistant_text", { text: `fake: working on ${mode}` });
+  onTrace("tool_use", { name: "Bash", input: { command: "fake-query" } });
+  onTrace("tool_result", { content: "fake output" });
+  onTrace("usage", { durationMs: 1, numTurns: 1, costUSD: 0, usage: { input_tokens: 1, output_tokens: 1 } });
+}
 
 function writeResult(workspaceDir, result) {
   writeFileSync(
@@ -40,7 +54,7 @@ function ciDoctorArtifact(input) {
 /**
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-export async function execute({ spec, def, workspaceDir, timeoutMs, env }) {
+export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace }) {
   // Contract-shaped fakes for the chain slice (OPS-223) — behavior keyed on
   // the spec's output contract so planner/verifier/chain run unmodified.
   if (spec.outputContract === "factory.ci-doctor/v1") {
@@ -140,6 +154,7 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env }) {
 
   switch (mode) {
     case "with-artifact": {
+      emitTrace(onTrace, mode);
       // Declares a file artifact and a transcript — exercises the §7 store.
       writeFileSync(path.join(workspaceDir, "report.txt"), `fake report for ${mode}\n`, "utf8");
       writeFileSync(path.join(workspaceDir, ".transcript.json"), `{"fake":"transcript"}\n`, "utf8");
@@ -181,6 +196,23 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env }) {
       await new Promise((resolve) => setTimeout(resolve, timeoutMs));
       return { exitCode: null, timedOut: true };
 
+    case "trace-flood": {
+      // Emits well past the per-attempt cap so tests can prove the recorder
+      // stops at TRACE_EVENTS_CAP rows plus exactly one truncation marker.
+      if (typeof onTrace === "function") {
+        for (let i = 0; i < TRACE_EVENTS_CAP + 50; i += 1) {
+          onTrace("assistant_text", { text: `flood ${i}` });
+        }
+      }
+      writeResult(workspaceDir, {
+        schemaVersion: "factory.agent-result/v1",
+        terminalState: "completed",
+        artifact: { repos: [repoRow(mode)], recommendedAction: "dispatch" },
+        evidence: { queries: ["fake"] },
+      });
+      return { exitCode: 0, timedOut: false };
+    }
+
     case "escape":
       writeFileSync(path.resolve(workspaceDir, "..", "outside.txt"), "escaped\n", "utf8");
       writeResult(workspaceDir, {
@@ -192,6 +224,7 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env }) {
       return { exitCode: 0, timedOut: false };
 
     default:
+      if (mode === "ok") emitTrace(onTrace, mode);
       writeResult(workspaceDir, {
         schemaVersion: "factory.agent-result/v1",
         terminalState: "completed",

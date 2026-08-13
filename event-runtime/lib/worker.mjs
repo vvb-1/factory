@@ -17,6 +17,7 @@ import { nextCounter, tx, txImmediate } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
 import { IllegalTransition, transition } from "./lifecycle.mjs";
 import { closeOpenProposalForRun } from "./proposals.mjs";
+import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { satisfiesPlacement } from "./workers.mjs";
 import { createWorkspace, destroyWorkspace } from "./workspace.mjs";
@@ -170,8 +171,20 @@ export async function executeClaimed(db, registry, adapters, claim, {
     }
     const def = getAgent(registry, spec.agent);
 
+    // Live trace (factory.trace/v1): the recorder is already defensive, but
+    // wrap it anyway — an adapter streaming trace events mid-run must never
+    // be able to turn a recording problem into a failed attempt.
+    const recorder = traceRecorder(db, { runId, attempt, now: () => now });
+    const onTrace = (kind, payload) => {
+      try {
+        recorder(kind, payload);
+      } catch {
+        // swallow: trace is observability, not correctness
+      }
+    };
+
     const { exitCode, timedOut } = await adapter.execute({
-      spec, def, workspaceDir, timeoutMs: spec.timeoutSeconds * 1000, env: {},
+      spec, def, workspaceDir, timeoutMs: spec.timeoutSeconds * 1000, env: {}, onTrace,
     });
 
     if (timedOut) {
