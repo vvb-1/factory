@@ -41,7 +41,7 @@ export function ambiguousOpenProposalRuns(db) {
     .query(
       `SELECT run_id AS runId, COUNT(*) AS n
        FROM proposals
-       WHERE status = 'open'
+       WHERE status = 'open' AND run_id IS NOT NULL
        GROUP BY run_id
        HAVING n > 1
        ORDER BY run_id`,

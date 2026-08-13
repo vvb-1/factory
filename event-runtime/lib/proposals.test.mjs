@@ -142,6 +142,25 @@ describe("closeOpenProposalForRun", () => {
   });
 });
 
+describe("ambiguousOpenProposalRuns", () => {
+  test("two open human_needed proposals with NULL run_id are not reported as ambiguous", () => {
+    const db = openDb(":memory:");
+    for (const eventId of ["hn-null-1", "hn-null-2"]) {
+      const admitted = admitEvent(db, registry, envelope({ eventId, type: "totally.unknown.type" }), { now: NOW });
+      expect(admitted.admitted).toBe(true);
+      const outcome = planEvent(
+        db, registry,
+        { source: admitted.event.source, eventId: admitted.event.event_id },
+        { now: NOW },
+      );
+      expect(outcome.decision).toBe("human_needed");
+      expect(outcome.proposal.run_id).toBeNull();
+    }
+    expect(openProposals(db, { now: NOW })).toHaveLength(2);
+    expect(ambiguousOpenProposalRuns(db)).toEqual([]);
+  });
+});
+
 describe("approveProposal after TTL expiry (§12)", () => {
   test("unchanged conditions: re-plan matches, run is approved with a replan reason", () => {
     const { db, proposal, runId } = planned();
