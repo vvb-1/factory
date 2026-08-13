@@ -56,7 +56,10 @@ type Heartbeat = { kind: "stale"; overdueMs: number } | { kind: "live"; remainin
  */
 const heartbeatOf = (w: Worker, now: number): Heartbeat => {
   const deadline = Date.parse(w.lastSeen) + HEARTBEAT_STALE_MS;
-  if (w.stale) return { kind: "stale", overdueMs: Math.max(0, now - deadline) };
+  // Floored to a second, because `dur` renders the first sub-second of overdue as
+  // `0:00` and "stale for no time at all" reads as a broken badge rather than a
+  // fresh one. Same floor the countdown below uses, so the flip reads 0:01 next.
+  if (w.stale) return { kind: "stale", overdueMs: Math.max(1000, now - deadline) };
   if (w.state === "stopped") return { kind: "none" };
   // Whole seconds, rounded up: the last fraction of a second reads 0:01, and only
   // a genuinely spent window reads 0 — which is what `overdue` keys off.
