@@ -106,8 +106,17 @@ export function InjectDialog({
     return [...(initialEnvelope ? ["__given__"] : []), ...templates.map((t) => t.eventType), null];
   }
 
+  /**
+   * The chip that owns the group's single tabIndex 0. Normally `selected`, but
+   * a registry refetch can drop the selected event type while the dialog is
+   * open; the blank chip always renders, so it takes over rather than leaving
+   * no chip tabbable and Tab skipping the group. The envelope text is left
+   * alone — it may hold the user's edits.
+   */
+  const checkedChip = templateIds().includes(selected) ? selected : null;
+
   function radioA11y(id: string | null) {
-    const checked = selected === id;
+    const checked = checkedChip === id;
     return {
       role: "radio" as const,
       "aria-checked": checked,
@@ -125,7 +134,7 @@ export function InjectDialog({
     if (!(e.target instanceof HTMLElement) || e.target.getAttribute("role") !== "radio") return;
     e.preventDefault();
     const ids = templateIds();
-    const idx = selected === null ? ids.length - 1 : Math.max(ids.indexOf(selected), 0);
+    const idx = checkedChip === null ? ids.length - 1 : Math.max(ids.indexOf(checkedChip), 0);
     const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
     const nextIdx = (idx + delta + ids.length) % ids.length;
     applyChip(ids[nextIdx]);
@@ -217,7 +226,7 @@ export function InjectDialog({
             {...radioA11y("__given__")}
             onClick={() => applyChip("__given__")}
             className={`rounded-md border px-2 py-1 text-[11.5px] ${
-              selected === "__given__"
+              checkedChip === "__given__"
                 ? "border-(--accent) bg-(--surface-3) text-(--text)"
                 : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
             }`}
@@ -233,7 +242,7 @@ export function InjectDialog({
             title={`${t.agent} · payload: ${t.summary}`}
             onClick={() => applyChip(t.eventType)}
             className={`rounded-md border px-2 py-1 text-left text-[11.5px] ${
-              selected === t.eventType
+              checkedChip === t.eventType
                 ? "border-(--accent) bg-(--surface-3) text-(--text)"
                 : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
             }`}
@@ -247,7 +256,7 @@ export function InjectDialog({
           {...radioA11y(null)}
           onClick={() => applyChip(null)}
           className={`rounded-md border px-2 py-1 text-[11.5px] ${
-            selected === null
+            checkedChip === null
               ? "border-(--accent) bg-(--surface-3) text-(--text)"
               : "border-(--border) text-(--text-faint) hover:bg-(--surface-2)"
           }`}
