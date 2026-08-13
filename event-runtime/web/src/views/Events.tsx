@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { useListKeys, useNow } from "../hooks";
+import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { AdmittedEvent, EventFocus } from "../types";
 import {
@@ -189,6 +189,12 @@ export function Events({
 
   const canRequeue = sel !== null && REQUEUEABLE.has(sel.status);
 
+  const selectTab = (t: StatusTab) => {
+    setTab(t);
+    if (selectedKey) onSelectEvent(null);
+  };
+  useTabKeys(STATUS_TABS, tab, selectTab);
+
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
@@ -253,7 +259,7 @@ export function Events({
                 type="button"
                 role="tab"
                 aria-selected={tab === t}
-                onClick={() => setTab(t)}
+                onClick={() => selectTab(t)}
                 className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
                   tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                 }`}

@@ -188,6 +188,8 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 - `/` — focus the list filter. Esc in the filter clears it, then blurs.
 - `j`/`k` or arrows — move list (and Graph node) selection; `Enter`/`o` —
   open detail panel; `Esc` — close it, then clear the filter.
+- `[` / `]` — previous / next status tab (Events, Proposals, Runs). Changing
+  tab closes the detail so a deep-linked row cannot yank the tab back.
 - `⌘↵` — confirm inject (from the envelope textarea too).
 - On a selected proposal: `a` approve (opens the confirm with the spec in
   view), `x` reject (focuses the reason field).
@@ -462,5 +464,6 @@ no new API.
   Empty Events inbox offers Inject as a button. Outbox types jump to the
   origin event when the envelope carries source+eventId. Trigger again
   selects a "this envelope" chip. `/` focuses the filter. Dialog Tab cycles
-  stay inside the dialog. The document title follows the hash
-  (`factory · Runs · run_id`).
+  stay inside the dialog and focus returns to the opener on close. `[` / `]`
+  cycle status tabs. Click a toast to dismiss it. The document title follows
+  the hash (`factory · Runs · run_id`).

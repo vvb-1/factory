@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useListKeys, useNow } from "../hooks";
+import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import { SpecDiff } from "../components/SpecDiff";
@@ -25,6 +25,8 @@ import {
   copyText,
   copyLink,
 } from "../components/ui";
+
+const PROPOSAL_TABS = ["open", "history"] as const;
 
 /**
  * Proposals (webui spec §4.2) — the watched-approval centerpiece. The full
@@ -231,6 +233,13 @@ export function Proposals({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.id, canApprove, isOpen, connected]);
 
+  const selectTab = (t: (typeof PROPOSAL_TABS)[number]) => {
+    setTab(t);
+    setExpiredOnly(false);
+    onSelectProposal(null);
+  };
+  useTabKeys(PROPOSAL_TABS, tab, selectTab);
+
   return (
     <div className="flex h-full min-w-0">
       <div className="min-w-0 flex-1 overflow-auto p-5">
@@ -238,7 +247,7 @@ export function Proposals({
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex gap-1" role="tablist" aria-label="Proposal status">
-            {(["open", "history"] as const).map((t) => {
+            {PROPOSAL_TABS.map((t) => {
               const count =
                 t === "open"
                   ? (statusQ.data?.proposals.open ?? 0)
@@ -249,11 +258,7 @@ export function Proposals({
                   type="button"
                   role="tab"
                   aria-selected={tab === t}
-                  onClick={() => {
-                    setTab(t);
-                    setExpiredOnly(false);
-                    onSelectProposal(null);
-                  }}
+                  onClick={() => selectTab(t)}
                   className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
                     tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                   }`}

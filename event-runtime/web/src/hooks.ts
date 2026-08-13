@@ -71,6 +71,27 @@ export function useListKeys(opts: {
   }, [count, selected, onSelect, onOpen, onClose, keys]);
 }
 
+/** `[` / `]` cycle a view's status tabs (Linear's issue-state keys). */
+export function useTabKeys<T extends string>(
+  tabs: readonly T[],
+  current: T,
+  onSelect: (tab: T) => void,
+) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "[" && e.key !== "]") return;
+      e.preventDefault();
+      const i = tabs.indexOf(current);
+      if (i < 0) return;
+      const delta = e.key === "]" ? 1 : -1;
+      onSelect(tabs[(i + delta + tabs.length) % tabs.length]);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tabs, current, onSelect]);
+}
+
 const THEMES = ["dark", "light", "contrast"] as const;
 export type Theme = (typeof THEMES)[number];
 

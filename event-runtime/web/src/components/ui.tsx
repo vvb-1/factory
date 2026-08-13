@@ -231,10 +231,14 @@ export function notify(message: string, type: "ok" | "err" | "info" = "ok") {
   const id = Math.random().toString(36).slice(2);
   activeToasts = [...activeToasts, { id, type, message }].slice(-5);
   toastListeners.forEach((l) => l(activeToasts));
-  setTimeout(() => {
-    activeToasts = activeToasts.filter((t) => t.id !== id);
-    toastListeners.forEach((l) => l(activeToasts));
-  }, 3000);
+  setTimeout(() => dismissToast(id), 3000);
+}
+
+function dismissToast(id: string) {
+  const next = activeToasts.filter((t) => t.id !== id);
+  if (next.length === activeToasts.length) return;
+  activeToasts = next;
+  toastListeners.forEach((l) => l(activeToasts));
 }
 
 export function ToastContainer() {
@@ -252,7 +256,10 @@ export function ToastContainer() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="pointer-events-auto flex items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
+          role="status"
+          title="Dismiss"
+          onClick={() => dismissToast(t.id)}
+          className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
           style={{
             borderColor: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
           }}
@@ -412,6 +419,7 @@ export function Dialog({
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     modal.depth += 1;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
       else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
@@ -423,6 +431,7 @@ export function Dialog({
     return () => {
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
+      previous?.focus();
     };
   }, [onClose]);
   return (

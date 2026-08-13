@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
-import { useListKeys, useNow } from "../hooks";
+import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { RunState } from "../types";
 import {
@@ -138,6 +138,12 @@ export function Runs({
     },
   });
 
+  const selectTab = (t: (typeof STATE_TABS)[number]) => {
+    setTab(t);
+    if (selectedId) onSelectRun(null);
+  };
+  useTabKeys(STATE_TABS, tab, selectTab);
+
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
@@ -206,7 +212,7 @@ export function Runs({
                   type="button"
                   role="tab"
                   aria-selected={tab === t}
-                  onClick={() => setTab(t)}
+                  onClick={() => selectTab(t)}
                   className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
                     tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                   }`}
