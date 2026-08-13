@@ -61,6 +61,9 @@ export function Overview({
   onJumpEvents,
   onJumpRuns,
   onNavigate,
+  onJumpExpired,
+  onJumpGraph,
+  onInject,
 }: {
   connected: boolean;
   onJumpRun: (runId: string) => void;
@@ -68,6 +71,9 @@ export function Overview({
   onJumpEvents: (focus: EventFocus) => void;
   onJumpRuns: (state?: string) => void;
   onNavigate: (view: string) => void;
+  onJumpExpired: () => void;
+  onJumpGraph: () => void;
+  onInject: () => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -118,7 +124,17 @@ export function Overview({
 
   return (
     <div className="h-full min-w-0 overflow-auto p-5">
-      <h1 className="display mb-4 text-lg font-semibold">Overview</h1>
+      <div className="mb-4 flex items-baseline justify-between gap-3">
+        <h1 className="display text-lg font-semibold">Overview</h1>
+        <div className="flex gap-3 text-[12px] text-(--text-dim)">
+          <button type="button" className="hover:text-(--accent)" onClick={onJumpGraph}>
+            Graph
+          </button>
+          <button type="button" className="hover:text-(--accent)" onClick={onInject}>
+            Inject event…
+          </button>
+        </div>
+      </div>
 
       {status.isPending && !s && <div className="mb-5 text-(--text-faint)">Loading status…</div>}
       {status.isError && !s && (
@@ -146,7 +162,7 @@ export function Overview({
             label="proposals · expired"
             value={s.proposals.expired}
             hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined}
-            onClick={() => onNavigate("proposals")}
+            onClick={onJumpExpired}
           />
           {Object.entries(s.runs.byState).map(([k, v]) => (
             <StatTile

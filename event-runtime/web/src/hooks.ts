@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { parseHash } from "./hash";
 
 /** Open-modal depth: global list-navigation keys stand down while a dialog is up. */
 export const modal = { depth: 0 };
@@ -12,15 +13,17 @@ export function keyGuard(e: KeyboardEvent): boolean {
 
 /** Hash routing: "#/runs/run_01" → ["runs", "run_01"]. Default view: overview. */
 export function useHashRoute(): [string[], (path: string) => void] {
-  const parse = () => window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  const [route, setRoute] = useState<string[]>(parse);
+  const read = () => parseHash(window.location.hash);
+  const [route, setRoute] = useState<string[]>(read);
   useEffect(() => {
-    const onChange = () => setRoute(parse());
+    const onChange = () => setRoute(read());
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
   const navigate = useCallback((path: string) => {
-    window.location.hash = `#/${path}`;
+    const next = `#/${path}`;
+    if (window.location.hash === next) return;
+    window.location.hash = next;
   }, []);
   return [route.length ? route : ["overview"], navigate];
 }

@@ -117,3 +117,9 @@ body {
 }
 .react-flow__controls-button:hover { background: var(--surface-3); }
 .react-flow__edge-text { fill: var(--text-faint); }
+
+[cmdk-group-heading] {
+  padding: 8px 12px 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}

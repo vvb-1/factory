@@ -60,6 +60,7 @@ export function Events({
   connected,
   focusEvent,
   onFocusConsumed,
+  onSelectEvent,
   onJumpProposal,
   onJumpRun,
   onTriggerAgain,
@@ -67,6 +68,7 @@ export function Events({
   connected: boolean;
   focusEvent: EventFocus | null;
   onFocusConsumed: () => void;
+  onSelectEvent: (source: string | null, eventId?: string) => void;
   onJumpProposal: (id: string) => void;
   onJumpRun: (runId: string) => void;
   onTriggerAgain: (envelope: Record<string, unknown>) => void;
@@ -75,11 +77,8 @@ export function Events({
   const queryClient = useQueryClient();
   const alive = useRef(true);
   const [tab, setTab] = useState<StatusTab>(isStatusTab(focusEvent?.status) ? focusEvent.status : "all");
-  const [selectedKey, setSelectedKey] = useState<string | null>(
-    focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null,
-  );
   const [filter, setFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string | null>(focusEvent?.type ?? null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [confirmReplay, setConfirmReplay] = useState(false);
 
@@ -116,6 +115,8 @@ export function Events({
     });
   }, [rows, filter, typeFilter, sourceFilter]);
 
+  const selectedKey =
+    focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
   const selectedIndex = useMemo(
     () => visible.findIndex((e) => keyOf(e) === selectedKey),
     [visible, selectedKey],
@@ -126,35 +127,26 @@ export function Events({
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  // Deep link: switch tab first, then select the row once it is in the list.
+  // Ephemeral Overview/Graph jumps: apply tab/type then drop them so the hash
+  // (if any) is the only remaining selection source.
   useEffect(() => {
     if (!focusEvent) return;
-    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) {
-      setTab(focusEvent.status);
-      return;
-    }
-    if (focusEvent.source && focusEvent.eventId) {
-      const key = `${focusEvent.source}:${focusEvent.eventId}`;
-      if (rows.some((e) => keyOf(e) === key)) {
-        setFilter("");
-        setTypeFilter(null);
-        setSourceFilter(null);
-        setSelectedKey(key);
-        onFocusConsumed();
-        return;
-      }
-      if (tab !== "all") {
-        setTab("all");
-        return;
-      }
-      if (list.isFetched) {
-        setSelectedKey(key);
-        onFocusConsumed();
-      }
-      return;
-    }
-    onFocusConsumed();
-  }, [focusEvent, rows, tab, list.isFetched, onFocusConsumed]);
+    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) setTab(focusEvent.status);
+    if (focusEvent.type) setTypeFilter(focusEvent.type);
+    if (focusEvent.status || focusEvent.type) onFocusConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusEvent?.status, focusEvent?.type]);
+
+  // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
+  useEffect(() => {
+    if (!focusEvent?.source || !focusEvent?.eventId) return;
+    setFilter("");
+    setSourceFilter(null);
+    if (!focusEvent.type) setTypeFilter(null);
+    const key = `${focusEvent.source}:${focusEvent.eventId}`;
+    if (!rows.some((e) => keyOf(e) === key) && tab !== "all") setTab("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusEvent?.source, focusEvent?.eventId, rows, tab]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -195,8 +187,11 @@ export function Events({
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedKey(visible[i] ? keyOf(visible[i]) : null),
-    onClose: () => setSelectedKey(null),
+    onSelect: (i) => {
+      const e = visible[i];
+      onSelectEvent(e ? e.source : null, e?.eventId);
+    },
+    onClose: () => onSelectEvent(null),
     keys: {
       // `q` not `r`: `r` is the `g r` navigation suffix, and both listeners
       // see the same keydown — `g r` with a selection must never requeue.
@@ -310,7 +305,7 @@ export function Events({
             {visible.map((e, i) => (
               <tr
                 key={keyOf(e)}
-                onClick={() => setSelectedKey(keyOf(e))}
+                onClick={() => onSelectEvent(e.source, e.eventId)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(e.status)} ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -358,7 +353,7 @@ export function Events({
             </div>
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.eventId, "event id")}>Copy id</Button>
-              <Button onClick={() => setSelectedKey(null)}>Close</Button>
+              <Button onClick={() => onSelectEvent(null)}>Close</Button>
             </div>
           </div>
 

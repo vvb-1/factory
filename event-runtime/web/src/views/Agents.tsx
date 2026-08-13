@@ -16,16 +16,15 @@ const caps = (a: AgentDef) =>
  */
 export function Agents({
   focusAgentRef,
-  onFocusConsumed,
+  onSelectAgent,
 }: {
   focusAgentRef: string | null;
-  onFocusConsumed: () => void;
+  onSelectAgent: (ref: string | null) => void;
 }) {
   const query = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 2000 });
   const rows = query.data?.agents ?? [];
   const contracts = query.data?.contracts ?? {};
 
-  const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -36,6 +35,7 @@ export function Agents({
       ),
     );
   }, [rows, filter]);
+  const selectedRef = focusAgentRef;
   const selectedIndex = useMemo(() => visible.findIndex((a) => a.ref === selectedRef), [visible, selectedRef]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
 
@@ -43,24 +43,15 @@ export function Agents({
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  // Deep link from a run's or proposal's agent ref.
   useEffect(() => {
-    if (!focusAgentRef) return;
-    setFilter("");
-    if (rows.some((a) => a.ref === focusAgentRef)) {
-      setSelectedRef(focusAgentRef);
-      onFocusConsumed();
-    } else if (query.isFetched) {
-      setSelectedRef(focusAgentRef);
-      onFocusConsumed();
-    }
-  }, [focusAgentRef, rows, query.isFetched, onFocusConsumed]);
+    if (focusAgentRef) setFilter("");
+  }, [focusAgentRef]);
 
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedRef(visible[i]?.ref ?? null),
-    onClose: () => setSelectedRef(null),
+    onSelect: (i) => onSelectAgent(visible[i]?.ref ?? null),
+    onClose: () => onSelectAgent(null),
   });
 
   return (
@@ -91,7 +82,7 @@ export function Agents({
             {visible.map((a, i) => (
               <tr
                 key={a.ref}
-                onClick={() => setSelectedRef(a.ref)}
+                onClick={() => onSelectAgent(a.ref)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -148,7 +139,7 @@ export function Agents({
             </div>
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.ref, "agent ref")}>Copy ref</Button>
-              <Button onClick={() => setSelectedRef(null)}>Close</Button>
+              <Button onClick={() => onSelectAgent(null)}>Close</Button>
             </div>
           </div>
 

@@ -31,7 +31,11 @@ export function CommandPalette({
   // Jump targets load only while the palette is open; cache keys shared with
   // the views, so this is usually a cache hit, not a request.
   const runs = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), enabled: open });
-  const proposals = useQuery({ queryKey: ["proposals"], queryFn: api.proposals, enabled: open });
+  const proposals = useQuery({
+    queryKey: ["proposals", "history"],
+    queryFn: () => api.proposalHistory("all"),
+    enabled: open,
+  });
   const events = useQuery({ queryKey: ["events", "all"], queryFn: () => api.events(), enabled: open });
   const agents = useQuery({ queryKey: ["agents"], queryFn: api.agents, enabled: open });
 
@@ -68,7 +72,9 @@ export function CommandPalette({
       <Command
         className="w-[560px] overflow-hidden rounded-lg border border-(--border-strong) bg-(--surface-1) shadow-2xl"
         loop
+        label="Command palette"
       >
+        <div role="dialog" aria-modal="true" aria-label="Command palette">
         <Command.Input
           autoFocus
           placeholder="Type a command…"
@@ -78,6 +84,7 @@ export function CommandPalette({
           <Command.Empty className="px-3 py-6 text-center text-(--text-faint)">
             No matching command
           </Command.Empty>
+          <Command.Group heading="Commands">
           {[...contextActions, ...actions].map((a) => (
             <Command.Item
               key={a.label}
@@ -91,10 +98,13 @@ export function CommandPalette({
               {a.hint && <span className="mono text-[11px] text-(--text-faint)">{a.hint}</span>}
             </Command.Item>
           ))}
+          </Command.Group>
+          {(proposals.data?.proposals ?? []).length > 0 && (
+            <Command.Group heading="Proposals">
           {(proposals.data?.proposals ?? []).map((p) => (
             <Command.Item
               key={p.id}
-              value={`proposal ${p.id} ${p.agent ?? ""}`}
+              value={`proposal ${p.id} ${p.agent ?? ""} ${p.status} ${p.decision}`}
               onSelect={() => {
                 setOpen(false);
                 onJumpProposal(p.id);
@@ -103,10 +113,15 @@ export function CommandPalette({
             >
               <span className="mono truncate">{p.id}</span>
               <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">
-                proposal · {p.agent ?? p.decision}
+                proposal · {p.status}
+                {p.status === "open" ? ` · ${p.agent ?? p.decision}` : ` · ${p.decision}`}
               </span>
             </Command.Item>
           ))}
+            </Command.Group>
+          )}
+          {(events.data?.events ?? []).length > 0 && (
+            <Command.Group heading="Events">
           {(events.data?.events ?? []).map((e) => (
             <Command.Item
               key={`${e.source}:${e.eventId}`}
@@ -123,6 +138,10 @@ export function CommandPalette({
               </span>
             </Command.Item>
           ))}
+            </Command.Group>
+          )}
+          {(runs.data?.runs ?? []).length > 0 && (
+            <Command.Group heading="Runs">
           {(runs.data?.runs ?? []).map((r) => (
             <Command.Item
               key={r.runId}
@@ -137,6 +156,10 @@ export function CommandPalette({
               <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">run · {r.state}</span>
             </Command.Item>
           ))}
+            </Command.Group>
+          )}
+          {(agents.data?.agents ?? []).length > 0 && (
+            <Command.Group heading="Agents">
           {(agents.data?.agents ?? []).map((a) => (
             <Command.Item
               key={a.ref}
@@ -151,11 +174,14 @@ export function CommandPalette({
               <span className="ml-3 shrink-0 text-[11px] text-(--text-faint)">agent · {a.outputContract}</span>
             </Command.Item>
           ))}
+            </Command.Group>
+          )}
         </Command.List>
         <div className="flex items-center justify-between border-t border-(--border) px-4 py-2 text-[11px] text-(--text-faint)">
           <span><span className="mono font-medium">↑↓</span> Navigate</span>
           <span><span className="mono font-medium">↵</span> Select</span>
           <span><span className="mono font-medium">ESC</span> Close</span>
+        </div>
         </div>
       </Command>
     </div>

@@ -426,3 +426,28 @@ informational. The title attribute carries `env.home` and the
 `policyVersion`. When `/health` fails the chip shows **disconnected** in the
 error tone, doubling as the API-down indicator alongside §4.1's connection
 dot.
+
+### 10.8 Operator chrome (OPS-230)
+
+Follow-up to the Events-as-a-node pass (OPS-226). Same design language (§5.1);
+no new API.
+
+- **Shareable hashes.** Selection lives in the hash: `#/runs/:id`,
+  `#/events/:source/:eventId`, `#/proposals/:id`, `#/agents/:ref`,
+  `#/graph/:nodeId`. Jumps write the full path; refresh restores the row.
+  Nav-rail clicks still go to the view root. Overview status tiles remain
+  ephemeral (tab/filter, not a URL).
+- **Health banner.** When `/health` has failed (not while first pending), a
+  status banner sits above every view: the factory is unreachable, lists may
+  show cache, verbs stay disabled. The nav chip still says `disconnected`.
+- **Graph on the same rails.** Selected event-type → Events filtered by type;
+  selected agent → Agents. Copy id, Esc closes the panel, honest empty when
+  `/agents` is down. `#/graph/:nodeId`.
+- **Inject confirm.** Inject and Trigger again require confirm before
+  `POST /replay`. Template chips are a radiogroup (arrow keys). Copy keeps
+  Requeue (re-plan) / Replay (same id through intake) / Trigger again (fresh
+  id) / Inject (blank or template) distinct.
+- **Overview.** Expired-proposals tile lands on the Open tab with the expired
+  chip on. Quiet Graph and Inject jumps in the header.
+- **⌘K** includes decided proposals (`GET /proposals?status=all`). Dialogs
+  expose `role=dialog` `aria-modal`. Runs state tabs scroll on one row.

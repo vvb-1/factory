@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { buildTemplates, triggerId, type TriggerTemplate } from "../templates";
 import { Button, Dialog, VerbError } from "./ui";
@@ -24,13 +24,13 @@ function blankEnvelope(nowMs: number) {
 const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
 /**
- * Inject dialog (webui spec §4.4, templates per OPS-214).
+ * Inject dialog (webui spec §4.4, templates per OPS-214, confirm per OPS-230).
  *
  * Templates are derived from the registry — one per registered event type,
  * with the payload skeleton built from that event's agent input schema — so
- * they cannot drift from what the runtime will actually accept, and a newly
- * registered event type appears here with no UI change. The raw JSON stays
- * editable underneath: the template is a starting point, never a cage.
+ * they cannot drift from what the runtime will actually accept. Inject is the
+ * same intake path as Replay; it is not Requeue (re-plan) and not Trigger
+ * again (which only seeds this dialog with a fresh event id).
  */
 export function InjectDialog({
   onClose,
@@ -42,8 +42,6 @@ export function InjectDialog({
   const queryClient = useQueryClient();
   const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents });
 
-  // One clock read per dialog opening: stable ids while editing, fresh ones
-  // each time the dialog is opened.
   const openedAt = useMemo(() => Date.now(), []);
   const templates = useMemo(
     () => (registry.data ? buildTemplates(registry.data, openedAt) : []),
@@ -53,13 +51,15 @@ export function InjectDialog({
   const [selected, setSelected] = useState<string | null>(initialEnvelope ? "__given__" : null);
   const [text, setText] = useState(() => pretty(initialEnvelope ?? blankEnvelope(openedAt)));
   const [clientError, setClientError] = useState<string | null>(null);
-  // Unregistered event types are legitimately admissible (they park as
-  // human_needed), so this warns once and then lets the operator through.
   const [unregisteredAck, setUnregisteredAck] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const inject = useMutation({
     mutationFn: (envelope: unknown) => api.replay(envelope),
-    onSuccess: () => queryClient.invalidateQueries(),
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      setConfirming(false);
+    },
   });
 
   function choose(template: TriggerTemplate) {
@@ -67,6 +67,7 @@ export function InjectDialog({
     setText(pretty(template.envelope));
     setClientError(null);
     setUnregisteredAck(false);
+    setConfirming(false);
     inject.reset();
   }
 
@@ -77,37 +78,75 @@ export function InjectDialog({
       envelope = JSON.parse(text);
     } catch (err) {
       setClientError(`not valid JSON: ${(err as Error).message}`);
+      setConfirming(false);
       return;
     }
     const missing = REQUIRED.filter((k) => typeof envelope[k] !== "string" || !envelope[k]);
     if (missing.length) {
       setClientError(`missing required string field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
+      setConfirming(false);
       return;
     }
     const registered = registry.data?.eventTypes.some((r) => r.type === envelope.type) ?? true;
     if (!registered && !unregisteredAck) {
       setClientError(
-        `"${envelope.type}" is not a registered event type — it will be admitted, but planning will park it as human_needed. Inject again to confirm.`,
+        `"${envelope.type}" is not a registered event type — it will be admitted, but planning will park it as human_needed. Confirm inject to proceed.`,
       );
       setUnregisteredAck(true);
+      setConfirming(true);
+      return;
+    }
+    if (!confirming) {
+      setConfirming(true);
       return;
     }
     inject.mutate(envelope);
   }
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLTextAreaElement) return;
+      const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+      if (!keys.includes(e.key)) return;
+      if (templates.length === 0) return;
+      e.preventDefault();
+      const ids = templates.map((t) => t.eventType);
+      const idx = selected ? ids.indexOf(selected) : -1;
+      const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
+      const next = ids[(Math.max(idx, 0) + delta + ids.length) % ids.length];
+      const t = templates.find((x) => x.eventType === next);
+      if (t) choose(t);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [templates, selected]);
+
   const outcome = inject.data;
+  const seeded = Boolean(initialEnvelope);
   return (
-    <Dialog title="Inject event" onClose={onClose} wide>
+    <Dialog title={seeded ? "Trigger again — inject with a fresh event id" : "Inject event"} onClose={onClose} wide>
       <div className="mb-3 text-[12px] text-(--text-dim)">
-        Templates come from the registry — payload fields are the ones each agent's input schema
-        requires. Edit freely before firing; duplicate delivery is safe.
+        {seeded
+          ? "Trigger again copies this envelope with a new event id so intake admits it as a new event. It is not Replay (same id, dedup no-op) and not Requeue (re-plan an already-admitted event)."
+          : "Templates come from the registry — payload fields are the ones each agent's input schema requires. Inject sends the envelope through intake, the same path as Replay. Duplicate event ids are a no-op. This is not Requeue."}
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      {registry.isPending && !registry.data && (
+        <div className="mb-3 text-[12px] text-(--text-faint)">Loading templates…</div>
+      )}
+      {registry.isError && !registry.data && (
+        <div className="mb-3 text-[12px] text-(--text-faint)">
+          Cannot reach the control API — templates will appear when it is up. You can still paste a raw envelope.
+        </div>
+      )}
+
+      <div className="mb-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Event type templates">
         {templates.map((t) => (
           <button
             key={t.eventType}
             type="button"
+            role="radio"
+            aria-checked={selected === t.eventType}
             title={`${t.agent} · payload: ${t.summary}`}
             onClick={() => choose(t)}
             className={`rounded-md border px-2 py-1 text-left text-[11.5px] ${
@@ -122,10 +161,13 @@ export function InjectDialog({
         ))}
         <button
           type="button"
+          role="radio"
+          aria-checked={selected === null}
           onClick={() => {
             setSelected(null);
             setText(pretty(blankEnvelope(openedAt)));
             setUnregisteredAck(false);
+            setConfirming(false);
             inject.reset();
           }}
           className={`rounded-md border px-2 py-1 text-[11.5px] ${
@@ -144,9 +186,11 @@ export function InjectDialog({
           setText(e.target.value);
           setClientError(null);
           setUnregisteredAck(false);
+          setConfirming(false);
         }}
         spellCheck={false}
         rows={14}
+        aria-label="Event envelope JSON"
         className="mono w-full resize-y rounded-md border border-(--border) bg-(--surface-0) p-3 text-(--text) outline-none focus:border-(--border-strong)"
       />
 
@@ -166,11 +210,27 @@ export function InjectDialog({
         </div>
       )}
 
+      {confirming && !outcome && (
+        <div className="mt-2 text-[12px] text-(--text-dim)">
+          Confirm sends this envelope through intake. A known event id is reported as a duplicate and
+          does nothing — that is Replay&apos;s demo, not a new event. Use Trigger again for a fresh id.
+        </div>
+      )}
+
       <div className="mt-3 flex justify-end gap-2">
         <Button onClick={onClose}>Close</Button>
-        <Button variant="primary" onClick={submit} disabled={inject.isPending}>
-          Inject
-        </Button>
+        {confirming ? (
+          <>
+            <Button onClick={() => setConfirming(false)}>Back</Button>
+            <Button variant="primary" onClick={submit} disabled={inject.isPending}>
+              Confirm inject
+            </Button>
+          </>
+        ) : (
+          <Button variant="primary" onClick={submit} disabled={inject.isPending}>
+            Inject…
+          </Button>
+        )}
       </div>
     </Dialog>
   );

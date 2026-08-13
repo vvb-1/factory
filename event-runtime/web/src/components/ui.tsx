@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { modal, useNow } from "../hooks";
 
 /** One fixed hue map for the closed §8 lifecycle — identical in every view. */
@@ -62,7 +62,7 @@ export function FilterInput({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       aria-label={label}
-      className="w-56 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
+      className="w-56 shrink-0 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
     />
   );
 }
@@ -136,7 +136,12 @@ export function StatTile({
   const cls = "rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left";
   if (!onClick) return <div className={cls}>{inner}</div>;
   return (
-    <button type="button" onClick={onClick} className={`${cls} cursor-pointer hover:bg-(--surface-2)`}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label}: ${value}`}
+      className={`${cls} cursor-pointer hover:bg-(--surface-2)`}
+    >
       {inner}
     </button>
   );
@@ -362,6 +367,7 @@ export function Dialog({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const titleId = useId();
   useEffect(() => {
     modal.depth += 1;
     const onKey = (e: KeyboardEvent) => {
@@ -379,9 +385,14 @@ export function Dialog({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`${wide ? "w-[720px]" : "w-[480px]"} max-h-[70vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl`}
       >
-        <div className="display mb-3 text-[15px] font-semibold">{title}</div>
+        <div id={titleId} className="display mb-3 text-[15px] font-semibold">
+          {title}
+        </div>
         {children}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "./api";
+import { hashPath } from "./hash";
 import { useHashRoute, useTheme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
@@ -31,65 +32,45 @@ export function App() {
   const [, cycleTheme] = useTheme();
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
-  const [focusRunId, setFocusRunId] = useState<string | null>(null);
   const [focusRunState, setFocusRunState] = useState<string | null>(null);
-  const [focusProposalId, setFocusProposalId] = useState<string | null>(null);
-  const [focusEvent, setFocusEvent] = useState<EventFocus | null>(null);
-  const [focusAgentRef, setFocusAgentRef] = useState<string | null>(null);
+  const [focusExpired, setFocusExpired] = useState(false);
+  const [ephemeralEvent, setEphemeralEvent] = useState<EventFocus | null>(null);
 
-  const jumpToRun = (runId: string) => {
-    setFocusRunId(runId);
-    navigate("runs");
-  };
+  const focusRunId = view === "runs" ? (route[1] ?? null) : null;
+  const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
+  const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
+  const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
+  const hashEvent: EventFocus | null =
+    view === "events" && route[1] && route[2]
+      ? { source: route[1], eventId: route[2] }
+      : null;
+  const focusEvent =
+    view === "events" ? { ...(ephemeralEvent ?? {}), ...(hashEvent ?? {}) } : null;
+  const hasEventFocus =
+    !!(focusEvent && (focusEvent.source || focusEvent.eventId || focusEvent.status || focusEvent.type));
+
+  const jumpToRun = (runId: string) => navigate(hashPath("runs", runId));
   const jumpToRuns = (state?: string) => {
     if (state) setFocusRunState(state);
     navigate("runs");
   };
-  const jumpToProposal = (id: string) => {
-    setFocusProposalId(id);
-    navigate("proposals");
-  };
+  const jumpToProposal = (id: string) => navigate(hashPath("proposals", id));
   const jumpToEvent = (source: string, eventId: string, status?: string) => {
-    setFocusEvent({ source, eventId, status: status ?? "all" });
-    navigate("events");
+    setEphemeralEvent(status ? { status } : null);
+    navigate(hashPath("events", source, eventId));
   };
   const jumpToEvents = (focus: EventFocus) => {
-    setFocusEvent(focus);
+    if (focus.source && focus.eventId) {
+      setEphemeralEvent(focus.status || focus.type ? { status: focus.status, type: focus.type } : null);
+      navigate(hashPath("events", focus.source, focus.eventId));
+      return;
+    }
+    setEphemeralEvent(focus);
     navigate("events");
   };
-  const jumpToAgent = (ref: string) => {
-    setFocusAgentRef(ref);
-    navigate("agents");
-  };
+  const jumpToAgent = (ref: string) => navigate(hashPath("agents", ref));
+  const jumpToGraph = (nodeId?: string) => navigate(hashPath("graph", nodeId));
 
-  // Deep link #/runs/:id, #/events/:source/:eventId, #/proposals/:id,
-  // #/agents/:ref → select, then normalize the hash so the master-detail
-  // pane owns selection state.
-  useEffect(() => {
-    if (route[0] === "runs" && route[1]) {
-      setFocusRunId(route[1]);
-      navigate("runs");
-    }
-    if (route[0] === "events" && route[1] && route[2]) {
-      setFocusEvent({
-        source: decodeURIComponent(route[1]),
-        eventId: decodeURIComponent(route[2]),
-        status: "all",
-      });
-      navigate("events");
-    }
-    if (route[0] === "proposals" && route[1]) {
-      setFocusProposalId(decodeURIComponent(route[1]));
-      navigate("proposals");
-    }
-    if (route[0] === "agents" && route[1]) {
-      setFocusAgentRef(decodeURIComponent(route[1]));
-      navigate("agents");
-    }
-  }, [route, navigate]);
-
-  // Connection indicator (spec §4.1): reads keep rendering from cache when
-  // the runtime is down; verbs disable.
   const health = useQuery({
     queryKey: ["health"],
     queryFn: api.health,
@@ -97,19 +78,18 @@ export function App() {
     retry: false,
   });
   const connected = health.isSuccess;
+  // Banner only after a failed fetch — first-load pending must not flash
+  // "unreachable" over an empty factory.
+  const healthFailed = !connected && !health.isPending;
 
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const openProposals = status.data?.proposals.open ?? 0;
   const activeRuns = Object.entries(status.data?.runs.byState ?? {})
     .filter(([s]) => ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(s))
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
-  // Events needing an operator: the two statuses requeue exists for.
   const eventAttention =
     (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
 
-  // Environment chip: which runtime this UI can mutate. "live" wears the
-  // warning tone — approving there triggers real agent runs; anything else
-  // (dev, or a serve-wide fake-adapter override) stays informational.
   const env = health.data?.env;
   const envHue = !connected
     ? "var(--hue-err)"
@@ -226,52 +206,85 @@ export function App() {
         </div>
       </nav>
 
-      <main className="min-w-0 flex-1">
-        {view === "proposals" ? (
-          <Proposals
-            connected={connected}
-            onRunQueued={jumpToRun}
-            focusProposalId={focusProposalId}
-            onFocusConsumed={() => setFocusProposalId(null)}
-            onJumpAgent={jumpToAgent}
-            onJumpEvent={jumpToEvent}
-          />
-        ) : view === "runs" ? (
-          <Runs
-            connected={connected}
-            focusRunId={focusRunId}
-            onFocusConsumed={() => setFocusRunId(null)}
-            focusState={focusRunState}
-            onFocusStateConsumed={() => setFocusRunState(null)}
-            onJumpAgent={jumpToAgent}
-            onJumpEvent={jumpToEvent}
-          />
-        ) : view === "graph" ? (
-          <Graph />
-        ) : view === "agents" ? (
-          <Agents focusAgentRef={focusAgentRef} onFocusConsumed={() => setFocusAgentRef(null)} />
-        ) : view === "events" ? (
-          <Events
-            connected={connected}
-            focusEvent={focusEvent}
-            onFocusConsumed={() => setFocusEvent(null)}
-            onJumpProposal={jumpToProposal}
-            onJumpRun={jumpToRun}
-            onTriggerAgain={(envelope) => {
-              setInjectSeed(envelope);
-              setInjectOpen(true);
+      <main className="flex min-w-0 flex-1 flex-col">
+        {healthFailed && (
+          <div
+            role="status"
+            className="shrink-0 border-b px-4 py-2 text-[12px]"
+            style={{
+              color: "var(--hue-err)",
+              background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
+              borderColor: "color-mix(in oklch, var(--hue-err) 35%, var(--border))",
             }}
-          />
-        ) : (
-          <Overview
-            connected={connected}
-            onJumpRun={jumpToRun}
-            onJumpProposal={jumpToProposal}
-            onJumpEvents={jumpToEvents}
-            onJumpRuns={jumpToRuns}
-            onNavigate={navigate}
-          />
+          >
+            Runtime unreachable — lists show last cached data; verbs are disabled until{" "}
+            <span className="mono">/health</span> responds. This is not an empty factory.
+          </div>
         )}
+        <div className="min-h-0 flex-1">
+          {view === "proposals" ? (
+            <Proposals
+              connected={connected}
+              onRunQueued={jumpToRun}
+              focusProposalId={focusProposalId}
+              onSelectProposal={(id) => navigate(hashPath("proposals", id))}
+              focusExpired={focusExpired}
+              onFocusExpiredConsumed={() => setFocusExpired(false)}
+              onJumpAgent={jumpToAgent}
+              onJumpEvent={jumpToEvent}
+            />
+          ) : view === "runs" ? (
+            <Runs
+              connected={connected}
+              focusRunId={focusRunId}
+              onSelectRun={(id) => navigate(hashPath("runs", id))}
+              focusState={focusRunState}
+              onFocusStateConsumed={() => setFocusRunState(null)}
+              onJumpAgent={jumpToAgent}
+              onJumpEvent={jumpToEvent}
+            />
+          ) : view === "graph" ? (
+            <Graph
+              focusNodeId={focusGraphNode}
+              onSelectNode={(id) => navigate(hashPath("graph", id))}
+              onJumpAgent={jumpToAgent}
+              onJumpEvents={jumpToEvents}
+            />
+          ) : view === "agents" ? (
+            <Agents
+              focusAgentRef={focusAgentRef}
+              onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
+            />
+          ) : view === "events" ? (
+            <Events
+              connected={connected}
+              focusEvent={hasEventFocus ? focusEvent : null}
+              onFocusConsumed={() => setEphemeralEvent(null)}
+              onSelectEvent={(source, eventId) => navigate(hashPath("events", source, eventId))}
+              onJumpProposal={jumpToProposal}
+              onJumpRun={jumpToRun}
+              onTriggerAgain={(envelope) => {
+                setInjectSeed(envelope);
+                setInjectOpen(true);
+              }}
+            />
+          ) : (
+            <Overview
+              connected={connected}
+              onJumpRun={jumpToRun}
+              onJumpProposal={jumpToProposal}
+              onJumpEvents={jumpToEvents}
+              onJumpRuns={jumpToRuns}
+              onNavigate={navigate}
+              onJumpExpired={() => {
+                setFocusExpired(true);
+                navigate("proposals");
+              }}
+              onJumpGraph={() => jumpToGraph()}
+              onInject={() => setInjectOpen(true)}
+            />
+          )}
+        </div>
       </main>
 
       <CommandPalette

@@ -37,7 +37,7 @@ function rowWash(state: string): string {
 export function Runs({
   connected,
   focusRunId,
-  onFocusConsumed,
+  onSelectRun,
   focusState,
   onFocusStateConsumed,
   onJumpAgent,
@@ -45,7 +45,7 @@ export function Runs({
 }: {
   connected: boolean;
   focusRunId: string | null;
-  onFocusConsumed: () => void;
+  onSelectRun: (runId: string | null) => void;
   focusState: string | null;
   onFocusStateConsumed: () => void;
   onJumpAgent: (ref: string) => void;
@@ -54,7 +54,6 @@ export function Runs({
   const now = useNow();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<(typeof STATE_TABS)[number]>("ALL");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [confirm, setConfirm] = useState<"cancel" | "force-retry" | null>(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -76,24 +75,18 @@ export function Runs({
     );
   }, [rows, filter]);
 
-  // Deep link from an approval: switch to ALL if the run isn't on this tab.
+  const selectedId = focusRunId;
+  const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
+
+  // Deep link: switch to ALL if the run isn't on this tab. Hash stays put.
   useEffect(() => {
     if (!focusRunId) return;
     if (rows.some((r) => r.runId === focusRunId)) {
       setFilter("");
-      setSelectedId(focusRunId);
-      onFocusConsumed();
       return;
     }
-    if (tab !== "ALL") {
-      setTab("ALL");
-      return;
-    }
-    if (list.isFetched) {
-      setSelectedId(focusRunId);
-      onFocusConsumed();
-    }
-  }, [focusRunId, rows, tab, list.isFetched, onFocusConsumed]);
+    if (tab !== "ALL") setTab("ALL");
+  }, [focusRunId, rows, tab]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
@@ -104,7 +97,6 @@ export function Runs({
     }
   }, [focusState, onFocusStateConsumed]);
 
-  const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
 
   useEffect(() => {
@@ -148,8 +140,8 @@ export function Runs({
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedId(visible[i]?.runId ?? null),
-    onClose: () => setSelectedId(null),
+    onSelect: (i) => onSelectRun(visible[i]?.runId ?? null),
+    onClose: () => onSelectRun(null),
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
       x: () => sel && connected && !TERMINAL.includes(sel.state) && setConfirm("cancel"),
@@ -186,8 +178,8 @@ export function Runs({
       <div className="min-w-0 flex-1 overflow-auto p-5">
         <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1" role="tablist" aria-label="Run state">
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label="Run state">
             {STATE_TABS.map((t) => {
               const byState = statusQ.data?.runs.byState ?? {};
               const count =
@@ -201,7 +193,7 @@ export function Runs({
                   role="tab"
                   aria-selected={tab === t}
                   onClick={() => setTab(t)}
-                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                  className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
                     tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                   }`}
                 >
@@ -236,7 +228,7 @@ export function Runs({
             {visible.map((r, i) => (
               <tr
                 key={r.runId}
-                onClick={() => setSelectedId(r.runId)}
+                onClick={() => onSelectRun(r.runId)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(r.state)} ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -292,7 +284,7 @@ export function Runs({
             <StateBadge state={sel.state} />
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
-              <Button onClick={() => setSelectedId(null)}>Close</Button>
+              <Button onClick={() => onSelectRun(null)}>Close</Button>
             </div>
           </div>
 
