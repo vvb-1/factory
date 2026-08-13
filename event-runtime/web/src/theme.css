@@ -62,9 +62,14 @@ body {
   letter-spacing: -0.01em;
 }
 
-.mono {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11.5px;
+/* In @layer components so `text-*` utilities override the default size: Tailwind
+   emits utilities into a later layer, which unlayered author CSS would beat at
+   equal specificity no matter what the utility declares (OPS-321). */
+@layer components {
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px;
+  }
 }
 
 /* Status washes on inbox rows — declared before .row-selected so selection wins. */
