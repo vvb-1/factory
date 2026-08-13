@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api } from "../api";
 import { buildTemplates, triggerId, type TriggerTemplate } from "../templates";
 import { Button, Dialog, VerbError, notify } from "./ui";
@@ -55,6 +55,7 @@ export function InjectDialog({
   const [clientError, setClientError] = useState<string | null>(null);
   const [unregisteredAck, setUnregisteredAck] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const groupRef = useRef<HTMLDivElement>(null);
 
   const inject = useMutation({
     mutationFn: (envelope: Record<string, unknown>) => api.replay(envelope),
@@ -80,6 +81,7 @@ export function InjectDialog({
   }
 
   function applyChip(next: string | null) {
+    if (next === selected) return;
     if (next === null) {
       setSelected(null);
       setText(pretty(blankEnvelope(openedAt)));
@@ -100,19 +102,34 @@ export function InjectDialog({
     if (t) choose(t);
   }
 
-  /** Arrows only when a chip (or the group) is focused — not document-wide. */
+  function templateIds(): Array<string | null> {
+    return [...(initialEnvelope ? ["__given__"] : []), ...templates.map((t) => t.eventType), null];
+  }
+
+  function radioA11y(id: string | null) {
+    const checked = selected === id;
+    return {
+      role: "radio" as const,
+      "aria-checked": checked,
+      tabIndex: checked ? 0 : -1,
+    };
+  }
+
+  /**
+   * Roving tabindex: arrows move selection and DOM focus together, and only
+   * while a chip is focused — not the envelope textarea, not ⌘K.
+   */
   function onTemplateKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
     if (!keys.includes(e.key)) return;
+    if (!(e.target instanceof HTMLElement) || e.target.getAttribute("role") !== "radio") return;
     e.preventDefault();
-    const ids: Array<string | null> = [
-      ...(initialEnvelope ? ["__given__"] : []),
-      ...templates.map((t) => t.eventType),
-      null,
-    ];
+    const ids = templateIds();
     const idx = selected === null ? ids.length - 1 : Math.max(ids.indexOf(selected), 0);
     const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
-    applyChip(ids[(idx + delta + ids.length) % ids.length]);
+    const nextIdx = (idx + delta + ids.length) % ids.length;
+    applyChip(ids[nextIdx]);
+    e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[nextIdx]?.focus();
   }
 
   function submit() {
@@ -150,6 +167,13 @@ export function InjectDialog({
   const submitRef = useRef(submit);
   submitRef.current = submit;
 
+  // Dialog focuses `[autofocus]` on open; React's autoFocus prop does not set that attribute.
+  useLayoutEffect(() => {
+    groupRef.current
+      ?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
+      ?.setAttribute("autofocus", "");
+  }, []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -181,6 +205,7 @@ export function InjectDialog({
       )}
 
       <div
+        ref={groupRef}
         className="mb-3 flex flex-wrap gap-1.5"
         role="radiogroup"
         aria-label="Event type templates"
@@ -189,8 +214,7 @@ export function InjectDialog({
         {initialEnvelope && (
           <button
             type="button"
-            role="radio"
-            aria-checked={selected === "__given__"}
+            {...radioA11y("__given__")}
             onClick={() => applyChip("__given__")}
             className={`rounded-md border px-2 py-1 text-[11.5px] ${
               selected === "__given__"
@@ -205,10 +229,9 @@ export function InjectDialog({
           <button
             key={t.eventType}
             type="button"
-            role="radio"
-            aria-checked={selected === t.eventType}
+            {...radioA11y(t.eventType)}
             title={`${t.agent} · payload: ${t.summary}`}
-            onClick={() => choose(t)}
+            onClick={() => applyChip(t.eventType)}
             className={`rounded-md border px-2 py-1 text-left text-[11.5px] ${
               selected === t.eventType
                 ? "border-(--accent) bg-(--surface-3) text-(--text)"
@@ -221,8 +244,7 @@ export function InjectDialog({
         ))}
         <button
           type="button"
-          role="radio"
-          aria-checked={selected === null}
+          {...radioA11y(null)}
           onClick={() => applyChip(null)}
           className={`rounded-md border px-2 py-1 text-[11.5px] ${
             selected === null
