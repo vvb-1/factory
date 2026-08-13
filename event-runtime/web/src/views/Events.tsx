@@ -194,6 +194,7 @@ export function Events({
         }
         await new Promise((r) => setTimeout(r, 250));
       }
+      if (alive.current) notify(`Requeued ${e.eventId} — no open proposal appeared`, "info");
     },
     onError: invalidate, // 404/409 mean someone else acted — converge on truth
   });
