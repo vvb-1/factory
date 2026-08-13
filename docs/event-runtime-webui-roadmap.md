@@ -48,7 +48,7 @@ Operators can dynamically group any view by:
 ## 2. Module Feature Roadmap
 
 ### 2.1 Executive Dashboard & Operations Center (`/overview`)
-* Real-time stat grid (events, proposals, runs, active workers).
+* Real-time stat grid (events, proposals, runs). Worker tiles are **not on Overview yet** (OPS-267) — `GET /status` already returns `workers.{live,busy,stale}`, and the fleet is readable today at `/workers` (§2.7).
 * Doctor anomaly resolution panel (dead letters, stale leases, prompt hash drift).
 * Append-only live activity journal (`GET /journal?since=<seq>`).
 * Published outbox result stream (`factory.agent-result/v1`).
@@ -81,3 +81,9 @@ Operators can dynamically group any view by:
 ### 2.6 Artifact & Transcript Viewer (`/artifacts`)
 * Content-addressed file browser (`/api/artifacts/:sha256`).
 * In-browser transcript viewer (`transcript.jsonl`).
+
+### 2.7 Worker Fleet & Placement (`/workers`) — shipped
+* Registry list from `GET /workers`: host, pid, health, placement labels, adapters, current run, heartbeat age.
+* Heartbeat as the lie detector: `stale` outranks the worker's own `busy`/`idle` report (90 s window), and the nav badge flips from the busy count to the stale count.
+* Detail inspector: process identity, declared adapters, placement labels; jump to the held run (`#/runs/:id`).
+* Pending: Overview worker tiles and doctor stalled/no-worker anomalies (OPS-267), and `lease_owner` → worker jumps from a run's attempts (OPS-268).

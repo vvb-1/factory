@@ -33,9 +33,13 @@ Made by the operator, recorded here so nobody relitigates them mid-build:
   convention continues to govern all runtime code. The web app is leaf UI code
   with its own toolchain, never imported by the runtime; shadcn/ui generates
   TSX, and fighting that in plain JS costs more than the exception.
-- **Polling, not push.** The control API has no event stream and one worker.
-  TanStack Query polling every 2 s on focused views is honest and sufficient
-  at this scale. An SSE endpoint is a deferred follow-up, not a dependency.
+- **Polling, not push.** The control API has no event stream, and the worker
+  fleet (OPS-233 onward — several processes may register at once) reports
+  itself by heartbeat rather than by push: a worker's `lastSeen` is never
+  fresher than its last beat, so the UI is polling something that is already
+  polled. TanStack Query polling every 2 s on focused views is honest and
+  sufficient at this scale. An SSE endpoint is a deferred follow-up, not a
+  dependency.
 
 ## 2. Non-goals
 
@@ -197,7 +201,8 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 - `⌘↵` — confirm inject (from the envelope textarea too).
 - On a selected proposal: `a` approve (opens the confirm with the spec in
   view), `x` reject (focuses the reason field).
-- `g o` / `g p` / `g r` — go to Overview / Proposals / Runs.
+- `g o` / `g e` / `g p` / `g r` / `g t` / `g w` / `g g` — go to Overview /
+  Events / Proposals / Runs / Agents / Workers / Graph.
 - Every verb the palette offers checks current state first — it never shows
   "approve" on a decided proposal or "cancel" on a terminal run.
 
@@ -280,6 +285,11 @@ and shared with the CLI:
   other verb.
 - **`GET /artifacts/:sha256`** — content-addressed artifact/transcript bytes
   (the §8 deferral, since triggered and shipped).
+- **`GET /workers`** — the worker registry the CLI `workers` command prints,
+  each row carrying a `stale` flag derived from heartbeat age. The same
+  projection widened `/status` with `workers.{live, busy, stale}` (live and
+  busy both exclude stale) and the doctor with `stalledWorkers` and
+  `noWorkers`.
 
 Still explicitly *not* added: pagination beyond `journal`/`outbox` limits
 (volumes are tiny; first endpoint to hurt gets it) and SSE (§8).
@@ -486,3 +496,57 @@ no new API.
   empty list reminds that Esc clears. Selection wash is denser so j/k is
   obvious. Click a toast to dismiss it. The document title follows the hash
   (`factory · Runs · run_id`).
+
+### 10.9 Workers view (`#/workers`, `g w`) — OPS-265, OPS-266
+
+The fleet became plural (OPS-233), so §1's single-worker claim stopped being
+true and the registry needed a view. Workers answers one question: **who could
+claim the next run, and who only looks like they could.** A worker whose
+heartbeat has gone stale still reports `busy` and still holds its run; that gap
+is the reason the view exists.
+
+- **Health is four disjoint tokens** — `idle`, `busy`, `stopped`, `stale` —
+  rendered with the same `StateBadge` primitive as events, proposals, and runs.
+  A stale heartbeat outranks whatever the row claims (`stale` beats a reported
+  `busy`), and the row keeps the last self-report beside the badge as
+  "reported busy" rather than discarding it. Staleness is heartbeat age past
+  `HEARTBEAT_STALE_MS` (90 s, `lib/workers.mjs`); a cleanly stopped worker is
+  never marked stale, which is what keeps the four disjoint. Stale rows carry
+  the error wash, cleanly stopped rows dim; selection wins over both, per
+  §5.1.
+- **List** over `GET /workers`, polled at §6's 2 s: worker id, host, pid,
+  state, placement labels, adapters, current run, last seen (relative, ISO on
+  hover, error-toned when stale). One client-side filter spans id, host, pid,
+  health, labels, adapters, and current run. Empty copy distinguishes loading,
+  an unreachable API, and a genuinely empty registry — the last names the
+  command that fixes it (`bun event-runtime/cli.mjs work`).
+- **Detail panel**, stacked sections: a stale banner that says the process is
+  gone whatever it last reported (and, when it still holds a run, that the run
+  is reclaimed when its lease expires); **Process** (`workerId`, `host`,
+  `pid`, `state`, `currentRun`, `startedAt`, `lastSeen`, and `stoppedAt` when
+  present); **Adapters**, with an honest empty line when a worker claims
+  nothing; and **Labels** as pretty JSON, captioned as what a run's placement
+  constraints are matched against. Strictly read-only — the registry has no
+  mutation surface, and the UI adds none.
+- **Runs stay the run router.** `currentRun` is a jump to `#/runs/:id` from
+  both the row and the panel; the fleet is a way in, not a second place runs
+  live.
+- **Hashes and keys.** `#/workers` and `#/workers/:id` per §10.8: selecting a
+  worker writes the hash, refresh restores the row, a nav-rail click returns
+  to the view root. `g w` navigates (`w` is no view's single-key list verb, so
+  unlike `g a` in §10.6 the natural chord was free); `j`/`k` move, `o` opens
+  the current run, `c` copies the worker id, `Esc` closes the panel then
+  clears the filter, and the panel's **Copy link** copies the shareable hash.
+  ⌘K lists workers in their own group (id, host, and the same
+  stale-outranks-reported health) and jumps to one.
+- **Nav badge.** The Workers rail entry is the one badge whose meaning flips:
+  with stale workers it shows the stale count in the warning tone plus the
+  word "stale", otherwise the busy count in the accent tone. The word is
+  there because tone alone does not survive the high-contrast theme. Counts
+  come from `/status`'s `workers` block.
+
+Two AC items of the parent pass are **not on this tree and remain follow-ups**:
+the Overview doctor tiles for `stalledWorkers` / `noWorkers` (OPS-267) and
+`lease_owner` jumps from a run's attempts to the owning worker (OPS-268) — the
+API already returns all three fields (§7), but no Overview or Runs UI reads
+them yet.
