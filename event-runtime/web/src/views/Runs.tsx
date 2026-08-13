@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
+import { hashPath } from "../hash";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { RunState } from "../types";
@@ -34,6 +35,37 @@ function rowWash(state: string): string {
   if (state === "FAILED" || state === "TIMED_OUT") return "row-wash-err";
   if (state === "REFUSED") return "row-wash-warn";
   return "";
+}
+
+/**
+ * A worker id is minted as `worker_<pid>_<rand>` (lib/ids.mjs); every other
+ * actor the runtime records is a bare word — `operator`, `planner`, `reaper`,
+ * or the `worker` fallback for an attempt whose owner was lost. Only the
+ * prefixed form addresses a row in the fleet, so only it becomes a jump.
+ */
+const isWorkerId = (actor: string): boolean => /^worker_.+/.test(actor);
+
+/** Workers owns `#/workers/:id`; this view is a way in, not a second router. */
+const openWorker = (workerId: string) => {
+  window.location.hash = `#/${hashPath("workers", workerId)}`;
+};
+
+/**
+ * Who did this — the lease owner of an attempt, or the actor on a lifecycle
+ * row. A worker id is a process you can go look at; an operator or a planner
+ * is not, and pretending otherwise would be a link to nowhere.
+ */
+function ActorRef({ actor, className }: { actor: string; className?: string }) {
+  if (!isWorkerId(actor)) return <>{actor}</>;
+  return (
+    <JumpLink
+      onClick={() => openWorker(actor)}
+      title={`Which process was this? Open ${actor} in Workers`}
+      className={className}
+    >
+      {actor}
+    </JumpLink>
+  );
 }
 
 /** Runs (webui spec §4.3): state tabs, lifecycle timeline, guarded verbs. */
@@ -416,7 +448,9 @@ export function Runs({
                     {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
                   </span>
                   <span className="truncate text-(--text-faint)">
-                    {e.actor}
+                    {/* `.mono` is 11.5px; the actors beside it are 13px prose,
+                        so the clickable one must not read as the smallest text. */}
+                    <ActorRef actor={e.actor} className="text-[13px]" />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
                 </div>
@@ -434,6 +468,10 @@ export function Runs({
                   </div>
                   <div className="mono truncate text-[11px] text-(--text-faint)">
                     {a.reason_code ?? ""} {a.workspace_path ?? ""}
+                  </div>
+                  <div className="flex items-baseline gap-1.5 truncate text-[11px] text-(--text-faint)">
+                    <span>owner</span>
+                    {a.lease_owner ? <ActorRef actor={a.lease_owner} /> : <span className="mono">unclaimed</span>}
                   </div>
                   {(a.started_at || a.finished_at) && (
                     <div className="mt-1 flex gap-3 text-[11px] text-(--text-faint)">
