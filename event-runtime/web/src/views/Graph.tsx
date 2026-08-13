@@ -156,7 +156,7 @@ export function Graph({
             <div className="display truncate text-[14px] font-semibold">{selected.label}</div>
             <div className="flex shrink-0 gap-1.5">
               <Button onClick={() => copyText(selected.label, selected.kind === "agent" ? "agent ref" : "id")}>
-                Copy id
+                {selected.kind === "agent" ? "Copy ref" : "Copy id"}
               </Button>
               <Button onClick={() => onSelectNode(null)}>Close</Button>
             </div>

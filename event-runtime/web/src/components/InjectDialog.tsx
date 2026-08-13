@@ -110,10 +110,18 @@ export function InjectDialog({
       if (!keys.includes(e.key)) return;
       if (templates.length === 0) return;
       e.preventDefault();
-      const ids = templates.map((t) => t.eventType);
-      const idx = selected ? ids.indexOf(selected) : -1;
+      const ids = [...templates.map((t) => t.eventType), null];
+      const idx = selected === null ? ids.length - 1 : Math.max(ids.indexOf(selected), 0);
       const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
-      const next = ids[(Math.max(idx, 0) + delta + ids.length) % ids.length];
+      const next = ids[(idx + delta + ids.length) % ids.length];
+      if (next === null) {
+        setSelected(null);
+        setText(pretty(blankEnvelope(openedAt)));
+        setUnregisteredAck(false);
+        setConfirming(false);
+        inject.reset();
+        return;
+      }
       const t = templates.find((x) => x.eventType === next);
       if (t) choose(t);
     }
