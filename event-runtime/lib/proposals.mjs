@@ -32,6 +32,24 @@ export function openProposals(db, { now = Date.now() } = {}) {
     .map((row) => ({ ...withSpec(row), expired: isExpired(row, now) }));
 }
 
+/**
+ * Runs with two or more open proposals. The planner never creates this — it
+ * is a defensive invariant, surfaced on the doctor view if it ever happens.
+ */
+export function ambiguousOpenProposalRuns(db) {
+  return db
+    .query(
+      `SELECT run_id AS runId, COUNT(*) AS n
+       FROM proposals
+       WHERE status = 'open' AND run_id IS NOT NULL
+       GROUP BY run_id
+       HAVING n > 1
+       ORDER BY run_id`,
+    )
+    .all()
+    .map((row) => ({ runId: row.runId, count: row.n }));
+}
+
 export function getProposal(db, id) {
   const row = db.query(`SELECT * FROM proposals WHERE id = ?`).get(id);
   return row ? withSpec(row) : null;
@@ -124,16 +142,20 @@ export function approveProposal(db, registry, id, { actor, now = Date.now(), pol
  * Keyed on `run_id` + `status = 'open'`. Zero matches is a no-op — cancelling
  * a QUEUED/LEASED/RUNNING run whose proposal is already decided must still
  * succeed. Two or more open rows for the same run is ambiguous: leave them
- * all untouched rather than guess which one to close. Caller must already
- * hold the transaction that performed the CANCELLED transition.
+ * all untouched rather than guess which one to close, and return `ambiguous`
+ * so the caller can surface it (OPS-245). Caller must already hold the
+ * transaction that performed the CANCELLED transition.
  *
- * @returns {{ closed: true, id: string } | { closed: false }}
+ * @returns {{ closed: true, id: string }
+ *         | { closed: false }
+ *         | { closed: false, ambiguous: true, count: number }}
  */
 export function closeOpenProposalForRun(db, runId, { actor, now = Date.now() } = {}) {
   const open = db
     .query(`SELECT id FROM proposals WHERE run_id = ? AND status = 'open'`)
     .all(runId);
-  if (open.length !== 1) return { closed: false };
+  if (open.length === 0) return { closed: false };
+  if (open.length > 1) return { closed: false, ambiguous: true, count: open.length };
   const at = new Date(now).toISOString();
   db.query(
     `UPDATE proposals SET status = 'rejected', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`,

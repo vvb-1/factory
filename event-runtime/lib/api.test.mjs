@@ -289,6 +289,7 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     expect(status.anomalies.staleLeases).toBe(0);
     expect(status.anomalies.deadLettered).toEqual([]);
     expect(status.anomalies.unpublishedOutbox).toBe(1); // completion event, not yet published
+    expect(status.anomalies.ambiguousOpenProposals).toEqual([]);
   });
 
   test("approve unknown proposal → 404; approve twice → 409", async () => {
@@ -351,6 +352,30 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
     expect(decided.status).toBe("rejected");
     expect(decided.reason).toBe("run_cancelled");
     expect(decided.decided_by).toBe("operator");
+  });
+
+  test("cancel with two open proposals still cancels and signals the ambiguity", async () => {
+    const prop = await planned("can-ambiguous-1");
+    const at = new Date().toISOString();
+    s.db.query(
+      `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
+       VALUES (?, ?, ?, ?, 'run', ?, 1800)`,
+    ).run("prop_extra_ambiguous", prop.eventSource, prop.eventId, prop.runId, at);
+
+    expect(await s.client.cancel(prop.runId, "never mind")).toEqual({
+      cancelled: true,
+      ambiguousOpenProposals: 2,
+    });
+    expect((await s.client.run(prop.runId)).run.state).toBe("CANCELLED");
+
+    const open = await s.client.proposals();
+    expect(open.proposals.map((p) => p.id)).toContain(prop.id);
+    expect(open.proposals.map((p) => p.id)).toContain("prop_extra_ambiguous");
+
+    const status = await s.client.status();
+    expect(status.anomalies.ambiguousOpenProposals).toEqual([
+      { runId: prop.runId, count: 2 },
+    ]);
   });
 
   test("retry: 404 on unknown run, 409 when attempts are exhausted, queued with force", async () => {

@@ -17,7 +17,7 @@ import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, we
 import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { requeueEvent } from "./planner.mjs";
-import { approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
+import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
 
@@ -140,6 +140,9 @@ function statusView(db, nowMs) {
       // valid, so nothing has reclaimed the run yet (OPS-233).
       stalledWorkers: stalled.map((w) => ({ workerId: w.workerId, host: w.host, runId: w.currentRun, lastSeen: w.lastSeen })),
       noWorkers: workers.filter((w) => w.state !== "stopped" && !w.stale).length === 0 && (runCounts(db).byState.QUEUED ?? 0) > 0,
+      // Two or more open proposals on one run: cancel fail-closes and leaves
+      // them open (OPS-245). Unreachable on the TTL replan path.
+      ambiguousOpenProposals: ambiguousOpenProposalRuns(db),
     },
   };
 }
@@ -495,6 +498,8 @@ export function createApi({
         try {
           if (verb === "cancel") {
             cancelRun(db, runId, { actor: ACTOR, reason: body.reason ?? "operator_cancel", now: nowMs, policyVersion });
+            const clash = ambiguousOpenProposalRuns(db).find((row) => row.runId === runId);
+            if (clash) return send(res, 200, { cancelled: true, ambiguousOpenProposals: clash.count });
             return send(res, 200, { cancelled: true });
           }
           retryRun(db, runId, { actor: ACTOR, force: body.force === true, now: nowMs, policyVersion });
