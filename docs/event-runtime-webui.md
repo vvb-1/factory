@@ -600,3 +600,50 @@ between Lifecycle and Attempts, rendering the stream chronologically:
 Nothing global changes: no nav entry, no chord — the trace lives inside the
 run detail only, and the shared `Disclosure` label widened from `string` to
 `ReactNode` to allow the error-toned tool-result summary.
+
+### 10.11 Full-page run view (`#/run/:id`) — OPS-354
+
+Operator verdict after living with §10.10: the panel is right for triage and
+wrong for *reading* — a trace deserves a page. `#/run/:id` is that page.
+
+- **Route.** A distinct first segment, not a mode on `#/runs/:id`. Under
+  §10.8's rules, same-view hash writes replace history and cross-view writes
+  push — so `runs → run` pushes by construction: browser Back lands on
+  `#/runs/:id` with the panel selection intact (the selection *is* the
+  hash), and the explicit **← Runs** control navigates to `#/runs/:id`
+  directly, which also works for a pasted `#/run/:id` link with no history
+  behind it. A bare `#/run` renders the Runs list. The Runs rail entry stays
+  highlighted while a full run view is open.
+- **Getting in and out.** From the Runs list: `Enter`/`o` on the selection
+  (§5's "open detail" verb graduates — selection alone already opens the
+  panel, so *open* now means the full page). From the panel: an **Expand**
+  button, clicking the run id in the panel title, the ⌘K context action, and
+  the panel trace's "open full view" tail link. Out: browser Back, **←
+  Runs**, or `Esc`. `x` cancel and `c` copy work on the page, same as the
+  panel.
+- **The `g o` collision, fixed for the class.** `o` is also the Overview
+  chord suffix, and the chord listener and a view's key listener ride the
+  same keydown — with listener order flipping on remount, so neither side
+  can reliably win a race. `goSequence.ts` now exports a time-based
+  `goPrefix` armed-timestamp (set on `g`, never cleared synchronously —
+  clearing in one listener would blind the other); `useListKeys` stands down
+  entirely while it is armed. This also retroactively fixes §10.9's `o`
+  (open current run) double-firing on `g o` in Workers.
+- **Layout.** Full-bleed two-column under a pinned header (back, state
+  badge, run id, agent · adapter · attempts, copy verbs): MAIN is the trace
+  at a readable measure (`max-w`-bounded, taller scroll viewport); SIDEBAR
+  is the panel's blocks unchanged — verbs with the existing 409 handling,
+  spec summary with the agent link, lifecycle, attempts, result + evidence,
+  artifacts (open links), receipt. The sidebar stacks below the trace on
+  narrow viewports. Origin event still comes from the runs-list join
+  (`GET /runs/:id` does not return it); the list query's cache is shared.
+- **Trace enhancements, width-earned and modest.** Kind filter chips —
+  text / tool calls / tool results / usage · lifecycle (the last two share a
+  chip) — filter client-side over the cached entries; polling is untouched
+  and hidden-not-shown state means new kinds stay visible by default. The
+  poller is the same `useTraceFeed` as §10.10, not a fork: `RunTrace` grew a
+  `variant` prop (`panel` | `full`), and both surfaces share one query
+  cache, so panel and page never poll the same run twice.
+- **Panel trace is now tail-only** (last 20 entries) with a "showing last 20
+  of N — open full view" line: triage reads the newest activity, reading the
+  whole thing is what the page is for.

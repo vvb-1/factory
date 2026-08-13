@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { modal, useNow } from "../hooks";
+import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
 
 /** One fixed hue map for the closed §8 lifecycle — identical in every view. */
 export const STATE_HUES: Record<string, string> = {
@@ -365,7 +366,18 @@ function ToastRegion({
 
 export function JsonBlock({ value }: { value: unknown }) {
   const [copied, setCopied] = useState(false);
-  const text = useMemo(() => JSON.stringify(value, null, 2), [value]);
+  const text = useMemo(() => {
+    if (typeof value === "string") {
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2);
+      } catch {
+        return value;
+      }
+    }
+    return JSON.stringify(value, null, 2);
+  }, [value]);
+
+  const tokens = useMemo(() => tokenizeJson(text), [text]);
 
   const copy = () => {
     navigator.clipboard.writeText(text);
@@ -377,7 +389,15 @@ export function JsonBlock({ value }: { value: unknown }) {
   return (
     <div className="relative group">
       <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 pr-16 leading-relaxed whitespace-pre-wrap">
-        {text}
+        {tokens.map((t, i) =>
+          TOKEN_CLASSES[t.kind] ? (
+            <span key={i} className={TOKEN_CLASSES[t.kind]}>
+              {t.text}
+            </span>
+          ) : (
+            t.text
+          ),
+        )}
       </pre>
       <button
         type="button"

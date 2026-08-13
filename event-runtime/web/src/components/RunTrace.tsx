@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { RunState, TraceEntry, TracePayload } from "../types";
 import { Disclosure, humanSize, JsonBlock, Section } from "./ui";
@@ -10,13 +10,28 @@ const LIVE_STATES: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
 /** Server page cap; the recorder's row cap (2000 + 1 marker) is ≤ 5 pages. */
 const PAGE = 500;
 
+/** Panel tail: triage shows the newest activity; reading happens full-page. */
+const PANEL_TAIL = 20;
+
+/** Kind filter chips (full view): usage and lifecycle share one toggle. */
+const KIND_GROUPS = [
+  { key: "assistant_text", label: "text" },
+  { key: "tool_use", label: "tool calls" },
+  { key: "tool_result", label: "tool results" },
+  { key: "meta", label: "usage · lifecycle" },
+] as const;
+
+const groupOf = (kind: string): string =>
+  kind === "usage" || kind === "lifecycle" ? "meta" : kind;
+
 /**
  * Incremental trace feed, same pattern as the Overview journal feed: each
  * poll passes `since=<last received seq>` and appends only what is new. The
  * cursor is the last *received* seq — never the server head, which would
  * skip rows whenever a read filled a whole page. The accumulated array lives
  * in the query cache (keyed per run), so a re-mounted detail pane renders a
- * terminal run's full trace without refetching.
+ * terminal run's full trace without refetching — and the panel and the
+ * full-page view share one feed instead of polling twice.
  */
 function useTraceFeed(runId: string, live: boolean) {
   const acc = useRef<TraceEntry[]>([]);
@@ -66,6 +81,25 @@ function TextBlock({ text }: { text: string }) {
   );
 }
 
+function ContentBlock({ content }: { content: unknown }) {
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return <JsonBlock value={parsed} />;
+      } catch {
+        // Fall back to plain text
+      }
+    }
+    return <TextBlock text={content} />;
+  }
+  return <JsonBlock value={content ?? null} />;
+}
+
 /** One trace row body, by kind. The recorder's truncation marker wins. */
 function TraceBody({ kind, p }: { kind: string; p: TracePayload }) {
   // Oversize payload clipped in place: whatever the kind was, only the
@@ -78,7 +112,7 @@ function TraceBody({ kind, p }: { kind: string; p: TracePayload }) {
         </span>
         {p.preview && (
           <Disclosure label="preview">
-            <TextBlock text={p.preview} />
+            <ContentBlock content={p.preview} />
           </Disclosure>
         )}
       </div>
@@ -111,7 +145,7 @@ function TraceBody({ kind, p }: { kind: string; p: TracePayload }) {
             )
           }
         >
-          {typeof p.content === "string" ? <TextBlock text={p.content} /> : <JsonBlock value={p.content ?? null} />}
+          <ContentBlock content={p.content} />
         </Disclosure>
       </div>
     );
@@ -150,13 +184,45 @@ function TraceBody({ kind, p }: { kind: string; p: TracePayload }) {
 }
 
 /**
- * Trace (webui doc §10.10) — the factory.trace/v1 stream in the run detail:
- * what the model is saying and which tools it is calling, live while the run
+ * Trace (webui doc §10.10, §10.11) — the factory.trace/v1 stream: what the
+ * model is saying and which tools it is calling, live while the run
  * executes, browsable afterwards. Mount with key={runId}.
+ *
+ * One component, two presentations (the poller is shared, never forked):
+ * - `panel` (default): a Section in the run detail panel, tail-only past
+ *   PANEL_TAIL entries with an "open full view" jump (`onExpand`).
+ * - `full`: the main column of `#/run/:id` — everything, plus client-side
+ *   kind filter chips over the cached entries. Filters never touch polling.
  */
-export function RunTrace({ runId, state }: { runId: string; state: RunState }) {
+export function RunTrace({
+  runId,
+  state,
+  variant = "panel",
+  onExpand,
+}: {
+  runId: string;
+  state: RunState;
+  variant?: "panel" | "full";
+  onExpand?: () => void;
+}) {
+  const full = variant === "full";
   const live = LIVE_STATES.includes(state);
   const { entries, isPending, isError } = useTraceFeed(runId, live);
+
+  // Full view: client-side kind visibility. Hidden groups, not shown ones,
+  // so new kinds from a live poll are visible by default.
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (key: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const filtered = full ? entries.filter((e) => !hidden.has(groupOf(e.kind))) : entries;
+  const tailCut = !full && entries.length > PANEL_TAIL;
+  const shown = tailCut ? entries.slice(-PANEL_TAIL) : filtered;
 
   // Multi-attempt runs: divider per attempt (entries are seq-ascending, so
   // attempts are contiguous). A single attempt needs no labels.
@@ -166,14 +232,43 @@ export function RunTrace({ runId, state }: { runId: string; state: RunState }) {
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (live && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [entries.length, live]);
+  }, [shown.length, live]);
 
-  return (
-    <Section title={`Trace${entries.length ? ` · ${entries.length}` : ""}`}>
+  const counts: Record<string, number> = {};
+  for (const e of entries) counts[groupOf(e.kind)] = (counts[groupOf(e.kind)] ?? 0) + 1;
+
+  const body = (
+    <>
       {live && (
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px]" style={{ color: "var(--hue-warn)" }}>
           <span className="size-1.5 animate-pulse rounded-full" style={{ background: "var(--hue-warn)" }} />
           live — following the running attempt
+        </div>
+      )}
+      {full && entries.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1" role="group" aria-label="Trace kind filter">
+          {KIND_GROUPS.map((g) => {
+            const off = hidden.has(g.key);
+            return (
+              <button
+                key={g.key}
+                type="button"
+                aria-pressed={!off}
+                title={off ? `Show ${g.label} entries` : `Hide ${g.label} entries`}
+                onClick={() => toggle(g.key)}
+                className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                  off
+                    ? "text-(--text-faint) line-through hover:bg-(--surface-1)"
+                    : "bg-(--surface-3) text-(--text)"
+                }`}
+              >
+                {g.label}
+                {(counts[g.key] ?? 0) > 0 && (
+                  <span className="ml-1.5 tabular-nums text-(--text-faint)">{counts[g.key]}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
       {entries.length === 0 ? (
@@ -186,11 +281,18 @@ export function RunTrace({ runId, state }: { runId: string; state: RunState }) {
                 ? "No trace yet — events appear here as the agent works."
                 : "No trace — this adapter does not stream events."}
         </div>
+      ) : shown.length === 0 ? (
+        <div className="text-(--text-faint)">
+          All {entries.length} entries hidden by the kind filter.
+        </div>
       ) : (
-        <div ref={scroller} className="max-h-96 overflow-auto rounded-md border border-(--border) px-3 py-1">
-          {entries.map((e, i) => (
+        <div
+          ref={scroller}
+          className={`${full ? "max-h-[70vh]" : "max-h-96"} overflow-auto rounded-md border border-(--border) px-3 py-1`}
+        >
+          {shown.map((e, i) => (
             <Fragment key={e.seq}>
-              {multiAttempt && (i === 0 || entries[i - 1].attempt !== e.attempt) && (
+              {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
                 <div className="border-b border-(--border) py-1 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
                   Attempt #{e.attempt}
                 </div>
@@ -205,6 +307,31 @@ export function RunTrace({ runId, state }: { runId: string; state: RunState }) {
           ))}
         </div>
       )}
-    </Section>
+      {tailCut && (
+        <div className="mt-1.5 text-[11px] text-(--text-faint)">
+          showing last {PANEL_TAIL} of {entries.length} entries
+          {onExpand && (
+            <>
+              {" — "}
+              <button type="button" onClick={onExpand} className="text-(--accent) hover:underline">
+                open full view
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
+
+  if (full) {
+    return (
+      <div>
+        <div className="display mb-2 text-[15px] font-semibold">
+          Trace{entries.length ? <span className="ml-2 text-(--text-faint)">· {entries.length}</span> : null}
+        </div>
+        {body}
+      </div>
+    );
+  }
+  return <Section title={`Trace${entries.length ? ` · ${entries.length}` : ""}`}>{body}</Section>;
 }

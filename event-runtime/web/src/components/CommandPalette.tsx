@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { goSequence } from "../goSequence";
+import { goPrefix, goSequence } from "../goSequence";
 import { keyGuard, modal } from "../hooks";
 import { useContextActions } from "../palette";
 
@@ -263,6 +263,8 @@ export function useGoSequences(map: Record<string, () => void>) {
       // A held `g` auto-repeats: without this, resting on the key would arm
       // the prefix and then immediately spend it on the Graph view.
       if (e.repeat) return;
+      // Arm the shared flag so list verbs (o, w, …) stand down (goSequence.ts).
+      if (e.key === "g") goPrefix.armedAt = Date.now();
       if (!press(e.key)) return;
       e.preventDefault();
       map[e.key]();

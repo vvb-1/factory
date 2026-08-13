@@ -10,7 +10,7 @@ const ROWS: { keys: string; does: string }[] = [
   { keys: "/", does: "focus filter (Events, if none on this view)" },
   { keys: "j k  ↑↓", does: "move list (or graph) selection" },
   { keys: "[ ]", does: "previous / next status tab" },
-  { keys: "Enter / o", does: "open detail" },
+  { keys: "Enter / o", does: "open detail · full run view on Runs" },
   { keys: "Esc", does: "close panel, clear filter, or close dialog" },
   { keys: "⌘↵", does: "confirm inject" },
   { keys: "c", does: "copy selected id" },

@@ -13,6 +13,7 @@ import { Events } from "./views/Events";
 import { Graph } from "./views/Graph";
 import { Overview } from "./views/Overview";
 import { Proposals } from "./views/Proposals";
+import { RunFull } from "./views/RunFull";
 import { Runs } from "./views/Runs";
 import { Workers } from "./views/Workers";
 
@@ -48,6 +49,9 @@ export function App() {
   const [filterFocus, setFilterFocus] = useState(false);
 
   const focusRunId = view === "runs" ? (route[1] ?? null) : null;
+  // `#/run/:id` is the full-page run view — a distinct first segment, so
+  // crossing from `#/runs/:id` pushes history and Back restores the panel.
+  const fullRunId = view === "run" ? (route[1] ?? null) : null;
   const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
   const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
   const focusWorkerId = view === "workers" ? (route[1] ?? null) : null;
@@ -69,6 +73,7 @@ export function App() {
     !!(focusEvent && (focusEvent.source || focusEvent.eventId || focusEvent.status || focusEvent.type));
 
   const jumpToRun = (runId: string) => navigate(hashPath("runs", runId));
+  const openRunFull = (runId: string) => navigate(hashPath("run", runId));
   const jumpToRuns = (state?: string) => {
     if (state) setFocusRunState(state);
     navigate("runs");
@@ -143,7 +148,7 @@ export function App() {
 
   useEffect(() => {
     const nav = NAV.find((n) => n.key === view);
-    const label = nav?.label ?? "Overview";
+    const label = nav?.label ?? (view === "run" ? "Run" : "Overview");
     const id = route.length > 1 ? route[route.length - 1] : null;
     const typeQ = hashSearch(window.location.hash).get("type");
     const detail = id ?? typeQ;
@@ -264,10 +269,10 @@ export function App() {
               <button
                 key={n.key}
                 type="button"
-                aria-current={view === n.key ? "page" : undefined}
+                aria-current={view === n.key || (n.key === "runs" && view === "run") ? "page" : undefined}
                 onClick={() => navigate(n.key)}
                 className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] ${
-                  view === n.key
+                  view === n.key || (n.key === "runs" && view === "run")
                     ? "bg-(--surface-3) font-medium text-(--text)"
                     : "text-(--text-dim) hover:bg-(--surface-2)"
                 }`}
@@ -396,11 +401,20 @@ export function App() {
               onJumpAgent={jumpToAgent}
               onJumpEvent={jumpToEvent}
             />
-          ) : view === "runs" ? (
+          ) : view === "run" && fullRunId ? (
+            <RunFull
+              runId={fullRunId}
+              connected={connected}
+              onBack={() => navigate(hashPath("runs", fullRunId))}
+              onJumpAgent={jumpToAgent}
+              onJumpEvent={jumpToEvent}
+            />
+          ) : view === "runs" || view === "run" ? (
             <Runs
               connected={connected}
               focusRunId={focusRunId}
               onSelectRun={(id) => navigate(hashPath("runs", id))}
+              onOpenFull={openRunFull}
               focusState={focusRunState}
               onFocusStateConsumed={() => setFocusRunState(null)}
               onJumpAgent={jumpToAgent}

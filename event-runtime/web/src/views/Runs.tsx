@@ -30,7 +30,7 @@ import {
 const STATE_TABS: (RunState | "ALL")[] = [
   "ALL", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
 ];
-const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
+export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
 
 /**
  * The two states `reapExpiredLeases` sweeps (lib/worker.mjs) — so exactly the
@@ -193,7 +193,7 @@ const openWorker = (workerId: string) => {
  * row. A worker id is a process you can go look at; an operator or a planner
  * is not, and pretending otherwise would be a link to nowhere.
  */
-function ActorRef({ actor, className }: { actor: string; className?: string }) {
+export function ActorRef({ actor, className }: { actor: string; className?: string }) {
   if (!isWorkerId(actor)) return <>{actor}</>;
   return (
     <JumpLink
@@ -211,6 +211,7 @@ export function Runs({
   connected,
   focusRunId,
   onSelectRun,
+  onOpenFull,
   focusState,
   onFocusStateConsumed,
   onJumpAgent,
@@ -219,6 +220,7 @@ export function Runs({
   connected: boolean;
   focusRunId: string | null;
   onSelectRun: (runId: string | null) => void;
+  onOpenFull: (runId: string) => void;
   focusState: string | null;
   onFocusStateConsumed: () => void;
   onJumpAgent: (ref: string) => void;
@@ -329,6 +331,10 @@ export function Runs({
     count: visible.length,
     selected: selectedIndex,
     onSelect: (i) => onSelectRun(visible[i]?.runId ?? null),
+    // §5 "Enter/o — open detail": selection already opens the panel, so the
+    // open verb graduates to the full-page run view (`g o` is safe — list
+    // verbs stand down while the chord prefix is armed, hooks.ts).
+    onOpen: () => sel && onOpenFull(sel.runId),
     onClose: () => {
       if (selectedId) onSelectRun(null);
       else if (filter) setFilter("");
@@ -357,6 +363,7 @@ export function Runs({
       setContextActions([]);
     } else {
       const copy = [
+        { label: `Open ${sel.runId} full view`, hint: "o", run: () => onOpenFull(sel.runId) },
         { label: `Copy ${sel.runId}`, hint: "c", run: () => copyText(sel.runId, "run id") },
         { label: "Copy link to this run", run: copyLink },
       ];
@@ -498,13 +505,20 @@ export function Runs({
           title={
             <span className="flex min-w-0 items-center gap-2">
               <StateBadge state={sel.state} />
-              <span className="mono truncate" title={sel.runId}>
+              <JumpLink
+                onClick={() => onOpenFull(sel.runId)}
+                title={`Open ${sel.runId} full view`}
+                className="truncate"
+              >
                 {sel.runId}
-              </span>
+              </JumpLink>
             </span>
           }
           actions={
             <>
+              <Button onClick={() => onOpenFull(sel.runId)}>
+                Expand <span className="mono ml-1 opacity-70">o</span>
+              </Button>
               <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
               <Button onClick={copyLink}>Copy link</Button>
               <Button onClick={() => onSelectRun(null)}>Close</Button>
@@ -644,7 +658,12 @@ export function Runs({
           </Section>
 
           {/* key: a run switch must reset the feed's cursor and scroll state. */}
-          <RunTrace key={d.run.runId} runId={d.run.runId} state={d.run.state} />
+          <RunTrace
+            key={d.run.runId}
+            runId={d.run.runId}
+            state={d.run.state}
+            onExpand={() => onOpenFull(d.run.runId)}
+          />
 
           {d.attempts.length > 0 && (
             <Section title="Attempts">

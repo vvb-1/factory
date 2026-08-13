@@ -3,8 +3,10 @@
  * operator-pasted `#/runs/:id` survives refresh (OPS-230).
  *
  * `#/overview` `#/events` `#/events?type=` `#/events/:source/:eventId`
- * `#/proposals` `#/proposals/:id` `#/runs` `#/runs/:id` `#/agents`
- * `#/agents/:ref` `#/workers` `#/workers/:id` `#/graph` `#/graph/:nodeId`
+ * `#/proposals` `#/proposals/:id` `#/runs` `#/runs/:id` `#/run/:id` (the
+ * full-page run view — distinct first segment so expand/back get push
+ * semantics) `#/agents` `#/agents/:ref` `#/workers` `#/workers/:id`
+ * `#/graph` `#/graph/:nodeId`
  */
 
 function pathAndQuery(hash: string): { path: string; query: string } {

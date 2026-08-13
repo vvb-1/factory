@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { goPrefixActive } from "./goSequence";
 import type { HashWriter } from "./hash";
 import { createHashWriter, hashSearch, parseHash, shouldReplaceHash } from "./hash";
 
@@ -91,6 +92,9 @@ export function useListKeys(opts: {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      // `g o` must navigate, not also fire a view's `o` verb: while the `g`
+      // chord prefix is armed, every single-key list verb stands down.
+      if (goPrefixActive()) return;
       if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
         if (count) onSelect(Math.min(selected + 1, count - 1));
