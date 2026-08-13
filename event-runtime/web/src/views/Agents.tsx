@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useListKeys } from "../hooks";
 import type { AgentDef } from "../types";
-import { Button, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, Section, copyText } from "../components/ui";
+import { Button, DetailPane, Disclosure, FilterInput, JsonBlock, KV, ListEmpty, ListPane, Section, copyText, copyLink } from "../components/ui";
+import { setContextActions } from "../palette";
 
 const caps = (a: AgentDef) =>
   [a.capabilities.filesystem, ...(a.capabilities.services ?? [])].filter(Boolean).join(", ") || "none";
@@ -16,16 +17,15 @@ const caps = (a: AgentDef) =>
  */
 export function Agents({
   focusAgentRef,
-  onFocusConsumed,
+  onSelectAgent,
 }: {
   focusAgentRef: string | null;
-  onFocusConsumed: () => void;
+  onSelectAgent: (ref: string | null) => void;
 }) {
   const query = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 2000 });
   const rows = query.data?.agents ?? [];
   const contracts = query.data?.contracts ?? {};
 
-  const [selectedRef, setSelectedRef] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -36,6 +36,7 @@ export function Agents({
       ),
     );
   }, [rows, filter]);
+  const selectedRef = focusAgentRef;
   const selectedIndex = useMemo(() => visible.findIndex((a) => a.ref === selectedRef), [visible, selectedRef]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
 
@@ -43,29 +44,40 @@ export function Agents({
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  // Deep link from a run's or proposal's agent ref.
   useEffect(() => {
-    if (!focusAgentRef) return;
-    setFilter("");
-    if (rows.some((a) => a.ref === focusAgentRef)) {
-      setSelectedRef(focusAgentRef);
-      onFocusConsumed();
-    } else if (query.isFetched) {
-      setSelectedRef(focusAgentRef);
-      onFocusConsumed();
-    }
-  }, [focusAgentRef, rows, query.isFetched, onFocusConsumed]);
+    if (focusAgentRef) setFilter("");
+  }, [focusAgentRef]);
 
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedRef(visible[i]?.ref ?? null),
-    onClose: () => setSelectedRef(null),
+    onSelect: (i) => onSelectAgent(visible[i]?.ref ?? null),
+    onClose: () => {
+      if (selectedRef) onSelectAgent(null);
+      else if (filter) setFilter("");
+    },
+    keys: {
+      c: () => sel && copyText(sel.ref, "agent ref"),
+    },
   });
+
+  useEffect(() => {
+    if (!sel) {
+      setContextActions([]);
+    } else {
+      setContextActions([
+        { label: `Copy ${sel.ref}`, hint: "c", run: () => copyText(sel.ref, "agent ref") },
+        { label: "Copy link to this agent", run: copyLink },
+      ]);
+    }
+    return () => setContextActions([]);
+  }, [sel?.ref]);
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Agents</h1>
         <div className="mb-3">
           <FilterInput
@@ -75,6 +87,9 @@ export function Agents({
             label="Filter agents"
           />
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -91,7 +106,7 @@ export function Agents({
             {visible.map((a, i) => (
               <tr
                 key={a.ref}
-                onClick={() => setSelectedRef(a.ref)}
+                onClick={() => onSelectAgent(a.ref)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -138,19 +153,24 @@ export function Agents({
             ))}
           </Section>
         </div>
-      </div>
+      </ListPane>
 
       {sel && (
-        <div className="w-[520px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display mono truncate text-[14px] font-semibold" title={sel.ref}>
+        <DetailPane
+          widthClass="w-[520px]"
+          title={
+            <span className="mono" title={sel.ref}>
               {sel.ref}
-            </div>
-            <div className="flex shrink-0 gap-1.5">
+            </span>
+          }
+          actions={
+            <>
               <Button onClick={() => copyText(sel.ref, "agent ref")}>Copy ref</Button>
-              <Button onClick={() => setSelectedRef(null)}>Close</Button>
-            </div>
-          </div>
+              <Button onClick={copyLink}>Copy link</Button>
+              <Button onClick={() => onSelectAgent(null)}>Close</Button>
+            </>
+          }
+        >
 
           <Section title="Definition">
             <KV k="id" v={sel.id} />
@@ -219,7 +239,7 @@ export function Agents({
               </div>
             )}
           </Section>
-        </div>
+        </DetailPane>
       )}
     </div>
   );

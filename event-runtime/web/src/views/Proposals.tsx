@@ -1,18 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useListKeys, useNow } from "../hooks";
+import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import { SpecDiff } from "../components/SpecDiff";
 import {
-  ago,
+  Ago,
   Button,
   Countdown,
   DECISION_HUES,
   Dialog,
   Disclosure,
   FilterInput,
+  ListPane,
+  DetailPane,
   JsonBlock,
   JumpLink,
   KV,
@@ -23,7 +25,10 @@ import {
   StateBadge,
   VerbError,
   copyText,
+  copyLink,
 } from "../components/ui";
+
+const PROPOSAL_TABS = ["open", "history"] as const;
 
 /**
  * Proposals (webui spec §4.2) — the watched-approval centerpiece. The full
@@ -36,14 +41,18 @@ export function Proposals({
   connected,
   onRunQueued,
   focusProposalId,
-  onFocusConsumed,
+  onSelectProposal,
+  focusExpired,
+  onFocusExpiredConsumed,
   onJumpAgent,
   onJumpEvent,
 }: {
   connected: boolean;
   onRunQueued: (runId: string) => void;
   focusProposalId: string | null;
-  onFocusConsumed: () => void;
+  onSelectProposal: (id: string | null) => void;
+  focusExpired: boolean;
+  onFocusExpiredConsumed: () => void;
   onJumpAgent: (ref: string) => void;
   onJumpEvent: (source: string, eventId: string) => void;
 }) {
@@ -94,8 +103,8 @@ export function Proposals({
     return state && state !== "PROPOSED" ? state : null;
   };
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [expiredOnly, setExpiredOnly] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [reason, setReason] = useState("");
@@ -105,14 +114,16 @@ export function Proposals({
   const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((p) =>
-      [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
+    return rows.filter((p) => {
+      if (expiredOnly && !p.expired) return false;
+      if (!q) return true;
+      return [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
         (v ?? "").toLowerCase().includes(q),
-      ),
-    );
-  }, [rows, filter]);
+      );
+    });
+  }, [rows, filter, expiredOnly]);
 
+  const selectedId = focusProposalId;
   const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
 
@@ -121,23 +132,22 @@ export function Proposals({
   }, [selectedIndex]);
 
   // Deep link: open tab first, then history if the id is a decided proposal.
+  // Hash stays; we only switch tabs so the row is in `visible`.
   useEffect(() => {
     if (!focusProposalId) return;
-    if (visible.some((p) => p.id === focusProposalId) || rows.some((p) => p.id === focusProposalId)) {
-      setFilter("");
-      setSelectedId(focusProposalId);
-      onFocusConsumed();
-      return;
-    }
-    if (tab === "open") {
-      setTab("history");
-      return;
-    }
-    if (history.isFetched) {
-      setSelectedId(focusProposalId);
-      onFocusConsumed();
-    }
-  }, [focusProposalId, rows, visible, tab, history.isFetched, onFocusConsumed]);
+    setFilter("");
+    setExpiredOnly(false);
+    if (rows.some((p) => p.id === focusProposalId)) return;
+    if (tab === "open") setTab("history");
+  }, [focusProposalId, rows, tab]);
+
+  useEffect(() => {
+    if (!focusExpired) return;
+    setTab("open");
+    setExpiredOnly(true);
+    setFilter("");
+    onFocusExpiredConsumed();
+  }, [focusExpired, onFocusExpiredConsumed]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["proposals"] });
@@ -156,7 +166,7 @@ export function Proposals({
         notify(`Proposal expired — re-planned new spec`, "info");
         // §12: expired proposal re-planned to a different spec — stop and show it.
         setReplan({ before: p, after: outcome.proposal });
-        setSelectedId(outcome.proposal.id);
+        onSelectProposal(outcome.proposal.id);
       }
     },
     onError: invalidate, // 404/409 mean someone else acted — converge on truth
@@ -184,39 +194,64 @@ export function Proposals({
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedId(visible[i]?.id ?? null),
-    onClose: () => setSelectedId(null),
+    onSelect: (i) => onSelectProposal(visible[i]?.id ?? null),
+    onClose: () => {
+      if (selectedId) onSelectProposal(null);
+      else {
+        if (filter) setFilter("");
+        if (expiredOnly) setExpiredOnly(false);
+      }
+    },
     keys: {
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
       a: () => canApprove && connected && setConfirmApprove(true),
       x: () => isOpen && connected && openReject(),
+      c: () => sel && copyText(sel.id, "proposal id"),
     },
   });
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
-    if (!sel || !connected || !isOpen) {
+    if (!sel) {
       setContextActions([]);
     } else {
-      setContextActions([
-        ...(canApprove
-          ? [{ label: `Approve ${sel.agent ?? sel.id}…`, hint: "a", run: () => setConfirmApprove(true) }]
-          : []),
-        { label: `Reject ${sel.agent ?? sel.id}…`, hint: "x", run: openReject },
-      ]);
+      const copy = [
+        { label: `Copy ${sel.id}`, hint: "c", run: () => copyText(sel.id, "proposal id") },
+        { label: "Copy link to this proposal", run: copyLink },
+      ];
+      if (!connected || !isOpen) {
+        setContextActions(copy);
+      } else {
+        setContextActions([
+          ...(canApprove
+            ? [{ label: `Approve ${sel.agent ?? sel.id}…`, hint: "a", run: () => setConfirmApprove(true) }]
+            : []),
+          { label: `Reject ${sel.agent ?? sel.id}…`, hint: "x", run: openReject },
+          ...copy,
+        ]);
+      }
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.id, canApprove, isOpen, connected]);
 
+  const selectTab = (t: (typeof PROPOSAL_TABS)[number]) => {
+    setTab(t);
+    setExpiredOnly(false);
+    onSelectProposal(null);
+  };
+  useTabKeys(PROPOSAL_TABS, tab, selectTab);
+
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex gap-1" role="tablist" aria-label="Proposal status">
-            {(["open", "history"] as const).map((t) => {
+            {PROPOSAL_TABS.map((t) => {
               const count =
                 t === "open"
                   ? (statusQ.data?.proposals.open ?? 0)
@@ -227,10 +262,7 @@ export function Proposals({
                   type="button"
                   role="tab"
                   aria-selected={tab === t}
-                  onClick={() => {
-                    setTab(t);
-                    setSelectedId(null);
-                  }}
+                  onClick={() => selectTab(t)}
                   className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
                     tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                   }`}
@@ -247,7 +279,29 @@ export function Proposals({
             placeholder="Filter agent, id, origin…"
             label="Filter proposals"
           />
+          {tab === "open" && (
+            <button
+              type="button"
+              aria-pressed={expiredOnly}
+              onClick={() => setExpiredOnly((v) => !v)}
+              className={`rounded-md px-2 py-1 text-[12px] ${
+                expiredOnly
+                  ? "bg-(--surface-3) text-(--text)"
+                  : "text-(--text-faint) hover:bg-(--surface-1)"
+              }`}
+            >
+              expired
+              {(statusQ.data?.proposals.expired ?? 0) > 0 && (
+                <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                  {statusQ.data?.proposals.expired}
+                </span>
+              )}
+            </button>
+          )}
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -274,7 +328,7 @@ export function Proposals({
             {visible.map((p, i) => (
               <tr
                 key={p.id}
-                onClick={() => setSelectedId(p.id)}
+                onClick={() => onSelectProposal(p.id)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -315,8 +369,8 @@ export function Proposals({
                       <StateBadge state={p.status} hues={PROPOSAL_STATUS_HUES} />
                     </td>
                     <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.decided_by ?? "-"}</td>
-                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={p.decided_at ?? undefined}>
-                      {p.decided_at ? ago(p.decided_at, now) : "-"}
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                      <Ago iso={p.decided_at} now={now} />
                     </td>
                   </>
                 )}
@@ -332,8 +386,8 @@ export function Proposals({
                     (p.eventId ?? "-")
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={p.created_at}>
-                  {ago(p.created_at, now)}
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  <Ago iso={p.created_at} now={now} />
                 </td>
                 <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.reason ?? "-"}</td>
               </tr>
@@ -342,30 +396,33 @@ export function Proposals({
               <ListEmpty
                 colSpan={tab === "open" ? 6 : 7}
                 query={tab === "open" ? query : history}
-                filtered={rows.length > 0}
+                filtered={expiredOnly ? false : rows.length > 0}
                 noun="proposals"
                 empty={
-                  tab === "open"
-                    ? "No open proposals — the operator's work is done, for now."
-                    : "No decided proposals yet."
+                  expiredOnly
+                    ? "No expired open proposals."
+                    : tab === "open"
+                      ? "No open proposals — the operator's work is done, for now."
+                      : "No decided proposals yet."
                 }
               />
             )}
           </tbody>
         </table>
-      </div>
+      </ListPane>
 
       {sel && (
-        <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display truncate text-[14px] font-semibold" title={sel.id}>
-              {sel.agent ?? sel.id}
-            </div>
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[460px]"
+          title={<span title={sel.id}>{sel.agent ?? sel.id}</span>}
+          actions={
+            <>
               <Button onClick={() => copyText(sel.id, "proposal id")}>Copy id</Button>
-              <Button onClick={() => setSelectedId(null)}>Close</Button>
-            </div>
-          </div>
+              <Button onClick={copyLink}>Copy link</Button>
+              <Button onClick={() => onSelectProposal(null)}>Close</Button>
+            </>
+          }
+        >
 
           <Section title="Proposal">
             <KV k="id" v={sel.id} />
@@ -397,7 +454,8 @@ export function Proposals({
                 v={<Countdown createdAt={sel.created_at} ttlSeconds={sel.ttl_seconds} />}
               />
             )}
-            {sel.decided_at && <KV k="decided at" v={sel.decided_at} />}
+            <KV k="created" v={<Ago iso={sel.created_at} now={now} />} />
+            {sel.decided_at && <KV k="decided at" v={<Ago iso={sel.decided_at} now={now} />} />}
             {sel.decided_by && <KV k="decided by" v={sel.decided_by} />}
             {sel.reason && <KV k="planner reason" v={sel.reason} />}
           </Section>
@@ -482,7 +540,7 @@ export function Proposals({
           )}
 
           <VerbError error={approve.error ?? reject.error} />
-        </div>
+        </DetailPane>
       )}
 
       {confirmApprove && sel && (

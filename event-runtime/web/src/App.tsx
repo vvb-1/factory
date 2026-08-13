@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { useHashRoute, useTheme } from "./hooks";
+import { eventsHash, hashPath, hashSearch } from "./hash";
+import { keyGuard, useHashRoute, useTheme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
-import { ToastContainer } from "./components/ui";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
+import { ToastContainer, copyLink, copyText } from "./components/ui";
 import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Graph } from "./views/Graph";
@@ -31,65 +33,59 @@ export function App() {
   const [, cycleTheme] = useTheme();
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
-  const [focusRunId, setFocusRunId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [focusRunState, setFocusRunState] = useState<string | null>(null);
-  const [focusProposalId, setFocusProposalId] = useState<string | null>(null);
-  const [focusEvent, setFocusEvent] = useState<EventFocus | null>(null);
-  const [focusAgentRef, setFocusAgentRef] = useState<string | null>(null);
+  const [focusExpired, setFocusExpired] = useState(false);
+  const [ephemeralEvent, setEphemeralEvent] = useState<EventFocus | null>(null);
+  const [filterFocus, setFilterFocus] = useState(false);
 
-  const jumpToRun = (runId: string) => {
-    setFocusRunId(runId);
-    navigate("runs");
-  };
+  const focusRunId = view === "runs" ? (route[1] ?? null) : null;
+  const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
+  const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
+  const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
+  const hashEvent: EventFocus | null =
+    view === "events" && route[1] && route[2]
+      ? { source: route[1], eventId: route[2] }
+      : null;
+  const typeFromHash = view === "events" ? hashSearch(window.location.hash).get("type") : null;
+  const focusEvent =
+    view === "events"
+      ? {
+          ...(ephemeralEvent ?? {}),
+          ...(typeFromHash ? { type: typeFromHash } : {}),
+          ...(hashEvent ?? {}),
+        }
+      : null;
+  const hasEventFocus =
+    !!(focusEvent && (focusEvent.source || focusEvent.eventId || focusEvent.status || focusEvent.type));
+
+  const jumpToRun = (runId: string) => navigate(hashPath("runs", runId));
   const jumpToRuns = (state?: string) => {
     if (state) setFocusRunState(state);
     navigate("runs");
   };
-  const jumpToProposal = (id: string) => {
-    setFocusProposalId(id);
-    navigate("proposals");
-  };
+  const jumpToProposal = (id: string) => navigate(hashPath("proposals", id));
   const jumpToEvent = (source: string, eventId: string, status?: string) => {
-    setFocusEvent({ source, eventId, status: status ?? "all" });
-    navigate("events");
+    setEphemeralEvent(status ? { status } : null);
+    navigate(hashPath("events", source, eventId));
   };
   const jumpToEvents = (focus: EventFocus) => {
-    setFocusEvent(focus);
+    if (focus.source && focus.eventId) {
+      setEphemeralEvent(focus.status || focus.type ? { status: focus.status, type: focus.type } : null);
+      navigate(hashPath("events", focus.source, focus.eventId));
+      return;
+    }
+    if (focus.type) {
+      setEphemeralEvent(focus.status ? { status: focus.status } : null);
+      navigate(eventsHash(null, null, focus.type));
+      return;
+    }
+    setEphemeralEvent(focus);
     navigate("events");
   };
-  const jumpToAgent = (ref: string) => {
-    setFocusAgentRef(ref);
-    navigate("agents");
-  };
+  const jumpToAgent = (ref: string) => navigate(hashPath("agents", ref));
+  const jumpToGraph = (nodeId?: string) => navigate(hashPath("graph", nodeId));
 
-  // Deep link #/runs/:id, #/events/:source/:eventId, #/proposals/:id,
-  // #/agents/:ref → select, then normalize the hash so the master-detail
-  // pane owns selection state.
-  useEffect(() => {
-    if (route[0] === "runs" && route[1]) {
-      setFocusRunId(route[1]);
-      navigate("runs");
-    }
-    if (route[0] === "events" && route[1] && route[2]) {
-      setFocusEvent({
-        source: decodeURIComponent(route[1]),
-        eventId: decodeURIComponent(route[2]),
-        status: "all",
-      });
-      navigate("events");
-    }
-    if (route[0] === "proposals" && route[1]) {
-      setFocusProposalId(decodeURIComponent(route[1]));
-      navigate("proposals");
-    }
-    if (route[0] === "agents" && route[1]) {
-      setFocusAgentRef(decodeURIComponent(route[1]));
-      navigate("agents");
-    }
-  }, [route, navigate]);
-
-  // Connection indicator (spec §4.1): reads keep rendering from cache when
-  // the runtime is down; verbs disable.
   const health = useQuery({
     queryKey: ["health"],
     queryFn: api.health,
@@ -97,19 +93,18 @@ export function App() {
     retry: false,
   });
   const connected = health.isSuccess;
+  // Banner only after a failed fetch — first-load pending must not flash
+  // "unreachable" over an empty factory.
+  const healthFailed = !connected && !health.isPending;
 
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const openProposals = status.data?.proposals.open ?? 0;
   const activeRuns = Object.entries(status.data?.runs.byState ?? {})
     .filter(([s]) => ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(s))
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
-  // Events needing an operator: the two statuses requeue exists for.
   const eventAttention =
     (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
 
-  // Environment chip: which runtime this UI can mutate. "live" wears the
-  // warning tone — approving there triggers real agent runs; anything else
-  // (dev, or a serve-wide fake-adapter override) stays informational.
   const env = health.data?.env;
   const envHue = !connected
     ? "var(--hue-err)"
@@ -131,9 +126,68 @@ export function App() {
     ),
   );
 
+  useEffect(() => {
+    const nav = NAV.find((n) => n.key === view);
+    const label = nav?.label ?? "Overview";
+    const id = route.length > 1 ? route[route.length - 1] : null;
+    const typeQ = hashSearch(window.location.hash).get("type");
+    const detail = id ?? typeQ;
+    document.title = detail ? `factory · ${label} · ${detail}` : `factory · ${label}`;
+  }, [route, view]);
+
+  useEffect(() => {
+    if (!filterFocus) return;
+    const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+    if (!el) return;
+    el.focus();
+    setFilterFocus(false);
+  }, [filterFocus, view]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "i") {
+        e.preventDefault();
+        setInjectOpen(true);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen((open) => !open);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+        if (el) el.focus();
+        else {
+          setFilterFocus(true);
+          navigate("events");
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
+
   const paletteActions: PaletteAction[] = [
-    ...NAV.map((n) => ({ label: `Go to ${n.label}`, hint: `g ${n.go}`, run: () => navigate(n.key) })),
-    { label: "Inject event…", run: () => setInjectOpen(true) },
+    ...NAV.map((n) => ({
+      label: `Go to ${n.label}`,
+      hint: `g ${n.go}`,
+      group: "Go" as const,
+      run: () => navigate(n.key),
+    })),
+    { label: "Inject event…", hint: "i", run: () => setInjectOpen(true) },
+    {
+      label: "Focus filter",
+      hint: "/",
+      run: () => {
+        const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+        if (el) el.focus();
+        else {
+          setFilterFocus(true);
+          navigate("events");
+        }
+      },
+    },
+    { label: "Copy link to this page", run: copyLink },
+    { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },
     { label: "Cycle theme (dark → light → contrast)", run: cycleTheme },
   ];
 
@@ -145,20 +199,22 @@ export function App() {
             <img src="/watt-mind-logo.svg" alt="Watt Mind" className="size-5.5 shrink-0" />
             <span className="display text-[14px] font-semibold">factory</span>
           </div>
-          <span
+          <button
+            type="button"
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
             title={
               env
-                ? `${env.home} · policy ${health.data?.policyVersion}`
+                ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
                 : "runtime unreachable"
             }
             style={{
               color: envHue,
               background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
             }}
+            onClick={() => env?.home && copyText(env.home, "runtime home")}
           >
             {envLabel}
-          </span>
+          </button>
         </div>
         <div className="flex-1 px-2">
           {NAV.map((n) => {
@@ -202,7 +258,7 @@ export function App() {
             onClick={() => setInjectOpen(true)}
             className="mt-2 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2)"
           >
-            Inject event…
+            Inject event… <span className="mono ml-1 text-(--text-faint)">i</span>
           </button>
         </div>
         <div className="border-t border-(--border) px-4 py-3 text-[11px]">
@@ -221,57 +277,112 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/e/p/r/t/g</span> navigate
+            <span className="mono">o/e/p/r/t/g</span> · <span className="mono">/</span> filter ·{" "}
+            <span className="mono">i</span> inject · <span className="mono">?</span> keys
           </div>
         </div>
       </nav>
 
-      <main className="min-w-0 flex-1">
-        {view === "proposals" ? (
-          <Proposals
-            connected={connected}
-            onRunQueued={jumpToRun}
-            focusProposalId={focusProposalId}
-            onFocusConsumed={() => setFocusProposalId(null)}
-            onJumpAgent={jumpToAgent}
-            onJumpEvent={jumpToEvent}
-          />
-        ) : view === "runs" ? (
-          <Runs
-            connected={connected}
-            focusRunId={focusRunId}
-            onFocusConsumed={() => setFocusRunId(null)}
-            focusState={focusRunState}
-            onFocusStateConsumed={() => setFocusRunState(null)}
-            onJumpAgent={jumpToAgent}
-            onJumpEvent={jumpToEvent}
-          />
-        ) : view === "graph" ? (
-          <Graph />
-        ) : view === "agents" ? (
-          <Agents focusAgentRef={focusAgentRef} onFocusConsumed={() => setFocusAgentRef(null)} />
-        ) : view === "events" ? (
-          <Events
-            connected={connected}
-            focusEvent={focusEvent}
-            onFocusConsumed={() => setFocusEvent(null)}
-            onJumpProposal={jumpToProposal}
-            onJumpRun={jumpToRun}
-            onTriggerAgain={(envelope) => {
-              setInjectSeed(envelope);
-              setInjectOpen(true);
+      <main className="flex min-w-0 flex-1 flex-col">
+        {healthFailed && (
+          <div
+            role="status"
+            className="shrink-0 border-b px-4 py-2 text-[12px]"
+            style={{
+              color: "var(--hue-err)",
+              background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
+              borderColor: "color-mix(in oklch, var(--hue-err) 35%, var(--border))",
             }}
-          />
-        ) : (
-          <Overview
-            connected={connected}
-            onJumpRun={jumpToRun}
-            onJumpProposal={jumpToProposal}
-            onJumpEvents={jumpToEvents}
-            onJumpRuns={jumpToRuns}
-            onNavigate={navigate}
-          />
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                Runtime unreachable — lists show last cached data; verbs are disabled until{" "}
+                <span className="mono">/health</span> responds. This is not an empty factory.
+              </span>
+              <button
+                type="button"
+                onClick={() => health.refetch()}
+                className="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium"
+                style={{
+                  color: "var(--hue-err)",
+                  borderColor: "color-mix(in oklch, var(--hue-err) 40%, var(--border))",
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
         )}
+        <div className="min-h-0 flex-1">
+          {view === "proposals" ? (
+            <Proposals
+              connected={connected}
+              onRunQueued={jumpToRun}
+              focusProposalId={focusProposalId}
+              onSelectProposal={(id) => navigate(hashPath("proposals", id))}
+              focusExpired={focusExpired}
+              onFocusExpiredConsumed={() => setFocusExpired(false)}
+              onJumpAgent={jumpToAgent}
+              onJumpEvent={jumpToEvent}
+            />
+          ) : view === "runs" ? (
+            <Runs
+              connected={connected}
+              focusRunId={focusRunId}
+              onSelectRun={(id) => navigate(hashPath("runs", id))}
+              focusState={focusRunState}
+              onFocusStateConsumed={() => setFocusRunState(null)}
+              onJumpAgent={jumpToAgent}
+              onJumpEvent={jumpToEvent}
+            />
+          ) : view === "graph" ? (
+            <Graph
+              focusNodeId={focusGraphNode}
+              onSelectNode={(id) => navigate(hashPath("graph", id))}
+              onJumpAgent={jumpToAgent}
+              onJumpEvents={jumpToEvents}
+            />
+          ) : view === "agents" ? (
+            <Agents
+              focusAgentRef={focusAgentRef}
+              onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
+            />
+          ) : view === "events" ? (
+            <Events
+              connected={connected}
+              focusEvent={hasEventFocus ? focusEvent : null}
+              onFocusConsumed={() => setEphemeralEvent(null)}
+              onSelectEvent={(source, eventId) =>
+                navigate(eventsHash(source, eventId, typeFromHash))
+              }
+              onSelectType={(type) =>
+                navigate(eventsHash(hashEvent?.source, hashEvent?.eventId, type))
+              }
+              onJumpProposal={jumpToProposal}
+              onJumpRun={jumpToRun}
+              onTriggerAgain={(envelope) => {
+                setInjectSeed(envelope);
+                setInjectOpen(true);
+              }}
+              onInject={() => setInjectOpen(true)}
+            />
+          ) : (
+            <Overview
+              connected={connected}
+              onJumpRun={jumpToRun}
+              onJumpProposal={jumpToProposal}
+              onJumpEvents={jumpToEvents}
+              onJumpRuns={jumpToRuns}
+              onNavigate={navigate}
+              onJumpExpired={() => {
+                setFocusExpired(true);
+                navigate("proposals");
+              }}
+              onJumpGraph={() => jumpToGraph()}
+              onInject={() => setInjectOpen(true)}
+            />
+          )}
+        </div>
       </main>
 
       <CommandPalette
@@ -288,8 +399,14 @@ export function App() {
             setInjectOpen(false);
             setInjectSeed(undefined);
           }}
+          onAdmitted={(source, eventId) => {
+            setInjectOpen(false);
+            setInjectSeed(undefined);
+            jumpToEvent(source, eventId);
+          }}
         />
       )}
+      {helpOpen && <ShortcutsDialog onClose={() => setHelpOpen(false)} />}
       <ToastContainer />
     </div>
   );

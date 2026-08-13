@@ -4,7 +4,7 @@ import { api } from "../api";
 import { useNow } from "../hooks";
 import type { JournalEntry, EventFocus } from "../types";
 import {
-  ago,
+  Ago,
   Button,
   Disclosure,
   EVENT_STATUS_HUES,
@@ -14,6 +14,7 @@ import {
   StateBadge,
   StatTile,
   VerbError,
+  copyText,
 } from "../components/ui";
 
 const FEED_CAP = 50;
@@ -61,6 +62,9 @@ export function Overview({
   onJumpEvents,
   onJumpRuns,
   onNavigate,
+  onJumpExpired,
+  onJumpGraph,
+  onInject,
 }: {
   connected: boolean;
   onJumpRun: (runId: string) => void;
@@ -68,6 +72,9 @@ export function Overview({
   onJumpEvents: (focus: EventFocus) => void;
   onJumpRuns: (state?: string) => void;
   onNavigate: (view: string) => void;
+  onJumpExpired: () => void;
+  onJumpGraph: () => void;
+  onInject: () => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -95,8 +102,8 @@ export function Overview({
     if (anomalies.staleLeases > 0) {
       anomalyRows.push({
         text: `stale leases: ${anomalies.staleLeases}`,
-        linkLabel: "View runs",
-        link: () => onJumpRuns(),
+        linkLabel: "View leased runs",
+        link: () => onJumpRuns("LEASED"),
       });
     }
     if (anomalies.unpublishedOutbox > 0) {
@@ -118,7 +125,17 @@ export function Overview({
 
   return (
     <div className="h-full min-w-0 overflow-auto p-5">
-      <h1 className="display mb-4 text-lg font-semibold">Overview</h1>
+      <div className="mb-4 flex items-baseline justify-between gap-3">
+        <h1 className="display text-lg font-semibold">Overview</h1>
+        <div className="flex gap-3 text-[12px] text-(--text-dim)">
+          <button type="button" className="hover:text-(--accent)" onClick={onJumpGraph}>
+            Graph
+          </button>
+          <button type="button" className="hover:text-(--accent)" onClick={onInject}>
+            Inject event…
+          </button>
+        </div>
+      </div>
 
       {status.isPending && !s && <div className="mb-5 text-(--text-faint)">Loading status…</div>}
       {status.isError && !s && (
@@ -146,7 +163,7 @@ export function Overview({
             label="proposals · expired"
             value={s.proposals.expired}
             hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined}
-            onClick={() => onNavigate("proposals")}
+            onClick={onJumpExpired}
           />
           {Object.entries(s.runs.byState).map(([k, v]) => (
             <StatTile
@@ -174,6 +191,7 @@ export function Overview({
                   {a.text}
                 </span>
                 <span className="flex shrink-0 gap-2">
+                  <Button onClick={() => copyText(a.text, "anomaly")}>Copy</Button>
                   {a.requeue && (
                     <Button
                       disabled={!connected || requeue.isPending}
@@ -205,7 +223,7 @@ export function Overview({
             <div className="rounded-md border border-(--border) px-3 py-1">
               {feed.entries.map((e) => (
                 <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                  <span className="mono w-[52px] shrink-0 text-(--text-faint)">{ago(e.at, now)}</span>
+                  <Ago iso={e.at} now={now} className="mono w-[52px] shrink-0 text-(--text-faint)" />
                   <JumpLink
                     onClick={() => onJumpRun(e.runId)}
                     title={e.runId}
@@ -241,9 +259,24 @@ export function Overview({
               {(outbox.data?.outbox ?? []).map((o) => (
                 <div key={o.seq} className="border-b border-(--border) py-1.5 last:border-0">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-(--text-dim)">{String(o.event.type ?? "unknown event")}</span>
+                    {(() => {
+                      const type = String(o.event.type ?? "unknown event");
+                      const source = typeof o.event.source === "string" ? o.event.source : null;
+                      const eventId = typeof o.event.eventId === "string" ? o.event.eventId : null;
+                      return source && eventId ? (
+                        <JumpLink
+                          onClick={() => onJumpEvents({ source, eventId })}
+                          title="Open origin event"
+                          className="max-w-[70%] truncate"
+                        >
+                          {type}
+                        </JumpLink>
+                      ) : (
+                        <span className="truncate text-(--text-dim)">{type}</span>
+                      );
+                    })()}
                     {o.published_at ? (
-                      <span className="mono shrink-0 text-(--text-faint)">{ago(o.published_at, now)}</span>
+                      <Ago iso={o.published_at} now={now} className="mono shrink-0 text-(--text-faint)" />
                     ) : (
                       <span className="shrink-0 text-[11px]" style={{ color: "var(--hue-warn)" }}>
                         unpublished

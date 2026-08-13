@@ -20,6 +20,7 @@ function Shell({
   return (
     <div
       className="rounded-md px-3 py-2 text-left"
+      tabIndex={0}
       style={{
         width: 236,
         height: 92,

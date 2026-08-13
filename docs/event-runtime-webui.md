@@ -184,8 +184,14 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 
 - `⌘K` — cmdk palette: navigate to any view, jump to a run/proposal by ID,
   and invoke the verbs valid for the current selection.
-- `j`/`k` or arrows — move list selection; `Enter`/`o` — open detail panel;
-  `Esc` — close it.
+- `i` — inject event. `?` — keyboard cheatsheet. `c` — copy the selected id.
+- `/` — focus the list filter. Esc in the filter clears it, then blurs.
+  From Overview or Graph (no filter), `/` opens Events and focuses there.
+- `j`/`k` or arrows — move list (and Graph node) selection; `Enter`/`o` —
+  open detail panel; `Esc` — close it, then clear the filter.
+- `[` / `]` — previous / next status tab (Events, Proposals, Runs). Changing
+  tab closes the detail so a deep-linked row cannot yank the tab back.
+- `⌘↵` — confirm inject (from the envelope textarea too).
 - On a selected proposal: `a` approve (opens the confirm with the spec in
   view), `x` reject (focuses the reason field).
 - `g o` / `g p` / `g r` — go to Overview / Proposals / Runs.
@@ -426,3 +432,48 @@ informational. The title attribute carries `env.home` and the
 `policyVersion`. When `/health` fails the chip shows **disconnected** in the
 error tone, doubling as the API-down indicator alongside §4.1's connection
 dot.
+
+### 10.8 Operator chrome (OPS-230)
+
+Follow-up to the Events-as-a-node pass (OPS-226). Same design language (§5.1);
+no new API.
+
+- **Shareable hashes.** Selection lives in the hash: `#/runs/:id`,
+  `#/events/:source/:eventId`, `#/events?type=`, `#/proposals/:id`,
+  `#/agents/:ref`, `#/graph/:nodeId`. Jumps write the full path; refresh
+  restores the row. Nav-rail clicks still go to the view root. Overview
+  status tiles remain ephemeral (tab/filter, not a URL) except Graph's
+  event-type jump, which is `#/events?type=`.
+- **Health banner.** When `/health` has failed (not while first pending), a
+  status banner sits above every view: the factory is unreachable, lists may
+  show cache, verbs stay disabled. **Retry** refetches `/health`. The nav
+  chip still says `disconnected`; click it to copy `env.home`.
+- **Graph on the same rails.** Selected event-type → Events filtered by type
+  (`#/events?type=`); selected agent → Agents. Copy id, `j`/`k` walk nodes,
+  Esc closes the panel, honest empty when `/agents` is down. `#/graph/:nodeId`.
+- **Inject confirm.** Inject and Trigger again require confirm before
+  `POST /replay`. Template chips are a radiogroup (arrow keys). Copy keeps
+  Requeue (re-plan) / Replay (same id through intake) / Trigger again (fresh
+  id) / Inject (blank or template) distinct.
+- **Overview.** Expired-proposals tile lands on the Open tab with the expired
+  chip on. Quiet Graph and Inject jumps in the header.
+- **⌘K** includes decided proposals (`GET /proposals?status=all`). Dialogs
+  expose `role=dialog` `aria-modal`. Runs state tabs scroll on one row
+  (LEASED and VERIFYING included — the Overview stale-lease jump lands there).
+- **Copy link** on every detail panel copies the shareable hash (`c` copies
+  the id). Inject `i` admits then jumps to the event. `?` lists the keys.
+  Empty Events inbox offers Inject as a button. Outbox types jump to the
+  origin event when the envelope carries source+eventId. Trigger again
+  selects a "this envelope" chip. `/` focuses the filter — from Overview or
+  Graph it opens Events first. The empty filter shows a `/` hint. Dialog Tab
+  cycles stay inside the dialog and focus returns to the opener on close.
+  `[` / `]` cycle status tabs. Graph `j`/`k` pans the selected node into
+  view; **Show on canvas** does the same from the panel. List title/tabs/filter
+  stay pinned while the table scrolls. Detail Copy/Close stays pinned while
+  the spec scrolls. `[` / `]` also scrolls the selected Runs tab into view.
+  ⌘K splits This item / Go / Commands.
+  Relative timestamps show the ISO instant on hover (lists, detail KV, run
+  lifecycle clock, attempt start/finish). Click a string KV value to copy it. Doctor anomalies copy. A filtered
+  empty list reminds that Esc clears. Selection wash is denser so j/k is
+  obvious. Click a toast to dismiss it. The document title follows the hash
+  (`factory · Runs · run_id`).

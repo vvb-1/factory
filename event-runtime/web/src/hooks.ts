@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { parseHash } from "./hash";
 
 /** Open-modal depth: global list-navigation keys stand down while a dialog is up. */
 export const modal = { depth: 0 };
@@ -12,15 +13,23 @@ export function keyGuard(e: KeyboardEvent): boolean {
 
 /** Hash routing: "#/runs/run_01" → ["runs", "run_01"]. Default view: overview. */
 export function useHashRoute(): [string[], (path: string) => void] {
-  const parse = () => window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  const [route, setRoute] = useState<string[]>(parse);
+  const read = () => parseHash(window.location.hash);
+  const [route, setRoute] = useState<string[]>(read);
+  // Query-only hash changes (`#/events?type=`) keep the same path segments;
+  // tick so readers of window.location.hash re-render.
+  const [, setHash] = useState(window.location.hash);
   useEffect(() => {
-    const onChange = () => setRoute(parse());
+    const onChange = () => {
+      setRoute(read());
+      setHash(window.location.hash);
+    };
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
   const navigate = useCallback((path: string) => {
-    window.location.hash = `#/${path}`;
+    const next = `#/${path}`;
+    if (window.location.hash === next) return;
+    window.location.hash = next;
   }, []);
   return [route.length ? route : ["overview"], navigate];
 }
@@ -60,6 +69,32 @@ export function useListKeys(opts: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [count, selected, onSelect, onOpen, onClose, keys]);
+}
+
+/** `[` / `]` cycle a view's status tabs (Linear's issue-state keys). */
+export function useTabKeys<T extends string>(
+  tabs: readonly T[],
+  current: T,
+  onSelect: (tab: T) => void,
+) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "[" && e.key !== "]") return;
+      e.preventDefault();
+      const i = tabs.indexOf(current);
+      if (i < 0) return;
+      const delta = e.key === "]" ? 1 : -1;
+      onSelect(tabs[(i + delta + tabs.length) % tabs.length]);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tabs, current, onSelect]);
+  useEffect(() => {
+    document
+      .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [current]);
 }
 
 const THEMES = ["dark", "light", "contrast"] as const;

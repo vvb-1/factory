@@ -8,24 +8,45 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { keyGuard } from "../hooks";
 import { buildCapabilityGraph, type GraphNode } from "../graph/model";
 import { layoutGraph, NODE_HEIGHT, NODE_WIDTH } from "../graph/layout";
 import { nodeTypes } from "../graph/nodes";
-import { JsonBlock, KV, Section, Button } from "../components/ui";
+import type { EventFocus } from "../types";
+import { Button, DetailPane, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
 
 /**
- * Graph (webui roadmap / OPS-224 phase 1): the capability map — what this
- * runtime *can* do, drawn from the registry alone. Event types route to
- * agents; agents recommend follow-up event types; unmapped recommendation
- * values are drawn as terminals, because "the chain ends here" is topology.
- * Phase 2 overlays live run state onto these same nodes.
+ * Graph (webui roadmap / OPS-224 phase 1, chrome OPS-230): the capability map
+ * — what this runtime *can* do, drawn from the registry alone. Same inverted-L
+ * as the list views: canvas + right detail, jumps to Events/Agents, Copy id,
+ * honest empty when /agents is down. Phase 2 overlays live run state.
  */
-export function Graph() {
+export function Graph({
+  focusNodeId,
+  onSelectNode,
+  onJumpAgent,
+  onJumpEvents,
+}: {
+  focusNodeId: string | null;
+  onSelectNode: (id: string | null) => void;
+  onJumpAgent: (ref: string) => void;
+  onJumpEvents: (focus: EventFocus) => void;
+}) {
   const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 10_000 });
   const [positioned, setPositioned] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const flowRef = useRef<{
+    getZoom: () => number;
+    fitView: (opts: {
+      nodes?: Array<{ id: string }>;
+      padding?: number;
+      duration?: number;
+      minZoom?: number;
+      maxZoom?: number;
+    }) => void;
+  } | null>(null);
+  const [flowReady, setFlowReady] = useState(0);
 
   const graph = useMemo(
     () => (registry.data ? buildCapabilityGraph(registry.data) : null),
@@ -44,8 +65,6 @@ export function Graph() {
           position: positions.get(node.id) ?? { x: 0, y: 0 },
           data: { node },
           draggable: true,
-          // Explicit dimensions: the minimap draws from these, and elk was
-          // laid out against the same constants.
           width: NODE_WIDTH,
           height: NODE_HEIGHT,
         })),
@@ -70,11 +89,74 @@ export function Graph() {
     };
   }, [graph]);
 
-  const selected: GraphNode | undefined = graph?.nodes.find((n) => n.id === selectedId);
+  const nodes = useMemo(
+    () => (positioned ? positioned.nodes.map((n) => ({ ...n, selected: n.id === focusNodeId })) : []),
+    [positioned, focusNodeId],
+  );
+
+  const selected: GraphNode | undefined = graph?.nodes.find((n) => n.id === focusNodeId);
   const agentDef =
     selected?.kind === "agent"
       ? registry.data?.agents.find((a) => a.ref === selected.label)
       : undefined;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Escape") {
+        onSelectNode(null);
+        return;
+      }
+      if (e.key === "c" && focusNodeId) {
+        e.preventDefault();
+        const node = graph?.nodes.find((n) => n.id === focusNodeId);
+        if (node) copyText(node.label, node.kind === "agent" ? "agent ref" : "id");
+        return;
+      }
+      const order = positioned
+        ? [...positioned.nodes]
+            .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+            .map((n) => n.id)
+        : (graph?.nodes.map((n) => n.id) ?? []);
+      if (!order.length) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const idx = focusNodeId ? order.indexOf(focusNodeId) : -1;
+        onSelectNode(order[Math.min(idx + 1, order.length - 1)]);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const idx = focusNodeId ? order.indexOf(focusNodeId) : order.length;
+        onSelectNode(order[Math.max(idx - 1, 0)]);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onSelectNode, focusNodeId, graph, positioned]);
+
+  const revealSelected = () => {
+    if (!focusNodeId || !flowRef.current) return;
+    const zoom = flowRef.current.getZoom();
+    flowRef.current.fitView({
+      nodes: [{ id: focusNodeId }],
+      padding: 0.45,
+      duration: 180,
+      minZoom: zoom,
+      maxZoom: zoom,
+    });
+  };
+
+  useEffect(() => {
+    revealSelected();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNodeId, flowReady, positioned]);
+
+  const emptyCopy = registry.isPending
+    ? "Loading the capability map…"
+    : registry.isError
+      ? "Cannot reach the control API — the graph will appear when /agents is up."
+      : graph && graph.nodes.length === 0
+        ? "No registered event types or agents."
+        : "Laying out the capability map…";
 
   return (
     <div className="flex h-full min-w-0">
@@ -85,13 +167,18 @@ export function Graph() {
             what this runtime can do — registered routes and recommendation edges
           </div>
         </div>
-        {positioned ? (
+        {positioned && graph && graph.nodes.length > 0 ? (
           <ReactFlow
-            nodes={positioned.nodes}
+            nodes={nodes}
             edges={positioned.edges}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, node) => setSelectedId(node.id)}
-            onPaneClick={() => setSelectedId(null)}
+            onNodeClick={(_, node) => onSelectNode(node.id)}
+            onPaneClick={() => onSelectNode(null)}
+            onInit={(inst) => {
+              flowRef.current = inst;
+              setFlowReady((n) => n + 1);
+            }}
+            nodesFocusable
             fitView
             fitViewOptions={{ padding: 0.25 }}
             proOptions={{ hideAttribution: true }}
@@ -113,26 +200,40 @@ export function Graph() {
             />
           </ReactFlow>
         ) : (
-          <div className="flex h-full items-center justify-center text-(--text-faint)">
-            {registry.isError ? "runtime unreachable" : "laying out the capability map…"}
+          <div className="flex h-full items-center justify-center px-8 text-center text-(--text-faint)">
+            {emptyCopy}
           </div>
         )}
       </div>
 
       {selected && (
-        <div className="w-[420px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display truncate text-[14px] font-semibold">{selected.label}</div>
-            <Button onClick={() => setSelectedId(null)}>Close</Button>
-          </div>
+        <DetailPane
+          widthClass="w-[420px]"
+          title={selected.label}
+          actions={
+            <>
+              <Button onClick={() => copyText(selected.label, selected.kind === "agent" ? "agent ref" : "id")}>
+                {selected.kind === "agent" ? "Copy ref" : "Copy id"}
+              </Button>
+              <Button onClick={copyLink}>Copy link</Button>
+              <Button onClick={revealSelected}>Show on canvas</Button>
+              <Button onClick={() => onSelectNode(null)}>Close</Button>
+            </>
+          }
+        >
 
           {selected.kind === "eventType" && (
-            <Section title="Event type">
-              <KV k="type" v={selected.label} />
-              <KV k="adapter" v={selected.adapter} />
-              <KV k="idempotency scope" v={selected.scope.join(" + ") || "—"} />
-              <KV k="proposal ttl" v={selected.ttl ? `${selected.ttl}s` : "—"} />
-            </Section>
+            <>
+              <Section title="Event type">
+                <KV k="type" v={selected.label} />
+                <KV k="adapter" v={selected.adapter} />
+                <KV k="idempotency scope" v={selected.scope.join(" + ") || "—"} />
+                <KV k="proposal ttl" v={selected.ttl ? `${selected.ttl}s` : "—"} />
+              </Section>
+              <Button onClick={() => onJumpEvents({ type: selected.label })}>
+                Show in Events
+              </Button>
+            </>
           )}
 
           {selected.kind === "terminal" && (
@@ -147,10 +248,17 @@ export function Graph() {
           {selected.kind === "agent" && agentDef && (
             <>
               <Section title="Agent">
-                <KV k="ref" v={agentDef.ref} />
+                <KV
+                  k="ref"
+                  v={
+                    <JumpLink onClick={() => onJumpAgent(agentDef.ref)} title="Open in Agents">
+                      {agentDef.ref}
+                    </JumpLink>
+                  }
+                />
                 <KV k="execution" v={selected.execution} />
                 <KV k="output contract" v={agentDef.outputContract} />
-                <KV k="mutating" v={String(agentDef.mutating)} />
+                <KV k="mutating" v={agentDef.mutating ? "yes" : "no"} />
                 <KV k="capabilities" v={agentDef.capabilities?.services?.join(", ") ?? "—"} />
                 <KV k="timeout" v={`${agentDef.limits?.timeout_seconds ?? "—"}s`} />
                 <KV k="attempts" v={String(agentDef.limits?.attempts ?? "—")} />
@@ -170,9 +278,10 @@ export function Graph() {
                   {agentDef.prompt}
                 </pre>
               </Section>
+              <Button onClick={() => onJumpAgent(agentDef.ref)}>Open in Agents</Button>
             </>
           )}
-        </div>
+        </DetailPane>
       )}
     </div>
   );

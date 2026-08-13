@@ -77,8 +77,8 @@ body {
 
 /* Row selection ring used by keyboard navigation. */
 .row-selected {
-  background: color-mix(in oklch, var(--accent) 10%, var(--surface-0));
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: color-mix(in oklch, var(--accent) 16%, var(--surface-0));
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 :focus-visible {
@@ -117,3 +117,9 @@ body {
 }
 .react-flow__controls-button:hover { background: var(--surface-3); }
 .react-flow__edge-text { fill: var(--text-faint); }
+
+[cmdk-group-heading] {
+  padding: 8px 12px 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}

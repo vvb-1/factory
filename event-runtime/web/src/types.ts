@@ -241,9 +241,10 @@ export interface ApproveOutcome {
   proposal?: Proposal;
 }
 
-/** Deep-link payload for the Events inbox (tab and/or a specific row). */
+/** Deep-link payload for the Events inbox (tab, type chip, and/or a specific row). */
 export interface EventFocus {
   status?: string;
   source?: string;
   eventId?: string;
+  type?: string;
 }

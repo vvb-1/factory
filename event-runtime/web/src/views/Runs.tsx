@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
-import { useListKeys, useNow } from "../hooks";
+import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { RunState } from "../types";
 import {
-  ago,
+  Ago,
   Button,
   Dialog,
   Disclosure,
   FilterInput,
+  ListPane,
+  DetailPane,
   humanSize,
   JsonBlock,
   JumpLink,
@@ -20,10 +22,11 @@ import {
   StateBadge,
   VerbError,
   copyText,
+  copyLink,
 } from "../components/ui";
 
 const STATE_TABS: (RunState | "ALL")[] = [
-  "ALL", "QUEUED", "RUNNING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
+  "ALL", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
 ];
 const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
 
@@ -37,7 +40,7 @@ function rowWash(state: string): string {
 export function Runs({
   connected,
   focusRunId,
-  onFocusConsumed,
+  onSelectRun,
   focusState,
   onFocusStateConsumed,
   onJumpAgent,
@@ -45,7 +48,7 @@ export function Runs({
 }: {
   connected: boolean;
   focusRunId: string | null;
-  onFocusConsumed: () => void;
+  onSelectRun: (runId: string | null) => void;
   focusState: string | null;
   onFocusStateConsumed: () => void;
   onJumpAgent: (ref: string) => void;
@@ -54,7 +57,6 @@ export function Runs({
   const now = useNow();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<(typeof STATE_TABS)[number]>("ALL");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [confirm, setConfirm] = useState<"cancel" | "force-retry" | null>(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -76,24 +78,18 @@ export function Runs({
     );
   }, [rows, filter]);
 
-  // Deep link from an approval: switch to ALL if the run isn't on this tab.
+  const selectedId = focusRunId;
+  const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
+
+  // Deep link: switch to ALL if the run isn't on this tab. Hash stays put.
   useEffect(() => {
     if (!focusRunId) return;
     if (rows.some((r) => r.runId === focusRunId)) {
       setFilter("");
-      setSelectedId(focusRunId);
-      onFocusConsumed();
       return;
     }
-    if (tab !== "ALL") {
-      setTab("ALL");
-      return;
-    }
-    if (list.isFetched) {
-      setSelectedId(focusRunId);
-      onFocusConsumed();
-    }
-  }, [focusRunId, rows, tab, list.isFetched, onFocusConsumed]);
+    if (tab !== "ALL") setTab("ALL");
+  }, [focusRunId, rows, tab]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
@@ -104,7 +100,6 @@ export function Runs({
     }
   }, [focusState, onFocusStateConsumed]);
 
-  const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
 
   useEffect(() => {
@@ -145,14 +140,24 @@ export function Runs({
     },
   });
 
+  const selectTab = (t: (typeof STATE_TABS)[number]) => {
+    setTab(t);
+    if (selectedId) onSelectRun(null);
+  };
+  useTabKeys(STATE_TABS, tab, selectTab);
+
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedId(visible[i]?.runId ?? null),
-    onClose: () => setSelectedId(null),
+    onSelect: (i) => onSelectRun(visible[i]?.runId ?? null),
+    onClose: () => {
+      if (selectedId) onSelectRun(null);
+      else if (filter) setFilter("");
+    },
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
       x: () => sel && connected && !TERMINAL.includes(sel.state) && setConfirm("cancel"),
+      c: () => sel && copyText(sel.runId, "run id"),
     },
   });
 
@@ -161,33 +166,44 @@ export function Runs({
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
-    if (!d || !connected) {
+    if (!sel) {
       setContextActions([]);
     } else {
-      setContextActions([
-        ...(!TERMINAL.includes(d.run.state)
-          ? [{ label: `Cancel ${d.run.runId}…`, run: () => setConfirm("cancel") }]
-          : []),
-        ...(d.run.state === "FAILED"
-          ? [
-              attemptsExhausted
-                ? { label: `Force retry ${d.run.runId}…`, run: () => setConfirm("force-retry") }
-                : { label: `Retry ${d.run.runId}`, run: () => retry.mutate({ id: d.run.runId, force: false }) },
-            ]
-          : []),
-      ]);
+      const copy = [
+        { label: `Copy ${sel.runId}`, hint: "c", run: () => copyText(sel.runId, "run id") },
+        { label: "Copy link to this run", run: copyLink },
+      ];
+      if (!d || !connected) {
+        setContextActions(copy);
+      } else {
+        setContextActions([
+          ...(!TERMINAL.includes(d.run.state)
+            ? [{ label: `Cancel ${d.run.runId}…`, hint: "x", run: () => setConfirm("cancel") }]
+            : []),
+          ...(d.run.state === "FAILED"
+            ? [
+                attemptsExhausted
+                  ? { label: `Force retry ${d.run.runId}…`, run: () => setConfirm("force-retry") }
+                  : { label: `Retry ${d.run.runId}`, run: () => retry.mutate({ id: d.run.runId, force: false }) },
+              ]
+            : []),
+          ...copy,
+        ]);
+      }
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d?.run.runId, d?.run.state, attemptsExhausted, connected]);
+  }, [sel?.runId, d?.run.runId, d?.run.state, attemptsExhausted, connected]);
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1" role="tablist" aria-label="Run state">
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label="Run state">
             {STATE_TABS.map((t) => {
               const byState = statusQ.data?.runs.byState ?? {};
               const count =
@@ -200,8 +216,8 @@ export function Runs({
                   type="button"
                   role="tab"
                   aria-selected={tab === t}
-                  onClick={() => setTab(t)}
-                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                  onClick={() => selectTab(t)}
+                  className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
                     tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                   }`}
                 >
@@ -218,6 +234,9 @@ export function Runs({
             label="Filter runs"
           />
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -236,7 +255,7 @@ export function Runs({
             {visible.map((r, i) => (
               <tr
                 key={r.runId}
-                onClick={() => setSelectedId(r.runId)}
+                onClick={() => onSelectRun(r.runId)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(r.state)} ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -268,8 +287,8 @@ export function Runs({
                     (r.eventId ?? "-")
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={r.updated_at}>
-                  {ago(r.updated_at, now)}
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  <Ago iso={r.updated_at} now={now} />
                 </td>
               </tr>
             ))}
@@ -284,17 +303,27 @@ export function Runs({
             )}
           </tbody>
         </table>
-      </div>
+      </ListPane>
 
       {sel && (
-        <div className="w-[460px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <StateBadge state={sel.state} />
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[460px]"
+          title={
+            <span className="flex min-w-0 items-center gap-2">
+              <StateBadge state={sel.state} />
+              <span className="mono truncate" title={sel.runId}>
+                {sel.runId}
+              </span>
+            </span>
+          }
+          actions={
+            <>
               <Button onClick={() => copyText(sel.runId, "run id")}>Copy id</Button>
-              <Button onClick={() => setSelectedId(null)}>Close</Button>
-            </div>
-          </div>
+              <Button onClick={copyLink}>Copy link</Button>
+              <Button onClick={() => onSelectRun(null)}>Close</Button>
+            </>
+          }
+        >
 
           {!d && (
             <div className="text-(--text-faint)">{detail.isError ? "Could not load run detail." : "Loading run…"}</div>
@@ -337,6 +366,8 @@ export function Runs({
             <KV k="idempotencyKey" v={d.run.idempotencyKey} />
             <KV k="specHash" v={d.run.specHash} />
             <KV k="workspace" v={d.workspace} />
+            <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
+            <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
           </Section>
 
           <div className="mb-4 flex gap-2">
@@ -366,7 +397,7 @@ export function Runs({
             <div className="rounded-md border border-(--border) px-3 py-1">
               {d.lifecycle.map((e) => (
                 <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                  <span className="mono w-[64px] shrink-0 text-(--text-faint)">
+                  <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.at}>
                     {new Date(e.at).toLocaleTimeString([], { hour12: false })}
                   </span>
                   <span className="shrink-0">
@@ -392,6 +423,20 @@ export function Runs({
                   <div className="mono truncate text-[11px] text-(--text-faint)">
                     {a.reason_code ?? ""} {a.workspace_path ?? ""}
                   </div>
+                  {(a.started_at || a.finished_at) && (
+                    <div className="mt-1 flex gap-3 text-[11px] text-(--text-faint)">
+                      {a.started_at && (
+                        <span>
+                          started <Ago iso={a.started_at} now={now} />
+                        </span>
+                      )}
+                      {a.finished_at && (
+                        <span>
+                          finished <Ago iso={a.finished_at} now={now} />
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </Section>
@@ -466,7 +511,7 @@ export function Runs({
           </Section>
             </>
           )}
-        </div>
+        </DetailPane>
       )}
 
       {confirm === "cancel" && d && (

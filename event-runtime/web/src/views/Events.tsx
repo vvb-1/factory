@@ -2,16 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { useListKeys, useNow } from "../hooks";
+import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { AdmittedEvent, EventFocus } from "../types";
 import {
-  ago,
+  Ago,
   Button,
   Dialog,
   Disclosure,
   EVENT_STATUS_HUES,
   FilterInput,
+  ListPane,
+  DetailPane,
   JsonBlock,
   JumpLink,
   KV,
@@ -21,6 +23,7 @@ import {
   StateBadge,
   VerbError,
   copyText,
+  copyLink,
 } from "../components/ui";
 
 const STATUS_TABS = ["all", "admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
@@ -60,26 +63,29 @@ export function Events({
   connected,
   focusEvent,
   onFocusConsumed,
+  onSelectEvent,
+  onSelectType,
   onJumpProposal,
   onJumpRun,
   onTriggerAgain,
+  onInject,
 }: {
   connected: boolean;
   focusEvent: EventFocus | null;
   onFocusConsumed: () => void;
+  onSelectEvent: (source: string | null, eventId?: string) => void;
+  onSelectType: (type: string | null) => void;
   onJumpProposal: (id: string) => void;
   onJumpRun: (runId: string) => void;
   onTriggerAgain: (envelope: Record<string, unknown>) => void;
+  onInject: () => void;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
   const alive = useRef(true);
   const [tab, setTab] = useState<StatusTab>(isStatusTab(focusEvent?.status) ? focusEvent.status : "all");
-  const [selectedKey, setSelectedKey] = useState<string | null>(
-    focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null,
-  );
   const [filter, setFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string | null>(focusEvent?.type ?? null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [confirmReplay, setConfirmReplay] = useState(false);
 
@@ -116,6 +122,8 @@ export function Events({
     });
   }, [rows, filter, typeFilter, sourceFilter]);
 
+  const selectedKey =
+    focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
   const selectedIndex = useMemo(
     () => visible.findIndex((e) => keyOf(e) === selectedKey),
     [visible, selectedKey],
@@ -126,35 +134,26 @@ export function Events({
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  // Deep link: switch tab first, then select the row once it is in the list.
+  // Ephemeral Overview/Graph jumps: apply tab/type then drop them so the hash
+  // (if any) is the only remaining selection source.
   useEffect(() => {
     if (!focusEvent) return;
-    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) {
-      setTab(focusEvent.status);
-      return;
-    }
-    if (focusEvent.source && focusEvent.eventId) {
-      const key = `${focusEvent.source}:${focusEvent.eventId}`;
-      if (rows.some((e) => keyOf(e) === key)) {
-        setFilter("");
-        setTypeFilter(null);
-        setSourceFilter(null);
-        setSelectedKey(key);
-        onFocusConsumed();
-        return;
-      }
-      if (tab !== "all") {
-        setTab("all");
-        return;
-      }
-      if (list.isFetched) {
-        setSelectedKey(key);
-        onFocusConsumed();
-      }
-      return;
-    }
-    onFocusConsumed();
-  }, [focusEvent, rows, tab, list.isFetched, onFocusConsumed]);
+    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) setTab(focusEvent.status);
+    if (focusEvent.type) setTypeFilter(focusEvent.type);
+    if (focusEvent.status || focusEvent.type) onFocusConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusEvent?.status, focusEvent?.type]);
+
+  // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
+  useEffect(() => {
+    if (!focusEvent?.source || !focusEvent?.eventId) return;
+    setFilter("");
+    setSourceFilter(null);
+    if (!focusEvent.type) setTypeFilter(null);
+    const key = `${focusEvent.source}:${focusEvent.eventId}`;
+    if (!rows.some((e) => keyOf(e) === key) && tab !== "all") setTab("all");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusEvent?.source, focusEvent?.eventId, rows, tab]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -192,15 +191,33 @@ export function Events({
 
   const canRequeue = sel !== null && REQUEUEABLE.has(sel.status);
 
+  const selectTab = (t: StatusTab) => {
+    setTab(t);
+    if (selectedKey) onSelectEvent(null);
+  };
+  useTabKeys(STATUS_TABS, tab, selectTab);
+
   useListKeys({
     count: visible.length,
     selected: selectedIndex,
-    onSelect: (i) => setSelectedKey(visible[i] ? keyOf(visible[i]) : null),
-    onClose: () => setSelectedKey(null),
+    onSelect: (i) => {
+      const e = visible[i];
+      onSelectEvent(e ? e.source : null, e?.eventId);
+    },
+    onClose: () => {
+      if (selectedKey) onSelectEvent(null);
+      else if (filter || typeFilter || sourceFilter) {
+        setFilter("");
+        setTypeFilter(null);
+        setSourceFilter(null);
+        onSelectType(null);
+      }
+    },
     keys: {
       // `q` not `r`: `r` is the `g r` navigation suffix, and both listeners
       // see the same keydown — `g r` with a selection must never requeue.
       q: () => canRequeue && connected && sel && requeue.mutate(sel),
+      c: () => sel && copyText(sel.eventId, "event id"),
     },
   });
 
@@ -218,6 +235,8 @@ export function Events({
           label: `Trigger ${sel.type} again (new event id)…`,
           run: () => onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now())),
         },
+        { label: `Copy ${sel.eventId}`, hint: "c", run: () => copyText(sel.eventId, "event id") },
+        { label: "Copy link to this event", run: copyLink },
       ]);
     }
     return () => setContextActions([]);
@@ -230,7 +249,9 @@ export function Events({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="min-w-0 flex-1 overflow-auto p-5">
+      <ListPane
+        chrome={
+          <>
         <h1 className="display mb-4 text-lg font-semibold">Events</h1>
 
         <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Event status">
@@ -242,7 +263,7 @@ export function Events({
                 type="button"
                 role="tab"
                 aria-selected={tab === t}
-                onClick={() => setTab(t)}
+                onClick={() => selectTab(t)}
                 className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
                   tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
                 }`}
@@ -267,7 +288,11 @@ export function Events({
                 key={t}
                 type="button"
                 aria-pressed={typeFilter === t}
-                onClick={() => setTypeFilter((cur) => (cur === t ? null : t))}
+                onClick={() => {
+                  const next = typeFilter === t ? null : t;
+                  setTypeFilter(next);
+                  onSelectType(next);
+                }}
                 className={`rounded-md px-2 py-0.5 text-[11px] ${
                   typeFilter === t
                     ? "bg-(--surface-3) text-(--text)"
@@ -294,6 +319,9 @@ export function Events({
               </button>
             ))}
         </div>
+          </>
+        }
+      >
 
         <table className="w-full border-separate border-spacing-0">
           <thead>
@@ -310,7 +338,7 @@ export function Events({
             {visible.map((e, i) => (
               <tr
                 key={keyOf(e)}
-                onClick={() => setSelectedKey(keyOf(e))}
+                onClick={() => onSelectEvent(e.source, e.eventId)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(e.status)} ${i === selectedIndex ? "row-selected" : ""}`}
               >
@@ -330,7 +358,9 @@ export function Events({
                     </span>
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">{ago(e.admittedAt, now)}</td>
+                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                  <Ago iso={e.admittedAt} now={now} />
+                </td>
               </tr>
             ))}
             {visible.length === 0 && (
@@ -341,26 +371,32 @@ export function Events({
                 noun="events"
                 empty={
                   tab === "all"
-                    ? "No events yet — inject one with ⌘K → Inject event."
+                    ? "No events yet."
                     : `No ${TAB_LABEL[tab].toLowerCase()} events.`
+                }
+                action={
+                  tab === "all" ? (
+                    <Button onClick={onInject}>Inject event…</Button>
+                  ) : undefined
                 }
               />
             )}
           </tbody>
         </table>
-      </div>
+      </ListPane>
 
       {sel && (
-        <div className="w-[440px] shrink-0 overflow-auto border-l border-(--border) bg-(--surface-1) p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="display truncate text-[14px] font-semibold" title={sel.eventId}>
-              {sel.eventId}
-            </div>
-            <div className="flex shrink-0 gap-1.5">
+        <DetailPane
+          widthClass="w-[440px]"
+          title={<span title={sel.eventId}>{sel.eventId}</span>}
+          actions={
+            <>
               <Button onClick={() => copyText(sel.eventId, "event id")}>Copy id</Button>
-              <Button onClick={() => setSelectedKey(null)}>Close</Button>
-            </div>
-          </div>
+              <Button onClick={copyLink}>Copy link</Button>
+              <Button onClick={() => onSelectEvent(null)}>Close</Button>
+            </>
+          }
+        >
 
           <Section title="Event">
             <KV k="source" v={sel.source} />
@@ -368,9 +404,9 @@ export function Events({
             <KV k="subject" v={sel.subject} />
             <KV k="status" v={<StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />} />
             <KV k="correlationId" v={sel.correlationId} />
-            <KV k="occurredAt" v={sel.occurredAt} />
-            <KV k="receivedAt" v={sel.receivedAt} />
-            <KV k="admittedAt" v={sel.admittedAt} />
+            <KV k="occurredAt" v={<Ago iso={sel.occurredAt} now={now} />} />
+            <KV k="receivedAt" v={<Ago iso={sel.receivedAt} now={now} />} />
+            <KV k="admittedAt" v={<Ago iso={sel.admittedAt} now={now} />} />
             <KV
               k="proposal"
               v={
@@ -444,7 +480,7 @@ export function Events({
             </div>
           </div>
           <VerbError error={requeue.error ?? replay.error} />
-        </div>
+        </DetailPane>
       )}
 
       {confirmReplay && sel && (

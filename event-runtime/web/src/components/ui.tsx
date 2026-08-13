@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { modal, useNow } from "../hooks";
 
 /** One fixed hue map for the closed §8 lifecycle — identical in every view. */
@@ -45,6 +45,11 @@ export function copyText(text: string, label: string) {
   notify(`Copied ${label}`, "info");
 }
 
+/** Shareable hash of the current selection — the payoff of hash-as-source-of-truth. */
+export function copyLink() {
+  copyText(window.location.href, "link");
+}
+
 export function FilterInput({
   value,
   onChange,
@@ -57,13 +62,63 @@ export function FilterInput({
   label: string;
 }) {
   return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      aria-label={label}
-      className="w-56 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
-    />
+    <span className="relative inline-flex w-56 shrink-0">
+      <input
+        data-view-filter
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          e.preventDefault();
+          if (value) onChange("");
+          else e.currentTarget.blur();
+        }}
+        placeholder={placeholder}
+        aria-label={label}
+        className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 pr-7 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
+      />
+      {!value && (
+        <kbd
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 rounded border border-(--border) px-1 font-sans text-[10px] text-(--text-faint)"
+        >
+          /
+        </kbd>
+      )}
+    </span>
+  );
+}
+
+/** Pinned title/tabs/filter; only the table (and anything below it) scrolls. */
+export function ListPane({ chrome, children }: { chrome: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="shrink-0 px-5 pt-5 pb-3">{chrome}</div>
+      <div className="min-h-0 flex-1 overflow-auto px-5 pb-5">{children}</div>
+    </div>
+  );
+}
+
+/** Pinned copy/close bar; the spec and payload scroll underneath. */
+export function DetailPane({
+  widthClass,
+  title,
+  actions,
+  children,
+}: {
+  widthClass: string;
+  title: ReactNode;
+  actions: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <aside className={`${widthClass} flex min-h-0 shrink-0 flex-col border-l border-(--border) bg-(--surface-1)`}>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-(--border) px-4 py-3">
+        <div className="display min-w-0 truncate text-[14px] font-semibold">{title}</div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">{actions}</div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+    </aside>
   );
 }
 
@@ -74,22 +129,28 @@ export function ListEmpty({
   filtered,
   noun,
   empty,
+  action,
 }: {
   colSpan: number;
   query: { isPending: boolean; isError: boolean; data?: unknown };
   filtered?: boolean;
   noun: string;
   empty: string;
+  action?: ReactNode;
 }) {
   let msg = empty;
   if (query.isPending && !query.data) msg = `Loading ${noun}…`;
   else if (query.isError && !query.data) {
     msg = `Cannot reach the control API — ${noun} will appear when it is up.`;
-  } else if (filtered) msg = `No ${noun} match this filter.`;
+  }   else if (filtered) msg = `No ${noun} match this filter.`;
   return (
     <tr>
       <td colSpan={colSpan} className="px-3 py-8 text-center text-(--text-faint)">
-        {msg}
+        <div>{msg}</div>
+        {filtered && !query.isPending && (
+          <div className="mt-2 text-[11px]">Esc clears the filter</div>
+        )}
+        {action && !query.isPending && !query.isError && !filtered && <div className="mt-3">{action}</div>}
       </td>
     </tr>
   );
@@ -136,7 +197,12 @@ export function StatTile({
   const cls = "rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left";
   if (!onClick) return <div className={cls}>{inner}</div>;
   return (
-    <button type="button" onClick={onClick} className={`${cls} cursor-pointer hover:bg-(--surface-2)`}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label}: ${value}`}
+      className={`${cls} cursor-pointer hover:bg-(--surface-2)`}
+    >
       {inner}
     </button>
   );
@@ -192,6 +258,24 @@ export function ago(iso: string | null | undefined, now: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+/** Relative time with the absolute ISO on hover — operators check both. */
+export function Ago({
+  iso,
+  now,
+  className,
+}: {
+  iso: string | null | undefined;
+  now: number;
+  className?: string;
+}) {
+  if (!iso) return <span className={className}>-</span>;
+  return (
+    <span className={className} title={iso}>
+      {ago(iso, now)}
+    </span>
+  );
+}
+
 export function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -211,10 +295,14 @@ export function notify(message: string, type: "ok" | "err" | "info" = "ok") {
   const id = Math.random().toString(36).slice(2);
   activeToasts = [...activeToasts, { id, type, message }].slice(-5);
   toastListeners.forEach((l) => l(activeToasts));
-  setTimeout(() => {
-    activeToasts = activeToasts.filter((t) => t.id !== id);
-    toastListeners.forEach((l) => l(activeToasts));
-  }, 3000);
+  setTimeout(() => dismissToast(id), 3000);
+}
+
+function dismissToast(id: string) {
+  const next = activeToasts.filter((t) => t.id !== id);
+  if (next.length === activeToasts.length) return;
+  activeToasts = next;
+  toastListeners.forEach((l) => l(activeToasts));
 }
 
 export function ToastContainer() {
@@ -232,7 +320,10 @@ export function ToastContainer() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="pointer-events-auto flex items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
+          role="status"
+          title="Dismiss"
+          onClick={() => dismissToast(t.id)}
+          className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
           style={{
             borderColor: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
           }}
@@ -309,12 +400,25 @@ export function Section({ title, children }: { title: string; children: ReactNod
 }
 
 export function KV({ k, v }: { k: string; v: ReactNode }) {
+  const text = typeof v === "string" ? v : null;
+  const copyable = !!text && text !== "-";
   return (
     <div className="flex justify-between gap-4 border-b border-(--border) py-1 last:border-0">
       <span className="text-(--text-faint)">{k}</span>
-      <span className="mono truncate text-(--text-dim)" title={typeof v === "string" ? v : undefined}>
-        {v ?? "-"}
-      </span>
+      {copyable ? (
+        <button
+          type="button"
+          title={`Copy ${k}`}
+          onClick={() => copyText(text, k)}
+          className="mono max-w-[70%] truncate text-right text-(--text-dim) hover:text-(--accent)"
+        >
+          {text}
+        </button>
+      ) : (
+        <span className="mono truncate text-(--text-dim)" title={text ?? undefined}>
+          {v ?? "-"}
+        </span>
+      )}
     </div>
   );
 }
@@ -351,6 +455,32 @@ export function Button({
   );
 }
 
+const FOCUSABLE =
+  "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+function tabCycle(root: HTMLElement, e: KeyboardEvent) {
+  const nodes = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  );
+  if (nodes.length === 0) {
+    e.preventDefault();
+    root.focus();
+    return;
+  }
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey) {
+    if (active === first || !root.contains(active)) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else if (active === last || !root.contains(active)) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 export function Dialog({
   title,
   onClose,
@@ -362,15 +492,23 @@ export function Dialog({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     modal.depth += 1;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
     };
     window.addEventListener("keydown", onKey);
+    const root = panelRef.current;
+    const pref = root?.querySelector<HTMLElement>("[autofocus]");
+    (pref ?? root)?.focus();
     return () => {
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
+      previous?.focus();
     };
   }, [onClose]);
   return (
@@ -379,9 +517,16 @@ export function Dialog({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className={`${wide ? "w-[720px]" : "w-[480px]"} max-h-[70vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl`}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`${wide ? "w-[720px]" : "w-[480px]"} max-h-[70vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl outline-none`}
       >
-        <div className="display mb-3 text-[15px] font-semibold">{title}</div>
+        <div id={titleId} className="display mb-3 text-[15px] font-semibold">
+          {title}
+        </div>
         {children}
       </div>
     </div>
