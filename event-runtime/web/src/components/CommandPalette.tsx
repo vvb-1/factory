@@ -253,22 +253,38 @@ export function CommandPalette({
   );
 }
 
-/** g-then-letter navigation sequences (spec §5): g o, g p, g r, g e. */
+const GO_CHORD_MS = 800;
+
+/**
+ * Keydown handler behind `useGoSequences`, split out so the chord state
+ * machine is reachable from a test without mounting a component.
+ */
+export function goSequenceHandler(
+  map: Record<string, () => void>,
+  now: () => number = Date.now,
+) {
+  let pendingG = 0;
+  return function onKey(e: KeyboardEvent) {
+    if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    // A held `g` auto-repeats: without this, resting on the key would arm the
+    // prefix and then immediately spend it on the Graph view.
+    if (e.repeat) return;
+    // The armed check runs before the `g` branch: `g` is both the prefix and
+    // the Graph suffix, so `g g` must be allowed to match the map.
+    if (pendingG && now() - pendingG < GO_CHORD_MS && map[e.key]) {
+      e.preventDefault();
+      pendingG = 0;
+      map[e.key]();
+      return;
+    }
+    pendingG = e.key === "g" ? now() : 0;
+  };
+}
+
+/** g-then-letter navigation sequences (spec §5): g g, g o, g p, g r, g e. */
 export function useGoSequences(map: Record<string, () => void>) {
   useEffect(() => {
-    let pendingG = 0;
-    function onKey(e: KeyboardEvent) {
-      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "g") {
-        pendingG = Date.now();
-        return;
-      }
-      if (pendingG && Date.now() - pendingG < 800 && map[e.key]) {
-        e.preventDefault();
-        map[e.key]();
-      }
-      pendingG = 0;
-    }
+    const onKey = goSequenceHandler(map);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [map]);
