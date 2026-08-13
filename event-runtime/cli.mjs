@@ -38,11 +38,13 @@ const USAGE = `event-runtime — watched event → agent runtime (docs/event-run
 
 usage: bun event-runtime/cli.mjs <command>
 
-  serve [--port N] [--adapter-override fake] [--watch]
-                                 start the control API (loopback), planner,
-                                 and one worker in the foreground.
+  serve [--port N] [--adapter-override fake] [--watch] [--with-worker]
+                                 start the control API (loopback) and planner
+                                 in the foreground. Runs NO worker unless
+                                 --with-worker (OPS-233) — start workers as
+                                 separate "work" processes so serve restarts
+                                 never kill a running agent.
                                  --watch restarts on event-runtime/ changes
-                                 (in-flight work is dropped — for development)
   status                         events, proposals, runs, anomalies
   events [status]                admitted events, optionally filtered by status
   ps [state]                     running event processes/runs (default: RUNNING or LEASED)

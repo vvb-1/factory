@@ -174,7 +174,10 @@ export async function executeClaimed(db, registry, adapters, claim, {
     // Live trace (factory.trace/v1): the recorder is already defensive, but
     // wrap it anyway — an adapter streaming trace events mid-run must never
     // be able to turn a recording problem into a failed attempt.
-    const recorder = traceRecorder(db, { runId, attempt, now: () => now });
+    // Real wall-clock per event — NOT the claim-time `now`. Trace timestamps
+    // are the one place frozen time defeats the feature: "what is the agent
+    // doing right now" needs to say when each step actually happened.
+    const recorder = traceRecorder(db, { runId, attempt });
     const onTrace = (kind, payload) => {
       try {
         recorder(kind, payload);
