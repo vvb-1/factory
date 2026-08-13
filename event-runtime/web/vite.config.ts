@@ -76,10 +76,20 @@ function entryChunkBudget(): Plugin {
         }
       }
       if (oversized.length === 0) return;
+      // Vite's size reporter runs later in writeBundle; throwing here skips it,
+      // so print the inventory ourselves instead of pointing at missing output.
+      const inventory = Object.values(bundle)
+        .filter((output) => output.type === "chunk")
+        .map(
+          (output) =>
+            `${output.fileName} ${(Buffer.byteLength(output.code, "utf8") / 1000).toFixed(2)} kB`,
+        )
+        .join("\n  ");
       const detail = oversized.join(", ");
       throw new Error(
-        `Entry chunk budget exceeded: ${detail} (budget ${ENTRY_CHUNK_BUDGET_BYTES / 1000} kB). ` +
-          "Check the chunk list above first: if the xyflow chunk shrank or vanished, a " +
+        `Entry chunk budget exceeded: ${detail} (budget ${ENTRY_CHUNK_BUDGET_BYTES / 1000} kB).\n` +
+          `Chunks:\n  ${inventory}\n` +
+          "Check the list above: if the xyflow chunk shrank or vanished, a " +
           "@xyflow/react transitive dep is missing from VENDOR_CHUNKS in vite.config.ts — add it " +
           "there (or code-split the new import) rather than raising the budget. If the split " +
           "chunks look right and this is genuine app growth, re-baseline ENTRY_CHUNK_BUDGET_BYTES " +
