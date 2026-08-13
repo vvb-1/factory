@@ -126,6 +126,15 @@ export function Proposals({
     });
   }, [rows, filter, expiredFilter]);
 
+  // What the list would show without the text filter. An empty list under the
+  // expired chip has two causes and needs two messages: no expired opens exist
+  // (chip copy, nothing for Esc to clear) or the text filter hid the expired
+  // ones (filter copy + the Esc hint).
+  const unfilteredCount = useMemo(
+    () => (expiredFilter ? rows.filter((p) => p.expired).length : rows.length),
+    [rows, expiredFilter],
+  );
+
   const selectedId = focusProposalId;
   const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
   const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
@@ -423,7 +432,7 @@ export function Proposals({
               <ListEmpty
                 colSpan={tab === "open" ? 6 : 7}
                 query={tab === "open" ? query : history}
-                filtered={expiredFilter ? false : rows.length > 0}
+                filtered={unfilteredCount > 0}
                 noun="proposals"
                 empty={
                   expiredFilter
