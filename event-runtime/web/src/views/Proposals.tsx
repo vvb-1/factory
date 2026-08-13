@@ -574,6 +574,12 @@ export function Proposals({
                       </div>
                     </div>
                   )}
+                  <div className="col-span-2">
+                    <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Placement</div>
+                    <div className="mono text-(--text-dim) truncate">
+                      {sel.spec.placement ? JSON.stringify(sel.spec.placement) : "any worker"}
+                    </div>
+                  </div>
                 </div>
               </div>
               <Disclosure label="immutable RunSpec" defaultOpen={isOpen}>

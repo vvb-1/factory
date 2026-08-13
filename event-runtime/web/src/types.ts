@@ -29,6 +29,7 @@ export interface RunSpec {
   timeoutSeconds: number;
   maxAttempts: number;
   idempotencyKey: string;
+  placement?: Record<string, unknown> | null;
 }
 
 export interface Proposal {
