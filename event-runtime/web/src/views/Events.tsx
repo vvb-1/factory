@@ -144,12 +144,30 @@ export function Events({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusEvent?.status, focusEvent?.type]);
 
+  // Reveal a hash-selected row only when current filters hide it. Latch until
+  // the row exists in `rows` (inject / tab switch / poll); decide once so a
+  // later 2s poll does not wipe a typed filter. j/k/click on a visible row
+  // keeps the chips.
+  const pendingReveal = useRef<string | null>(null);
+  const lastKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedKey !== lastKey.current) {
+      lastKey.current = selectedKey;
+      pendingReveal.current = selectedKey;
+    }
+    const key = pendingReveal.current;
+    if (!key || key !== selectedKey) return;
+    if (!rows.some((e) => keyOf(e) === key)) return; // tab switch / poll still pending
+    pendingReveal.current = null; // decided once
+    if (visible.some((e) => keyOf(e) === key)) return; // visible: keep the filters
+    setFilter("");
+    setSourceFilter(null);
+    if (!focusEvent?.type) setTypeFilter(null);
+  }, [selectedKey, rows, visible, focusEvent?.type]);
+
   // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
   useEffect(() => {
     if (!focusEvent?.source || !focusEvent?.eventId) return;
-    setFilter("");
-    setSourceFilter(null);
-    if (!focusEvent.type) setTypeFilter(null);
     const key = `${focusEvent.source}:${focusEvent.eventId}`;
     if (!rows.some((e) => keyOf(e) === key) && tab !== "all") setTab("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
