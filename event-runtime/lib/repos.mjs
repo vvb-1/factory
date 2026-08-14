@@ -60,6 +60,15 @@ export function loadRepos({ root = reposRoot() } = {}) {
   for (const entry of parsed?.repos ?? []) {
     if (!entry?.name) throw new RepoError(`${file}: a repo entry has no name`);
     if (!entry.path) throw new RepoError(`${file}: repo ${entry.name} has no path`);
+    let maxInFlight = null;
+    if (entry.max_in_flight !== undefined && entry.max_in_flight !== null) {
+      if (typeof entry.max_in_flight !== "number" || !Number.isFinite(entry.max_in_flight) || entry.max_in_flight <= 0) {
+        throw new RepoError(
+          `${file}: repo ${entry.name} max_in_flight must be a positive number, got ${JSON.stringify(entry.max_in_flight)}`,
+        );
+      }
+      maxInFlight = entry.max_in_flight;
+    }
     repos.set(entry.name, {
       name: entry.name,
       path: expandHome(entry.path),
@@ -74,7 +83,7 @@ export function loadRepos({ root = reposRoot() } = {}) {
       reportOnly: entry.report_only === true,
       // Null, not a default: the cap's fallback lives with the dispatcher, and
       // inventing a number here would state a limit this file never set.
-      maxInFlight: Number.isFinite(entry.max_in_flight) ? entry.max_in_flight : null,
+      maxInFlight,
       worktreeRoot: entry.worktree_root ? expandHome(entry.worktree_root) : null,
       worktreeUp: entry.worktree_up ?? null,
       worktreeDown: entry.worktree_down ?? null,
