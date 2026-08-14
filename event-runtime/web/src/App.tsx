@@ -631,7 +631,7 @@ export function App() {
         />
       )}
       {helpOpen && <ShortcutsDialog onClose={() => setHelpOpen(false)} />}
-      <GoPrefixHint armed={goArmed} />
+      <GoPrefixHint armed={goArmed} currentView={view} />
       <ToastContainer />
     </div>
   );
@@ -648,7 +648,7 @@ export function App() {
  * while empty — a screen reader only announces nodes inserted into a live
  * region that already existed (see ToastContainer).
  */
-function GoPrefixHint({ armed }: { armed: boolean }) {
+export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentView?: string }) {
   return (
     <div
       role="status"
@@ -674,11 +674,28 @@ function GoPrefixHint({ armed }: { armed: boolean }) {
               g
             </span>
             <span className="text-(--text-dim)">then</span>
-            {NAV.map((n) => (
-              <span key={n.key} className="whitespace-nowrap text-(--text-faint)">
-                <span className="mono text-(--text)">{n.go}</span> {n.label}
-              </span>
-            ))}
+            {NAV.map((n) => {
+              const isCurrent =
+                n.key === currentView || (n.key === "runs" && currentView === "run");
+              if (isCurrent) {
+                return (
+                  <span
+                    key={n.key}
+                    className="whitespace-nowrap opacity-60 text-(--text-faint)"
+                  >
+                    <span className="mono text-(--text-dim)">{n.go}</span> {n.label}{" "}
+                    <span className="rounded px-1 text-[10px] text-(--text-faint) ring-1 ring-inset ring-(--border)">
+                      current
+                    </span>
+                  </span>
+                );
+              }
+              return (
+                <span key={n.key} className="whitespace-nowrap text-(--text-faint)">
+                  <span className="mono text-(--text)">{n.go}</span> {n.label}
+                </span>
+              );
+            })}
           </div>
         </>
       )}
