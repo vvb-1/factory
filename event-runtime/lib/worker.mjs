@@ -447,12 +447,12 @@ export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = 
         finishAttempt(db, runId, run.attempts, "CANCELLED", "cancelled", now);
       }
     }
-    closeOpenProposalForRun(db, runId, { actor, now });
+    const proposalClose = closeOpenProposalForRun(db, runId, { actor, now });
     const active = ACTIVE_EXECUTIONS.get(runId);
     if (active) {
       active.abort(reason);
     }
-    return result;
+    return { ...result, proposalClose };
   });
 }
 
