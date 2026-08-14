@@ -21,13 +21,13 @@ So the job is not "spec everything" — it's **sorting tickets into three piles*
 
 **A promoted ticket must be falsifiable.** Before promoting, confirm every file in `Source File Pointers` exists and **run the `Verification Command`**. A spec that looks complete but whose command doesn't run is worse than leaving the ticket in `Triage` — it burns a full agent run to discover, and the agent that discovers it has already created a worktree and a database.
 
-It is fine for the verification command to *fail* — that's the bug. It must not *error*: a wrong path, a missing script, a task name that doesn't exist.
+It is fine for the verification command to _fail_ — that's the bug. It must not _error_: a wrong path, a missing script, a task name that doesn't exist.
 
 **`Owned Paths` is the concurrency key, so tight globs beat convenient ones.** It is the set the ticket may modify, and the dispatcher refuses to run two tickets whose sets intersect. `app/**` blocks every other ticket in the repo; `app/services/api.ts` + `app/services/__tests__/*` blocks almost nothing. Over-broad paths don't just risk scope creep — they serialize the factory.
 
 Include the test files and the docs the change will touch. A path the agent needs but doesn't own means it stops and blocks.
 
-**Owned Paths orders nothing — `blocked by` relations do.** Disjoint paths only mean two tickets can run *simultaneously*; if one consumes the other's output (a helper it adds, a migration it lands), they must not, and the dispatcher can't see that from globs. Set the Linear `blocked by` relation when you spec a ticket that builds on an open one — dispatch holds it until the blocker is `Done`/`Canceled` and releases it automatically. A spec whose hidden prerequisite is only mentioned in prose will dispatch anyway and burn the run.
+**Owned Paths orders nothing — `blocked by` relations do.** Disjoint paths only mean two tickets can run _simultaneously_; if one consumes the other's output (a helper it adds, a migration it lands), they must not, and the dispatcher can't see that from globs. Set the Linear `blocked by` relation when you spec a ticket that builds on an open one — dispatch holds it until the blocker is `Done`/`Canceled` and releases it automatically. A spec whose hidden prerequisite is only mentioned in prose will dispatch anyway and burn the run.
 
 **Never promote what you couldn't verify against the actual codebase.** If exploration didn't find the code, that's a hold, not a guess.
 

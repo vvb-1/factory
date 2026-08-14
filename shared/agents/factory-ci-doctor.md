@@ -28,7 +28,7 @@ Work from the outside in, reading as little log as possible:
 - **`ENV`** — the failure would have happened to any diff: runner setup, action version, cache corruption, missing/expired secrets, quota or rate limits, disk space, registry outages, base branch already red. This is the classification the dispatch circuit breaker consumes — be precise about it, because two consecutive `ENV` verdicts stop the whole queue on purpose.
 - **`FLAKE`** — intermittent, and you have evidence: the same code passed this workflow before or on re-run, the failure is a known-flaky shape (timeout in a network test, port already in use, race in a UI test) unrelated to the diff. No evidence → it is not FLAKE; pick TICKET or ENV and say the flake suspicion out loud instead.
 
-**Smoke-workflow boundary:** when the failed workflow is a post-deploy smoke check and the logs point at the *deployed environment* (app not responding, 5xx from the live URL, container down) rather than at the workflow or the code, classify `ENV` and say in your suggested action that the caller should spawn **`factory-infra-scout`** at that app — do not SSH into servers or investigate the stack yourself; your jurisdiction ends at the workflow log.
+**Smoke-workflow boundary:** when the failed workflow is a post-deploy smoke check and the logs point at the _deployed environment_ (app not responding, 5xx from the live URL, container down) rather than at the workflow or the code, classify `ENV` and say in your suggested action that the caller should spawn **`factory-infra-scout`** at that app — do not SSH into servers or investigate the stack yourself; your jurisdiction ends at the workflow log.
 
 ## Hard rules
 

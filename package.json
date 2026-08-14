@@ -23,6 +23,8 @@
     "sync-floor": "bun build/emit.mjs --sync-floor",
     "economics": "bun orchestrator/economics.mjs",
     "schedule": "bun deploy/gen.mjs",
+    "format:check": "prettier --check 'shared/**/*.md'",
+    "format": "prettier --write 'shared/**/*.md'",
     "test": "bun test"
   },
   "engines": {
@@ -31,5 +33,8 @@
   "dependencies": {
     "ink": "^7.1.1",
     "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "prettier": "^3.5.0"
   }
 }
