@@ -23,7 +23,11 @@ afterAll(() => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
 });
 
-const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+// Fixture repos must not inherit the operator's global git config: a machine
+// with commit.gpgsign=true blocks on pinentry until the 5s test timeout, and
+// core.hooksPath would run their hooks inside our scratch dirs (OPS-441).
+const HERMETIC = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.template="];
+const git = (args, cwd) => execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
 
 /** A tiny real repo — the provider's whole job is git, so fake git proves nothing. */
 function makeRepo() {
