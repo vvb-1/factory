@@ -131,6 +131,12 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       expect(() => loadRepos({ root: factoryRoot(yaml) })).toThrow(RepoError);
     }
   });
+
+  test("malformed YAML throws RepoError with file path and parse error message (OPS-346)", () => {
+    const root = factoryRoot("repos: [ invalid: {");
+    expect(() => loadRepos({ root })).toThrow(RepoError);
+    expect(() => loadRepos({ root })).toThrow(/invalid YAML:/);
+  });
 });
 
 describe("reposView is what the control API serves", () => {

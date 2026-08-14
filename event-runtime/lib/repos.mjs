@@ -55,7 +55,12 @@ export function expandHome(p) {
 export function loadRepos({ root = reposRoot() } = {}) {
   const file = reposConfigPath(root);
   if (!existsSync(file)) throw new RepoError(`no repos config at ${file}`);
-  const parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
+  let parsed;
+  try {
+    parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    throw new RepoError(`${file}: invalid YAML: ${err.message}`);
+  }
   const repos = new Map();
   for (const entry of parsed?.repos ?? []) {
     if (!entry?.name) throw new RepoError(`${file}: a repo entry has no name`);
