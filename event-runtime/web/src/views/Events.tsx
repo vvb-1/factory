@@ -280,12 +280,14 @@ export function Events({
       onSelectEvent(e ? e.source : null, e?.eventId);
     },
     onClose: () => {
-      if (selectedKey) onSelectEvent(null);
+      if (sel) onSelectEvent(null);
       else if (filter || typeFilter || sourceFilter) {
         setFilter("");
         setTypeFilter(null);
         setSourceFilter(null);
         onSelectType(null);
+      } else if (selectedKey) {
+        onSelectEvent(null);
       }
     },
     keys: {
