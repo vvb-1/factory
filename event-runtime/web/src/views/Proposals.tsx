@@ -206,12 +206,18 @@ export function Proposals({
   // chip is cleared like selectTab does: it belongs to Open only.
   useEffect(() => {
     if (!focusProposalId) return;
-    if (rows.some((p) => p.id === focusProposalId)) return;
-    if (tab === "open") {
+    if (query.isPending || history.isPending) return;
+    const inOpen = (query.data?.proposals ?? []).some((p) => p.id === focusProposalId);
+    const inHistory = (history.data?.proposals ?? []).some(
+      (p) => p.id === focusProposalId && p.status !== "open",
+    );
+    if (inOpen && tab !== "open") {
+      setTab("open");
+    } else if (!inOpen && inHistory && tab === "open") {
       setTab("history");
       setExpiredOnly(false);
     }
-  }, [focusProposalId, rows, tab]);
+  }, [focusProposalId, query.isPending, history.isPending, query.data, history.data, tab]);
 
   useEffect(() => {
     if (!focusExpired) return;
