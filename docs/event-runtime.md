@@ -357,8 +357,7 @@ behavior, and workspace confinement. The registry has four entries: `claude`
 (the LLM harness), `command` (a closed argv template), `actions` (an approved
 action list resolved against a closed registry, remote-SSH or local-argv), and
 `fake` (tests and demo environments). It does not inherit the current runner's
-entire adapter surface. (Conformance coverage is currently uneven — the
-`command` adapter has it, `claude` does not: OPS-427.)
+entire adapter surface.
 
 **Live trace is an optional adapter capability (`factory.trace/v1`).** An
 adapter may stream what the agent is doing mid-run — via the `onTrace`

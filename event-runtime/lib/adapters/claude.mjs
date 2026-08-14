@@ -22,12 +22,12 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { FACTORY_ROOT } from "../config.mjs";
 
-const KILL_GRACE_MS = 30_000;
+export const KILL_GRACE_MS = 30_000;
 
 /** Trace events preview text; the recorder's byte bound is the real limit. */
 const TEXT_PREVIEW_CHARS = 4000;
 
-const PROMPT_SUFFIX =
+export const PROMPT_SUFFIX =
   "\n\n---\nInput is at ./input.json. Write ./result.json per the factory.agent-result/v1 contract. Work only inside this directory.";
 
 export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
@@ -154,7 +154,17 @@ export function mapStreamEvent(msg) {
 /**
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-export async function execute({ spec, def, workspaceDir, timeoutMs, env = {}, onTrace }) {
+export async function execute({
+  spec,
+  def,
+  workspaceDir,
+  timeoutMs,
+  killGraceMs = KILL_GRACE_MS,
+  env = {},
+  onTrace,
+  abortSignal,
+  signal,
+}) {
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
 
   const childEnv = { ...process.env, ...env };
@@ -178,11 +188,14 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env = {}, on
     // stream-json the artifact is NDJSON, one message per line — consumers
     // stream bytes, none parses it as a single JSON document.
     const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
-    child.stdout.pipe(transcript);
+    transcript.on("error", () => {});
+    if (child.stdout) {
+      child.stdout.pipe(transcript);
+    }
 
     // Live trace: same stdout, line by line. Every failure mode here is
     // swallowed — the agent must not be able to crash the worker via output.
-    if (typeof onTrace === "function") {
+    if (typeof onTrace === "function" && child.stdout) {
       const lines = createInterface({ input: child.stdout });
       lines.on("line", (line) => {
         try {
@@ -200,22 +213,41 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env = {}, on
     }
 
     let timedOut = false;
-    let killTimer;
+    let killTimer = null;
     const termTimer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+      killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
       killTimer.unref?.();
     }, timeoutMs);
 
+    const onAbort = () => {
+      child.kill("SIGTERM");
+      if (!killTimer) {
+        killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+        killTimer.unref?.();
+      }
+    };
+    const abortSig = abortSignal ?? signal;
+    if (abortSig) {
+      if (abortSig.aborted) {
+        onAbort();
+      } else {
+        abortSig.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
     child.on("error", (err) => {
       clearTimeout(termTimer);
-      clearTimeout(killTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (abortSig) abortSig.removeEventListener?.("abort", onAbort);
+      transcript.destroy();
       reject(err);
     });
     child.on("close", (exitCode) => {
       clearTimeout(termTimer);
-      clearTimeout(killTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (abortSig) abortSig.removeEventListener?.("abort", onAbort);
       resolve({ exitCode, timedOut });
     });
   });
