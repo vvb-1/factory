@@ -4,8 +4,9 @@ Status: **stage 1 shipped (OPS-233); stages 2–3 are still design**. Tracking: 
 Companion to [event-runtime.md](event-runtime.md) §3, §8, §10, §11 — this
 note expands the "second process → Postgres → remote workers" line of §10
 into something ticket-shaped, without changing any decision made there.
-Implementation tickets are deliberately not filed yet; §6 defines the
-cut-lines for when the operator says go.
+§6 tracks the cut-lines, recording what has shipped (in-process workers,
+placement, claim verification, chaining) versus what remains deferred for
+remote distribution (Postgres substrate, shared artifact store).
 
 ---
 
@@ -81,11 +82,11 @@ What actually has to exist first:
   node. Workspaces stay node-local and ephemeral; retained-on-failure
   debugging leans on captured transcripts, not remote paths.
 - **Registry verification at claim, not trust.** Definitions are pinned by
-  content hash and the RunSpec records `promptVersion: git:<sha>` (§6). A
-  remote worker resolves prompt and schema files from its own checkout and
-  **verifies the spec's content hashes before executing; mismatch → typed
-  refusal** (`registry_mismatch`), re-queue for a current node. Version skew
-  becomes visible instead of behavioral.
+  content hash and the RunSpec records `defHash` (OPS-409). The worker
+  resolves prompt and schema files from its checkout and **verifies the spec's
+  content hash before executing; mismatch → typed refusal**
+  (`agent_definition_mismatch`), preventing version skew between approval and
+  execution.
 - **Per-node credentials and adapters.** Secrets are worker-injected (§14):
   each node carries its own Linear key / claude auth. A node registers only
   adapters it has passed conformance for — a node without the `claude` CLI
@@ -96,15 +97,17 @@ What actually has to exist first:
 Placement is **claim-side filtering, not a scheduler**. The claim query is
 the whole mechanism:
 
-- A worker starts with labels describing what and where it is:
-  `node=lab`, `arch=arm64`, `adapter=claude`, `can=infra-exec`.
-- An agent definition (and therefore its RunSpec, resolved at planning time)
-  may declare `placement`: label requirements such as
+- A worker starts with labels describing what and where it is (`--label k=v`):
+  `node=lab`, `arch=arm64`, `adapter=claude`, `can=infra-exec`, registered in
+  the worker table via `registerWorker` (`lib/workers.mjs`).
+- An agent definition (and therefore its RunSpec, resolved at planning time in
+  `lib/planner.mjs`) may declare `placement`: label requirements such as
   `{ node: "lab", can: "infra-exec" }`. No requirement → any worker.
-- `claimNext` claims only runs whose placement its labels satisfy. Postgres
-  evaluates the filter inside the same `SKIP LOCKED` query — there is no
-  scheduler process, no bin-packing, no second coordinator (§3's rule: two
-  mutation coordinators race).
+- `claimNext` (`lib/worker.mjs`) claims only runs whose placement its labels satisfy
+  (`satisfiesPlacement` in `lib/workers.mjs`). In SQLite today, the worker
+  filters candidate runs in JS within `claimNext`; Postgres will evaluate the
+  filter inside the same `SKIP LOCKED` query — there is no scheduler process,
+  no bin-packing, no second coordinator (§3's rule: two mutation coordinators race).
 
 Slice 2 is the motivating case: `keephq.disk-alert.raised` remediation must
 execute *on the affected host*. Labels also encode the quota split cleanly:
@@ -112,9 +115,10 @@ execute *on the affected host*. Labels also encode the quota split cleanly:
 executors (closed action registry, no model) can scale per node with zero
 usage-window risk.
 
-Unsatisfiable placement must surface, not hang: a run whose placement no
-live worker's labels satisfy is a doctor-check anomaly (§13) after a
-threshold age, with the missing labels named.
+Unsatisfiable placement must surface, not hang: candidate filtering ensures
+unplaced or matching runs are not starved by unsatisfiable queue heads
+(OPS-454), and runs whose placement no live worker's labels satisfy surface
+as doctor-check anomalies (§13) after a threshold age, naming the missing labels.
 
 ## 5. Chaining agents
 
@@ -196,21 +200,32 @@ stand as the rules that design satisfies:
    merge permanently human. Building the provider before those land would
    recreate the race this rule exists to prevent.
 
-## 6. Ticket cut-lines (when the operator says go)
+## 6. Ticket cut-lines
 
-1. **Postgres substrate** — port `db.mjs`; same schema; `SKIP LOCKED` in
-   `claimNext`; SQLite remains the default for demo/tests.
-2. **`cli.mjs work`** — worker-as-process; `serve --no-worker`; two-process
-   lease/fencing contention test.
-3. **Artifact store backend** — shared-bytes implementation behind
-   `lib/artifacts.mjs`; control-node reads for any node's artifacts.
-4. **Labels + placement** — worker label set, `placement` in agent
-   definitions and RunSpec, claim-side filtering, unsatisfiable-placement
-   doctor check.
-5. **Registry verification at claim** — content-hash check on the worker,
-   `registry_mismatch` refusal path.
-6. **Chaining slice** — §11's two-node DAG plus the typed-recommendation →
-   proposal path, gated per event type.
+1. **Postgres substrate** — **deferred (Stage 2)**: port `db.mjs`; same schema;
+   `FOR UPDATE SKIP LOCKED` in `claimNext` for remote nodes; SQLite with WAL mode
+   and `BEGIN IMMEDIATE` remains the default substrate for local multi-process
+   operation, tests, and demos.
+2. **`cli.mjs work`** — **shipped (OPS-233)**: worker-as-process; `serve`
+   runs no worker by default (`--with-worker` for all-in-one demo/tests);
+   two-process lease/fencing contention verified in `lib/workers.test.mjs`.
+3. **Artifact store backend** — **deferred (Stage 2)**: shared-bytes
+   implementation behind `lib/artifacts.mjs` (Postgres blobs or object store);
+   control-node reads for any remote node's artifacts; node-local content-addressed
+   disk store (`<home>/artifacts/<sha256>`) remains current.
+4. **Labels + placement** — **shipped (OPS-233, OPS-454)**: worker label set
+   (`--label k=v`, `registerWorker` in `lib/workers.mjs`), `placement` in agent
+   definitions and RunSpec (`lib/planner.mjs`), claim-side filtering via
+   `satisfiesPlacement` (`lib/workers.mjs`) in `claimNext` (`lib/worker.mjs`).
+   Enforcement semantics are strictly claim-side filtering, not an external scheduler.
+5. **Registry verification at claim** — **shipped (OPS-409)**: content-hash check
+   on the worker via `verifyDefHash` (`lib/receipts.mjs`), evaluated in
+   `lib/worker.mjs` before execution, with typed refusal (`agent_definition_mismatch`
+   → `REFUSED`) and receipt attestation on definition drift.
+6. **Chaining slice** — **shipped (OPS-223)**: discovered chaining via
+   typed recommendations in output contracts (`edges.json`, `lib/chain.mjs`),
+   re-entering the planner for watched proposals with per-edge earned automation
+   (CI failure doctor: `ci-doctor@1` → `FLAKE|ENV → ci-rerun@1` / `TICKET → ci-notify@1`).
 
-Each is independently shippable and testable with the fake adapter; 1–2
-are prerequisites for 3–5; 6 is orthogonal to distribution.
+Items 2, 4, 5, and 6 are shipped and verified in the test suite; items 1 and 3
+remain the prerequisites for multi-node distribution (Stage 2).

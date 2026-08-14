@@ -25,7 +25,13 @@ export function keyGuard(e: KeyboardEvent): boolean {
   return modal.depth > 0;
 }
 
-/** Hash routing: "#/runs/run_01" → ["runs", "run_01"]. Default view: overview. */
+/**
+ * Hash routing: "#/runs/run_01" → ["runs", "run_01"]. Default view: overview.
+ *
+ * Query-only hash updates (or same-path query changes) depend on producing a
+ * new route array identity `[...segments]` so React component effects and
+ * state updates trigger re-renders properly.
+ */
 export function useHashRoute(): [string[], (path: string) => void] {
   const read = () => parseHash(window.location.hash);
   const [route, setRoute] = useState<string[]>(read);
