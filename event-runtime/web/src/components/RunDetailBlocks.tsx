@@ -114,7 +114,11 @@ function BudgetMeter({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }
   if (c.kind === "off" || timeoutSeconds <= 0) return null;
   const spent = c.kind === "spent" ? 1 : 1 - c.leftMs / (timeoutSeconds * 1000);
   return (
-    <div className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)" aria-hidden="true">
+    <div
+      className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)"
+      aria-hidden="true"
+      title="share of the attempt budget already spent"
+    >
       <div
         className="h-full rounded-full transition-[width,background-color] duration-1000 ease-linear"
         style={{
