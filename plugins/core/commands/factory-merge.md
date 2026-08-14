@@ -8,6 +8,8 @@ Review and land the open PRs for this repository. My invoking this command is th
 
 Interpret $ARGUMENTS as specific PR numbers or Linear issue IDs; default is every open PR in this repo (`gh pr list`, cross-checked against the team's `In Review` tickets so orphaned PRs and ticket-less PRs both surface).
 
+**Merge serialization & per-repo lock**: Merges are strictly serialized per repository. Never run concurrent merge supervisors or merge processes against the same repository; a merge run holds exclusive lock over merge execution for that repo to prevent race conditions where one process merges PRs another process has escalated or modified.
+
 `--include-escalated` is a one-off override used only by the foreground TUI's explicitly confirmed **merge all** action. It means the human has decided that existing `escalated` labels are not a hold for this run: include those PRs in the review and merge them when they otherwise meet the normal MERGE bar. Do not treat it as permission to merge with red CI, unresolved conflicts, a failing base/smoke check, or a blocking review finding. Do not apply this override merely because an escalated PR is visible; it must be present in `$ARGUMENTS`.
 
 ## Per PR, in this order
@@ -36,9 +38,9 @@ Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the mo
 
   Exception: when `$ARGUMENTS` contains `--include-escalated`, the invoking human has explicitly cleared this escalation hold for this run. Review the PR just as thoroughly; if CI is green and there are no other blocking findings, classify it MERGE instead of holding it solely because it is escalated. This exception never overrides the normal MERGE prerequisites.
 
-  Then label the PR `escalated` on GitHub (`gh pr edit <PR> --add-label escalated`, creating the label if the repo lacks it). An escalated PR stays open by design, waiting on me — and the merge gate counts open PRs, so without the label every tick would re-review it and re-escalate it forever. Removing the label is my signal that it is yours again.
+  **Atomic dual-labeling**: Whenever a PR is escalated, apply Linear `ai:escalated` and GitHub `escalated` (`gh pr edit <PR> --add-label escalated`, creating the label if the repo lacks it) together in the same step. Neither label alone is sufficient — Linear surfaces the issue in human decision queues, while GitHub blocks merge tooling. An escalated PR stays open by design, waiting on me — and the merge gate counts open PRs, so without the label every tick would re-review it and re-escalate it forever. Removing the label is my signal that it is yours again.
 
-  Run the mechanical half first: `factory escalate --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. **Exit 2** means ESCALATE, no judgment call needed. **Exit 0** means the list was checked and no changed file matched — that clears only the path list, the behavior-based judgment below still applies. **Exit 3 means the gate could not be evaluated at all** (unknown repo, unreadable config, `gh pr diff` failed, or the repo has no `escalate_paths` key): it is not a pass. Treat the PR as escalated until the check can actually run, and fix the cause — give the repo an `escalate_paths` list, or an explicit `escalate_paths: []` where there is deliberately nothing to check mechanically.
+  Run the mechanical half first: `factory escalate --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. **Exit 2** means ESCALATE, no judgment call needed. **Exit 0** means the list was checked and no changed file matched — that clears only the path list, the behavior-based judgment below still applies. **Exit 3 means the gate could not be evaluated at all** (unknown repo, unreadable config, `gh pr diff` failed or named no files at all / empty diff, or the repo has no `escalate_paths` key): it is not a pass. Treat the PR as escalated until the check can actually run, and fix the cause — give the repo an `escalate_paths` list, or an explicit `escalate_paths: []` where there is deliberately nothing to check mechanically.
 
   The command also warns on stderr when the factory checkout it read the config from is behind its upstream or has uncommitted changes to `config/repos.yaml` — either can silently change the answer, which is how a real PR touching `.github/workflows/**` once came back clean (WM-15). On those warnings, `git -C ~/Develop/factory pull --ff-only` (or read `origin/<base>:config/repos.yaml` when the checkout is dirty) and re-run before trusting the result. If `factory` is not on PATH, apply the repo's `escalate_paths` from `config/repos.yaml` by hand against the changed-file list.
 
@@ -58,7 +60,10 @@ So:
 
 1. Take the PRs you classified MERGE and read each one's changed files (`gh pr diff <PR> --name-only`).
 2. Form a batch of PRs whose file sets are **pairwise disjoint**, up to **8** (matches the repo's dispatch concurrency cap — batching should be able to clear what one dispatch cycle produces). Any PR sharing a file with one already in the batch waits for the next batch.
-3. Merge the batch back to back, without waiting for base CI between them.
+3. Merge the batch back to back, without waiting for base CI between them. Immediately before executing `gh pr merge` on each PR:
+   - Run `factory escalate --repo <name> --pr <PR>` as an authoritative pre-merge gate. Any PR touching `escalate_paths` (exit code 2) is prohibited from merging even if labels are missing or out of sync (unless `$ARGUMENTS` contains `--include-escalated`). Exit 3 (cannot evaluate) also halts the merge.
+   - Re-verify that the PR does not carry the `escalated` label (`gh pr view <PR> --json labels -q '.labels[].name'`). GitHub status checks do not re-run when labels change, so a passing check rollup can mask an escalation applied after CI settled. If the `escalated` label is present (and `$ARGUMENTS` does not contain `--include-escalated`), abort the merge immediately.
+   - Verify that the current PR head SHA matches the reviewed and approved commit SHA (`gh pr view <PR> --json headRefOid -q .headRefOid`). If the head SHA has changed (e.g. from an unreviewed push or review fix added after review approval), stop and re-review the diff before merging.
 4. Then wait **once** for base CI on the batch (`gh run watch <run> --exit-status`), plus the smoke check where the repo has one.
 5. Green: move every ticket in the batch to `Done` and clean up. Red: you have at most 5 suspects and their file sets are disjoint, so the failing job names the culprit. Revert that one merge (`git revert -m 1 <merge-sha>`, push, re-verify), keep the rest, and report what you reverted and why.
 
@@ -72,16 +77,14 @@ If the repo has GitHub's native merge queue enabled, prefer it over any of this 
 
 After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
 
-Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, check that no **other open PR** still has it as its head (WM-17):
+Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, run `factory branch-guard` to mechanically verify that the branch is not protected (`base` / `deploy_branch` / `develop` / `master` / `main`) and that no **other open PR** still has it as its head (WM-17, WM-51):
 
 ```bash
 HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
-HOLDERS="$(gh pr list --head "$HEAD_REF" --state open --json number -q '.[].number')" ||
-  { echo "cannot tell whether $HEAD_REF is held — not deleting"; exit 1; }
-if [ -n "$HOLDERS" ]; then
-  echo "keeping $HEAD_REF — still the head of open PR $HOLDERS"
-else
+if factory branch-guard --repo <name> --pr <PR> --head "$HEAD_REF"; then
   git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+else
+  echo "branch-guard refused or held deletion for $HEAD_REF — keeping branch"
 fi
 ```
 
