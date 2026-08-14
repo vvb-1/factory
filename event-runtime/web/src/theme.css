@@ -56,34 +56,40 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Inter Display is Inter's opsz axis at display sizes (spec §5.1). */
-.display {
-  font-variation-settings: "opsz" 28;
-  letter-spacing: -0.01em;
-}
-
 /* In @layer components so `text-*` utilities override the default size: Tailwind
    emits utilities into a later layer, which unlayered author CSS would beat at
    equal specificity no matter what the utility declares (OPS-321). */
 @layer components {
+  /* Inter Display is Inter's opsz axis at display sizes (spec §5.1). */
+  .display {
+    font-variation-settings: "opsz" 28;
+    letter-spacing: -0.01em;
+  }
+
   .mono {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 11.5px;
   }
-}
 
-/* Status washes on inbox rows — declared before .row-selected so selection wins. */
-.row-wash-err {
-  background: color-mix(in oklch, var(--hue-err) 6%, transparent);
-}
-.row-wash-warn {
-  background: color-mix(in oklch, var(--hue-warn) 6%, transparent);
-}
+  /* Status washes on inbox rows — declared before .row-selected so selection wins. */
+  .row-wash-err {
+    background: color-mix(in oklch, var(--hue-err) 6%, transparent);
+  }
+  .row-wash-warn {
+    background: color-mix(in oklch, var(--hue-warn) 6%, transparent);
+  }
 
-/* Row selection ring used by keyboard navigation. */
-.row-selected {
-  background: color-mix(in oklch, var(--accent) 16%, var(--surface-0));
-  box-shadow: inset 3px 0 0 var(--accent);
+  /* Row selection ring used by keyboard navigation. */
+  .row-selected {
+    background: color-mix(in oklch, var(--accent) 16%, var(--surface-0));
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  [cmdk-group-heading] {
+    padding: 8px 12px 2px;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
 }
 
 :focus-visible {
@@ -122,9 +128,3 @@ body {
 }
 .react-flow__controls-button:hover { background: var(--surface-3); }
 .react-flow__edge-text { fill: var(--text-faint); }
-
-[cmdk-group-heading] {
-  padding: 8px 12px 2px;
-  font-size: 11px;
-  color: var(--text-faint);
-}
