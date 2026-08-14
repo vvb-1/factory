@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { modal, useNow } from "../hooks";
 import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
+import { flushHash } from "../hash";
 import {
   type FilterChipToken,
   type FilterQuery,
@@ -56,6 +57,7 @@ export function copyText(text: string, label: string) {
 
 /** Shareable hash of the current selection — the payoff of hash-as-source-of-truth. */
 export function copyLink() {
+  flushHash();
   copyText(window.location.href, "link");
 }
 
