@@ -51,6 +51,32 @@ if (completed) {
 const events = await client.events();
 check("≥8 admitted events", events.events.length >= 8);
 
+// Project tags (OPS-385 / OPS-366). ≥-shaped because --reseed accumulates
+// fixtures under a fresh prefix rather than wiping: one old tagged row keeps
+// this check green on an accumulated database.
+const FAKE_ADAPTER_MODES = new Set(["ok", "refuse", "crash", "invalid-artifact", "hang"]);
+let registryNames = null;
+try {
+  const { repos: registry } = await client.repos();
+  registryNames = (registry ?? []).map((row) => row.name).filter(Boolean);
+} catch (err) {
+  if (err.status === 500) {
+    console.log("skip ≥1 run carries a project tag (GET /repos 500 — registry missing or unreadable)");
+  } else {
+    check(`GET /repos (${err.status ?? "no status"})`, false);
+  }
+}
+if (registryNames !== null) {
+  const tagged = runs.filter((r) => {
+    const repos = r.repos ?? [];
+    return FAKE_ADAPTER_MODES.has(repos[0]) && registryNames.includes(repos[1]);
+  });
+  check(
+    "≥1 run carries a project tag (repos[1] from GET /repos, repos[0] still a fake-adapter mode)",
+    tagged.length >= 1,
+  );
+}
+
 if (failures.length) {
   console.error(`\nverify: ${failures.length} check(s) failed — reseed with: bun event-runtime/demo/seed.mjs --port ${port}`);
   process.exit(1);
