@@ -2,7 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { RunState, TraceEntry, TracePayload } from "../types";
-import { Disclosure, humanSize, JsonBlock, Section } from "./ui";
+import { Disclosure, humanSize, JsonBlock, Section, notify } from "./ui";
+
+function copyText(text: string, label: string = "text") {
+  navigator.clipboard.writeText(text);
+  notify(`Copied ${label} to clipboard`, "info");
+}
 
 /** States in which the trace is still being written — poll incrementally. */
 const LIVE_STATES: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
@@ -64,11 +69,206 @@ function useTraceFeed(runId: string, live: boolean) {
   };
 }
 
-function TextBlock({ text }: { text: string }) {
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const tokenRegex = /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)|(~~[^~]+~~)|(\[[^\]]+\]\([^)]+\))/g;
+  const nodes: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      nodes.push(text.slice(lastIdx, match.index));
+    }
+    const full = match[0];
+    if (match[1]) {
+      nodes.push(
+        <code key={match.index} className="mono rounded bg-(--surface-2) px-1 py-0.5 text-[11px] text-(--text)">
+          {full.slice(1, -1)}
+        </code>
+      );
+    } else if (match[2]) {
+      nodes.push(<strong key={match.index} className="font-semibold text-(--text)">{full.slice(2, -2)}</strong>);
+    } else if (match[3]) {
+      nodes.push(<em key={match.index} className="italic text-(--text-dim)">{full.slice(1, -1)}</em>);
+    } else if (match[4]) {
+      nodes.push(<del key={match.index} className="line-through text-(--text-faint)">{full.slice(2, -2)}</del>);
+    } else if (match[5]) {
+      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(full);
+      if (linkMatch) {
+        nodes.push(
+          <a key={match.index} href={linkMatch[2]} target="_blank" rel="noreferrer" className="text-(--accent) underline hover:opacity-80">
+            {linkMatch[1]}
+          </a>
+        );
+      } else {
+        nodes.push(full);
+      }
+    }
+    lastIdx = tokenRegex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    nodes.push(text.slice(lastIdx));
+  }
+  return nodes.length ? nodes : [text];
+}
+
+export function MarkdownView({
+  text,
+  allowToggle = true,
+  className = "",
+}: {
+  text: string;
+  allowToggle?: boolean;
+  className?: string;
+}) {
+  const [raw, setRaw] = useState(false);
+
+  if (raw) {
+    return (
+      <div className={`relative ${className}`}>
+        {allowToggle && (
+          <div className="mb-1 flex justify-end gap-2 text-[10.5px]">
+            <button type="button" onClick={() => copyText(text, "raw markdown")} className="text-(--text-faint) hover:text-(--text)">Copy</button>
+            <button type="button" onClick={() => setRaw(false)} className="text-(--accent) hover:underline">Formatted view</button>
+          </div>
+        )}
+        <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-2.5 text-[11.5px] leading-relaxed whitespace-pre-wrap text-(--text-dim)">
+          {text}
+        </pre>
+      </div>
+    );
+  }
+
+  const lines = text.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeLang = "";
+  let codeBuffer: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+  let listItems: string[] = [];
+
+  const flushList = (key: number) => {
+    if (!listType || !listItems.length) return;
+    if (listType === "ul") {
+      blocks.push(
+        <ul key={`ul-${key}`} className="my-1 ml-4 list-disc space-y-0.5 text-[12px] text-(--text-dim)">
+          {listItems.map((item, idx) => (
+            <li key={idx}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>
+      );
+    } else {
+      blocks.push(
+        <ol key={`ol-${key}`} className="my-1 ml-4 list-decimal space-y-0.5 text-[12px] text-(--text-dim)">
+          {listItems.map((item, idx) => (
+            <li key={idx}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ol>
+      );
+    }
+    listType = null;
+    listItems = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith("```")) {
+      flushList(i);
+      if (inCodeBlock) {
+        inCodeBlock = false;
+        const codeText = codeBuffer.join("\n");
+        blocks.push(
+          <div key={`code-${i}`} className="my-1.5 overflow-hidden rounded-md border border-(--border) bg-(--surface-0)">
+            <div className="flex items-center justify-between border-b border-(--border) bg-(--surface-1) px-2.5 py-0.5 text-[10px] text-(--text-faint) mono">
+              <span>{codeLang || "code"}</span>
+              <button type="button" onClick={() => copyText(codeText, "code block")} className="hover:text-(--text)">Copy</button>
+            </div>
+            <pre className="mono overflow-auto p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-(--text)">
+              {codeText}
+            </pre>
+          </div>
+        );
+        codeBuffer = [];
+        codeLang = "";
+      } else {
+        inCodeBlock = true;
+        codeLang = line.trim().slice(3).trim();
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (headingMatch) {
+      flushList(i);
+      const level = headingMatch[1].length;
+      const content = headingMatch[2];
+      if (level === 1) {
+        blocks.push(<h1 key={i} className="mb-1.5 mt-2 text-[14.5px] font-bold text-(--text) border-b border-(--border) pb-0.5">{renderInlineMarkdown(content)}</h1>);
+      } else if (level === 2) {
+        blocks.push(<h2 key={i} className="mb-1 mt-2 text-[13.5px] font-semibold text-(--text) border-b border-(--border) pb-0.5">{renderInlineMarkdown(content)}</h2>);
+      } else if (level === 3) {
+        blocks.push(<h3 key={i} className="mb-0.5 mt-1.5 text-[12.5px] font-semibold text-(--text)">{renderInlineMarkdown(content)}</h3>);
+      } else {
+        blocks.push(<h4 key={i} className="mb-0.5 mt-1 text-[12px] font-semibold text-(--text)">{renderInlineMarkdown(content)}</h4>);
+      }
+      continue;
+    }
+
+    if (line.startsWith("> ")) {
+      flushList(i);
+      blocks.push(
+        <blockquote key={i} className="my-1 border-l-2 border-(--accent) pl-2.5 italic text-(--text-dim) text-[12px]">
+          {renderInlineMarkdown(line.slice(2))}
+        </blockquote>
+      );
+      continue;
+    }
+
+    const ulMatch = /^[-*]\s+(.+)$/.exec(line);
+    if (ulMatch) {
+      if (listType !== "ul") flushList(i);
+      listType = "ul";
+      listItems.push(ulMatch[1]);
+      continue;
+    }
+
+    const olMatch = /^(\d+)\.\s+(.+)$/.exec(line);
+    if (olMatch) {
+      if (listType !== "ol") flushList(i);
+      listType = "ol";
+      listItems.push(olMatch[2]);
+      continue;
+    }
+
+    flushList(i);
+    if (!line.trim()) {
+      blocks.push(<div key={i} className="h-1" />);
+    } else {
+      blocks.push(
+        <p key={i} className="my-0.5 text-[12px] leading-relaxed text-(--text-dim)">
+          {renderInlineMarkdown(line)}
+        </p>
+      );
+    }
+  }
+  flushList(lines.length);
+
   return (
-    <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 leading-relaxed whitespace-pre-wrap">
-      {text}
-    </pre>
+    <div className={`relative ${className}`}>
+      {allowToggle && text.length > 50 && (
+        <div className="mb-1 flex justify-end gap-2 text-[10px]">
+          <button type="button" onClick={() => copyText(text, "markdown text")} className="text-(--text-faint) hover:text-(--text)">Copy</button>
+          <button type="button" onClick={() => setRaw(true)} className="text-(--text-faint) hover:text-(--accent)">Raw</button>
+        </div>
+      )}
+      <div className="space-y-0.5">{blocks}</div>
+    </div>
   );
 }
 
@@ -86,7 +286,7 @@ function ContentBlock({ content }: { content: unknown }) {
         // Fall back to plain text if not valid JSON
       }
     }
-    return <TextBlock text={content} />;
+    return <MarkdownView text={content} />;
   }
   return <JsonBlock value={content ?? null} />;
 }
@@ -145,7 +345,9 @@ function TraceBody({
     return (
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <div className="whitespace-pre-wrap text-(--text-dim)">{p.text ?? ""}</div>
+          <div className="min-w-0 flex-1">
+            <MarkdownView text={p.text ?? ""} />
+          </div>
           {durationMs != null && maxMs != null && <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />}
         </div>
       </div>
