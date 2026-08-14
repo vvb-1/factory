@@ -22,15 +22,16 @@
  * Plus two open proposals: one approvable (`run`) and one `human_needed`
  * (empty repos fails the input schema's minItems).
  *
- * Some fixtures carry a second repo — a real config/repos.yaml name appended
- * after the mode (`["ok", "bj29"]`). The web UI's project tabs filter on
- * `repos[]`, so without it every tab on a freshly seeded runtime reads empty
- * (OPS-366). Only appended, never substituted: repos[0] stays the mode.
+ * Some fixtures carry a second repo — a real project name from the serve
+ * process's GET /repos (the same list the UI's project tabs use), appended
+ * after the mode. Names come from the server on purpose, not from the
+ * seeder's local config/repos.yaml, so a seed aimed at a runtime serving a
+ * different checkout still tags with names the tabs can offer (OPS-387).
+ * Only appended, never substituted: repos[0] stays the mode.
  *
  *   bun event-runtime/demo/seed.mjs [--port 7381] [--prefix demo]
  */
 import { apiClient } from "../lib/client.mjs";
-import { loadRepos } from "../lib/repos.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => {
@@ -45,20 +46,22 @@ const log = (line) => console.log(`seed: ${line}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Real repos.yaml names for the project tags. Optional by design: a checkout
- * without config/repos.yaml (or with no entries) must still seed a full demo
- * set, so a missing registry costs the tags, not the run.
+ * Real project names for the tags, from the serve process's GET /repos — the
+ * same list the UI's project tabs offer. Optional by design: a missing or
+ * unreadable registry (HTTP 500) must still seed a full demo set, so it
+ * costs the tags, not the run. Resolved after the health check; calling the
+ * API at module scope would surface a connection error instead of the
+ * "no control API" message.
  */
-function projectNames() {
+async function projectNames() {
   try {
-    return [...loadRepos().keys()];
+    const { repos: registry } = await client.repos();
+    return (registry ?? []).map((row) => row.name).filter(Boolean);
   } catch (err) {
     log(`no repo registry (${err.message}) — seeding without project tags`);
     return [];
   }
 }
-
-const [projectA, projectB = projectA] = projectNames();
 
 /** repos[0] must stay the fake adapter's mode — the project name only trails it. */
 const tag = (mode, project) => (project ? [mode, project] : [mode]);
@@ -140,6 +143,7 @@ if (probe.spec?.adapter !== "fake") {
 }
 await client.reject(probe.id, "adapter probe — not part of the demo set");
 
+const [projectA, projectB = projectA] = await projectNames();
 log(projectA ? `project tags: ${[...new Set([projectA, projectB])].join(", ")}` : "project tags: none");
 
 // Quick terminals first: the single worker handles them one per tick. The
