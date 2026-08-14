@@ -834,10 +834,7 @@ export function Runs({
                     {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
                   </span>
                   <span className="truncate text-(--text-faint)">
-                    {/* `.mono` is unlayered author CSS at 11.5px; a utility
-                        `text-[13px]` loses the cascade. The important modifier
-                        is what actually matches the 13px prose beside it. */}
-                    <ActorRef actor={e.actor} className="text-[13px]!" />
+                    <ActorRef actor={e.actor} className="text-[13px]" />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
                 </div>
