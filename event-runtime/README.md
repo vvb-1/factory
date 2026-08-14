@@ -231,8 +231,10 @@ tagged fixtures are the completed `ok` run, the rejected proposal, the open
 approvable proposal, and the `hang` run; `refuse`, `crash`,
 `invalid-artifact`, and the `human_needed` proposal stay untagged because a
 tab that matches every row proves nothing about filtering. Names come from
-the reader's own registry, not a hardcoded pair; a checkout without one
-seeds the full set untagged and logs `project tags: none`.
+the running server's `GET /repos` endpoint (the same list the UI's project
+tabs offer), not the seeder checkout's local registry; a server without a
+readable registry logs `no repo registry (...) — seeding without project tags`
+and seeds the full set untagged.
 
 `event-runtime/demo/verify.mjs --port <api>` asserts the whole fixture via
 the API — the e2e smoke. `worktree-up.sh` runs it before reporting ready, so
