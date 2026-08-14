@@ -181,12 +181,17 @@ export function Events({
   // not its presence in `rows` — decides whether this tab can render it.
   useEffect(() => {
     if (!focusEvent?.source || !focusEvent?.eventId) return;
+    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) return;
+    if (list.isPending || !list.data) return;
     const key = `${focusEvent.source}:${focusEvent.eventId}`;
     const row = rows.find((e) => keyOf(e) === key);
-    const onTab = !!row && (!fetchAll || tab === "all" || row.status === tab);
-    if (!onTab && tab !== "all") setTab("all");
+    if (fetchAll) {
+      if (row && tab !== "all" && row.status !== tab) setTab("all");
+      return;
+    }
+    if (!row && tab !== "all") setTab("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusEvent?.source, focusEvent?.eventId, rows, tab, fetchAll]);
+  }, [focusEvent?.source, focusEvent?.eventId, focusEvent?.status, rows, tab, fetchAll, list.isPending, list.data]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });
