@@ -1,7 +1,7 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { Button, Countdown, DetailPane, FilterInput, getValueHue, notify, shortId, ToastContainer } from "./ui";
+import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, notify, shortId, ToastContainer } from "./ui";
 import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 
 function stackOf(r: ReturnType<typeof render>): HTMLElement {
@@ -16,14 +16,11 @@ function classes(el: HTMLElement): string[] {
 
 beforeEach(() => {
   jest.useFakeTimers();
+  clearToasts();
 });
 
 afterEach(() => {
-  // activeToasts in ui.tsx is module-scoped with no exported reset. Drain all
-  // dismiss timeouts (up to 6s for err toasts) so leftover toasts cannot leak into the next test.
-  act(() => {
-    jest.advanceTimersByTime(10000);
-  });
+  clearToasts();
   jest.useRealTimers();
   cleanup();
 });
