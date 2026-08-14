@@ -291,7 +291,7 @@ export function CommandPalette({
 export function useGoSequences(map: Record<string, () => void>): boolean {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
-    const chord = goSequence((key) => key in map);
+    const chord = goSequence((key) => Object.hasOwn(map, key));
     // The window closes on its own, with nothing to press: the only way the
     // affordance can follow it is a timer of the same length.
     let lapse: ReturnType<typeof setTimeout> | undefined;

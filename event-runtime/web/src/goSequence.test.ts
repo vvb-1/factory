@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { goSequence } from "./goSequence";
+import { GO_CHORD_MS, goSequence } from "./goSequence";
 
 /** A stepper over the real nav suffixes, with a clock the test drives. */
 function chord(targets = ["g", "o", "e", "p", "r", "t", "w"]) {
-  let now = 1_000;
+  let now = GO_CHORD_MS;
   const seq = goSequence((k) => targets.includes(k), () => now);
   return { press: seq.press, armed: seq.armed, at: (t: number) => (now = t) };
 }
@@ -12,7 +12,7 @@ describe("goSequence", () => {
   test("g g completes the chord inside the window — the Graph suffix is not swallowed", () => {
     const c = chord();
     expect(c.press("g")).toBe(false);
-    c.at(1_500);
+    c.at(GO_CHORD_MS + Math.floor(GO_CHORD_MS / 2));
     expect(c.press("g")).toBe(true);
   });
 
@@ -27,9 +27,9 @@ describe("goSequence", () => {
   test("a g after the window lapses re-arms rather than navigating", () => {
     const c = chord();
     c.press("g");
-    c.at(2_000);
+    c.at(GO_CHORD_MS + GO_CHORD_MS + 1);
     expect(c.press("g")).toBe(false);
-    c.at(2_200);
+    c.at(GO_CHORD_MS + GO_CHORD_MS + 1 + Math.floor(GO_CHORD_MS / 2));
     expect(c.press("g")).toBe(true);
   });
 
@@ -43,7 +43,7 @@ describe("goSequence", () => {
   test("a lapsed suffix does not navigate", () => {
     const c = chord();
     c.press("g");
-    c.at(2_000);
+    c.at(GO_CHORD_MS + GO_CHORD_MS);
     expect(c.press("w")).toBe(false);
   });
 
@@ -62,9 +62,9 @@ describe("goSequence", () => {
     const c = chord();
     c.press("g");
     expect(c.armed()).toBe(true);
-    c.at(1_799);
+    c.at(GO_CHORD_MS + GO_CHORD_MS - 1);
     expect(c.armed()).toBe(true);
-    c.at(1_800);
+    c.at(GO_CHORD_MS + GO_CHORD_MS);
     expect(c.armed()).toBe(false);
   });
 
@@ -87,7 +87,7 @@ describe("goSequence", () => {
   test("a lapsed g re-arms for a fresh window", () => {
     const c = chord();
     c.press("g");
-    c.at(2_000);
+    c.at(GO_CHORD_MS + GO_CHORD_MS);
     expect(c.armed()).toBe(false);
     c.press("g");
     expect(c.armed()).toBe(true);
