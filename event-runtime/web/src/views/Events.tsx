@@ -52,11 +52,8 @@ function isStatusTab(value: string | undefined): value is StatusTab {
   return !!value && (STATUS_TABS as readonly string[]).includes(value);
 }
 
-function rowWash(status: string): string {
-  if (status === "dead_lettered") return "row-wash-err";
-  if (status === "human_needed") return "row-wash-warn";
-  return "";
-}
+const rowWash = (s: string) =>
+  s === "dead_lettered" ? "row-wash-err" : s === "human_needed" ? "row-wash-warn" : "";
 
 /**
  * Events (webui doc §10.1) — the event inbox. Every admitted envelope with
@@ -452,16 +449,17 @@ export function Events({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Event</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Source</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Type</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Subject</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Admitted</th>
+              {["Event", "Source", "Type", "Subject", "Status", "Admitted"].map((h) => (
+                <th key={h} className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {visible.map((e, i) => (
+            {visible.map((e, i) => {
+              const proposalReason = (e as any).proposalReason ?? (e as any).proposal_reason ?? null;
+              return (
               <tr
                 key={keyOf(e)}
                 onClick={() => onSelectEvent(e.source, e.eventId)}
@@ -488,17 +486,21 @@ export function Events({
                   {/* Why the event is parked, on the row: `.mono` carries its own
                       11.5px, so no size utility (it is unlayered and would win).
                       The detail pane keeps the untruncated error. */}
-                  {e.lastPlanError && (
+                  {e.lastPlanError ? (
                     <div className="mono mt-0.5 truncate text-(--text-dim)" title={e.lastPlanError}>
                       {e.lastPlanError}
                     </div>
-                  )}
+                  ) : proposalReason ? (
+                    <div className="mono mt-0.5 truncate text-(--text-dim)" title={proposalReason}>
+                      {proposalReason}
+                    </div>
+                  ) : null}
                 </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
                   <Ago iso={e.admittedAt} now={now} />
                 </td>
               </tr>
-            ))}
+            );})}
             {visible.length === 0 && (
               <ListEmpty
                 colSpan={6}
@@ -507,9 +509,9 @@ export function Events({
                 noun="events"
                 empty={
                   context.kind === "repo"
-                    ? `No events naming ${context.name}.`
+                    ? `No events for ${context.name}.`
                     : tab === "all"
-                    ? "No events yet."
+                    ? "No events."
                     : `No ${TAB_LABEL[tab].toLowerCase()} events.`
                 }
                 action={
@@ -567,22 +569,29 @@ export function Events({
             />
           </Section>
 
-          {(sel.planFailures > 0 || sel.lastPlanError) && (
-            <Section title="Planning">
-              <KV k="planFailures" v={String(sel.planFailures)} />
-              {sel.lastPlanError && (
-                <div
-                  className="mt-1.5 rounded-md px-2.5 py-1.5 text-[12px]"
-                  style={{
-                    color: "var(--hue-err)",
-                    background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
-                  }}
-                >
-                  {sel.lastPlanError}
-                </div>
-              )}
-            </Section>
-          )}
+          {(() => {
+            const r = (sel as any).proposalReason ?? (sel as any).proposal_reason ?? null;
+            if (sel.planFailures <= 0 && !sel.lastPlanError && !r) return null;
+            const err = sel.lastPlanError;
+            const hue = err ? "var(--hue-err)" : "var(--hue-warn)";
+            return (
+              <Section title="Planning">
+                {sel.planFailures > 0 && <KV k="planFailures" v={String(sel.planFailures)} />}
+                {r && <KV k="proposalReason" v={r} />}
+                {(err || r) && (
+                  <div
+                    className="mt-1.5 rounded-md px-2.5 py-1.5 text-[12px]"
+                    style={{
+                      color: hue,
+                      background: `color-mix(in oklch, ${hue} 10%, transparent)`,
+                    }}
+                  >
+                    {err ?? r}
+                  </div>
+                )}
+              </Section>
+            );
+          })()}
 
           <Section title="Envelope">
             <Disclosure label="payload JSON">
@@ -612,9 +621,7 @@ export function Events({
               </Button>
             </div>
             <div className="text-[11px] leading-relaxed text-(--text-faint)">
-              Requeue re-plans this already-admitted event. Replay re-injects the envelope through
-              intake (dedup demo — a known id is a no-op). Trigger again opens inject with a fresh
-              event id so it admits as a new event.
+              Requeue re-plans this event. Replay re-injects through intake. Trigger again opens inject.
             </div>
           </div>
           <VerbError error={requeue.error ?? replay.error} />
@@ -624,9 +631,7 @@ export function Events({
       {confirmReplay && sel && (
         <Dialog title={`Replay ${sel.eventId} through intake?`} onClose={() => setConfirmReplay(false)}>
           <div className="mb-3 text-[12px] text-(--text-dim)">
-            Replay re-injects this envelope through the same admission path as a webhook. If the
-            event id already exists, intake reports a duplicate and does nothing. This does not
-            re-plan a dead letter — use Requeue for that.
+            Replay re-injects this envelope through intake.
           </div>
           <VerbError error={replay.error} />
           <div className="mt-3 flex justify-end gap-2">

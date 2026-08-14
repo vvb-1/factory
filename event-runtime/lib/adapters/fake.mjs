@@ -51,10 +51,7 @@ function ciDoctorArtifact(input) {
   };
 }
 
-/**
- * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
- */
-export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace }) {
+export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace, abortSignal, signal }) {
   // Every real adapter captures the agent's output as a runtime artifact
   // (worker.mjs RUNTIME_ARTIFACTS). The fake must too, or it models a world
   // where transcripts do not exist — which is exactly what run-postmortem
@@ -254,10 +251,19 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
     case "crash":
       return { exitCode: 1, timedOut: false };
 
-    case "hang":
-      // Resolves only when the timeout fires — no real long sleep in tests.
-      await new Promise((resolve) => setTimeout(resolve, timeoutMs));
-      return { exitCode: null, timedOut: true };
+    case "hang": {
+      // Resolves only when the timeout fires — or immediately when aborted (OPS-464).
+      const sig = abortSignal ?? signal;
+      if (sig?.aborted) return { exitCode: null, timedOut: false };
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        sig?.addEventListener?.("abort", () => {
+          clearTimeout(timer);
+          resolve();
+        }, { once: true });
+      });
+      return { exitCode: null, timedOut: !sig?.aborted };
+    }
 
     case "trace-flood": {
       // Emits well past the per-attempt cap so tests can prove the recorder

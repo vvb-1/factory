@@ -1,13 +1,28 @@
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "bun:test";
 
 const COMMON = path.resolve(import.meta.dir, "worktree-common.sh");
+const DAEMONS = path.resolve(import.meta.dir, "worktree-daemons.sh");
 
 function sh(body, extraEnv = {}) {
   const result = Bun.spawnSync({
     cmd: ["bash", "-c", `source "${COMMON}"\n${body}`],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, ...extraEnv },
+  });
+  return {
+    status: result.exitCode,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  };
+}
+
+function runScript(args = [], extraEnv = {}) {
+  const result = Bun.spawnSync({
+    cmd: [DAEMONS, ...args],
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, ...extraEnv },
@@ -145,6 +160,157 @@ test("await_daemon falls back to SIGKILL when process ignores SIGTERM", () => {
         process.kill(Number(pid), "SIGKILL");
       } catch {}
     }
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("check_daemon_health reports dead workers and anomalies", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "daemon-health-test-"));
+  const runDir = path.join(testDir, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    // 1. All dead
+    const deadRes = sh(`check_daemon_health "${testDir}"`);
+    expect(deadRes.status).not.toBe(0);
+    expect(deadRes.stdout).toContain("serve:   DEAD");
+    expect(deadRes.stdout).toContain("worker:  DEAD");
+    expect(deadRes.stdout).toContain("web:     DEAD");
+    expect(deadRes.stdout).toContain("anomalies (");
+
+    // 2. Serve alive, but dead worker
+    writeFileSync(path.join(runDir, "serve.pid"), String(process.pid));
+    writeFileSync(path.join(runDir, "worker.pid"), "999999");
+    const workerDeadRes = sh(`check_daemon_health "${testDir}"`);
+    expect(workerDeadRes.status).not.toBe(0);
+    expect(workerDeadRes.stdout).toContain("worker:  DEAD");
+    expect(workerDeadRes.stdout).toContain("worker daemon died");
+
+    // 3. Check daemon_anomalies helper
+    const anomalies = sh(`daemon_anomalies "${testDir}"`);
+    expect(anomalies.status).toBe(0);
+    expect(anomalies.stdout).toContain("worker daemon died (pid 999999)");
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("rotate_log_file and rotate_daemon_logs rotate oversized logs", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "log-rotate-test-"));
+  const runDir = path.join(testDir, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    const serveLog = path.join(runDir, "serve.log");
+    const workerLog = path.join(runDir, "worker.log");
+
+    // Write 500 bytes to serve.log and 100 bytes to worker.log
+    writeFileSync(serveLog, "x".repeat(500));
+    writeFileSync(workerLog, "y".repeat(100));
+
+    // Threshold = 300 bytes -> serve.log should rotate, worker.log should stay
+    const rotRes = sh(`rotate_daemon_logs "${testDir}" 300`);
+    expect(rotRes.status).toBe(0);
+
+    expect(existsSync(`${serveLog}.1`)).toBe(true);
+    expect(readFileSync(`${serveLog}.1`, "utf8").length).toBe(500);
+    expect(readFileSync(serveLog, "utf8").length).toBe(0);
+
+    expect(existsSync(`${workerLog}.1`)).toBe(false);
+    expect(readFileSync(workerLog, "utf8").length).toBe(100);
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("supervise_tick restarts dead daemon and logs restart line", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "supervise-restart-test-"));
+  const runDir = path.join(testDir, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    const workerPid = path.join(runDir, "worker.pid");
+    const workerLog = path.join(runDir, "worker.log");
+    writeFileSync(workerPid, "999999");
+    writeFileSync(workerLog, "initial log line\n");
+
+    const stateFile = path.join(runDir, "supervisor-state.json");
+    const supRes = sh(`supervise_tick "${testDir}" "${stateFile}" 5 60`);
+    expect(supRes.status).toBe(0);
+    expect(supRes.stderr).toContain("detected dead daemon 'worker'");
+    expect(supRes.stderr).toContain("restarting daemon 'worker'");
+
+    const newPid = readFileSync(workerPid, "utf8").trim();
+    expect(newPid).not.toBe("999999");
+    expect(Number(newPid)).toBeGreaterThan(0);
+
+    const logContent = readFileSync(workerLog, "utf8");
+    expect(logContent).toContain("[supervisor] restarting dead worker");
+
+    // Clean up spawned worker
+    try { process.kill(Number(newPid), "SIGKILL"); } catch {}
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("supervise_tick enforces circuit breaker when max restarts exceeded", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "supervise-circuit-breaker-test-"));
+  const runDir = path.join(testDir, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    const workerPid = path.join(runDir, "worker.pid");
+    const stateFile = path.join(runDir, "supervisor-state.json");
+    const now = Math.floor(Date.now() / 1000);
+
+    // Pre-populate state with 3 recent restarts
+    writeFileSync(stateFile, JSON.stringify({
+      worker: [now - 10, now - 5, now - 1],
+    }));
+    writeFileSync(workerPid, "999999");
+
+    // max_restarts = 3 -> should hit circuit breaker
+    const supRes = sh(`supervise_tick "${testDir}" "${stateFile}" 3 60`);
+    expect(supRes.status).toBe(0);
+    expect(supRes.stderr).toContain("exceeded max restarts");
+    expect(supRes.stderr).toContain("circuit breaker engaged");
+
+    // PID should still be the dead pid, not restarted
+    expect(readFileSync(workerPid, "utf8").trim()).toBe("999999");
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("worktree-daemons CLI subcommands (status, check, anomalies, rotate-logs)", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "daemons-cli-test-"));
+  const runDir = path.join(testDir, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    // 1. check on empty -> fails
+    const checkEmpty = runScript(["check", testDir]);
+    expect(checkEmpty.status).not.toBe(0);
+
+    // 2. anomalies on dead worker
+    writeFileSync(path.join(runDir, "serve.pid"), String(process.pid));
+    writeFileSync(path.join(runDir, "worker.pid"), "999999");
+    const anomaliesRes = runScript(["anomalies", testDir]);
+    expect(anomaliesRes.status).toBe(0);
+    expect(anomaliesRes.stdout).toContain("worker daemon died");
+
+    // 3. status
+    const statusRes = runScript(["status", testDir]);
+    expect(statusRes.status).not.toBe(0); // non-zero due to dead worker
+    expect(statusRes.stdout).toContain("worker:  DEAD");
+
+    // 4. rotate-logs
+    const serveLog = path.join(runDir, "serve.log");
+    writeFileSync(serveLog, "a".repeat(100));
+    const rotRes = runScript(["rotate-logs", testDir]);
+    expect(rotRes.status).toBe(0);
+  } finally {
     rmSync(testDir, { recursive: true, force: true });
   }
 });

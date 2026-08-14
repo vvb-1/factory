@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { openDb } from "./db.mjs";
-import { IllegalTransition, TERMINAL_STATES, createRun, lifecycleOf, runState, transition } from "./lifecycle.mjs";
+import { IllegalTransition, TERMINAL_STATES, createRun, lifecycleOf, resolveIdempotency, runState, transition } from "./lifecycle.mjs";
 
 function freshRun(db, key = `key-${Math.random()}`) {
   const runId = `run_test_${Math.random().toString(36).slice(2)}`;
@@ -70,5 +70,52 @@ describe("lifecycle", () => {
     }
     transition(db, { runId, to: "QUEUED", actor: "operator", reason: "retry" });
     expect(runState(db, runId)).toBe("QUEUED");
+  });
+
+  test("resolveIdempotency: duplicate delivery matches existing run, distinct correlation returns null (OPS-419)", () => {
+    const db = openDb(":memory:");
+    createRun(db, {
+      runId: "run_remed_1",
+      idempotencyKey: "remed-key-1",
+      spec: {},
+      specJson: "{}",
+      specHash: "sha256:0",
+      actor: "planner",
+      correlationId: "alert-001",
+      policyVersion: "test",
+    });
+
+    // Same key and matching correlationId -> resolves to existing run
+    const dup = resolveIdempotency(db, { idempotencyKey: "remed-key-1", correlationId: "alert-001" });
+    expect(dup?.run_id).toBe("run_remed_1");
+
+    // Same key but distinct correlationId (repeat remediation) -> null (not falsely suppressed)
+    const distinct = resolveIdempotency(db, { idempotencyKey: "remed-key-1", correlationId: "alert-002" });
+    expect(distinct).toBeNull();
+  });
+
+  test("lifecycle timestamps are monotonic and distinct across states when clock advances", () => {
+    const db = openDb(":memory:");
+    let t = 1000000;
+    const clock = () => (t += 1000);
+    const runId = `run_clock_${Math.random().toString(36).slice(2)}`;
+    createRun(db, {
+      runId,
+      idempotencyKey: `key-${runId}`,
+      spec: {},
+      specJson: "{}",
+      specHash: "sha256:0",
+      actor: "test",
+      policyVersion: "test",
+      now: clock,
+    });
+    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+      transition(db, { runId, to, actor: "test", now: clock });
+    }
+    const journal = lifecycleOf(db, runId);
+    const timestamps = journal.map((e) => Date.parse(e.at));
+    for (let i = 1; i < timestamps.length; i += 1) {
+      expect(timestamps[i]).toBeGreaterThan(timestamps[i - 1]);
+    }
   });
 });

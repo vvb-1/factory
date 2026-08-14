@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { hashJson } from "./canonical.mjs";
 import { DEAD_LETTER_AFTER } from "./config.mjs";
 import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
-import { lifecycleOf, runState } from "./lifecycle.mjs";
+import { createRun, lifecycleOf, runState } from "./lifecycle.mjs";
 import { buildRunSpec, idempotencyKeyFor, planAdmittedEvents, planEvent } from "./planner.mjs";
 import { loadRegistry } from "./registry.mjs";
 
@@ -130,6 +134,55 @@ describe("planEvent", () => {
     expect(event.status).toBe("noop");
   });
 
+  test("repeat remediations with identical payload but distinct correlationId produce distinct runs (OPS-419)", () => {
+    const db = openDb(":memory:");
+    const ref1 = admit(db, {
+      eventId: "keep-1",
+      correlationId: "alert-1",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+    const ref2 = admit(db, {
+      eventId: "keep-2",
+      correlationId: "alert-2",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+
+    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
+    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+
+    expect(first.decision).toBe("run");
+    expect(second.decision).toBe("run");
+    expect(second.runId).not.toBe(first.runId);
+    expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
+  });
+
+  test("duplicate delivery of remediation with same correlationId converges to one run (OPS-419)", () => {
+    const db = openDb(":memory:");
+    const ref1 = admit(db, {
+      eventId: "keep-1",
+      correlationId: "alert-1",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+    const ref2 = admit(db, {
+      eventId: "keep-dup",
+      correlationId: "alert-1",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+
+    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
+    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+
+    expect(first.decision).toBe("run");
+    expect(second.decision).toBe("noop");
+    expect(second.reason).toBe("duplicate_run");
+    expect(second.runId).toBe(first.runId);
+    expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
+  });
+
   test("unregistered event type → human_needed", () => {
     const db = openDb(":memory:");
     const ref = admit(db, { type: "totally.unknown.type" });
@@ -198,4 +251,162 @@ describe("planAdmittedEvents", () => {
     expect(counts).toEqual({ planned: 2, failed: 0, deadLettered: 0 });
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
   });
+
+  test("holds write transaction from second connection and does not increment plan_failures or dead-letter (OPS-451)", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-planner-"));
+    const file = path.join(dir, "test.db");
+    const db1 = openDb(file);
+    const db2 = openDb(file);
+    db2.exec("PRAGMA busy_timeout = 10;");
+
+    const ref = admit(db1);
+
+    // db1 holds write transaction
+    db1.exec("BEGIN IMMEDIATE;");
+    try {
+      for (let i = 0; i < DEAD_LETTER_AFTER + 1; i++) {
+        const res = planAdmittedEvents(db2, registry);
+        expect(res.deadLettered).toBe(0);
+        expect(res.failed).toBe(0);
+      }
+    } finally {
+      db1.exec("ROLLBACK;");
+    }
+
+    const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    expect(event.status).toBe("admitted");
+    expect(event.plan_failures).toBe(0);
+  });
+
+  test("three consecutive lock collisions leave the event admitted, not dead_lettered (OPS-451)", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-planner-"));
+    const file = path.join(dir, "test.db");
+    const db1 = openDb(file);
+    const db2 = openDb(file);
+    db2.exec("PRAGMA busy_timeout = 10;");
+
+    const ref = admit(db1);
+
+    db1.exec("BEGIN IMMEDIATE;");
+    try {
+      for (let i = 0; i < 3; i++) {
+        const res = planAdmittedEvents(db2, registry);
+        expect(res.deadLettered).toBe(0);
+      }
+    } finally {
+      db1.exec("ROLLBACK;");
+    }
+
+    const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    expect(event.status).toBe("admitted");
+    expect(event.plan_failures).toBe(0);
+  });
+
+  test("TTL re-plan preserves repoPin for repository workspace agent across expiry (OPS-418)", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "evrt-plan-factory-"));
+    mkdirSync(path.join(root, "config"), { recursive: true });
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), "evrt-repo-"));
+    execFileSync("git", ["init", "--quiet", "--initial-branch=develop"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+    writeFileSync(path.join(repoDir, "README.md"), "bj29\n");
+    execFileSync("git", ["add", "."], { cwd: repoDir });
+    execFileSync("git", ["commit", "--quiet", "-m", "init"], { cwd: repoDir });
+
+    writeFileSync(
+      path.join(root, "config", "repos.yaml"),
+      `repos:\n  - name: bj29\n    path: ${repoDir}\n    github: watt-mind/bj29\n    base: develop\n`,
+    );
+    const oldReposRoot = process.env.FACTORY_REPOS_ROOT;
+    const oldHome = process.env.FACTORY_EVENT_HOME;
+    process.env.FACTORY_REPOS_ROOT = root;
+    process.env.FACTORY_EVENT_HOME = mkdtempSync(path.join(os.tmpdir(), "evrt-plan-home-"));
+
+    try {
+      const db = openDb(":memory:");
+      const ref = admit(db, {
+        eventId: "triage-1",
+        type: "factory.triage.requested",
+        payload: { repo: "bj29", ref: "develop" },
+      });
+      const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test" });
+      expect(outcome.decision).toBe("run");
+      const originalSpec = JSON.parse(outcome.proposal.spec_json);
+      expect(originalSpec.input.repoPin).toBeTruthy();
+      expect(originalSpec.input.repoPin.sha).toMatch(/^[0-9a-f]{40}$/);
+
+      // Stored event envelope now carries repoPin
+      const storedEvent = db.query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+      const storedEnvelope = JSON.parse(storedEvent.envelope_json);
+      expect(storedEnvelope.payload.repoPin).toBeTruthy();
+
+      const mapping = registry.eventTypes["factory.triage.requested"];
+      const replannedSpec = buildRunSpec(registry, storedEnvelope, mapping, {
+        runId: outcome.runId,
+        policyVersion: "git:test",
+        now: NOW + 3600 * 1000,
+      });
+      expect(replannedSpec.input.repoPin).toEqual(originalSpec.input.repoPin);
+      expect(hashJson(replannedSpec)).toBe(outcome.proposal.spec_hash);
+      expect(replannedSpec.idempotencyKey).toBe(originalSpec.idempotencyKey);
+    } finally {
+      process.env.FACTORY_REPOS_ROOT = oldReposRoot;
+      process.env.FACTORY_EVENT_HOME = oldHome;
+    }
+  });
+
+  test("TTL re-plan preserves runPin for artifacts workspace agent across expiry (OPS-418)", () => {
+    const db = openDb(":memory:");
+    const priorRunId = "run_prior_123";
+    createRun(db, {
+      runId: priorRunId,
+      idempotencyKey: "prior-key",
+      spec: {},
+      specJson: JSON.stringify({ agent: "factory-status-report@1" }),
+      specHash: "sha256:0",
+      actor: "test",
+      policyVersion: "git:test",
+    });
+    db.query(
+      `INSERT INTO results (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
+       VALUES (?, 1, ?, 'sha256:a', '{}', '{}', ?)`,
+    ).run(
+      priorRunId,
+      JSON.stringify({
+        artifacts: [{ kind: "transcript", uri: "file:///tmp/t.json", sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }],
+      }),
+      new Date(NOW).toISOString(),
+    );
+
+    const artifactStore = mkdtempSync(path.join(os.tmpdir(), "evrt-pm-store-"));
+    const transcriptSha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    writeFileSync(path.join(artifactStore, transcriptSha), "{}");
+
+    const ref = admit(db, {
+      eventId: "postmortem-1",
+      type: "factory.run-postmortem.requested",
+      payload: { runId: priorRunId },
+    });
+    const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test", artifactStore });
+    expect(outcome.decision).toBe("run");
+    const originalSpec = JSON.parse(outcome.proposal.spec_json);
+    expect(originalSpec.input.runPin).toBeTruthy();
+    expect(originalSpec.input.runPin.transcript).toBe("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+
+    const storedEvent = db.query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+    const storedEnvelope = JSON.parse(storedEvent.envelope_json);
+    expect(storedEnvelope.payload.runPin).toBeTruthy();
+
+    const mapping = registry.eventTypes["factory.run-postmortem.requested"];
+    const replannedSpec = buildRunSpec(registry, storedEnvelope, mapping, {
+      runId: outcome.runId,
+      policyVersion: "git:test",
+      now: NOW + 3600 * 1000,
+    });
+    expect(replannedSpec.input.runPin).toEqual(originalSpec.input.runPin);
+    expect(hashJson(replannedSpec)).toBe(outcome.proposal.spec_hash);
+    expect(replannedSpec.idempotencyKey).toBe(originalSpec.idempotencyKey);
+  });
 });
+
+

@@ -11,9 +11,9 @@
 import { findArtifact, pinRunArtifact } from "./artifacts.mjs";
 import { canonicalJson, hashJson } from "./canonical.mjs";
 import { artifactsRoot, DEAD_LETTER_AFTER, DEFAULT_PROPOSAL_TTL_SECONDS } from "./config.mjs";
-import { tx } from "./db.mjs";
+import { isBusyError, tx, txImmediate } from "./db.mjs";
 import { newProposalId, newRunId } from "./ids.mjs";
-import { createRun } from "./lifecycle.mjs";
+import { createRun, resolveIdempotency } from "./lifecycle.mjs";
 import { getAgent, getEventType } from "./registry.mjs";
 import { pinRepo } from "./repository.mjs";
 import { validate } from "./schema.mjs";
@@ -47,13 +47,27 @@ export function idempotencyKeyFor(mapping, def, envelope, inputHash) {
  */
 export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion, adapterOverride, now = Date.now() } = {}) {
   const def = getAgent(registry, mapping.agent);
-  const inputHash = hashJson(envelope.payload);
+  let payload = envelope.payload;
+  if (def.workspace?.type === "repository" && payload?.repo) {
+    try {
+      payload = { ...payload, repoPin: pinRepo(payload.repo, payload.ref ?? undefined) };
+    } catch (err) {
+      if (!payload?.repoPin) throw err;
+    }
+  }
+  const inputHash = hashJson(payload);
   const placement = def.placement ?? mapping.placement ?? undefined;
+  const specEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
+  let idempotencyKey = idempotencyKeyFor(mapping, def, specEnvelope, inputHash);
+  const correlation = envelope.correlationId ?? envelope.eventId ?? null;
+  if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
+    idempotencyKey = `${idempotencyKey}:${correlation}`;
+  }
   return {
     schemaVersion: "factory.run-spec/v1",
     runId,
     agent: mapping.agent,
-    input: envelope.payload,
+    input: payload,
     inputHash,
     workspace: def.workspace,
     adapter: adapterOverride ?? mapping.adapter,
@@ -63,7 +77,7 @@ export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion
     capabilities: def.capabilities.services,
     timeoutSeconds: def.limits.timeout_seconds,
     maxAttempts: def.limits.attempts,
-    idempotencyKey: idempotencyKeyFor(mapping, def, envelope, inputHash),
+    idempotencyKey,
     ...(placement ? { placement } : {}),
   };
 }
@@ -111,7 +125,7 @@ function existingOutcome(db, event) {
  * @returns {{ decision: string, proposal?: object, runId?: string, reason?: string }}
  */
 export function planEvent(db, registry, { source, eventId }, { now = Date.now(), policyVersion = "unknown", adapterOverride, artifactStore = artifactsRoot() } = {}) {
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const event = db.query(`SELECT * FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
     if (!event) throw new Error(`no admitted event (${source}, ${eventId})`);
     if (event.status !== "admitted") return existingOutcome(db, event);
@@ -184,8 +198,21 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     }
 
     const pinnedEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
-    const idempotencyKey = idempotencyKeyFor(mapping, def, pinnedEnvelope, hashJson(payload));
-    const existingRun = db.query(`SELECT run_id FROM runs WHERE idempotency_key = ?`).get(idempotencyKey);
+    if (pinnedEnvelope !== envelope) {
+      db.query(`UPDATE events SET envelope_json = ? WHERE source = ? AND event_id = ?`)
+        .run(canonicalJson(pinnedEnvelope), event.source, event.event_id);
+    }
+    let idempotencyKey = idempotencyKeyFor(mapping, def, pinnedEnvelope, hashJson(payload));
+    const correlation = envelope.correlationId ?? envelope.eventId ?? null;
+    if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
+      idempotencyKey = `${idempotencyKey}:${correlation}`;
+    }
+    const existingRun = resolveIdempotency(db, {
+      idempotencyKey,
+      correlationId: envelope.correlationId,
+      causationId: envelope.causationId,
+      eventId: envelope.eventId,
+    });
     if (existingRun) {
       const proposal = insertProposal(db, {
         id: newProposalId(), event, runId: existingRun.run_id, decision: "noop",
@@ -223,7 +250,7 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
  * stale ask next to a fresh plan.
  */
 export function requeueEvent(db, { source, eventId }, { actor = "operator", now = Date.now() } = {}) {
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const event = db.query(`SELECT status FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
     if (!event) throw new Error(`unknown event (${source}, ${eventId})`);
     if (!["dead_lettered", "human_needed"].includes(event.status)) {
@@ -259,19 +286,30 @@ export function planAdmittedEvents(db, registry, opts = {}) {
       planEvent(db, registry, { source, eventId }, opts);
       planned += 1;
     } catch (err) {
+      if (isBusyError(err)) {
+        continue;
+      }
       failed += 1;
       const message = String(err?.message ?? err);
-      const failures = tx(db, () => {
-        db.query(
-          `UPDATE events SET plan_failures = plan_failures + 1, last_plan_error = ? WHERE source = ? AND event_id = ?`,
-        ).run(message, source, eventId);
-        const row = db.query(`SELECT plan_failures FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
-        if (row.plan_failures >= DEAD_LETTER_AFTER) {
-          db.query(`UPDATE events SET status = 'dead_lettered' WHERE source = ? AND event_id = ?`).run(source, eventId);
+      try {
+        const failures = txImmediate(db, () => {
+          db.query(
+            `UPDATE events SET plan_failures = plan_failures + 1, last_plan_error = ? WHERE source = ? AND event_id = ?`,
+          ).run(message, source, eventId);
+          const row = db.query(`SELECT plan_failures FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
+          if (row.plan_failures >= DEAD_LETTER_AFTER) {
+            db.query(`UPDATE events SET status = 'dead_lettered' WHERE source = ? AND event_id = ?`).run(source, eventId);
+          }
+          return row.plan_failures;
+        });
+        if (failures >= DEAD_LETTER_AFTER) deadLettered += 1;
+      } catch (innerErr) {
+        if (isBusyError(innerErr)) {
+          failed -= 1;
+          continue;
         }
-        return row.plan_failures;
-      });
-      if (failures >= DEAD_LETTER_AFTER) deadLettered += 1;
+        throw innerErr;
+      }
     }
   }
   return { planned, failed, deadLettered };

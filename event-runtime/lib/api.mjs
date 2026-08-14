@@ -10,21 +10,21 @@
  * no signature. Operator verbs record "operator" as actor — authenticated
  * actor identity is the web-app step, not this one.
  */
-import { spawnSync } from "node:child_process";
 import { createReadStream, readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { findArtifact } from "./artifacts.mjs";
 import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
 import { admitEvent, verifyWebhook } from "./intake.mjs";
+import { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
-import { requeueEvent } from "./planner.mjs";
+import { planEvent, requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
 import { loadRepos, RepoError, reposRoot, reposView } from "./repos.mjs";
 import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { storeStats } from "./artifacts.mjs";
-import { scheduleView } from "./schedules.mjs";
+import { parseCadence, scheduleView } from "./schedules.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
 
 /**
@@ -129,7 +129,7 @@ function runCounts(db) {
 }
 
 /** §13 status + doctor view: aggregates plus anomalies, all read-only SQL. */
-function statusView(db, registry, nowMs) {
+function statusView(db, registry, nowMs, { secret, policyVersion, env, getStoreStats } = {}) {
   const open = openProposals(db, { now: nowMs });
   const expiredOpen = open.filter((p) => p.expired);
   const staleLeases = db
@@ -149,20 +149,38 @@ function statusView(db, registry, nowMs) {
 
   const workers = listWorkers(db, { now: nowMs });
   const schedules = scheduleView(db, registry, { now: nowMs });
-  const store = storeStats(db, artifactsRoot(), { now: nowMs });
+  const store = getStoreStats
+    ? getStoreStats(nowMs)
+    : storeStats(db, artifactsRoot(env?.home), { now: nowMs });
   const stalled = stalledWorkers(db, { now: nowMs });
+  const runs = runCounts(db);
+
+  const configAnomalies = [];
+  if (!secret) {
+    configAnomalies.push("FACTORY_EVENT_SECRET is unset (webhook intake disabled)");
+  }
+  if (policyVersion === "unknown") {
+    configAnomalies.push("policyVersion is unknown");
+  }
 
   return {
     events: eventCounts(db),
     proposals: { open: open.length, expired: expiredOpen.length },
-    runs: runCounts(db),
+    runs,
     workers: {
       live: workers.filter((w) => w.state !== "stopped" && !w.stale).length,
       busy: workers.filter((w) => w.state === "busy" && !w.stale).length,
       stale: workers.filter((w) => w.stale).length,
     },
-    artifacts: { files: store.files, bytes: store.bytes, orphans: store.orphans, orphanBytes: store.orphanBytes },
+    artifacts: {
+      files: store.files,
+      bytes: store.bytes,
+      orphans: store.orphans,
+      orphanBytes: store.orphanBytes,
+      ...(store.at ? { at: store.at } : {}),
+    },
     anomalies: {
+      configuration: configAnomalies,
       expiredOpenProposals: expiredOpen.map((p) => p.id),
       staleLeases,
       unpublishedOutbox,
@@ -175,7 +193,7 @@ function statusView(db, registry, nowMs) {
       stoppedSchedules: schedules
         .filter((s) => s.stopped || s.error)
         .map((s) => ({ loop: s.loop, every: s.every, lastSlot: s.lastSlot, intervalsLate: s.intervalsLate, error: s.error })),
-      noWorkers: workers.filter((w) => w.state !== "stopped" && !w.stale).length === 0 && (runCounts(db).byState.QUEUED ?? 0) > 0,
+      noWorkers: workers.filter((w) => w.state !== "stopped" && !w.stale).length === 0 && (runs.byState.QUEUED ?? 0) > 0,
       // Two or more open proposals on one run: cancel fail-closes and leaves
       // them open (OPS-245). Unreachable on the TTL replan path.
       ambiguousOpenProposals: ambiguousOpenProposalRuns(db),
@@ -387,61 +405,7 @@ function runView(db, runId) {
   };
 }
 
-/** Bound so a hung Linear call cannot freeze serve forever (OPS-301 review). */
-const JANITOR_TIMEOUT_MS = 120_000;
-const JANITOR_MAX_BUFFER = 1_000_000;
-
-/**
- * Argv for one repos.yaml name. `--force` is not a flag and must never become
- * one — the worktree_down refusal on dirty trees is the safety property.
- * Spawn runs against `reposRoot()` so FACTORY_REPOS_ROOT cannot survey one
- * yaml and tear down another.
- */
-export function janitorArgv(name, { apply = false } = {}) {
-  const args = [path.join(reposRoot(), "orchestrator", "janitor.mjs"), "--repo", name, "--json"];
-  if (apply === true) args.push("--apply");
-  return args;
-}
-
-/**
- * Spawn `orchestrator/janitor.mjs --json` for one repos.yaml name (OPS-301).
- * Never passes `--force`. Injectable on createApi so tests never hit Linear
- * or real worktrees. Actor is the loopback operator — this is a host-side
- * spawn, the same trust as typing `factory janitor` on the machine.
- */
-export function spawnFactoryJanitor(name, { apply = false } = {}) {
-  const args = janitorArgv(name, { apply });
-  const root = reposRoot();
-  const r = spawnSync(process.execPath, args, {
-    encoding: "utf8",
-    cwd: root,
-    timeout: JANITOR_TIMEOUT_MS,
-    maxBuffer: JANITOR_MAX_BUFFER,
-  });
-  if (r.error?.code === "ETIMEDOUT") {
-    const err = new Error("janitor timed out");
-    err.status = 504;
-    throw err;
-  }
-  const stdout = (r.stdout || "").trim();
-  if (r.status === 2) {
-    const err = new Error(`unknown repo ${name}`);
-    err.status = 404;
-    throw err;
-  }
-  if (r.status !== 0) {
-    const err = new Error((r.stderr || "").trim() || `janitor exit ${r.status}`);
-    err.status = 500;
-    throw err;
-  }
-  const parsed = JSON.parse(stdout);
-  if (parsed && Array.isArray(parsed.results)) {
-    const err = new Error("janitor returned multiple repos; expected one");
-    err.status = 500;
-    throw err;
-  }
-  return parsed;
-}
+export { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 
 /**
  * Both admission routes converge here — the §15 requirement that webhook and
@@ -533,6 +497,20 @@ export function createApi({
   janitor = spawnFactoryJanitor,
 } = {}) {
   const ACTOR = "operator"; // one local operator in the MVP (§14)
+  const STORE_STATS_TTL_MS = 10_000;
+  let cachedStoreStats = null;
+  let cachedStoreStatsAt = 0;
+
+  function getStoreStats(nowMs) {
+    if (cachedStoreStats && nowMs - cachedStoreStatsAt < STORE_STATS_TTL_MS) {
+      return cachedStoreStats;
+    }
+    const root = artifactsRoot(env?.home);
+    const stats = storeStats(db, root, { now: nowMs });
+    cachedStoreStats = stats;
+    cachedStoreStatsAt = nowMs;
+    return stats;
+  }
 
   return async function handle(req, res) {
     try {
@@ -552,7 +530,12 @@ export function createApi({
       const nowMs = now();
 
       if (route === "GET /health") {
-        return send(res, 200, { ok: true, policyVersion, env });
+        return send(res, 200, {
+          ok: true,
+          policyVersion,
+          env,
+          webhookSecret: secret ? "set" : "absent",
+        });
       }
 
       if (route === "POST /events") {
@@ -575,7 +558,10 @@ export function createApi({
       }
 
       if (route === "GET /status") {
-        return send(res, 200, { env, ...statusView(db, registry, nowMs) });
+        return send(res, 200, {
+          env,
+          ...statusView(db, registry, nowMs, { secret, policyVersion, env, getStoreStats }),
+        });
       }
 
       if (route === "GET /events") {
@@ -590,6 +576,71 @@ export function createApi({
 
       if (route === "GET /schedules") {
         return send(res, 200, { schedules: scheduleView(db, registry, { now: nowMs }) });
+      }
+
+      // Ad-hoc loop trigger (OPS-401): distinct from slot ticks (source="operator",
+      // unique manual:<loop>:<now> ID, watched approval, never advances lastSlot).
+      const schedulePost = url.pathname.match(/^\/schedules\/([^/]+)\/(run|trigger)$/);
+      if (req.method === "POST" && schedulePost) {
+        const loop = decodeURIComponent(schedulePost[1]);
+        const schedule = registry.schedules?.[loop];
+        if (!schedule) {
+          return send(res, 404, {
+            error: `unknown schedule "${loop}"`,
+            schedules: Object.keys(registry.schedules ?? {}),
+          });
+        }
+        let cadenceSeconds;
+        try {
+          cadenceSeconds = parseCadence(schedule.every);
+        } catch {
+          // Cadence might have parse error in bad config
+        }
+        const isoNow = new Date(nowMs).toISOString();
+        let eventId = `manual:${loop}:${isoNow}`;
+        let seq = 0;
+        while (db.query(`SELECT 1 FROM events WHERE source = ? AND event_id = ?`).get(ACTOR, eventId)) {
+          seq += 1;
+          eventId = `manual:${loop}:${isoNow}:${seq}`;
+        }
+        const envelope = {
+          schemaVersion: "factory.event/v1",
+          eventId,
+          type: schedule.eventType,
+          source: ACTOR,
+          subject: loop,
+          occurredAt: isoNow,
+          correlationId: eventId,
+          causationId: null,
+          payload: {
+            loop,
+            slot: isoNow,
+            ...(cadenceSeconds ? { cadenceSeconds } : {}),
+            skippedSlots: 0,
+          },
+        };
+        const outcome = admitEvent(db, registry, envelope, { now: nowMs });
+        if (!outcome.admitted && !outcome.duplicate) {
+          return send(res, 422, { errors: outcome.errors });
+        }
+        if (outcome.admitted) onEvent("admitted");
+        const plan = planEvent(
+          db,
+          registry,
+          { source: ACTOR, eventId },
+          { now: nowMs, policyVersion },
+        );
+        return send(res, 200, {
+          admitted: outcome.admitted,
+          duplicate: outcome.duplicate,
+          eventId,
+          proposalId: plan.proposal?.id ?? null,
+          runId: plan.runId ?? null,
+          decision: plan.decision,
+          reason: plan.reason ?? null,
+          disabled: !schedule.enabled,
+          loop,
+        });
       }
 
       if (route === "GET /workers") {

@@ -484,23 +484,24 @@ function ToastRegion({
     // surviving toast whenever one is added or dismissed.
     <div role={role} aria-live={live} aria-atomic="false" className="flex flex-col gap-2">
       {toasts.map((t) => (
-        <div
+        <button
           key={t.id}
+          type="button"
           title="Dismiss"
           onClick={() => dismissToast(t.id)}
-          className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-[12px] shadow-xl transition-all"
+          className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-left text-[12px] shadow-xl transition-all hover:bg-(--surface-2) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
           style={{
             borderColor: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
           }}
         >
           <span
-            className="size-2 rounded-full"
+            className="size-2 shrink-0 rounded-full"
             style={{
               background: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
             }}
           />
           <span className="text-(--text) font-medium">{t.message}</span>
-        </div>
+        </button>
       ))}
     </div>
   );

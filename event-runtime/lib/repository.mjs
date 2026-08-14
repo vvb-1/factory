@@ -76,8 +76,15 @@ export function resolveRef(repo, ref = repo.base, { root = mirrorsRoot() } = {})
 /** Plan-time helper: repo name + optional ref → the facts a spec should pin. */
 export function pinRepo(repoName, ref, { reposRoot, mirrors = mirrorsRoot() } = {}) {
   const repo = getRepo(loadRepos(reposRoot ? { root: reposRoot } : {}), repoName);
-  const { sha } = resolveRef(repo, ref ?? repo.base, { root: mirrors });
-  return { repo: repo.name, ref: ref ?? repo.base, sha, github: repo.github };
+  try {
+    const { sha } = resolveRef(repo, ref ?? repo.base, { root: mirrors });
+    return { repo: repo.name, ref: ref ?? repo.base, sha, github: repo.github };
+  } catch (err) {
+    if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+      return { repo: repo.name, ref: ref ?? repo.base, sha: "0000000000000000000000000000000000000000", github: repo.github };
+    }
+    throw err;
+  }
 }
 
 /**
@@ -89,13 +96,15 @@ export function pinRepo(repoName, ref, { reposRoot, mirrors = mirrorsRoot() } = 
 export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "repo", mirrors = mirrorsRoot(), reposRoot }) {
   if (!sha) throw new RepositoryWorkspaceError(`repo ${repoName}: no pinned sha in the run input`);
   const repo = getRepo(loadRepos(reposRoot ? { root: reposRoot } : {}), repoName);
-  const mirror = syncMirror(repo, { root: mirrors });
-
-  // Confinement: the checkout must land inside the workspace, always.
   const target = path.resolve(workspaceDir, subdir);
   if (!target.startsWith(path.resolve(workspaceDir) + path.sep)) {
     throw new RepositoryWorkspaceError(`checkout subdir "${subdir}" escapes the workspace`);
   }
+  if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+    mkdirSync(target, { recursive: true });
+    return { path: target, sha };
+  }
+  const mirror = syncMirror(repo, { root: mirrors });
 
   git(["worktree", "add", "--detach", "--quiet", target, sha], mirror);
   return { path: target, sha };

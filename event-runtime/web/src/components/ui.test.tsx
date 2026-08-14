@@ -63,4 +63,20 @@ describe("ToastContainer", () => {
     });
     expect(classes(stackOf(r))).toContain("gap-2");
   });
+
+  test("renders toasts as focusable buttons with message as accessible name and allows dismissal", () => {
+    const r = render(<ToastContainer />);
+    act(() => {
+      notify("Operation succeeded", "ok");
+    });
+    const button = r.getByRole("button", { name: /Operation succeeded/i });
+    expect(button).toBeTruthy();
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.getAttribute("title")).toBe("Dismiss");
+
+    act(() => {
+      button.click();
+    });
+    expect(r.queryByRole("button", { name: /Operation succeeded/i })).toBeNull();
+  });
 });

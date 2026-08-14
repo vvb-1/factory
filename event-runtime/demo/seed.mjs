@@ -89,6 +89,24 @@ function envelope(id, repos, type = "factory.status-report.requested") {
   };
 }
 
+/**
+ * Replay an envelope, exiting immediately (<1s) if intake detects a duplicate
+ * event id/prefix instead of timing out downstream in until() (OPS-464).
+ */
+async function replay(env) {
+  const res = await client.replay(env);
+  if (res.duplicate) {
+    console.error(
+      `seed: duplicate prefix "${prefix}" — event "${env.eventId}" already exists in runtime database.\n` +
+      `This runtime was already seeded under prefix "${prefix}".\n` +
+      `To re-seed under a fresh prefix: bun event-runtime/demo/seed.mjs --port ${port} --prefix demo-$(date +%s)\n` +
+      `Or use: bin/worktree-up.sh --reseed`,
+    );
+    process.exit(1);
+  }
+  return res;
+}
+
 /** Poll until `fn` returns truthy, or die loudly — a seed must not half-run. */
 async function until(what, fn, { timeoutMs = 30_000, everyMs = 300 } = {}) {
   const deadline = Date.now() + timeoutMs;
@@ -153,7 +171,7 @@ if (!health) {
 // Guard: never seed a real-adapter runtime. The adapter lands in each spec at
 // planning time, so probe with a throwaway event and inspect its proposal.
 const probeId = `${prefix}-adapter-probe`;
-await client.replay(envelope("adapter-probe", ["ok"]));
+await replay(envelope("adapter-probe", ["ok"]));
 const probe = await openProposalFor(probeId);
 if (probe.spec?.adapter !== "fake") {
   await client.reject(probe.id, "seed aborted: runtime is not in fake-adapter mode");
@@ -164,6 +182,36 @@ if (probe.spec?.adapter !== "fake") {
   process.exit(1);
 }
 await client.reject(probe.id, "adapter probe — not part of the demo set");
+
+// Clean up any stale in-flight work or open proposals from prior seeds (OPS-464)
+// so the single worker is unblocked and open proposal counts match fixture assertions.
+try {
+  const { proposals: priorProposals } = await client.proposals();
+  for (const p of (priorProposals ?? [])) {
+    try {
+      await client.reject(p.id, "cancelled by demo re-seed");
+    } catch {}
+  }
+  const { runs: priorRuns } = await client.runs();
+  for (const r of (priorRuns ?? [])) {
+    if (r.state === "RUNNING" || r.state === "QUEUED") {
+      try {
+        await client.cancel(r.runId, "cancelled by demo re-seed");
+      } catch {}
+    }
+  }
+  await until(
+    "worker idle after re-seed cleanup",
+    async () => {
+      const { runs } = await client.runs();
+      const busy = (runs ?? []).filter((r) => r.state === "RUNNING" || r.state === "QUEUED");
+      return busy.length === 0;
+    },
+    { timeoutMs: 5_000, everyMs: 100 },
+  );
+} catch (err) {
+  log(`re-seed cleanup warning: ${err.message}`);
+}
 
 const [projectA, projectB = projectA] = await projectNames();
 const primaryProject = projectA || "factory";
@@ -179,7 +227,7 @@ const terminals = [
   { id: "failed-contract", repos: ["invalid-artifact"], wanted: "FAILED" },
 ];
 for (const t of terminals) {
-  await client.replay(envelope(t.id, t.repos));
+  await replay(envelope(t.id, t.repos));
   const proposal = await openProposalFor(`${prefix}-${t.id}`);
   await client.approve(proposal.id);
   await runTerminal(proposal.runId, t.wanted);
@@ -199,14 +247,14 @@ if (failedCrashProposal) {
 }
 
 // 3. CANCELLED via proposal rejection
-await client.replay(envelope("rejected", tag("ok", projectB)));
+await replay(envelope("rejected", tag("ok", projectB)));
 const rejected = await openProposalFor(`${prefix}-rejected`);
 await client.reject(rejected.id, "demo: rejected on purpose");
 await runTerminal(rejected.runId, "CANCELLED");
 log(`${rejected.runId} → CANCELLED (proposal rejected)`);
 
 // 4. CANCELLED via operator cancel
-await client.replay(envelope("cancel-op", tag("ok", projectA)));
+await replay(envelope("cancel-op", tag("ok", projectA)));
 const toCancel = await openProposalFor(`${prefix}-cancel-op`);
 await client.cancel(toCancel.runId, "demo: operator cancelled");
 await runTerminal(toCancel.runId, "CANCELLED");
@@ -268,16 +316,16 @@ const dupOutcome = await client.replay(envelope("completed", tag("ok", projectA)
 log(`duplicate admission test: duplicate=${dupOutcome.duplicate}`);
 
 // 8. Open proposals: approvable (`run`), human_needed, and TTL-expired
-await client.replay(envelope("open", tag("ok", projectA)));
+await replay(envelope("open", tag("ok", projectA)));
 const open = await openProposalFor(`${prefix}-open`);
 log(`${open.id} left open (approvable → instant COMPLETED)`);
 
-await client.replay(envelope("human-needed", []));
+await replay(envelope("human-needed", []));
 const human = await humanNeededProposal(`${prefix}-human-needed`);
 log(`${human.id} left open (human_needed: ${human.reason})`);
 
 // TTL-expired proposal
-await client.replay(envelope("expired", tag("ok", projectA)));
+await replay(envelope("expired", tag("ok", projectA)));
 const expiredProposal = await openProposalFor(`${prefix}-expired`);
 
 // 9. Database state for anomaly fixtures (dead-lettered event & expired proposal timestamp)
@@ -311,7 +359,7 @@ try {
 }
 
 // 10. RUNNING, last: occupies worker until 600s timeout
-await client.replay(envelope("running", tag("hang", projectB)));
+await replay(envelope("running", tag("hang", projectB)));
 const hang = await openProposalFor(`${prefix}-running`);
 await client.approve(hang.id);
 await until(`run ${hang.runId} → RUNNING`, async () => {
