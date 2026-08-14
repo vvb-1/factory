@@ -11,19 +11,27 @@ Runs on **bun**. The control layer of the Watt Mind agent factory: shared comman
 ```
 shared/                           harness-neutral content, the only place to edit
   floor.md                        the non-negotiables (goes into every AGENTS.md)
-  commands/                       factory-work, factory-merge, factory-triage, factory-audit
+  commands/                       the thirteen /factory-* commands (table below)
   skills/                         ticket-spec (SKILL.md — a format all harnesses share)
-  agents/                         factory-ux-critic (isolated specialist agent)
+  agents/                         factory-{ux-critic,ci-doctor,infra-scout,merge-reviewer}
 build/emit.mjs                    shared/ -> per-harness packaging; --check guards drift
 plugins/core/                     GENERATED — the Claude Code plugin
 dist/{codex,gemini,cursor,pi}/    GENERATED — the other harnesses
 dist/AGENTS.floor.md              GENERATED — paste/sync into each repo's AGENTS.md
 orchestrator/                     dispatch logic (owned-paths collision, tick)
-orchestrator/watch.jsx            read-only TUI: queue + in-flight tickets + live log tail
+orchestrator/watch.jsx            TUI: queue + in-flight tickets + live log tail, plus
+                                  the keys that start a stage
+event-runtime/                    the separate event-driven sidecar — intake, planner,
+                                  watched approval, worker, verification, receipt
+runners/run-agent.sh              one harness session against one repo
+bin/factory                       the cwd-independent CLI, symlinked to ~/.local/bin
+bin/worktree-{up,down}.sh         this repo's own worktree lifecycle
+lib/, tools/                      shared helpers: transcripts, spend, schedule, Linear
+config/repos.yaml                 per-repo routing: team, base, worktree scripts, verify
 config/schedule.yaml              ONE source of truth for cadences
 config/policy.yaml                budgets, concurrency, escalation
 deploy/gen.mjs                    schedule.yaml -> launchd plists
-evals/                            prompt regression tests
+evals/                            prompt regression cases (no runner yet — see SETUP.md)
 ```
 
 ## Multi-harness
@@ -74,9 +82,18 @@ Prefixed `factory-` so they're identifiable as ours and never collide with a rep
 | Command | Does |
 | :--- | :--- |
 | `/factory-work` | Claims agent-ready tickets, dispatches them rolling (not batched), lands the PRs |
+| `/factory-ticket` | Implements exactly one already-claimed ticket in the current worktree — what `tick.mjs` spawns |
 | `/factory-merge` | Reviews open PRs, fixes what's mechanical, merges what qualifies |
+| `/factory-ship` | Opens the `develop` → deploy-branch PR, waits for CI, merges, verifies the deploy |
 | `/factory-triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
+| `/factory-unblock` | Re-examines `ai:blocked` holds and releases the ones new evidence resolved |
+| `/factory-sweep` | Retires tickets overtaken by events — `Canceled`/`Duplicate` with evidence, never a delete |
 | `/factory-audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
+| `/factory-capture` | Files a Linear issue from the conversation — capture only, never implement |
+| `/factory-friction` | Files harness friction seen in an interactive session, where no transcript exists |
+| `/factory-retro` | Turns measured friction into harness changes |
+| `/factory-report` | Read-only pipeline snapshot across the configured repos |
+| `/factory-next` | Picks the one next stage for this repo, and runs it only when asked |
 
 ### `factory status` — the everyday hub
 
@@ -139,12 +156,15 @@ Agents are isolated specialist contexts, not workflow entry points. Their names 
 | Agent | Does |
 | :--- | :--- |
 | `factory-ux-critic` | Exercises a materially changed user journey and returns a read-only `SHIP` / `FIX-FIRST` critique |
+| `factory-merge-reviewer` | Reviews one PR cold and returns `MERGE` / `FIX` / `ESCALATE`, so the diff never enters the merge session's context |
+| `factory-ci-doctor` | Diagnoses one red Actions run and classifies it `TICKET` / `ENV` / `FLAKE`, keeping the job logs out of the caller |
+| `factory-infra-scout` | Answers questions that need SSH or container output, returning a verdict rather than the dumps |
 
 ## Scheduling — nothing is scheduled
 
 **Standing policy: the factory runs in the foreground, watched.** No launchd job acts on Linear, git, or CI without someone looking at it. Every job in `config/schedule.yaml` is `enabled: false`, and `deploy/launchd/` is empty.
 
-That's deliberate at this maturity: no skill has eval coverage yet, the dispatcher isn't built, per-agent identity doesn't exist (OPS-40) so autonomous actions can't be attributed, and the reaper already demonstrated that one wrong predicate reaches 31 tickets. Foreground-first is how each loop earns the right to run unattended.
+That's deliberate at this maturity: no skill has eval coverage yet, per-agent identity doesn't exist (OPS-40) so autonomous actions can't be attributed, and the reaper already demonstrated that one wrong predicate reaches 31 tickets. Foreground-first is how each loop earns the right to run unattended.
 
 The cost is real and worth naming: **without the reaper, a crashed agent holds its ticket until a human notices.** Acceptable while every run is watched; the first thing to re-enable when that stops being true.
 
@@ -156,7 +176,7 @@ Triage ──①triage──▶ ai:agent-ready ──②dispatch──▶ PR ─
                              reaper ◀── crashed claims ◀──────┘
 ```
 
-**Commands are repo-agnostic verbs; `--repo` supplies the targets.** Adding a repo is `--repo bj29,legalease`, not a second copy of every job. Only `bj29` is targeted today — it's the one repo satisfying `PC-15` (industrialized worktrees), which is what makes concurrent agents safe.
+**Commands are repo-agnostic verbs; `--repo` supplies the targets.** Adding a repo is `--repo bj29,legalease`, not a second copy of every job. Dispatch is authorized for the repos in `config/repos.yaml` that satisfy `PC-15` (industrialized worktrees) — today `bj29`, `legalease`, `cashsaas` and `wm-home` — because that isolation is what makes concurrent agents safe. Everything else in that file is `report_only`: the janitor can see its orphans, dispatch refuses it.
 
 ### Why the cadences are short
 
@@ -210,7 +230,7 @@ There is also a standalone `warm` stage (every 2h, same staleness gate) so a lon
 Three levels, each with a different job:
 
 1. **Across repos — sequential.** `--repo a,b` runs repos one after another. Parallelism belongs *inside* a repo; N concurrent sessions across repos contend for the same machine, the same Linear rate budget, and the same daily spend cap.
-2. **Within a repo — `max_in_flight` slots** (3 for bj29, in `config/repos.yaml`). One ticket = one worktree = one agent. The gate reports `slotsFree` and refuses to dispatch at zero.
+2. **Within a repo — `max_in_flight` slots** (20 for bj29, in `config/repos.yaml`; 3 is the fallback in `config/policy.yaml` for a repo that names no number of its own). One ticket = one worktree = one agent. The gate reports `slotsFree` and refuses to dispatch at zero.
 3. **Between tickets — `Owned Paths`.** Two tickets run together only if their glob sets are disjoint. This is the real safety property; slots just cap resource use.
 
 **Merging is never parallel**, at any level.
@@ -238,11 +258,11 @@ The agent runs with `cwd` set to the repo, so it reads that repo's `AGENTS.md` n
 
 **Worktrees must not live inside `~/Develop/factory/`.** It's a git repo, so nesting checkouts under it means `git status` noise, a real chance of `git add -A` sweeping an entire worktree into a commit, and the drift check walking trees it has no business in. A control plane that can accidentally commit its own workload is a bad control plane.
 
-A sibling like `~/Develop/factory-workspace/` would work, but it buys nothing and costs a migration: `bin/worktree-up.sh` in each repo already writes to `~/Develop/.worktrees/<repo>/`, [linear.md §6](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md) documents that path, and 21 existing bj29 worktrees live there. Changing it means editing every repo's script plus the docs, and orphaning what's already on disk.
+A sibling like `~/Develop/factory-workspace/` would work, but it buys nothing and costs a migration: `bin/worktree-up.sh` in each repo already writes to `~/Develop/.worktrees/<repo>/`, [linear.md §6](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md) documents that path, and fourteen repos' worktrees already live there. Changing it means editing every repo's script plus the docs, and orphaning what's already on disk.
 
 The existing convention already has the properties you'd want: outside any repo, namespaced per repo, dot-prefixed so it stays out of `~/Develop` listings, and pointed at by `worktree_root` in `config/repos.yaml` — so it's a config change, not a code change, if it ever needs to move.
 
-**The one good reason to move it: disk.** This machine is at 89%, and worktrees are the bulk of it. If you relocate them to another volume, change `worktree_root` here *and* the corresponding path in the repo's `worktree-up.sh` — those two must agree, or the janitor cleans a directory the scripts aren't using.
+**The one good reason to move it: disk.** This machine is at 96%, and worktrees are the bulk of it. If you relocate them to another volume, change `worktree_root` here *and* the corresponding path in the repo's `worktree-up.sh` — those two must agree, or the janitor cleans a directory the scripts aren't using.
 
 ### Lifecycle
 
@@ -257,7 +277,7 @@ The janitor exists because that third step is the one that gets skipped — a cr
 
 ### Checkout freshness
 
-Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **fetches and reports** — branch, commits behind, uncommitted files — but **never pulls**. The main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. Triage is read-only and needs no worktree; only dispatch creates them.
+Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **always fetches, and fast-forwards only when the tree is clean** — `--ff-only` cannot create a merge commit or lose work, so it is safe unattended. When the tree is dirty it pulls nothing and says so, in the log *and* in the prompt: the main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. A checkout that is behind, ahead, or dirty is announced to the agent as unreliable evidence, with instructions to take code from `origin/<base>` instead. Triage is read-only and needs no worktree; only dispatch creates them.
 
 ## Testing the loop
 
@@ -305,11 +325,11 @@ Only then start the supervisor on a cadence.
 
 | Limit | Where | Default |
 | :--- | :--- | :--- |
-| Tickets per tick | `--args` in `config/schedule.yaml` | triage 3, dispatch 2 |
-| Concurrent tickets | `max_in_flight` in `config/repos.yaml` | 3 |
-| Spend per run | `--budget`, else `budget.per_ticket_usd` in `config/policy.yaml` | $5 |
+| Tickets per tick | `--args` in `config/schedule.yaml` | triage 5, unblock 10 |
+| Concurrent tickets | `max_in_flight` in `config/repos.yaml` | 20 for bj29, legalease and cashsaas; 3 where a repo names nothing |
+| Spend per run | `--budget`, else `budget.per_ticket_usd` in `config/policy.yaml` | $15 (`merge_usd`: $40 — a merge pass reviews a backlog, not one diff) |
 | Daily spend | `budget.per_day_usd` | $2000 |
-| Which repos | `--repo` on each job | `bj29` only |
+| Which repos | `--repo` on each job, else `defaults.repo` | `bj29` |
 
 ### Auth and "budget" on a subscription
 
@@ -321,7 +341,7 @@ The real constraint on a subscription is the **usage window**, and nothing here 
 
 **Per-tick caps are what keep a 5-minute loop honest.** Without `--args`, a triage tick would turn all 14 Triage tickets into specs in one unattended run, and you'd review the results after the fact instead of before. Small ticks also fail small.
 
-Good first candidates in BJ29 today: `CLNT-616` (missing aria-label — tiny, user-facing, clear acceptance criteria) or `CLNT-611` (broken blog banner image). **Avoid `CLNT-612` for a first test** — it's a unique-index migration, which is on the never-auto-merge list and will correctly escalate rather than complete.
+A good first candidate is tiny, user-facing and unambiguous — the missing `aria-label` (`CLNT-616`) and the broken blog banner image (`CLNT-611`) this walkthrough was written against are both long since `Done`, but that is the shape to look for. **Avoid anything on the never-auto-merge list for a first test**: `CLNT-612` was a unique-index migration, and a ticket like that will correctly escalate rather than complete, which tells you nothing about whether the loop works.
 
 ### The supervisor — a scheduler you watch
 
@@ -349,14 +369,14 @@ bun deploy/gen.mjs --install   # copy to ~/Library/LaunchAgents and load
 
 ### The monitor — a bird's-eye view across repos
 
-`orchestrator/run.mjs` shows you one job's full output; `orchestrator/watch.jsx` shows you the state across every repo at once — queue depth, which tickets are in flight or in review, and a live tail of the selected ticket's session log. Read-only: it never spawns an agent or writes anything, it only re-reads what `queue.mjs` and `~/.factory/logs/*.jsonl` already expose.
+`orchestrator/run.mjs` shows you one job's full output; `orchestrator/watch.jsx` shows you the state across every repo at once — queue depth, which tickets are in flight or in review, and a live tail of the selected ticket's session log. The view itself only re-reads what `queue.mjs` and `~/.factory/logs/*.jsonl` already expose, but it also carries keys that **launch** a stage against the selected repo — `t` triage, `d` dispatch the selected ticket, `m` merge, `u` unblock, `x` the reaper (dry first, then a confirmation) — so a keystroke here is the same decision as typing the command.
 
 ```bash
 bun run watch                  # or: bun orchestrator/watch.jsx
 bun orchestrator/watch.jsx --repo bj29
 ```
 
-`↑`/`↓` selects a ticket, `←`/`→` switches repo, `q` quits.
+`↑`/`↓` selects a ticket, `←`/`→` switches repo, `?` lists every key, `q` quits.
 
 Never hand-edit a generated plist — the next regeneration silently reverts it.
 
@@ -405,30 +425,34 @@ Where the glob algebra is ambiguous it errs toward *collision*: a false positive
 
 Secrets (injected via launchd env or `op run`), worktrees, agent session logs, and the dispatcher's state — all under `~/.factory/`.
 
-## Where things stand (2026-08-03)
+## Where things stand
 
-**Automated dispatch is authorized for `bj29` only.** coach-wattz's lifecycle scripts landed in [CW-363](https://linear.app/watt-mind/issue/CW-363), so the janitor can safely reclaim its finished worktrees through the repo-owned teardown script. coach-wattz remains `report_only` for dispatch; legalease and cashsaas carry full lifecycle configuration.
+**Automated dispatch is authorized for the four repos in `config/repos.yaml` that ship the worktree lifecycle:** `bj29`, `legalease`, `cashsaas` and `wm-home`. coach-wattz's teardown script landed in [CW-363](https://linear.app/watt-mind/issue/CW-363), so the janitor can safely reclaim its finished worktrees through that repo-owned script, but it stays `report_only` for dispatch — as do watts-mobile, proxies, hdkiller, eslint-config and this repo.
 
 | Stage | State |
 | :--- | :--- |
 | `triage` | works on Claude **and** agy; claims tickets so they show in Agents In Flight |
 | `dispatch` | `tick.mjs` — one process per ticket, rolling refill, auto-warm |
-| `merge` | untested end to end by the factory; PRs have been merged from interactive sessions |
+| `merge` | exercised end to end across bj29, legalease and cashsaas; still the one stage that is never parallel |
 | `janitor`, `warm`, `reaper` | work; reaper cleaned 50 stale markers |
 
 **Nothing is scheduled.** All jobs are `enabled: false`; run through `orchestrator/run.mjs`.
 
+The event runtime under `event-runtime/` is a second, deliberately isolated track — intake, planner, watched approval, workers, verification and receipts all run, behind their own control API, CLI and web UI. It touches nothing above and carries its own documents; see Related.
+
 ### Immediate next steps
 
-1. **Merge stage is the untested link** — PRs #164/#165 have been sitting in review. `runners/run-agent.sh --repo bj29 --command factory-merge` is the next thing to exercise.
-2. **F-1, F-2, F-3** in the [friction log](docs/friction-log.md) are open and small. F-2 (`--delete-branch` fails while the worktree exists) will bite on every worktree merge.
-3. **e2e is failing on every PR** (CLNT-620, CLNT-622) — that is the gate that makes autonomous merging into `develop` safe, so it is currently not protecting anything.
-4. **Warm cache is ~100 commits behind.** `cd ~/Develop/pets/bj29 && bin/worktree-warm.sh` once, or let a 2+ ticket dispatch trigger it.
-5. **`evals/run.mjs` does not exist** — cases are written, the runner is not. Spec quality has no regression test, which is what would justify keeping triage on sonnet.
+1. **CI is the gate that makes autonomous merging into `develop` safe, and it is unreliable on two repos** — bj29's E2E and smoke checks (F-14, [CLNT-1346](https://linear.app/watt-mind/issue/CLNT-1346)) and legalease's CI (F-13, [CLNT-1345](https://linear.app/watt-mind/issue/CLNT-1345)). Both are filed and still sitting in `Triage`, so the gate protects less than it looks like it does.
+2. **F-9** in the [friction log](docs/friction-log.md) is open and document-only — agents still guess at fixed sleeps waiting for a dev server to boot, and the stronger fix is a repo-level `bin/wait-for-dev.sh` rather than another rule.
+3. **Warm cache is 26 commits behind.** `cd ~/Develop/pets/bj29 && bin/worktree-warm.sh` once, or let a 2+ ticket dispatch trigger it.
+4. **`evals/run.mjs` does not exist** — cases are written, the runner is not. Spec quality has no regression test, which is what would justify keeping triage on sonnet.
 
 ## Related
 
 - [`docs/architecture.md`](docs/architecture.md) — **why** it is shaped this way: the decisions, their reasons, and the ones that were wrong first
+- [`docs/event-runtime.md`](docs/event-runtime.md) — the event runtime's architecture, with [`event-runtime/README.md`](event-runtime/README.md) for how to run it
+- [`docs/event-runtime-workers.md`](docs/event-runtime-workers.md), [`docs/event-runtime-schedules.md`](docs/event-runtime-schedules.md), [`docs/event-runtime-webui.md`](docs/event-runtime-webui.md) — placement and chaining, clock events, and the web control plane
+- [`docs/friction-log.md`](docs/friction-log.md) — what has actually wasted agents' time, and what was done about it
 - `~/Develop/hdkiller/docs/orgs/linear.md` — the execution protocol (SoT)
 - `~/Develop/hdkiller/docs/guides/project-conventions.md` — the quality baseline and `PC-*` audit
 - `~/Develop/hdkiller/docs/servers/workstations/hdkiller-macbook-pro.md` — the host these jobs run on

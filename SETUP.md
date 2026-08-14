@@ -60,9 +60,13 @@ This is a **private** repo, so any machine loading the plugin needs GitHub auth 
 ## 5. Verify
 
 ```bash
+(cd event-runtime/web && bun install --frozen-lockfile)
 bun test
+bun build/emit.mjs --check
 bun deploy/gen.mjs
 ```
+
+That is the gate CI applies to every pull request and to every push to `develop` and `main`. The web install comes first because the web `.test.tsx` files resolve React's JSX runtime out of `event-runtime/web/node_modules`; without it `bun test` reports a green that CI will not reproduce (OPS-384). `--check` is the half that proves the generated tree still matches `shared/`.
 
 ## Known gaps
 
@@ -70,10 +74,8 @@ These are deliberate — the scaffold ships honest about what isn't built.
 
 | Gap | Why it's not done |
 | :--- | :--- |
-| `orchestrator/tick.mjs` | Dispatch stays disabled until `PC-15` (worktree isolation) lands in the repos it would dispatch to — see CW-363, CLNT-609. Dispatching into repos with no port/database isolation is how two agents share one dev database. |
-| `runners/` | The shared worktree library is deliberately deferred: BJ29 is the only implementation today. Extract after CW-363 and CLNT-609 land, when the real variation across Wasp/Prisma/Postgres, pnpm/Nuxt/Prisma and Django/SQLite is visible. Rule of three. |
+| A shared worktree library | Each repo still owns its own `bin/worktree-{up,down,warm}.sh`, and the common library stays deliberately deferred. The real variation across Wasp/Prisma/Postgres, pnpm/Nuxt/Prisma and Django/SQLite is visible now, but extracting it is real work with no forcing function yet — and a wrong abstraction here silently breaks the port and database isolation the scripts exist for. |
 | `evals/run.mjs` | Cases are written first on purpose — they specify what the skill is for. |
-| `config/repos.yaml` | Not created. Ports and test commands would be invented today; they come from the worktree scripts once those exist. |
 | Per-agent Linear identity | Every agent currently claims as the human, so the assignee lock can't detect a lost race (OPS-40). The dispatcher is the natural place to inject a per-agent key — build it in rather than retrofitting. |
 
 ## Flags worth knowing
