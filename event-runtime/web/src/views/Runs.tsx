@@ -268,8 +268,12 @@ export function RunFailureBanner({
 const rowWash = (s: string) =>
   s === "FAILED" || s === "TIMED_OUT" ? "row-wash-err" : s === "REFUSED" ? "row-wash-warn" : "";
 
+export function isWorkerId(actor: string): boolean {
+  return /^worker_.+/.test(actor);
+}
+
 export function ActorRef({ actor, className }: { actor: string; className?: string }) {
-  if (!/^worker_.+/.test(actor)) return <>{actor}</>;
+  if (!isWorkerId(actor)) return <>{actor}</>;
   return (
     <JumpLink
       onClick={() => {
