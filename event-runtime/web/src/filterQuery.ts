@@ -250,12 +250,15 @@ export function filterHint(query: FilterQuery): string {
 /**
  * An open proposal whose run already left PROPOSED was raced (cancelled from
  * Runs, say) and can never be approved — the list calls that stale, and the
- * `is:stale` facet has to agree with the row wash that shows it.
+ * `is:stale` facet has to agree with the row wash that shows it. Decided proposals
+ * (status !== "open") are audit records whose runs are naturally terminal, so
+ * they are never stale.
  */
 export function proposalRunState(
-  proposal: { runId: string | null },
+  proposal: { runId: string | null; status?: string },
   runStates: ReadonlyMap<string, string>,
 ): string | null {
+  if (proposal.status && proposal.status !== "open") return null;
   const state = proposal.runId ? runStates.get(proposal.runId) : undefined;
   return state && state !== "PROPOSED" ? state : null;
 }
