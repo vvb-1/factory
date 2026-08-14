@@ -8,6 +8,8 @@ repos:
   - name: bj29
     path: ~/Develop/pets/bj29
     github: watt-mind/bakonszegi-coaching
+    icon: ph-fire
+    color: rose
 
     # Linear routing (linear.md §1-2)
     team: CLNT
@@ -120,6 +122,8 @@ repos:
   - name: wm-home
     path: ~/Develop/pets/wm/wm-home
     github: watt-mind/wm-home
+    icon: ph-globe
+    color: sky
     team: WM
     project: Corporate Marketing
     base: develop
@@ -147,6 +151,8 @@ repos:
   - name: coach-wattz
     path: ~/Develop/coach-wattz
     github: watt-mind/coach
+    icon: ph-pulse
+    color: indigo
     team: CW
     project: Coach Watts - Web & AI Core Platform
     base: develop
@@ -171,6 +177,8 @@ repos:
   - name: watts-mobile
     path: ~/Develop/watts-mobile
     github: watt-mind/watts-mobile
+    icon: ph-device-mobile
+    color: violet
     team: CW
     project: Mobile App
     base: develop
@@ -188,6 +196,8 @@ repos:
   - name: legalease
     path: ~/Develop/legalease
     github: watt-mind/legalease
+    icon: ph-scales
+    color: emerald
     team: CLNT
     project: Legalease
     base: develop
@@ -238,6 +248,8 @@ repos:
   - name: cashsaas
     path: ~/Develop/cashsaas
     github: hdkiller/cashsaas
+    icon: ph-trend-up
+    color: amber
     team: CLNT
     project: CashMap
     base: develop
@@ -281,6 +293,8 @@ repos:
   - name: proxies
     path: ~/Develop/pets/proxies
     github: watt-mind/proxies
+    icon: ph-plugs-connected
+    color: teal
     report_only: true
 
     # Linear routing (AGENTS.md + linear.md §1)
@@ -319,6 +333,8 @@ repos:
   - name: hdkiller
     path: ~/Develop/hdkiller
     github: hdkiller/hdkiller
+    icon: ph-hard-drives
+    color: slate
     team: OPS
     base: master
     report_only: true
@@ -337,6 +353,8 @@ repos:
   - name: eslint-config
     path: ~/Develop/watt-mind/eslint-config
     github: watt-mind/eslint-config
+    icon: ph-checks
+    color: fuchsia
     team: OPS
     base: main
     report_only: true            # stub (OPS-164) — no package, no worktree tooling yet
@@ -358,6 +376,8 @@ repos:
   - name: factory
     path: ~/Develop/factory
     github: watt-mind/factory
+    icon: ph-robot
+    color: orange
 
     # Linear routing (linear.md §1-2) — factory tickets moved to WM / Factory
     # on 2026-08-05; the earlier team: OPS routing was stale.

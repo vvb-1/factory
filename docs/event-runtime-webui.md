@@ -246,9 +246,7 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 - `g o` / `g e` / `g p` / `g r` / `g f` / `g t` / `g w` / `g g` — go to
   Overview / Events / Proposals / Runs / Projects / Agents / Workers / Graph.
   Projects took `g f` because `p` and `r` were already Proposals and Runs.
-  The rail footer and the `?` cheatsheet render this list from the single `NAV`
-  table in `nav.ts` rather than spelling it out, after a hand-listed footer
-  had already fallen one chord behind; OPS-311 additionally shows the armed
+  The status bar and the `?` cheatsheet render shortcuts cleanly (with full destination mapping in `?` and dynamic `g` chord overlay); OPS-311 additionally shows the armed
   `g` on screen while it waits for its suffix.
 - Context strip toolbar (`role="toolbar"`): single Tab stop with roving
   tabindex among All / open repos / In flight. `Left`/`Right` arrows (and

@@ -122,3 +122,23 @@ describe("sidebar navigation accessibility", () => {
     }
   });
 });
+
+describe("bottom status bar", () => {
+  test("renders connection status, policy, workers, shortcuts, and theme switcher", async () => {
+    const utils = renderApp();
+    const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
+    expect(statusBar).toBeTruthy();
+
+    await waitFor(() => {
+      expect(statusBar.textContent).toContain("connected");
+      expect(statusBar.textContent).toContain("test");
+      expect(statusBar.textContent).toContain("1 worker");
+      expect(statusBar.textContent).toContain("⌘K commands");
+      expect(statusBar.textContent).toContain("g go");
+      expect(statusBar.textContent).toContain("? keys");
+    });
+
+    const themeButton = within(statusBar).getByRole("button", { name: /Theme:/i });
+    expect(themeButton).toBeTruthy();
+  });
+});

@@ -405,65 +405,6 @@ export function App() {
             Inject event… <span className="mono ml-1 text-(--text-faint)">i</span>
           </button>
         </div>
-        <div className="border-t border-(--border) px-4 py-3 text-[11px]">
-          <div className="flex items-center gap-2">
-            <span
-              className="size-2 shrink-0 rounded-full"
-              style={{ background: connected ? "var(--hue-ok)" : "var(--hue-err)" }}
-            />
-            {connected ? (
-              <span className="text-(--text-dim)">
-                connected · <span className="mono">{health.data?.policyVersion}</span>
-                {liveWorkers !== null && (
-                  <>
-                    {" "}
-                    {/* One unbreakable token: at this nav width the fragment
-                        always wraps, and a bare "1" ending the line above its
-                        own "worker" reads as a different number. */}
-                    <span
-                      className="whitespace-nowrap"
-                      style={staleWorkers > 0 ? { color: "var(--hue-warn)" } : undefined}
-                      title={
-                        staleWorkers > 0
-                          ? `${liveWorkers} live · ${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`
-                          : `${liveWorkers} live worker${liveWorkers === 1 ? "" : "s"}`
-                      }
-                    >
-                      ·{" "}
-                      {liveWorkers === 0
-                        ? "no workers"
-                        : `${liveWorkers} worker${liveWorkers === 1 ? "" : "s"}`}
-                    </span>
-                  </>
-                )}
-              </span>
-            ) : (
-              <span style={{ color: "var(--hue-err)" }}>runtime unreachable</span>
-            )}
-          </div>
-          <div className="mt-1.5 text-(--text-faint)">
-            <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            {/* Read off NAV, not typed out: hand-listed it had already lost `f`
-                (Projects), so the footer promised a shorter chord set than the
-                pill and the `?` list. */}
-            <span className="mono">{NAV.map((n) => n.go).join("/")}</span> ·{" "}
-            <span className="mono">/</span> filter · <span className="mono">i</span> inject ·{" "}
-            <span className="mono">?</span> keys
-          </div>
-          {/* Named, not just toggled: "contrast" is the accessibility theme, and
-              an operator who lands in it by accident needs to read where they
-              are before the swatch tells them anything. */}
-          <button
-            type="button"
-            onClick={cycleTheme}
-            title={`Theme ${theme} — click for ${nextTheme}`}
-            aria-label={`Theme: ${theme}. Switch to ${nextTheme}.`}
-            className="mt-2 flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-(--border-strong) px-1.5 py-0.5 text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
-          >
-            <span>Theme</span>
-            <span className="text-(--text)">{theme}</span>
-          </button>
-        </div>
       </nav>
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -619,6 +560,61 @@ export function App() {
       </main>
       </div>
 
+      <footer
+        role="contentinfo"
+        aria-label="Status bar"
+        className="flex h-7 shrink-0 items-center justify-between border-t border-(--border) bg-(--surface-1) px-3 text-[11px] select-none"
+      >
+        <div className="flex items-center gap-2 text-(--text-dim)">
+          <div className="flex items-center gap-1.5">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: connected ? "var(--hue-ok)" : "var(--hue-err)" }}
+            />
+            {connected ? (
+              <span>
+                connected · <span className="mono">{health.data?.policyVersion}</span>
+                {liveWorkers !== null && (
+                  <span
+                    className="ml-1"
+                    style={staleWorkers > 0 ? { color: "var(--hue-warn)" } : undefined}
+                    title={
+                      staleWorkers > 0
+                        ? `${liveWorkers} live · ${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`
+                        : `${liveWorkers} live worker${liveWorkers === 1 ? "" : "s"}`
+                    }
+                  >
+                    ·{" "}
+                    {liveWorkers === 0
+                      ? "no workers"
+                      : `${liveWorkers} worker${liveWorkers === 1 ? "" : "s"}`}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span style={{ color: "var(--hue-err)" }}>runtime unreachable</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="text-(--text-faint)">
+            <span className="mono">⌘K</span> commands · <span className="mono">g</span> go ·{" "}
+            <span className="mono">?</span> keys
+          </div>
+          <button
+            type="button"
+            onClick={cycleTheme}
+            title={`Theme ${theme} — click for ${nextTheme}`}
+            aria-label={`Theme: ${theme}. Switch to ${nextTheme}.`}
+            className="flex cursor-pointer items-center gap-1.5 rounded border border-(--border-strong) bg-(--surface-2) px-1.5 py-0.5 text-[10px] text-(--text-dim) hover:bg-(--surface-3) hover:text-(--text)"
+          >
+            <span>Theme</span>
+            <span className="text-(--text)">{theme}</span>
+          </button>
+        </div>
+      </footer>
+
       <CommandPalette
         actions={paletteActions}
         onJumpRun={jumpToRun}
@@ -665,7 +661,7 @@ export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentVi
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 left-4 z-30 max-w-[calc(100vw-20rem)] lg:left-1/2 lg:-translate-x-1/2 lg:max-w-[calc(100vw-24rem)]"
+      className="pointer-events-none fixed bottom-9 left-4 z-30 max-w-[calc(100vw-20rem)] lg:left-1/2 lg:-translate-x-1/2 lg:max-w-[calc(100vw-24rem)]"
     >
       {armed && (
         <>
