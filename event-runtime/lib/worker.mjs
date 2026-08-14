@@ -10,8 +10,9 @@
  * mid-flight surfaces here as IllegalTransition; the worker stops quietly,
  * publishing nothing.
  */
+import { existsSync, readFileSync } from "node:fs";
 import { storeCollected } from "./artifacts.mjs";
-import { canonicalJson, hashJson } from "./canonical.mjs";
+import { canonicalJson, hashJson, sha256Hex } from "./canonical.mjs";
 import { artifactsRoot } from "./config.mjs";
 import { nextCounter, tx, txImmediate } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
@@ -20,7 +21,7 @@ import { closeOpenProposalForRun } from "./proposals.mjs";
 import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { satisfiesPlacement } from "./workers.mjs";
-import { createWorkspace, destroyWorkspace } from "./workspace.mjs";
+import { createWorkspace, destroyWorkspace, PathViolation, safeJoin } from "./workspace.mjs";
 
 /**
  * Runtime-injected artifacts: adapters that capture the agent's output write
@@ -276,6 +277,25 @@ export async function executeClaimed(db, registry, adapters, claim, {
     }
 
     if (verified.kind === "refused") {
+      const collected = [];
+      for (const entry of RUNTIME_ARTIFACTS) {
+        let abs;
+        try {
+          abs = safeJoin(workspaceDir, entry.path);
+        } catch (err) {
+          if (!(err instanceof PathViolation)) throw err;
+          continue;
+        }
+        if (existsSync(abs)) {
+          collected.push({ kind: entry.kind, uri: `file://${abs}`, sha256: sha256Hex(readFileSync(abs)) });
+        }
+      }
+      const artifacts = storeCollected({ entries: collected, storeRoot: artifactStore });
+      const refusedResult = {
+        ...verified.result,
+        artifacts,
+      };
+
       // Refusal is not failure (§5.3): store the typed result, publish no
       // completion event, clean the workspace normally.
       tx(db, () => {
@@ -291,8 +311,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
           `INSERT INTO results (run_id, attempt, result_json, artifact_hash, evidence_set_hash, verification_json, receipt_json, accepted_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
-          runId, attempt, canonicalJson(verified.result), "none", null,
-          canonicalJson(verified.result.verification), canonicalJson(receipt), iso(now),
+          runId, attempt, canonicalJson(refusedResult), "none", null,
+          canonicalJson(refusedResult.verification), canonicalJson(receipt), iso(now),
         );
         finishAttempt(db, runId, attempt, "REFUSED", verified.reasonCode, now);
       });

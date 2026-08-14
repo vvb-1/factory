@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
+import { pinRunArtifact } from "./artifacts.mjs";
 import { canonicalJson, hashJson } from "./canonical.mjs";
+import { artifactsRoot } from "./config.mjs";
 import { openDb } from "./db.mjs";
 import { createRun, lifecycleOf, runState, transition, IllegalTransition } from "./lifecycle.mjs";
 import { loadRegistry } from "./registry.mjs";
@@ -121,6 +123,21 @@ describe("worker", () => {
     expect(db.query(`SELECT COUNT(*) AS n FROM results WHERE run_id = ?`).get(spec.runId).n).toBe(1);
     expect(db.query(`SELECT COUNT(*) AS n FROM outbox`).get().n).toBe(0);
     expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+
+    const resultRow = db.query(`SELECT * FROM results WHERE run_id = ?`).get(spec.runId);
+    const parsedResult = JSON.parse(resultRow.result_json);
+    expect(parsedResult.artifacts).toHaveLength(1);
+    expect(parsedResult.artifacts[0].kind).toBe("transcript");
+    expect(parsedResult.artifacts[0].sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(parsedResult.artifacts[0].uri).toMatch(/^file:\/\//);
+    const storePath = path.join(o.artifactStore ?? artifactsRoot(), parsedResult.artifacts[0].sha256);
+    expect(existsSync(storePath)).toBe(true);
+    expect(pinRunArtifact(db, spec.runId)).toEqual({
+      runId: spec.runId,
+      transcript: parsedResult.artifacts[0].sha256,
+      state: "REFUSED",
+      agent: spec.agent,
+    });
   });
 
   test("invalid-artifact: FAILED/contract_violation, no outbox row, workspace retained", async () => {
