@@ -11,16 +11,19 @@
   --base: oklch(0.16 0.007 260);
   --contrast: oklch(0.93 0.004 260);
   --accent: oklch(0.64 0.15 265);
+  --on-accent: var(--base);
 }
 [data-theme="light"] {
   --base: oklch(0.985 0.002 260);
   --contrast: oklch(0.21 0.012 260);
   --accent: oklch(0.52 0.17 265);
+  --on-accent: #ffffff;
 }
 [data-theme="contrast"] {
   --base: oklch(0.08 0 0);
   --contrast: oklch(0.99 0 0);
   --accent: oklch(0.78 0.17 265);
+  --on-accent: var(--base);
 }
 
 :root,
@@ -33,8 +36,8 @@
   --border: color-mix(in oklch, var(--base) 89%, var(--contrast));
   --border-strong: color-mix(in oklch, var(--base) 78%, var(--contrast));
   --text: color-mix(in oklch, var(--contrast) 94%, var(--base));
-  --text-dim: color-mix(in oklch, var(--contrast) 64%, var(--base));
-  --text-faint: color-mix(in oklch, var(--contrast) 42%, var(--base));
+  --text-dim: color-mix(in oklch, var(--contrast) 72%, var(--base));
+  --text-faint: color-mix(in oklch, var(--contrast) 58%, var(--base));
   --accent-dim: color-mix(in oklch, var(--accent) 25%, var(--base));
 
   /* meaningful color: state hues derived from the accent by hue rotation,
