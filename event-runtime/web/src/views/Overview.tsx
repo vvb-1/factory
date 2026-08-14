@@ -229,11 +229,18 @@ export function Overview({
           </div>
           <div className="rounded-md border border-(--border) bg-(--surface-1)">
             {anomalyRows.map((a, i) => (
-              <div key={i} className="flex items-center justify-between gap-3 border-b border-(--border) px-3 py-2 last:border-0">
-                <span className="truncate text-[12px]" title={a.text} style={{ color: "var(--hue-warn)" }}>
+              <div
+                key={i}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 border-b border-(--border) px-3 py-2 last:border-0"
+              >
+                <span
+                  className="min-w-0 break-words sm:truncate text-[12px]"
+                  title={a.text}
+                  style={{ color: "var(--hue-warn)" }}
+                >
                   {a.text}
                 </span>
-                <span className="flex shrink-0 gap-2">
+                <span className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:shrink-0">
                   <Button onClick={() => copyText(a.text, "anomaly")}>Copy</Button>
                   {a.requeue && (
                     <Button
