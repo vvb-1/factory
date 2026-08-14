@@ -329,5 +329,6 @@ repos:
     team: OPS
     base: develop
     deploy_branch: main          # release target is main, not the master fallback
+    worktree_root: ~/Develop/.worktrees/factory
     report_only: true            # never a dispatch target — no worktree tooling
     verify: bun test && bun build/emit.mjs --check
