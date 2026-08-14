@@ -6,6 +6,8 @@ import {
   chipHelp,
   chipLabel,
   filterHint,
+  getActiveFilterToken,
+  getFilterSuggestions,
   matchesFilterQuery,
   parseFilterQuery,
   proposalRunState,
@@ -310,3 +312,85 @@ describe("proposalRunState", () => {
     expect(proposalRunState({ runId: "r1", status: "expired" }, new Map([["r1", "CANCELLED"]]))).toBeNull();
   });
 });
+
+describe("getActiveFilterToken", () => {
+  test("finds active token under cursor when typing inside a word", () => {
+    const input = "state:failed agent:ci";
+    expect(getActiveFilterToken(input, 5)).toMatchObject({ raw: "state:failed", start: 0, end: 12 });
+    expect(getActiveFilterToken(input, 12)).toMatchObject({ raw: "state:failed", start: 0, end: 12 });
+    expect(getActiveFilterToken(input, 13)).toMatchObject({ raw: "agent:ci", start: 13, end: 21 });
+    expect(getActiveFilterToken(input, 21)).toMatchObject({ raw: "agent:ci", start: 13, end: 21 });
+  });
+
+  test("returns empty token when cursor is in whitespace", () => {
+    const input = "state:failed  agent:ci";
+    expect(getActiveFilterToken(input, 13)).toMatchObject({ raw: "", start: 13, end: 13 });
+    expect(getActiveFilterToken("   ", 1)).toMatchObject({ raw: "", start: 1, end: 1 });
+    expect(getActiveFilterToken("", 0)).toMatchObject({ raw: "", start: 0, end: 0 });
+  });
+
+  test("handles quotes properly", () => {
+    const input = 'subject:"disk pressure" state:fail';
+    expect(getActiveFilterToken(input, 10)).toMatchObject({ raw: 'subject:"disk pressure"', start: 0, end: 23 });
+    expect(getActiveFilterToken(input, 30)).toMatchObject({ raw: "state:fail", start: 24, end: 34 });
+  });
+});
+
+describe("getFilterSuggestions", () => {
+  test("suggests facet names and flags on empty or prefix input", () => {
+    const emptySugs = getFilterSuggestions("", RUN_FACETS);
+    expect(emptySugs.some((s) => s.label === "state:")).toBe(true);
+    expect(emptySugs.some((s) => s.label === "agent:")).toBe(true);
+    expect(emptySugs.some((s) => s.label === "repo:")).toBe(true);
+    expect(emptySugs.some((s) => s.label === "reason:")).toBe(true);
+    expect(emptySugs.some((s) => s.label === "is:stale")).toBe(true);
+
+    const stSugs = getFilterSuggestions("st", RUN_FACETS);
+    expect(stSugs.map((s) => s.label)).toContain("state:");
+    expect(stSugs.map((s) => s.label)).toContain("status:");
+    expect(stSugs.map((s) => s.label)).toContain("is:stale");
+    expect(stSugs.map((s) => s.label)).not.toContain("agent:");
+  });
+
+  test("suggests enum values with state hues when typing a facet value", () => {
+    const stateSugs = getFilterSuggestions("state:", RUN_FACETS, undefined, (_field, val) =>
+      val === "failed" ? "var(--hue-err)" : val === "completed" ? "var(--hue-ok)" : undefined,
+    );
+    expect(stateSugs.length).toBeGreaterThan(0);
+    const failedSug = stateSugs.find((s) => s.label === "failed");
+    expect(failedSug).toBeDefined();
+    expect(failedSug?.insertText).toBe("state:failed ");
+    expect(failedSug?.hue).toBe("var(--hue-err)");
+
+    const failedFilter = getFilterSuggestions("state:fa", RUN_FACETS);
+    expect(failedFilter.map((s) => s.label)).toEqual(["failed"]);
+  });
+
+  test("resolves aliases like status: to canonical state values for Runs", () => {
+    const statusSugs = getFilterSuggestions("status:", RUN_FACETS);
+    expect(statusSugs.map((s) => s.label)).toContain("failed");
+    expect(statusSugs.map((s) => s.label)).toContain("running");
+    expect(statusSugs[0].insertText.startsWith("status:")).toBe(true);
+  });
+
+  test("suggests flags when typing is:", () => {
+    const isSugs = getFilterSuggestions("is:", PROPOSAL_FACETS);
+    expect(isSugs.map((s) => s.label)).toContain("is:stale");
+    expect(isSugs.map((s) => s.label)).toContain("is:expired");
+  });
+
+  test("suggests enum values for Proposals and Events", () => {
+    const decisionSugs = getFilterSuggestions("decision:", PROPOSAL_FACETS);
+    expect(decisionSugs.map((s) => s.label)).toEqual(["run", "human_needed", "noop"]);
+
+    const eventStatusSugs = getFilterSuggestions("status:", EVENT_FACETS);
+    expect(eventStatusSugs.map((s) => s.label)).toEqual([
+      "admitted",
+      "planned",
+      "noop",
+      "human_needed",
+      "dead_lettered",
+    ]);
+  });
+});
+
