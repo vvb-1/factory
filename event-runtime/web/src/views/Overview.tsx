@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../api";
 import { hashPath } from "../hash";
-import { useNow } from "../hooks";
+import { useNow, useRequeuePoll } from "../hooks";
 import type { JournalEntry, EventFocus, Proposal, RunState } from "../types";
 import type { OperatorContext } from "../context";
 import { ScopeCaption } from "../components/ContextTabs";
@@ -140,13 +140,7 @@ export function Overview({
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
+  const pollRequeue = useRequeuePoll(onJumpProposal);
   const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   const outbox = useQuery({
     queryKey: ["outbox"],
@@ -168,22 +162,7 @@ export function Overview({
     onSuccess: async (_, { source, eventId }) => {
       queryClient.invalidateQueries();
       notify(`Requeued event ${eventId}`, "ok");
-      const deadline = Date.now() + 8000;
-      try {
-        while (alive.current && Date.now() < deadline) {
-          const { proposals } = await api.proposals();
-          const match = proposals.find((p) => p.eventSource === source && p.eventId === eventId);
-          if (match && alive.current) {
-            onJumpProposal(match.id);
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 250));
-        }
-      } catch {
-        if (alive.current) notify(`Requeued ${eventId} — could not confirm a proposal appeared`, "err");
-        return;
-      }
-      if (alive.current) notify(`Requeued ${eventId} — no open proposal appeared`, "info");
+      await pollRequeue(source, eventId);
     },
     onError: () => queryClient.invalidateQueries(),
   });
