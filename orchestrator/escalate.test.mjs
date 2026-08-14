@@ -16,6 +16,190 @@ const repos = Bun.YAML.parse(
   readFileSync(new URL("../config/repos.yaml", import.meta.url), "utf8"),
 ).repos;
 const cashsaasGlobs = repos.find((repo) => repo.name === "cashsaas")?.escalate_paths;
+const wmHomeGlobs = repos.find((repo) => repo.name === "wm-home")?.escalate_paths;
+const wattsMobileGlobs = repos.find((repo) => repo.name === "watts-mobile")?.escalate_paths;
+const coachWattzGlobs = repos.find((repo) => repo.name === "coach-wattz")?.escalate_paths;
+const legaleaseGlobs = repos.find((repo) => repo.name === "legalease")?.escalate_paths;
+
+test("wm-home config protects its schema, auth, admin, and deployment boundaries", () => {
+  expect(wmHomeGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "schema.prisma",
+      "migrations/20260519140000_init/migration.sql",
+      "src/auth/email.ts",
+      "src/admin/operations.ts",
+      "main.wasp",
+      "Dockerfile",
+      "Dockerfile.web",
+      "docker-compose.yml",
+      "nginx.conf",
+      ".github/workflows/deploy.yml",
+    ],
+    wmHomeGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "schema.prisma",
+    "migrations/20260519140000_init/migration.sql",
+    "src/auth/email.ts",
+    "src/admin/operations.ts",
+    "main.wasp",
+    "Dockerfile",
+    "Dockerfile.web",
+    "docker-compose.yml",
+    "nginx.conf",
+    ".github/workflows/deploy.yml",
+  ]);
+});
+
+test("wm-home config leaves ordinary landing page and docs changes unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "src/LandingPage.tsx",
+        "src/components/Header.tsx",
+        "README.md",
+        "docs/setup.md",
+      ],
+      wmHomeGlobs,
+    ),
+  ).toEqual([]);
+});
+
+test("watts-mobile config protects subscriptions, auth, credentials, and build configuration", () => {
+  expect(wattsMobileGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "src/features/subscriptions/revenueCat.ts",
+      "src/auth/sessionStore.ts",
+      "credentials/apple/distribution.p12",
+      "eas.json",
+      ".env.example",
+      ".github/workflows/build.yml",
+    ],
+    wattsMobileGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "src/features/subscriptions/revenueCat.ts",
+    "src/auth/sessionStore.ts",
+    "credentials/apple/distribution.p12",
+    "eas.json",
+    ".env.example",
+    ".github/workflows/build.yml",
+  ]);
+});
+
+test("watts-mobile config leaves ordinary feature screens and components unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "src/features/stats/StatsScreen.tsx",
+        "src/components/Button.tsx",
+        "README.md",
+        "docs/setup.md",
+      ],
+      wattsMobileGlobs,
+    ),
+  ).toEqual([]);
+});
+
+test("coach-wattz config protects stripe, auth, prisma, and deployment boundaries", () => {
+  expect(coachWattzGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "server/api/stripe/webhook.ts",
+      "server/api/subscriptions/sync.ts",
+      "server/api/auth/login.ts",
+      "server/api/oauth/callback.ts",
+      "server/middleware/auth.ts",
+      "server/middleware/session-impersonation.ts",
+      "prisma/schema.prisma",
+      "prisma/migrations/20260223120700_init/migration.sql",
+      "docker-compose.yml",
+      "Dockerfile",
+      ".github/workflows/ci.yml",
+    ],
+    coachWattzGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "server/api/stripe/webhook.ts",
+    "server/api/subscriptions/sync.ts",
+    "server/api/auth/login.ts",
+    "server/api/oauth/callback.ts",
+    "server/middleware/auth.ts",
+    "server/middleware/session-impersonation.ts",
+    "prisma/schema.prisma",
+    "prisma/migrations/20260223120700_init/migration.sql",
+    "docker-compose.yml",
+    "Dockerfile",
+    ".github/workflows/ci.yml",
+  ]);
+});
+
+test("coach-wattz config leaves ordinary Vue pages and components unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "app/pages/index.vue",
+        "app/components/UserProfile.vue",
+        "README.md",
+        "docs/ARCHITECTURE.md",
+      ],
+      coachWattzGlobs,
+    ),
+  ).toEqual([]);
+});
+
+test("legalease config protects URL routing, auth decorators, migrations, settings, and MCP security boundaries", () => {
+  expect(legaleaseGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "legalease/legalease/urls.py",
+      "legalease/main/decorators.py",
+      "legalease/main/migrations/0001_initial.py",
+      "legalease/legalease/settings_prod.py",
+      "legalease/main/services/access_control.py",
+      "legalease/main/mcp/auth.py",
+      "legalease/main/mcp/scopes.py",
+      "legalease/main/mcp/security.py",
+      "legalease/main/services/google_drive_tokens.py",
+    ],
+    legaleaseGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "legalease/legalease/urls.py",
+    "legalease/main/decorators.py",
+    "legalease/main/migrations/0001_initial.py",
+    "legalease/legalease/settings_prod.py",
+    "legalease/main/services/access_control.py",
+    "legalease/main/mcp/auth.py",
+    "legalease/main/mcp/scopes.py",
+    "legalease/main/mcp/security.py",
+    "legalease/main/services/google_drive_tokens.py",
+  ]);
+});
+
+test("legalease config leaves ordinary document generation services and views unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "legalease/main/services/document_generation.py",
+        "legalease/main/views/home.py",
+        "README.md",
+        "docs/setup.md",
+      ],
+      legaleaseGlobs,
+    ),
+  ).toEqual([]);
+});
 
 test("cashsaas config protects its destructive, deployment, credential, and auth boundaries", () => {
   expect(cashsaasGlobs).toBeDefined();

@@ -114,6 +114,17 @@ repos:
     verify: npm run typecheck && npm run lint && npm run format:check
     smoke_workflow: smoke-prod.yml
     smoke_url: https://watt-mind.com
+    escalate_paths:
+      - schema.prisma
+      - migrations/**
+      - src/auth/**
+      - src/admin/**
+      - main.wasp
+      - Dockerfile
+      - Dockerfile.web
+      - docker-compose.yml
+      - nginx.conf
+      - .github/workflows/**
 
   - name: coach-wattz
     path: ~/Develop/coach-wattz
@@ -126,6 +137,18 @@ repos:
     worktree_warm: bin/worktree-warm.sh
     worktree_root: ~/Develop/.worktrees/coach-wattz
     report_only: true            # Dispatch remains disabled; janitor may use the teardown script.
+    escalate_paths:
+      - server/api/stripe/**
+      - server/api/subscriptions/**
+      - server/api/auth/**
+      - server/api/oauth/**
+      - server/middleware/auth.ts
+      - server/middleware/session-impersonation.ts
+      - prisma/schema.prisma
+      - prisma/migrations/**
+      - docker-compose.yml
+      - Dockerfile
+      - .github/workflows/**
 
   - name: watts-mobile
     path: ~/Develop/watts-mobile
@@ -136,6 +159,13 @@ repos:
     worktree_root: ~/Develop/.worktrees/watts-mobile
     report_only: true            # No isolated worktree lifecycle yet.
     verify: pnpm typecheck && pnpm lint && pnpm test
+    escalate_paths:
+      - src/features/subscriptions/**
+      - src/auth/**
+      - credentials/**
+      - eas.json
+      - .env.example
+      - .github/workflows/**
 
   - name: legalease
     path: ~/Develop/legalease
@@ -173,6 +203,8 @@ repos:
     # means. mcp/** narrowed to the OAuth boundary itself — the tool
     # implementations under mcp/tools/ are ordinary CRUD behind that boundary.
     escalate_paths:
+      - legalease/legalease/urls.py
+      - legalease/main/decorators.py
       - legalease/main/migrations/**
       - legalease/legalease/settings*.py
       - legalease/main/services/access_control.py
