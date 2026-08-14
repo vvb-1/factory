@@ -591,17 +591,30 @@ export function Projects({
                   <div className="mt-3 space-y-2 border-t border-(--border) pt-3 text-[12px]">
                     <div className="flex items-center justify-between font-medium">
                       <span>Dry Scan Results</span>
-                      <span
-                        className="rounded px-1.5 py-0.2 text-[11px]"
-                        style={{
-                          color: dryResult.reclaimable.length > 0 ? "var(--hue-ok)" : "var(--text-faint)",
-                          background: `color-mix(in oklch, ${
-                            dryResult.reclaimable.length > 0 ? "var(--hue-ok)" : "var(--text-faint)"
-                          } 14%, transparent)`,
-                        }}
-                      >
-                        {dryResult.reclaimable.length} reclaimable
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {dryResult.held && dryResult.held.length > 0 && (
+                          <span
+                            className="rounded px-1.5 py-0.2 text-[11px]"
+                            style={{
+                              color: "var(--hue-warn)",
+                              background: "color-mix(in oklch, var(--hue-warn) 14%, transparent)",
+                            }}
+                          >
+                            {dryResult.held.length} held
+                          </span>
+                        )}
+                        <span
+                          className="rounded px-1.5 py-0.2 text-[11px]"
+                          style={{
+                            color: dryResult.reclaimable.length > 0 ? "var(--hue-ok)" : "var(--text-faint)",
+                            background: `color-mix(in oklch, ${
+                              dryResult.reclaimable.length > 0 ? "var(--hue-ok)" : "var(--text-faint)"
+                            } 14%, transparent)`,
+                          }}
+                        >
+                          {dryResult.reclaimable.length} reclaimable
+                        </span>
+                      </div>
                     </div>
 
                     {dryResult.reclaimable.length > 0 ? (
@@ -620,6 +633,33 @@ export function Projects({
                       </div>
                     ) : (
                       <div className="text-[11px] text-(--text-faint)">No finished worktrees to reclaim.</div>
+                    )}
+
+                    {dryResult.held && dryResult.held.length > 0 && (
+                      <div>
+                        <div className="text-[11px]" style={{ color: "var(--hue-warn)" }}>
+                          Held by Open PR (Finished ticket, active PR):
+                        </div>
+                        <div className="mono mt-1 space-y-1">
+                          {dryResult.held.map((h) => (
+                            <div
+                              key={h.id}
+                              className="rounded border border-(--border) bg-(--surface-1) p-1.5 text-[11px]"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-(--text)">{h.id}</span>
+                                {h.state && <span className="text-(--text-dim)">({h.state})</span>}
+                                {h.branch && (
+                                  <span className="rounded bg-(--surface-2) px-1 py-0.2 text-[10px] text-(--text-faint)">
+                                    {h.branch}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-(--text-dim)">{h.reason}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     {dryResult.kept.length > 0 && (
@@ -666,6 +706,33 @@ export function Projects({
                             >
                               ✓ {id}
                             </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {applyResult.held && applyResult.held.length > 0 && (
+                      <div>
+                        <div className="text-[11px]" style={{ color: "var(--hue-warn)" }}>
+                          Held by Open PR (Left in Place):
+                        </div>
+                        <div className="mono mt-1 space-y-1">
+                          {applyResult.held.map((h) => (
+                            <div
+                              key={h.id}
+                              className="rounded border border-(--border) bg-(--surface-1) p-1.5 text-[11px]"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-(--text)">{h.id}</span>
+                                {h.state && <span className="text-(--text-dim)">({h.state})</span>}
+                                {h.branch && (
+                                  <span className="rounded bg-(--surface-2) px-1 py-0.2 text-[10px] text-(--text-faint)">
+                                    {h.branch}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-(--text-dim)">{h.reason}</div>
+                            </div>
                           ))}
                         </div>
                       </div>
