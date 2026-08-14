@@ -61,6 +61,45 @@ describe("tick (OPS-412)", () => {
     expect(logs.some((l) => l.startsWith("artifacts: pruned 1 orphan"))).toBe(true);
   });
 
+  test("a thrown exception in the GC subsystem still advances result.lastPrune to now (OPS-468)", async () => {
+    const { db, storeRoot } = harness();
+    const now = Date.now();
+    const initialPrune = now - PRUNE_INTERVAL_MS - 1;
+    const logs = [];
+
+    // Create a file at storeRoot/invalid so readdirSync fails with ENOTDIR or provide invalid storeRoot
+    const invalidStoreRoot = path.join(storeRoot, "not_a_directory");
+    writeFileSync(invalidStoreRoot, "not a directory");
+
+    const result = await tick({
+      db,
+      registry,
+      now,
+      lastPrune: initialPrune,
+      storeRoot: invalidStoreRoot,
+      policyVersion: "git:test",
+      log: (line) => logs.push(line),
+    });
+
+    expect(result.lastPrune).toBe(now);
+    expect(logs.some((l) => l.startsWith("tick GC:"))).toBe(true);
+
+    // On next 1s tick, GC interval is not elapsed, so pruneArtifacts is not retried
+    const nextLogs = [];
+    const nextTickResult = await tick({
+      db,
+      registry,
+      now: now + 1000,
+      lastPrune: result.lastPrune,
+      storeRoot: invalidStoreRoot,
+      policyVersion: "git:test",
+      log: (line) => nextLogs.push(line),
+    });
+
+    expect(nextLogs.some((l) => l.startsWith("tick GC:"))).toBe(false);
+    expect(nextTickResult.lastPrune).toBe(now);
+  });
+
   for (const failing of TICK_SUBSYSTEMS) {
     test(`a throw in ${failing} does not prevent the others from running`, async () => {
       const { db } = harness();
