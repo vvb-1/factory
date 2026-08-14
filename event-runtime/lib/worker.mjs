@@ -18,6 +18,7 @@ import { nextCounter, tx, txImmediate } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
 import { IllegalTransition, transition } from "./lifecycle.mjs";
 import { closeOpenProposalForRun } from "./proposals.mjs";
+import { computeDefHash, createReceipt, verifyDefHash } from "./receipts.mjs";
 import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { satisfiesPlacement } from "./workers.mjs";
@@ -46,6 +47,32 @@ function finishAttempt(db, runId, attempt, terminalState, reasonCode, now) {
     `UPDATE attempts SET terminal_state = ?, reason_code = ?, finished_at = ?
      WHERE run_id = ? AND attempt = ?`,
   ).run(terminalState, reasonCode, iso(now), runId, attempt);
+}
+
+function assertCurrentToken(db, runId, fencingToken) {
+  const maxToken = db
+    .query(`SELECT MAX(fencing_token) AS m FROM attempts WHERE run_id = ?`)
+    .get(runId)?.m;
+  return fencingToken === maxToken;
+}
+
+function recordFencedAttempt(db, { runId, attempt, actor, policyVersion, now = Date.now() }) {
+  const at = iso(now);
+  const run = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId);
+  const state = run?.state ?? null;
+  const record = {
+    runId, from: state, to: "FENCED", actor,
+    reason: "fenced_attempt", attempt, policyVersion, at,
+  };
+  const record_hash = hashJson(record);
+  db.query(
+    `INSERT INTO lifecycle_events
+       (run_id, from_state, to_state, actor, reason, attempt, correlation_id, causation_id, policy_version, at, record_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    runId, state, "FENCED", actor, "fenced_attempt",
+    attempt, null, null, policyVersion, at, record_hash,
+  );
 }
 
 function latestJournalHash(db, runId) {
@@ -163,6 +190,10 @@ export async function executeClaimed(db, registry, adapters, claim, {
   const failTerminal = (to, journalReason, reasonCode, { requeue = false } = {}) =>
     txImmediate(db, () => {
       const currentNow = nowFn();
+      if (!assertCurrentToken(db, runId, fencingToken)) {
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+        return { fenced: true };
+      }
       transition(db, {
         runId, to, expectFrom: "RUNNING",
         actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
@@ -174,18 +205,27 @@ export async function executeClaimed(db, registry, adapters, claim, {
           actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
         });
       }
+      return { ok: true };
     });
 
   try {
-    txImmediate(db, () => {
+    const started = txImmediate(db, () => {
       const currentNow = nowFn();
+      if (!assertCurrentToken(db, runId, fencingToken)) {
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+        return { fenced: true };
+      }
       transition(db, {
         runId, to: "RUNNING", expectFrom: "LEASED",
         actor: owner, reason: "started", attempt, policyVersion, now: currentNow,
       });
       db.query(`UPDATE attempts SET started_at = ? WHERE run_id = ? AND attempt = ?`)
         .run(iso(currentNow), runId, attempt);
+      return { ok: true };
     });
+    if (started?.fenced) {
+      return { fenced: true };
+    }
 
     const created = createWorkspace({
       root: workspacesRoot, runId, attempt, input: spec.input, workspace: spec.workspace,
@@ -199,11 +239,60 @@ export async function executeClaimed(db, registry, adapters, claim, {
     const adapterKey = adapterOverride ?? spec.adapter;
     const adapter = adapters[adapterKey];
     if (!adapter) {
-      failTerminal("FAILED", "unknown_adapter", "unknown_adapter");
+      const res = failTerminal("FAILED", "unknown_adapter", "unknown_adapter");
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode: "unknown_adapter" };
     }
     const def = getAgent(registry, spec.agent);
+
+    if (!verifyDefHash(spec, def)) {
+      const refusedRes = txImmediate(db, () => {
+        if (!assertCurrentToken(db, runId, fencingToken)) {
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+          return { fenced: true };
+        }
+        transition(db, {
+          runId, to: "VERIFYING", expectFrom: "RUNNING",
+          actor: owner, reason: "def_hash_mismatch", attempt, policyVersion, now,
+        });
+        transition(db, {
+          runId, to: "REFUSED", expectFrom: "VERIFYING",
+          actor: owner, reason: "agent_definition_mismatch", attempt, policyVersion, now,
+        });
+        const receipt = createReceipt({
+          runId,
+          spec,
+          def,
+          artifactHash: null,
+          evidenceSetHash: null,
+          journalHead: latestJournalHash(db, runId),
+          verificationStatus: "passed",
+        });
+        const result = {
+          schemaVersion: "factory.run-result/v1",
+          runId,
+          attempt,
+          terminalState: "refused",
+          reasonCode: "agent_definition_mismatch",
+          outputContract: spec.outputContract,
+          verification: { status: "passed", checks: ["def_hash_mismatch"] },
+          artifacts: [],
+        };
+        db.query(
+          `INSERT INTO results (run_id, attempt, result_json, artifact_hash, evidence_set_hash, verification_json, receipt_json, accepted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          runId, attempt, canonicalJson(result), "none", null,
+          canonicalJson(result.verification), canonicalJson(receipt), iso(now),
+        );
+        finishAttempt(db, runId, attempt, "REFUSED", "agent_definition_mismatch", now);
+        return { ok: true, receipt };
+      });
+      destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      if (refusedRes?.fenced) return { fenced: true };
+      return { runId, attempt, terminalState: "REFUSED", reasonCode: "agent_definition_mismatch", receipt: refusedRes.receipt };
+    }
 
     // Live trace (factory.trace/v1): the recorder is already defensive, but
     // wrap it anyway — an adapter streaming trace events mid-run must never
@@ -233,32 +322,55 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     if (abortController.signal.aborted) {
       if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
-      try {
-        finishAttempt(db, runId, attempt, "CANCELLED", "cancelled", nowFn());
-      } catch {
-        // ignore
-      }
+      const res = txImmediate(db, () => {
+        const currentNow = nowFn();
+        if (!assertCurrentToken(db, runId, fencingToken)) {
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+          return { fenced: true };
+        }
+        try {
+          finishAttempt(db, runId, attempt, "CANCELLED", "cancelled", currentNow);
+        } catch {
+          // ignore
+        }
+        return { ok: true };
+      });
+      if (res?.fenced) return { fenced: true };
       return { cancelled: true };
     }
 
     const { exitCode, timedOut } = outcome ?? {};
 
     if (timedOut) {
-      failTerminal("TIMED_OUT", "timeout", "timeout");
+      const res = failTerminal("TIMED_OUT", "timeout", "timeout");
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "TIMED_OUT", reasonCode: "timeout" };
     }
     if (exitCode !== 0) {
       const reasonCode = `agent_exit_${exitCode}`;
-      failTerminal("FAILED", reasonCode, reasonCode, { requeue: true });
+      const res = failTerminal("FAILED", reasonCode, reasonCode, { requeue: true });
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
 
-    transition(db, {
-      runId, to: "VERIFYING", expectFrom: "RUNNING",
-      actor: owner, reason: "exit_0", attempt, policyVersion, now: nowFn(),
+    const toVerifying = txImmediate(db, () => {
+      const currentNow = nowFn();
+      if (!assertCurrentToken(db, runId, fencingToken)) {
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+        return { fenced: true };
+      }
+      transition(db, {
+        runId, to: "VERIFYING", expectFrom: "RUNNING",
+        actor: owner, reason: "exit_0", attempt, policyVersion, now: currentNow,
+      });
+      return { ok: true };
     });
+    if (toVerifying?.fenced) {
+      destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      return { fenced: true };
+    }
 
     let verified;
     try {
@@ -267,8 +379,12 @@ export async function executeClaimed(db, registry, adapters, claim, {
       if (!(err instanceof ContractViolation)) throw err;
       // Invalid output is a typed contract failure and emits no completion
       // event (§15) — no results row, no outbox row.
-      txImmediate(db, () => {
+      const res = txImmediate(db, () => {
         const currentNow = nowFn();
+        if (!assertCurrentToken(db, runId, fencingToken)) {
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+          return { fenced: true };
+        }
         transition(db, {
           runId, to: "FAILED", expectFrom: "VERIFYING",
           actor: owner, reason: `contract_violation: ${err.violations.join(", ")}`,
@@ -281,8 +397,10 @@ export async function executeClaimed(db, registry, adapters, claim, {
             actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
           });
         }
+        return { ok: true };
       });
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode: "contract_violation" };
     }
 
@@ -308,16 +426,25 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
       // Refusal is not failure (§5.3): store the typed result, publish no
       // completion event, clean the workspace normally.
-      txImmediate(db, () => {
+      const res = txImmediate(db, () => {
         const currentNow = nowFn();
+        if (!assertCurrentToken(db, runId, fencingToken)) {
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+          return { fenced: true };
+        }
         transition(db, {
           runId, to: "REFUSED", expectFrom: "VERIFYING",
           actor: owner, reason: verified.reasonCode, attempt, policyVersion, now: currentNow,
         });
-        const receipt = {
-          runId, runSpecHash: hashJson(spec), artifactHash: null, evidenceSetHash: null,
-          journalHead: latestJournalHash(db, runId), verificationStatus: "passed",
-        };
+        const receipt = createReceipt({
+          runId,
+          spec,
+          def,
+          artifactHash: null,
+          evidenceSetHash: null,
+          journalHead: latestJournalHash(db, runId),
+          verificationStatus: "passed",
+        });
         db.query(
           `INSERT INTO results (run_id, attempt, result_json, artifact_hash, evidence_set_hash, verification_json, receipt_json, accepted_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -326,9 +453,11 @@ export async function executeClaimed(db, registry, adapters, claim, {
           canonicalJson(refusedResult.verification), canonicalJson(receipt), iso(currentNow),
         );
         finishAttempt(db, runId, attempt, "REFUSED", verified.reasonCode, currentNow);
+        return { ok: true, receipt };
       });
       destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
-      return { runId, attempt, terminalState: "REFUSED", reasonCode: verified.reasonCode };
+      if (res?.fenced) return { fenced: true };
+      return { runId, attempt, terminalState: "REFUSED", reasonCode: verified.reasonCode, receipt: res.receipt };
     }
 
     // Copy verified artifact files into the durable content-addressed store
@@ -340,12 +469,21 @@ export async function executeClaimed(db, registry, adapters, claim, {
     // COMPLETED transition are one transaction.
     const published = txImmediate(db, () => {
       const currentNow = nowFn();
-      const maxToken = db
-        .query(`SELECT MAX(fencing_token) AS m FROM attempts WHERE run_id = ?`)
-        .get(runId).m;
-      if (fencingToken !== maxToken) return { fenced: true };
+      if (!assertCurrentToken(db, runId, fencingToken)) {
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
+        return { fenced: true };
+      }
 
-      const receipt = { ...verified.receipt, journalHead: latestJournalHash(db, runId) };
+      const receipt = createReceipt({
+        runId,
+        spec,
+        def,
+        artifactHash: verified.result.artifactHash,
+        evidenceSetHash: verified.result.evidenceSetHash,
+        journalHead: latestJournalHash(db, runId),
+        verificationStatus: "passed",
+        extraReceipt: verified.receipt,
+      });
       const { result } = verified;
       db.query(
         `INSERT INTO results (run_id, attempt, result_json, artifact_hash, evidence_set_hash, verification_json, receipt_json, accepted_at)
@@ -388,18 +526,30 @@ export async function executeClaimed(db, registry, adapters, claim, {
     if (err instanceof IllegalTransition) {
       // Operator moved the run under us (cancel) — stop quietly, publish nothing.
       if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
-      return { cancelled: true };
+      const state = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId)?.state;
+      if (state === "CANCELLED") {
+        return { cancelled: true };
+      }
+      if (!assertCurrentToken(db, runId, fencingToken)) {
+        txImmediate(db, () => {
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+        });
+        return { fenced: true };
+      }
+      return { cancelled: false, error: err.message };
     }
     const reasonCode = "adapter_error";
     const journalReason = `adapter_error: ${err?.message ?? String(err)}`;
+    let res;
     try {
-      failTerminal("FAILED", journalReason, reasonCode, { requeue: true });
+      res = failTerminal("FAILED", journalReason, reasonCode, { requeue: true });
     } catch {
       // if failTerminal could not transition, continue
     }
     if (workspaceDir) {
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
     }
+    if (res?.fenced) return { fenced: true };
     return { runId, attempt, terminalState: "FAILED", reasonCode, error: err?.message };
   }
 }
