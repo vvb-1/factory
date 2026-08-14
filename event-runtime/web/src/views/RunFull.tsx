@@ -177,55 +177,49 @@ export function RunFull({
         </span>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        {unknownRun ? (
-          <div className="p-6 text-(--text-faint)">
-            Unknown run <span className="mono">{runId}</span> — it may not exist on this runtime.
-          </div>
-        ) : !d ? (
-          <div className="p-6 text-(--text-faint)">
-            {detail.isError ? "Could not load run detail." : "Loading run…"}
-          </div>
-        ) : (
-          <>
-          {/* The failure first, full width under the header (WM-93) — renders nothing for other states. */}
-          <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} className="mx-6 mt-6 mb-0" />
-          {/* items-start: a stretched flex child is full-height, which silently defeats the sidebar's sticky. */}
-          <div className="flex flex-col gap-8 p-6 xl:flex-row xl:items-start xl:pr-4">
-            {/* Main column: the trace, at a readable measure — the point of the page. */}
-            <main className="min-w-0 flex-1 xl:max-w-[900px]">
+      {unknownRun ? (
+        <div className="min-h-0 flex-1 overflow-auto p-6 text-(--text-faint)">
+          Unknown run <span className="mono">{runId}</span> — it may not exist on this runtime.
+        </div>
+      ) : !d ? (
+        <div className="min-h-0 flex-1 overflow-auto p-6 text-(--text-faint)">
+          {detail.isError ? "Could not load run detail." : "Loading run…"}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+          {/* Main column: the trace, at a readable measure — the point of the
+              page — scrolling on its own so the sidebar never moves with it. */}
+          <main className="min-w-0 flex-1 overflow-y-auto">
+            <div className="p-6 xl:max-w-[900px]">
+              {/* The failure first (WM-93) — renders nothing for other states. */}
+              <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} className="mb-6" />
               <RunTrace key={runId} runId={runId} state={d.run.state} variant="full" />
-            </main>
+            </div>
+          </main>
 
-            {/* Anchored to the right edge at the side panel's width, so
-                toggling panel ↔ full page reads as the left region swapping
-                rather than the whole layout reflowing; `ml-auto` parks the
-                slack left of the sidebar, since the trace column caps at its
-                readable measure and would otherwise leave it floating. Its
-                own scroll keeps the Deadlines clock and run vitals on screen
-                through a long trace, matching the panel. The height leaves
-                enough slack that the page itself never scrolls at xl, so no
-                outer scrollbar gutter pushes the sidebar off the edge and it
-                lands on the panel's exact right margin (WM-136). */}
-            <aside className="w-full shrink-0 xl:sticky xl:top-0 xl:ml-auto xl:max-h-[calc(100dvh-11rem)] xl:w-[428px] xl:overflow-y-auto">
-              <RunDetailBlocks
-                d={d}
-                now={now}
-                connected={connected}
-                origin={listRow}
-                onJumpAgent={onJumpAgent}
-                onJumpEvent={onJumpEvent}
-                onCancel={() => setConfirm("cancel")}
-                onRetry={() => retry.mutate({ id: d.run.runId, force: false })}
-                onForceRetry={() => setConfirm("force-retry")}
-                retryPending={retry.isPending}
-                verbError={cancel.error ?? (confirm === "force-retry" ? null : retry.error)}
-              />
-            </aside>
-          </div>
-          </>
-        )}
-      </div>
+          {/* Same shape as the side panel's DetailPane — border-l, fixed
+              width, own bg and scroll — so the two are pixel-identical and
+              toggling panel ↔ full page reads as the left region swapping
+              rather than the whole layout reflowing (WM-136). Stacks full
+              width below the trace under xl, where there is no room for two
+              columns. */}
+          <aside className="w-full shrink-0 overflow-y-auto border-(--border) bg-(--surface-1) p-4 xl:w-[460px] xl:border-l">
+            <RunDetailBlocks
+              d={d}
+              now={now}
+              connected={connected}
+              origin={listRow}
+              onJumpAgent={onJumpAgent}
+              onJumpEvent={onJumpEvent}
+              onCancel={() => setConfirm("cancel")}
+              onRetry={() => retry.mutate({ id: d.run.runId, force: false })}
+              onForceRetry={() => setConfirm("force-retry")}
+              retryPending={retry.isPending}
+              verbError={cancel.error ?? (confirm === "force-retry" ? null : retry.error)}
+            />
+          </aside>
+        </div>
+      )}
 
       {confirm === "cancel" && d && (
         <Dialog title={`Cancel ${d.run.runId}?`} onClose={() => setConfirm(null)}>

@@ -590,9 +590,14 @@ export function GroupHeaderRow({
 export function StateBadge({
   state,
   hues = STATE_HUES,
+  dot = true,
 }: {
   state: string;
   hues?: Record<string, string>;
+  /** Off wherever the caller already draws its own dot for this state (the
+   *  Lifecycle timeline's rail beads) — two dots for one state read as a
+   *  mistake, not emphasis (WM-136). */
+  dot?: boolean;
 }) {
   const hue = hues[state] ?? "var(--hue-idle)";
   return (
@@ -600,7 +605,7 @@ export function StateBadge({
       className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium"
       style={{ color: hue, background: `color-mix(in oklch, ${hue} 12%, transparent)` }}
     >
-      <span className="size-1.5 rounded-full" style={{ background: hue }} />
+      {dot && <span className="size-1.5 rounded-full" style={{ background: hue }} />}
       {state}
     </span>
   );

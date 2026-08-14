@@ -1,7 +1,7 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, KV, notify, Section, shortId, ToastContainer } from "./ui";
+import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, KV, notify, Section, shortId, StateBadge, ToastContainer } from "./ui";
 import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 
 function stackOf(r: ReturnType<typeof render>): HTMLElement {
@@ -396,5 +396,16 @@ describe("Section cards and collapse persistence (WM-136)", () => {
     // Same section, different terminal state in the title — still collapsed.
     const again = render(<Section id="run-result" title="Result · FAILED · agent_exit_1"><KV k="a" v="b" /></Section>);
     expect(again.queryByText("a")).toBeNull();
+  });
+});
+
+describe("StateBadge dot suppression (WM-136)", () => {
+  test("renders its own dot by default and omits it when dot={false}", () => {
+    const withDot = render(<StateBadge state="RUNNING" />);
+    expect(withDot.container.querySelector(".rounded-full")).toBeTruthy();
+    cleanup();
+    const bare = render(<StateBadge state="RUNNING" dot={false} />);
+    expect(bare.container.querySelector(".rounded-full")).toBeNull();
+    expect(bare.getByText("RUNNING")).toBeTruthy();
   });
 });

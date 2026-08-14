@@ -2,7 +2,7 @@ import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { RunDetailBlocks } from "./RunDetailBlocks";
-import { createRunDetailFixture } from "../test-render";
+import { createLifecycleEventFixture, createRunDetailFixture } from "../test-render";
 import type { RunDetail, RunState } from "../types";
 
 afterEach(() => {
@@ -103,5 +103,45 @@ describe("RunDetailBlocks field tiering (WM-129)", () => {
     // VERIFYING has already exited its agent — not cancellable, same rule as the panel.
     const verifying = renderBlocks(createRunDetailFixture({ run: { state: "VERIFYING" } as RunDetail["run"] }));
     expect(verifying.queryByText("Cancel")).toBeNull();
+  });
+});
+
+describe("Lifecycle timeline (WM-136)", () => {
+  test("renders exactly one dot per transition and aligns actors at a constant column", () => {
+    const now = new Date().toISOString();
+    const lifecycle = [
+      createLifecycleEventFixture(1, "run_x", null, "PROPOSED", null, now),
+      createLifecycleEventFixture(2, "run_x", "PROPOSED", "APPROVED", null, now),
+      createLifecycleEventFixture(3, "run_x", "APPROVED", "RUNNING", null, now),
+    ];
+    const d = createRunDetailFixture({ run: { state: "RUNNING" } as RunDetail["run"], lifecycle });
+    const r = renderBlocks(d);
+
+    // The rail contributes one dot per row; StateBadge's own dot is
+    // suppressed there so a transition never shows two.
+    const rows = r.container.querySelectorAll("li");
+    expect(rows.length).toBe(3);
+    for (const row of Array.from(rows)) {
+      expect(row.querySelectorAll(".rounded-full").length).toBe(1);
+    }
+
+    // Every badge column is the same fixed width, so the actor after it
+    // starts at one x regardless of how long the state name is.
+    const badgeColumns = Array.from(r.container.querySelectorAll("li .w-\\[100px\\]"));
+    expect(badgeColumns.length).toBe(3);
+  });
+
+  test("shows the from-state only where the chain actually breaks", () => {
+    const now = new Date().toISOString();
+    const lifecycle = [
+      createLifecycleEventFixture(1, "run_x", null, "QUEUED", null, now),
+      createLifecycleEventFixture(2, "run_x", "QUEUED", "RUNNING", null, now),
+      // A gap: this event's `from` disagrees with the previous row's `to`.
+      createLifecycleEventFixture(3, "run_x", "LEASED", "TIMED_OUT", null, now),
+    ];
+    const d = createRunDetailFixture({ run: { state: "TIMED_OUT" } as RunDetail["run"], lifecycle });
+    const r = renderBlocks(d);
+    expect(r.queryByText("QUEUED→")).toBeNull();
+    expect(r.getByText("LEASED→")).toBeTruthy();
   });
 });

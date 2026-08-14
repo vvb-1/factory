@@ -372,7 +372,9 @@ export function RunDetailBlocks({
           }
         />
         <KV k="adapter" v={d.run.spec.adapter} />
-        <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} />
+        {/* A count, not an identifier — mono bought it nothing but a mismatched
+            font next to "any worker" and "26m ago" on the rows around it. */}
+        <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} mono={false} />
         <InputRows input={d.run.spec.input} />
         {origin?.eventId && (
           <KV
@@ -490,11 +492,19 @@ export function RunDetailBlocks({
                   )}
                   <span className="relative mt-[7px] size-1.5 shrink-0 rounded-full" style={{ background: hue }} />
                 </span>
-                <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-                  {jumped && (
-                    <span className="text-[11px] text-(--text-faint)">{e.from_state ?? "·"} →</span>
-                  )}
-                  <StateBadge state={e.to_state} />
+                <span className="flex min-w-0 flex-1 items-center gap-x-2">
+                  {/* Fixed-width badge column, badge's own dot dropped in favor
+                      of the rail's: with it, every actor started at whatever x
+                      its state name happened to end at, and each row carried
+                      two dots for one state (WM-136). */}
+                  <span className="flex w-[100px] shrink-0 items-center gap-1">
+                    {jumped && (
+                      <span className="shrink-0 text-[10px] text-(--text-faint)" title={`from ${e.from_state ?? "·"}`}>
+                        {e.from_state ?? "·"}→
+                      </span>
+                    )}
+                    <StateBadge state={e.to_state} dot={false} />
+                  </span>
                   <span className="min-w-0 truncate text-[11.5px] text-(--text-faint)" title={e.actor}>
                     <ActorRef actor={e.actor} className="text-[11.5px]" />
                     {e.reason ? ` · ${e.reason}` : ""}
