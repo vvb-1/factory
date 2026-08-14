@@ -130,18 +130,29 @@ export function App() {
   const hasEventFocus =
     !!(focusEvent && (focusEvent.source || focusEvent.eventId || focusEvent.status || focusEvent.type));
 
-  const jumpToRun = (runId: string) => navigate(hashPath("runs", runId));
+  const [rejumpEpoch, setRejumpEpoch] = useState(0);
+
+  const jumpToRun = (runId: string) => {
+    setRejumpEpoch((n) => n + 1);
+    navigate(hashPath("runs", runId));
+  };
   const openRunFull = (runId: string) => navigate(hashPath("run", runId));
   const jumpToRuns = (state?: string) => {
     if (state) setFocusRunState(state);
+    setRejumpEpoch((n) => n + 1);
     navigate("runs");
   };
-  const jumpToProposal = (id: string) => navigate(hashPath("proposals", id));
+  const jumpToProposal = (id: string) => {
+    setRejumpEpoch((n) => n + 1);
+    navigate(hashPath("proposals", id));
+  };
   const jumpToEvent = (source: string, eventId: string, status?: string) => {
     setEphemeralEvent(status ? { status } : null);
+    setRejumpEpoch((n) => n + 1);
     navigate(hashPath("events", source, eventId));
   };
   const jumpToEvents = (focus: EventFocus) => {
+    setRejumpEpoch((n) => n + 1);
     if (focus.source && focus.eventId) {
       setEphemeralEvent(focus.status || focus.type ? { status: focus.status, type: focus.type } : null);
       navigate(hashPath("events", focus.source, focus.eventId));
@@ -476,6 +487,7 @@ export function App() {
               onFocusExpiredConsumed={() => setFocusExpired(false)}
               onJumpAgent={jumpToAgent}
               onJumpEvent={jumpToEvent}
+              rejumpEpoch={rejumpEpoch}
             />
           ) : view === "run" && fullRunId ? (
             <RunFull
@@ -496,6 +508,7 @@ export function App() {
               onFocusStateConsumed={() => setFocusRunState(null)}
               onJumpAgent={jumpToAgent}
               onJumpEvent={jumpToEvent}
+              rejumpEpoch={rejumpEpoch}
             />
           ) : view === "projects" ? (
             <Projects
@@ -542,6 +555,7 @@ export function App() {
                 setInjectOpen(true);
               }}
               onInject={() => setInjectOpen(true)}
+              rejumpEpoch={rejumpEpoch}
             />
           ) : (
             <Overview

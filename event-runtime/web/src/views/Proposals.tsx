@@ -52,6 +52,7 @@ export function Proposals({
   onFocusExpiredConsumed,
   onJumpAgent,
   onJumpEvent,
+  rejumpEpoch,
 }: {
   connected: boolean;
   context: OperatorContext;
@@ -62,6 +63,7 @@ export function Proposals({
   onFocusExpiredConsumed: () => void;
   onJumpAgent: (ref: string) => void;
   onJumpEvent: (source: string, eventId: string) => void;
+  rejumpEpoch?: number;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -171,15 +173,18 @@ export function Proposals({
     snapshot: { filter: string; expiredOnly: boolean };
   } | null>(null);
   const lastKey = useRef<string | null>(null);
+  const lastRejump = useRef<number | undefined>(rejumpEpoch);
   useEffect(() => {
-    if (focusProposalId !== lastKey.current) {
-      lastKey.current = focusProposalId;
-      pendingReveal.current = focusProposalId
-        ? {
-            key: focusProposalId,
-            snapshot: { filter, expiredOnly },
-          }
-        : null;
+    const isNewKey = focusProposalId !== lastKey.current;
+    const isRejump = rejumpEpoch !== lastRejump.current;
+    lastKey.current = focusProposalId;
+    lastRejump.current = rejumpEpoch;
+
+    if (focusProposalId && (isNewKey || isRejump)) {
+      pendingReveal.current = {
+        key: focusProposalId,
+        snapshot: { filter, expiredOnly },
+      };
     }
     const latch = pendingReveal.current;
     if (!latch || latch.key !== focusProposalId) return;
@@ -193,7 +198,7 @@ export function Proposals({
       if (decision.clearedFields.includes("filter")) setFilter(decision.next.filter);
       if (decision.clearedFields.includes("expiredOnly")) setExpiredOnly(decision.next.expiredOnly);
     }
-  }, [focusProposalId, rows, visible, filter, expiredOnly]);
+  }, [focusProposalId, rejumpEpoch, rows, visible, filter, expiredOnly]);
 
   // Deep link: open tab first, then history if the id is a decided proposal.
   // Hash stays; we only switch tabs so the row is in `visible` — the selection

@@ -8,7 +8,7 @@ import { RunTrace } from "../components/RunTrace";
 import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
 import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
-import { formatRevealNotification } from "../reveal";
+import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import type { Attempt, ArtifactRef, RunState } from "../types";
 import {
   Ago,
@@ -314,6 +314,7 @@ export function Runs({
   onFocusStateConsumed,
   onJumpAgent,
   onJumpEvent,
+  rejumpEpoch,
 }: {
   connected: boolean;
   context: OperatorContext;
@@ -324,6 +325,7 @@ export function Runs({
   onFocusStateConsumed: () => void;
   onJumpAgent: (ref: string) => void;
   onJumpEvent: (source: string, eventId: string) => void;
+  rejumpEpoch?: number;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -376,36 +378,58 @@ export function Runs({
   // Under `fetchAll` the list carries every state, so presence in `rows` says
   // nothing about the tab — the tab has to be part of the membership test, or
   // the switch to ALL never fires and the row stays unrendered.
-  const revealedFor = useRef<string | null>(null);
+  const pendingReveal = useRef<{
+    key: string;
+    snapshot: { filter: string };
+  } | null>(null);
+  const lastKey = useRef<string | null>(null);
+  const lastRejump = useRef<number | undefined>(rejumpEpoch);
   const tabChangedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!focusRunId) {
-      revealedFor.current = null;
+      pendingReveal.current = null;
+      lastKey.current = null;
+      lastRejump.current = rejumpEpoch;
       tabChangedFor.current = null;
       return;
     }
+
+    const isNewKey = focusRunId !== lastKey.current;
+    const isRejump = rejumpEpoch !== lastRejump.current;
+    lastKey.current = focusRunId;
+    lastRejump.current = rejumpEpoch;
+
+    if (isNewKey || isRejump) {
+      pendingReveal.current = {
+        key: focusRunId,
+        snapshot: { filter },
+      };
+    }
+
     const onTab = rows.some(
       (r) => r.runId === focusRunId && (!fetchAll || tab === "ALL" || r.state === tab),
     );
     if (onTab) {
-      if (revealedFor.current !== focusRunId) {
-        revealedFor.current = focusRunId;
-        const isHidden = !visible.some((r) => r.runId === focusRunId);
-        let filterCleared = false;
-        if (isHidden && filter) {
-          setFilter("");
-          filterCleared = true;
+      const latch = pendingReveal.current;
+      if (latch && latch.key === focusRunId) {
+        pendingReveal.current = null; // decided once
+        const isVisible = visible.some((r) => r.runId === focusRunId);
+        const currentFilters = { filter };
+        const emptyFilters = { filter: "" };
+        const decision = decideRevealFilters(latch.snapshot, currentFilters, emptyFilters, isVisible);
+        if (decision.cleared) {
+          setFilter(decision.next.filter);
         }
         const tabChanged = tabChangedFor.current === focusRunId;
         tabChangedFor.current = null;
-        if (tabChanged || filterCleared) {
+        if (tabChanged || decision.cleared) {
           const row = rows.find((r) => r.runId === focusRunId);
           const msg = formatRevealNotification({
             kind: "run",
             id: focusRunId,
             state: row?.state,
             tabChanged,
-            filterCleared,
+            filterCleared: decision.cleared,
           });
           if (msg) notify(msg, "info");
         }
@@ -416,7 +440,7 @@ export function Runs({
       tabChangedFor.current = focusRunId;
       setTab("ALL");
     }
-  }, [focusRunId, rows, tab, visible, fetchAll, filter]);
+  }, [focusRunId, rejumpEpoch, rows, tab, visible, fetchAll, filter]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
@@ -442,7 +466,7 @@ export function Runs({
   const detail = useQuery({
     queryKey: ["run", selectedId],
     queryFn: () => api.run(selectedId as string),
-    enabled: selectedId !== null,
+    enabled: sel !== null,
     refetchInterval: 2000,
   });
 

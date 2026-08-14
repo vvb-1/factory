@@ -75,6 +75,7 @@ export function Events({
   onJumpRun,
   onTriggerAgain,
   onInject,
+  rejumpEpoch,
 }: {
   connected: boolean;
   context: OperatorContext;
@@ -86,6 +87,7 @@ export function Events({
   onJumpRun: (runId: string) => void;
   onTriggerAgain: (envelope: Record<string, unknown>) => void;
   onInject: () => void;
+  rejumpEpoch?: number;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -163,16 +165,19 @@ export function Events({
     snapshot: { filter: string; typeFilter: string | null; sourceFilter: string | null };
   } | null>(null);
   const lastKey = useRef<string | null>(null);
+  const lastRejump = useRef<number | undefined>(rejumpEpoch);
   const tabChangedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedKey !== lastKey.current) {
-      lastKey.current = selectedKey;
-      pendingReveal.current = selectedKey
-        ? {
-            key: selectedKey,
-            snapshot: { filter, typeFilter, sourceFilter },
-          }
-        : null;
+    const isNewKey = selectedKey !== lastKey.current;
+    const isRejump = rejumpEpoch !== lastRejump.current;
+    lastKey.current = selectedKey;
+    lastRejump.current = rejumpEpoch;
+
+    if (selectedKey && (isNewKey || isRejump)) {
+      pendingReveal.current = {
+        key: selectedKey,
+        snapshot: { filter, typeFilter, sourceFilter },
+      };
     }
     const latch = pendingReveal.current;
     if (!latch || latch.key !== selectedKey) return;
@@ -210,6 +215,7 @@ export function Events({
     }
   }, [
     selectedKey,
+    rejumpEpoch,
     rows,
     visible,
     focusEvent?.type,

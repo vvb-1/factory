@@ -101,10 +101,16 @@ describe("formatRevealNotification", () => {
 });
 
 describe("decideRevealFilters", () => {
+  type EventFilters = {
+    filter: string;
+    typeFilter: string | null;
+    sourceFilter: string | null;
+  };
+
   test("when target row is already visible, keeps all filters and clears nothing", () => {
-    const snapshot = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const current = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const empty = { filter: "", typeFilter: null, sourceFilter: null };
+    const snapshot: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
+    const current: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
+    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
 
     const result = decideRevealFilters(snapshot, current, empty, true);
     expect(result.cleared).toBe(false);
@@ -113,9 +119,9 @@ describe("decideRevealFilters", () => {
   });
 
   test("when target row is hidden and filters are unchanged from snapshot, clears all non-empty fields", () => {
-    const snapshot = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const current = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const empty = { filter: "", typeFilter: null, sourceFilter: null };
+    const snapshot: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
+    const current: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
+    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
 
     const result = decideRevealFilters(snapshot, current, empty, false);
     expect(result.cleared).toBe(true);
@@ -124,10 +130,10 @@ describe("decideRevealFilters", () => {
   });
 
   test("Events: preserving a newly typed text filter while clearing stale type/source filters", () => {
-    const snapshot = { filter: "", typeFilter: "deploy", sourceFilter: "github" };
+    const snapshot: EventFilters = { filter: "", typeFilter: "deploy", sourceFilter: "github" };
     // Operator typed "new search" after latch armed, but left typeFilter/sourceFilter untouched
-    const current = { filter: "new search", typeFilter: "deploy", sourceFilter: "github" };
-    const empty = { filter: "", typeFilter: null, sourceFilter: null };
+    const current: EventFilters = { filter: "new search", typeFilter: "deploy", sourceFilter: "github" };
+    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
 
     const result = decideRevealFilters(snapshot, current, empty, false);
     expect(result.cleared).toBe(true);
@@ -136,10 +142,10 @@ describe("decideRevealFilters", () => {
   });
 
   test("Events: preserving modified type chip while clearing stale text filter", () => {
-    const snapshot = { filter: "old filter", typeFilter: null, sourceFilter: null };
+    const snapshot: EventFilters = { filter: "old filter", typeFilter: null, sourceFilter: null };
     // Operator selected "webhook" type chip after latch armed
-    const current = { filter: "old filter", typeFilter: "webhook", sourceFilter: null };
-    const empty = { filter: "", typeFilter: null, sourceFilter: null };
+    const current: EventFilters = { filter: "old filter", typeFilter: "webhook", sourceFilter: null };
+    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
 
     const result = decideRevealFilters(snapshot, current, empty, false);
     expect(result.cleared).toBe(true);
