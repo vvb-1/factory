@@ -21,8 +21,8 @@ Made by the operator, recorded here so nobody relitigates them mid-build:
   are the shortest honest path to that look; TanStack Query handles fetching
   and polling.
 - **No authentication.** This narrows §14's "the web-app step requires real
-  auth" to its actual precondition: auth is required *when approval and cancel
-  become network-reachable*. They do not. The web server binds `127.0.0.1`
+  auth" to its actual precondition: auth is required _when approval and cancel
+  become network-reachable_. They do not. The web server binds `127.0.0.1`
   only, exactly like the control API (`API_HOST` in `lib/config.mjs`), so the
   trust surface is unchanged: local user access. The actor recorded on verbs
   stays `"operator"`, same as the CLI. If this surface is ever bound beyond
@@ -53,8 +53,8 @@ Made by the operator, recorded here so nobody relitigates them mid-build:
   replay.
 - No database access, no imports from `event-runtime/lib/`.
 - No SSE/WebSocket work in the first version.
-- No transcript/artifact *content* viewer. `GET /runs/:id` returns the
-  retained workspace *path*; a browser cannot read local paths, and an
+- No transcript/artifact _content_ viewer. `GET /runs/:id` returns the
+  retained workspace _path_; a browser cannot read local paths, and an
   artifact-fetch endpoint is new API surface. Deferred (§8) — the UI shows
   the path and hashes, and `cli.mjs inspect` remains the deep-inspection tool.
 - No involvement in the emit pipeline or `shared/`. The control API may
@@ -177,7 +177,7 @@ envelope, client-side-validated against the envelope shape before submitting.
 
 **Templates are derived, never hand-maintained (OPS-214).** One chip per
 registered event type; the payload skeleton is built from that event's agent
-*input schema* (required fields only; enums seed their first value, numbers
+_input schema_ (required fields only; enums seed their first value, numbers
 their minimum, `minItems` arrays one element, patterned strings a
 recognisable placeholder). A newly registered event type therefore appears
 with no UI change, and a template can never propose a payload the runtime
@@ -185,7 +185,7 @@ would reject for shape. Ids and `occurredAt` are generated per dialog
 opening; the JSON stays fully editable — the template is a starting point,
 not a cage. An unregistered `type` warns once (it is admissible, but parks
 as `human_needed`) and injects on the second click. The Events view offers
-**Trigger again**, which clones an envelope under a *fresh* identity —
+**Trigger again**, which clones an envelope under a _fresh_ identity —
 deliberately distinct from Replay, which reuses the delivery id and dedups
 to a no-op.
 The response distinguishes `admitted` from `duplicate` — a duplicate is a
@@ -224,7 +224,7 @@ constraints, not vibes:
   generates every surface, border, and text shade from them in a perceptually
   uniform color space. We do the same: three `oklch()` tokens as CSS
   variables (Tailwind v4 is OKLCH-native), with light, dark, and a
-  high-contrast variant *computed*, never hand-tuned per theme. Dark is the
+  high-contrast variant _computed_, never hand-tuned per theme. Dark is the
   default; the others come for free by construction, which is the whole
   point.
 - **Neutral chrome, meaningful color.** Keep chroma out of the chrome: nav
@@ -302,18 +302,18 @@ and shared with the CLI:
   busy both exclude stale) and the doctor with `stalledWorkers` and
   `noWorkers`.
 
-Still explicitly *not* added: pagination beyond `journal`/`outbox` limits
+Still explicitly _not_ added: pagination beyond `journal`/`outbox` limits
 (volumes are tiny; first endpoint to hurt gets it) and SSE (§8).
 
 ## 8. Deferred, with triggers
 
-| Deferred item | Trigger |
-| :--- | :--- |
-| Authentication + real actor identity | Binding the web server or control API beyond loopback — precondition, not retrofit (§1, parent §14) |
-| SSE / push updates | Polling demonstrably too slow — e.g. watching slice-2 remediation runs live |
+| Deferred item                                     | Trigger                                                                                             |
+| :------------------------------------------------ | :-------------------------------------------------------------------------------------------------- |
+| Authentication + real actor identity              | Binding the web server or control API beyond loopback — precondition, not retrofit (§1, parent §14) |
+| SSE / push updates                                | Polling demonstrably too slow — e.g. watching slice-2 remediation runs live                         |
 | ~~Artifact/transcript content endpoint + viewer~~ | **Shipped** — content-addressed artifact store + `GET /artifacts/:sha256` + transcript capture (§7) |
-| Pagination on `/runs`, `/events` | First list where scrolling actually hurts |
-| Notification channel | Unattended stage (parent §12) — watched mode means the operator is watching |
+| Pagination on `/runs`, `/events`                  | First list where scrolling actually hurts                                                           |
+| Notification channel                              | Unattended stage (parent §12) — watched mode means the operator is watching                         |
 
 ## 9. Exit criteria
 
@@ -578,8 +578,8 @@ tree**, so the fields §7 already returned are all read by a view:
 ### 10.10 Live trace in run detail (OPS-295)
 
 `GET /runs/:id/trace` (factory.trace/v1, `lib/trace.mjs`) answers the
-question the lifecycle journal cannot: *what is the agent saying and which
-tools is it calling, right now.* The run detail gains a **Trace** section
+question the lifecycle journal cannot: _what is the agent saying and which
+tools is it calling, right now._ The run detail gains a **Trace** section
 between Lifecycle and Attempts, rendering the stream chronologically:
 
 - `assistant_text` as plain text blocks; `tool_use` as a compact "🔧 name"
@@ -597,7 +597,7 @@ between Lifecycle and Attempts, rendering the stream chronologically:
   catch-up read on the live→terminal transition so the tail written between
   the last poll and the terminal flip is not lost. Terminal runs fetch once
   on open — historical traces are browsable, not just live ones. The cursor
-  is the last *received* seq, never the server `head` (which would skip rows
+  is the last _received_ seq, never the server `head` (which would skip rows
   whenever a read filled a whole 500-row page); full pages loop until caught
   up, bounded by the recorder's 2000-row cap.
 - **Multi-attempt runs** get an "Attempt #n" divider whenever the attempt
@@ -615,19 +615,19 @@ run detail only, and the shared `Disclosure` label widened from `string` to
 ### 10.11 Full-page run view (`#/run/:id`) — OPS-354
 
 Operator verdict after living with §10.10: the panel is right for triage and
-wrong for *reading* — a trace deserves a page. `#/run/:id` is that page.
+wrong for _reading_ — a trace deserves a page. `#/run/:id` is that page.
 
 - **Route.** A distinct first segment, not a mode on `#/runs/:id`. Under
   §10.8's rules, same-view hash writes replace history and cross-view writes
   push — so `runs → run` pushes by construction: browser Back lands on
-  `#/runs/:id` with the panel selection intact (the selection *is* the
+  `#/runs/:id` with the panel selection intact (the selection _is_ the
   hash), and the explicit **← Runs** control navigates to `#/runs/:id`
   directly, which also works for a pasted `#/run/:id` link with no history
   behind it. A bare `#/run` renders the Runs list. The Runs rail entry stays
   highlighted while a full run view is open.
 - **Getting in and out.** From the Runs list: `Enter`/`o` on the selection
   (§5's "open detail" verb graduates — selection alone already opens the
-  panel, so *open* now means the full page). From the panel: an **Expand**
+  panel, so _open_ now means the full page). From the panel: an **Expand**
   button, clicking the run id in the panel title, the ⌘K context action, and
   the panel trace's "open full view" tail link. Out: browser Back, **←
   Runs**, or `Esc`. `x` cancel and `c` copy work on the page, same as the
@@ -679,4 +679,4 @@ project container and not a second nav rail. Decisions: [product-decisions.md](p
   `?project=` opens All. `g e` / j/k / Esc stay inside the context; `[` / `]`
   still cycle status tabs.
 - Pinning a run as a document tab on this strip is OPS-357, not this
-  section. The Projects *view* (OPS-300) is a separate registry list.
+  section. The Projects _view_ (OPS-300) is a separate registry list.
