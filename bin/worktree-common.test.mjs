@@ -122,6 +122,84 @@ test("allocate_api_port skips port occupied by another runtime", async () => {
   }
 });
 
+test("allocate_api_port skips port squatted by an alien process that does not answer /health", async () => {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 7764,
+    fetch() {
+      return new Response("I am an alien process", { status: 500 });
+    },
+  });
+  try {
+    const r = await shAsync('allocate_api_port 7764 /this/worktree/.factory/event-runtime');
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("7766");
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("allocate_api_port skips port held by raw TCP listener", async () => {
+  const listener = Bun.listen({
+    hostname: "127.0.0.1",
+    port: 7772,
+    socket: {
+      data() {},
+      open() {},
+      close() {},
+    },
+  });
+  try {
+    const r = await shAsync('allocate_api_port 7772 /this/worktree/.factory/event-runtime');
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("7774");
+  } finally {
+    listener.stop(true);
+  }
+});
+
+test("allocate_api_port reuses port when /health reports matching expected home", async () => {
+  const home = "/this/worktree/.factory/event-runtime";
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 7774,
+    fetch(req) {
+      if (new URL(req.url).pathname === "/health") {
+        return new Response(JSON.stringify({ ok: true, env: { home } }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  try {
+    const r = await shAsync(`allocate_api_port 7774 '${home}'`);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("7774");
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("port_listening detects active and closed ports", async () => {
+  expect(sh('port_listening 7796').status).not.toBe(0);
+  const listener = Bun.listen({
+    hostname: "127.0.0.1",
+    port: 7796,
+    socket: {
+      data() {},
+      open() {},
+      close() {},
+    },
+  });
+  try {
+    expect(sh('port_listening 7796').status).toBe(0);
+  } finally {
+    listener.stop(true);
+  }
+  expect(sh('port_listening 7796').status).not.toBe(0);
+});
+
 test("ticket_number extracts numeric ID from valid ticket strings", () => {
   expect(sh('ticket_number OPS-123').stdout.trim()).toBe("123");
   expect(sh('ticket_number CLNT-456').stdout.trim()).toBe("456");

@@ -112,6 +112,14 @@ listen_tcp_port() { # <pidfile>
   printf '%s' "$port"
 }
 
+port_listening() { # <port>
+  (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && { exec 3>&- 3<&-; return 0; }
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
 health_json() { # <port>
   curl -sf -m 1 "http://127.0.0.1:$1/health" 2>/dev/null || true
 }
@@ -135,13 +143,18 @@ allocate_api_port() { # <preferred> <expected_home>
   local port="$preferred" i=0 json occupant=""
   [[ "$preferred" =~ ^[0-9]+$ ]] || die "invalid preferred port '$preferred'"
   while [[ $i -lt $PORT_SPAN ]]; do
-    json=$(health_json "$port")
-    occupant=$(health_field "$json" home)
-    if [[ -z "$occupant" || "$occupant" == "$expected" ]]; then
+    if port_listening "$port"; then
+      json=$(health_json "$port")
+      occupant=$(health_field "$json" home)
+      if [[ -n "$occupant" && "$occupant" == "$expected" ]]; then
+        printf '%s' "$port"
+        return 0
+      fi
+      warn "port $port is owned by ${occupant:-unknown process} — trying next"
+    else
       printf '%s' "$port"
       return 0
     fi
-    warn "port $port is owned by $occupant — trying next"
     port=$((port + 2))
     if [[ $port -ge $((PORT_BASE + 2 * PORT_SPAN)) ]]; then
       port=$PORT_BASE
