@@ -129,7 +129,7 @@ function runCounts(db) {
 }
 
 /** §13 status + doctor view: aggregates plus anomalies, all read-only SQL. */
-function statusView(db, registry, nowMs, { secret, policyVersion } = {}) {
+function statusView(db, registry, nowMs, { secret, policyVersion, env, getStoreStats } = {}) {
   const open = openProposals(db, { now: nowMs });
   const expiredOpen = open.filter((p) => p.expired);
   const staleLeases = db
@@ -149,8 +149,11 @@ function statusView(db, registry, nowMs, { secret, policyVersion } = {}) {
 
   const workers = listWorkers(db, { now: nowMs });
   const schedules = scheduleView(db, registry, { now: nowMs });
-  const store = storeStats(db, artifactsRoot(), { now: nowMs });
+  const store = getStoreStats
+    ? getStoreStats(nowMs)
+    : storeStats(db, artifactsRoot(env?.home), { now: nowMs });
   const stalled = stalledWorkers(db, { now: nowMs });
+  const runs = runCounts(db);
 
   const configAnomalies = [];
   if (!secret) {
@@ -163,13 +166,19 @@ function statusView(db, registry, nowMs, { secret, policyVersion } = {}) {
   return {
     events: eventCounts(db),
     proposals: { open: open.length, expired: expiredOpen.length },
-    runs: runCounts(db),
+    runs,
     workers: {
       live: workers.filter((w) => w.state !== "stopped" && !w.stale).length,
       busy: workers.filter((w) => w.state === "busy" && !w.stale).length,
       stale: workers.filter((w) => w.stale).length,
     },
-    artifacts: { files: store.files, bytes: store.bytes, orphans: store.orphans, orphanBytes: store.orphanBytes },
+    artifacts: {
+      files: store.files,
+      bytes: store.bytes,
+      orphans: store.orphans,
+      orphanBytes: store.orphanBytes,
+      ...(store.at ? { at: store.at } : {}),
+    },
     anomalies: {
       configuration: configAnomalies,
       expiredOpenProposals: expiredOpen.map((p) => p.id),
@@ -184,7 +193,7 @@ function statusView(db, registry, nowMs, { secret, policyVersion } = {}) {
       stoppedSchedules: schedules
         .filter((s) => s.stopped || s.error)
         .map((s) => ({ loop: s.loop, every: s.every, lastSlot: s.lastSlot, intervalsLate: s.intervalsLate, error: s.error })),
-      noWorkers: workers.filter((w) => w.state !== "stopped" && !w.stale).length === 0 && (runCounts(db).byState.QUEUED ?? 0) > 0,
+      noWorkers: workers.filter((w) => w.state !== "stopped" && !w.stale).length === 0 && (runs.byState.QUEUED ?? 0) > 0,
       // Two or more open proposals on one run: cancel fail-closes and leaves
       // them open (OPS-245). Unreachable on the TTL replan path.
       ambiguousOpenProposals: ambiguousOpenProposalRuns(db),
@@ -542,6 +551,20 @@ export function createApi({
   janitor = spawnFactoryJanitor,
 } = {}) {
   const ACTOR = "operator"; // one local operator in the MVP (§14)
+  const STORE_STATS_TTL_MS = 10_000;
+  let cachedStoreStats = null;
+  let cachedStoreStatsAt = 0;
+
+  function getStoreStats(nowMs) {
+    if (cachedStoreStats && nowMs - cachedStoreStatsAt < STORE_STATS_TTL_MS) {
+      return cachedStoreStats;
+    }
+    const root = artifactsRoot(env?.home);
+    const stats = storeStats(db, root, { now: nowMs });
+    cachedStoreStats = stats;
+    cachedStoreStatsAt = nowMs;
+    return stats;
+  }
 
   return async function handle(req, res) {
     try {
@@ -589,7 +612,10 @@ export function createApi({
       }
 
       if (route === "GET /status") {
-        return send(res, 200, { env, ...statusView(db, registry, nowMs, { secret, policyVersion }) });
+        return send(res, 200, {
+          env,
+          ...statusView(db, registry, nowMs, { secret, policyVersion, env, getStoreStats }),
+        });
       }
 
       if (route === "GET /events") {
