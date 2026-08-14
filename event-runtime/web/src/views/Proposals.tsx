@@ -472,9 +472,7 @@ export function Proposals({
                         ? "No open proposals — the operator's work is done, for now."
                         : "No decided proposals yet."
                 }
-                action={
-                  escClearsFilter ? <span className="text-[11px]">Esc clears the filter</span> : undefined
-                }
+                escHint={escClearsFilter}
               />
             )}
           </tbody>

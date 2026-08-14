@@ -251,6 +251,8 @@ export function DetailPane({
   );
 }
 
+export const ESC_CLEARS_FILTER = "Esc clears the filter";
+
 /** Empty / loading / error row for the dense lists. Never say "none" while pending. */
 export function ListEmpty({
   colSpan,
@@ -259,6 +261,7 @@ export function ListEmpty({
   noun,
   empty,
   action,
+  escHint,
 }: {
   colSpan: number;
   query: { isPending: boolean; isError: boolean; data?: unknown };
@@ -266,18 +269,20 @@ export function ListEmpty({
   noun: string;
   empty: string;
   action?: ReactNode;
+  escHint?: boolean;
 }) {
   let msg = empty;
   if (query.isPending && !query.data) msg = `Loading ${noun}…`;
   else if (query.isError && !query.data) {
     msg = `Cannot reach the control API — ${noun} will appear when it is up.`;
-  }   else if (filtered) msg = `No ${noun} match this filter.`;
+  } else if (filtered) msg = `No ${noun} match this filter.`;
+  const showEscHint = (filtered || escHint) && !query.isPending && !query.isError;
   return (
     <tr>
       <td colSpan={colSpan} className="px-3 py-8 text-center text-(--text-faint)">
         <div>{msg}</div>
-        {filtered && !query.isPending && (
-          <div className="mt-2 text-[11px]">Esc clears the filter</div>
+        {showEscHint && (
+          <div className="mt-2 text-[11px]">{ESC_CLEARS_FILTER}</div>
         )}
         {action && !query.isPending && !query.isError && !filtered && <div className="mt-3">{action}</div>}
       </td>
