@@ -404,6 +404,44 @@ describe("worker", () => {
     expect(claimNext(db, opts())).toBeNull();
   });
 
+  test("cancelRun on a RUNNING attempt aborts adapter immediately and records attempt (OPS-417)", async () => {
+    const db = openDb(":memory:");
+    let aborted = false;
+    const longRunningAdapter = {
+      execute: ({ abortSignal }) => {
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => resolve({ exitCode: 0, timedOut: false }), 5000);
+          abortSignal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            aborted = true;
+            resolve({ exitCode: null, timedOut: false });
+          });
+        });
+      },
+    };
+    const customAdapters = { long: longRunningAdapter };
+    const spec = queueRun(db, makeSpec({ adapter: "long", timeoutSeconds: 30 }));
+    const o = opts();
+
+    const claim = claimNext(db, o);
+    const execPromise = executeClaimed(db, registry, customAdapters, claim, o);
+
+    // Cancel while RUNNING
+    expect(runState(db, spec.runId)).toBe("RUNNING");
+    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+
+    const summary = await execPromise;
+    expect(summary.cancelled).toBe(true);
+    expect(aborted).toBe(true);
+    expect(runState(db, spec.runId)).toBe("CANCELLED");
+
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.terminal_state).toBe("CANCELLED");
+    expect(attempt.reason_code).toBe("cancelled");
+    expect(attempt.finished_at).toBeTruthy();
+    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+  });
+
   test("runOnce returns null when nothing is QUEUED", async () => {
     const db = openDb(":memory:");
     expect(await runOnce(db, registry, adapters, opts())).toBeNull();

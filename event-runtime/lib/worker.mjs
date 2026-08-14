@@ -111,6 +111,9 @@ export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknow
   });
 }
 
+/** Active executions by runId for cooperative cancellation. */
+const ACTIVE_EXECUTIONS = new Map();
+
 /**
  * Execute one claimed attempt to a terminal state. Returns a summary
  * { runId, attempt, terminalState, reasonCode, receipt? }, or
@@ -128,6 +131,25 @@ export async function executeClaimed(db, registry, adapters, claim, {
   let workspaceDir = null;
   let checkoutPath = null;
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
+
+  const abortController = new AbortController();
+  ACTIVE_EXECUTIONS.set(runId, {
+    abort: (reason) => abortController.abort(reason),
+    controller: abortController,
+    runId,
+    attempt,
+  });
+  let cancelPoll = setInterval(() => {
+    try {
+      const state = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId)?.state;
+      if (state === "CANCELLED" && !abortController.signal.aborted) {
+        abortController.abort("db_cancelled");
+      }
+    } catch {
+      // ignore
+    }
+  }, 250);
+  cancelPoll?.unref?.();
 
   /** Terminal failure-shaped write: transition + attempts row, one tx. */
   const failTerminal = (to, journalReason, reasonCode, { requeue = false } = {}) =>
@@ -187,9 +209,28 @@ export async function executeClaimed(db, registry, adapters, claim, {
       }
     };
 
-    const { exitCode, timedOut } = await adapter.execute({
-      spec, def, workspaceDir, timeoutMs: spec.timeoutSeconds * 1000, env: {}, onTrace,
-    });
+    let outcome;
+    try {
+      outcome = await adapter.execute({
+        spec, def, workspaceDir, timeoutMs: spec.timeoutSeconds * 1000, env: {}, onTrace,
+        abortSignal: abortController.signal, signal: abortController.signal,
+      });
+    } finally {
+      clearInterval(cancelPoll);
+      ACTIVE_EXECUTIONS.delete(runId);
+    }
+
+    if (abortController.signal.aborted) {
+      if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      try {
+        finishAttempt(db, runId, attempt, "CANCELLED", "cancelled", now);
+      } catch {
+        // ignore
+      }
+      return { cancelled: true };
+    }
+
+    const { exitCode, timedOut } = outcome ?? {};
 
     if (timedOut) {
       failTerminal("TIMED_OUT", "timeout", "timeout");
@@ -407,6 +448,10 @@ export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = 
       }
     }
     closeOpenProposalForRun(db, runId, { actor, now });
+    const active = ACTIVE_EXECUTIONS.get(runId);
+    if (active) {
+      active.abort(reason);
+    }
     return result;
   });
 }
