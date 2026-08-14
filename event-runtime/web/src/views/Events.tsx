@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import { useDisplayOptions, useListKeys, useNow, useRequeuePoll, useTabKeys } from "../hooks";
 import {
   buildSections,
   cycleColumnSort,
@@ -136,19 +136,12 @@ export function Events({
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
-  const alive = useRef(true);
+  const pollRequeue = useRequeuePoll(onJumpProposal);
   const [tab, setTab] = useState<StatusTab>(isStatusTab(focusEvent?.status) ? focusEvent.status : "all");
   const [filter, setFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | null>(focusEvent?.type ?? null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [confirmReplay, setConfirmReplay] = useState(false);
-
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
 
   const fetchAll = context.kind === "repo";
   const list = useQuery({
@@ -341,24 +334,7 @@ export function Events({
     onSuccess: async (_, e) => {
       invalidate();
       notify(`Requeued event ${e.eventId}`, "ok");
-      const deadline = Date.now() + 8000;
-      try {
-        while (alive.current && Date.now() < deadline) {
-          const { proposals } = await api.proposals();
-          const match = proposals.find((p) => p.eventSource === e.source && p.eventId === e.eventId);
-          if (match && alive.current) {
-            onJumpProposal(match.id);
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 250));
-        }
-      } catch {
-        // The requeue itself landed; only the confirmation poll broke, so say
-        // that rather than claiming no proposal appeared.
-        if (alive.current) notify(`Requeued ${e.eventId} — could not confirm a proposal appeared`, "err");
-        return;
-      }
-      if (alive.current) notify(`Requeued ${e.eventId} — no open proposal appeared`, "info");
+      await pollRequeue(e);
     },
     onError: invalidate, // 404/409 mean someone else acted — converge on truth
   });
