@@ -76,9 +76,13 @@ Resolve that branch from the PR you just merged; never from the ticket ID, and n
 
 ```bash
 HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
-HOLDERS="$(gh pr list --head "$HEAD_REF" --state open --json number -q '.[].number')"
-[ -z "$HOLDERS" ] || { echo "keeping $HEAD_REF — still the head of open PR $HOLDERS"; }
-git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"   # only when $HOLDERS is empty
+HOLDERS="$(gh pr list --head "$HEAD_REF" --state open --json number -q '.[].number')" ||
+  { echo "cannot tell whether $HEAD_REF is held — not deleting"; exit 1; }
+if [ -n "$HOLDERS" ]; then
+  echo "keeping $HEAD_REF — still the head of open PR $HOLDERS"
+else
+  git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+fi
 ```
 
 Deleting a branch that still heads an open PR makes GitHub **auto-close that PR**, and its commits become unreachable. That is not hypothetical: on legalease, PR #261 (a data-corruption fix) was closed at 08:34Z when this cleanup deleted `feat/CLNT-520` after merging PR #253, and the work had to be recovered from a dangling commit and re-opened as PR #263. A second agent branching further work off the same head is normal in a batched run, so treat a non-empty `$HOLDERS` as a stop: leave the branch and its worktree alone, note it in the report, and let the run that lands the holding PR clean it up.

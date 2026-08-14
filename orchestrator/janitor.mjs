@@ -108,10 +108,14 @@ export function listOpenPrs(repoPath, run = spawnSync) {
   }
 }
 
-/** Branch checked out in each ticket worktree under `root`, keyed by ticket. */
+/**
+ * Branch checked out in each ticket worktree under `root`, keyed by ticket.
+ * Returns null when `git worktree list` could not answer — same fail-closed
+ * shape as `listOpenPrs`: "don't know" is not "no branch, so nothing is held".
+ */
 export function ticketBranches(repoPath, root, tickets, run = spawnSync) {
   const r = run("git", ["worktree", "list", "--porcelain"], { cwd: repoPath, encoding: "utf8" });
-  if (r.status !== 0) return {};
+  if (r.status !== 0) return null;
   const byPath = parseWorktreeBranches(r.stdout);
   const byTicket = {};
   for (const t of tickets) {
@@ -202,23 +206,25 @@ async function survey(repo, { apply }) {
   // the --gate firing on work that every apply run will correctly decline.
   const branches = allFinished.length ? ticketBranches(repoPath, root, allFinished) : {};
   const openPrs = allFinished.length ? listOpenPrs(repoPath) : [];
-  const finished = openPrs === null ? allFinished : allFinished.filter((t) => !openPrHold(branches[t], openPrs));
-  if (openPrs !== null) {
-    result.held = allFinished
-      .filter((t) => !finished.includes(t))
-      .map((t) => ({ id: t, state: states[t].name, branch: branches[t], reason: openPrHold(branches[t], openPrs) }));
+  const cannotTell = openPrs === null || branches === null;
+  if (cannotTell) {
+    // Dry and apply both: do not advertise as reclaimable what we will not
+    // (or cannot) tear down — otherwise --gate and the Dry UI count a set
+    // Apply then refuses wholesale.
+    result.skippedApplyReason =
+      branches === null
+        ? `${repo.name}: could not list worktree branches (git worktree list failed) — refusing to tear down worktrees blind (WM-17)`
+        : `${repo.name}: could not list open PRs (gh pr list failed) — refusing to tear down worktrees blind (WM-17)`;
+    result.reclaimable = [];
+    return result;
   }
+  const finished = allFinished.filter((t) => !openPrHold(branches[t], openPrs));
+  result.held = allFinished
+    .filter((t) => !finished.includes(t))
+    .map((t) => ({ id: t, state: states[t].name, branch: branches[t], reason: openPrHold(branches[t], openPrs) }));
   result.reclaimable = finished.map((t) => ({ id: t, state: states[t].name }));
 
   if (!apply || !allFinished.length) return result;
-
-  // Fail closed when `gh` could not answer (unauthenticated, no network, no
-  // remote): "I don't know which PRs are open" is not "no PR is open", and
-  // guessing here is precisely how PR #261 was closed out from under an agent.
-  if (openPrs === null) {
-    result.skippedApplyReason = `${repo.name}: could not list open PRs (gh pr list failed) — refusing to tear down worktrees blind (WM-17)`;
-    return result;
-  }
 
   if (!finished.length) return result;
 

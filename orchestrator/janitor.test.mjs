@@ -122,6 +122,11 @@ describe("ticketBranches", () => {
       "CLNT-600": "fix/CLNT-600-thing",
     });
   });
+
+  test("a failed git worktree list is cannot-tell, not an empty map", () => {
+    const run = recorder(() => ({ status: 128, stdout: "", stderr: "fatal: not a git repository\n" }));
+    expect(ticketBranches("/repo", "/wt/legalease", ["CLNT-520"], run)).toBeNull();
+  });
 });
 
 describe("reclaim (WM-17 regression: branch A merged while a second PR still heads it)", () => {
