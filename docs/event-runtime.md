@@ -1,6 +1,9 @@
 # Event runtime architecture
 
-Status: **design proposal; no runtime is implemented yet**. Tracking: OPS-203.
+Status: **implemented and watched**. Slices 1 and 2 and the discovered-chain
+machinery ship; the runtime lives at [`event-runtime/`](../event-runtime/README.md).
+Tracking: OPS-203 (this design). Sections still marked deferred name what is
+genuinely unbuilt; everything else describes running code.
 
 This document captures an additive event-driven runtime for bounded, one-off
 agents. It is deliberately separate from the factory's existing skill-based
@@ -72,17 +75,22 @@ here is a separate per-loop decision, and the MVP enables no timer (§3).
 Conversely, what no event type above needs yet — and is therefore explicitly
 deferred, with its trigger named:
 
-- **`evidenceSetHash` and semantic verification** — slice 2, the first
-  data-bearing artifact whose truth matters (§9): reclaimed bytes are
-  recomputed from before/after evidence.
-- **The DAG engine (§11)** — earned by slice 2's diagnose → remediate chain,
-  the first event type that needs more than one node.
-- **Fencing tokens and `FOR UPDATE SKIP LOCKED`** — the second worker process
-  (§10).
-- **Artifact and repository workspaces (§7)** — the first synthesis or
-  repository-mutating event type.
+- **`FOR UPDATE SKIP LOCKED`** — the first *remote* worker node. Fencing
+  tokens shipped with the worker split (OPS-233); the claim is `BEGIN
+  IMMEDIATE` on SQLite (§10), correct for multiple processes on one machine.
+- **Declared workflows with `dependsOn` and deterministic joins (§11)** — the
+  first event type that needs a fan-out and a join. What shipped is the
+  *discovered* form: one typed recommendation per completed run, resolved
+  through `edges.json`.
+- **`mounted`, `container` and `persistent` workspaces (§7)** — filesystem
+  isolation as a policy axis, and any run needing a durable named workspace.
 - **Remote workers** — undated; see §10 for why this is a possibility to keep
   cheap, not a requirement to build toward.
+
+What has left that list by being built: semantic verification and
+`evidenceSetHash` (slice 2), the chain engine (`lib/chain.mjs`), fencing
+tokens (OPS-233), and the `artifacts` (OPS-372) and `repository` (OPS-228)
+workspaces.
 
 ---
 
@@ -107,10 +115,18 @@ The MVP must not:
 - modify `shared/commands/`, `shared/skills/`, or their generated copies;
 - change `build/emit.mjs` or participate in the emit pipeline;
 - change `orchestrator/run.mjs`, `orchestrator/tick.mjs`, or their schedules;
-- enable launchd, cron, or another unattended timer;
-- claim Linear tickets, create worktrees, mutate repositories, or merge code;
+- change `config/schedule.yaml` or the launchd state;
+- create worktrees, mutate repository source, or merge code;
 - share mutable workspaces with interactive or ticket agents; or
 - feed a result into the existing dispatcher automatically.
+
+Two boundaries have moved deliberately since this was written, and are stated
+rather than absorbed. **Timers:** the runtime has its own in-process scheduler
+([event-runtime-schedules.md](event-runtime-schedules.md)); it touches neither
+launchd nor `config/schedule.yaml`, and every loop ships `enabled: false`.
+**Linear writes:** `triage-apply@1` and the scheduled `reaper@1` mutate ticket
+state through closed action registries, so the runtime now writes to the same
+control plane the dispatcher reads.
 
 Starting the API, planner, or worker is always explicit. Stopping all three has
 no effect on skill invocation, emit checks, queue scans, or ticket dispatch.
@@ -224,7 +240,7 @@ returns the existing admission record and never spawns a second run.
     "type": "ephemeral",
     "retainOnFailure": true
   },
-  "adapter": "pi",
+  "adapter": "claude",
   "promptVersion": "git:7d91d88",
   "policyVersion": "git:7d91d88",
   "outputContract": "factory.status-report/v1",
@@ -332,13 +348,17 @@ mutating: false
 A definition is admitted only when its adapter can prove the required
 capabilities. Adapter support is a contract, not a hopeful command-line flag.
 
-**Adapters are a registry, not a flag.** `"adapter": "pi"` in the run spec
+**Adapters are a registry, not a flag.** `"adapter": "claude"` in the run spec
 names an entry in a small adapter registry, one per harness the runtime has
 actually tested. The emit pipeline targets several harnesses (Claude Code,
 Codex, Gemini, Cursor, Pi); the event runtime admits only adapters with a
 passing conformance test covering structured output, timeout and shutdown
-behavior, and workspace confinement. The first registry contains one entry —
-the runtime does not inherit the current runner's entire adapter surface.
+behavior, and workspace confinement. The registry has four entries: `claude`
+(the LLM harness), `command` (a closed argv template), `actions` (an approved
+action list resolved against a closed registry, remote-SSH or local-argv), and
+`fake` (tests and demo environments). It does not inherit the current runner's
+entire adapter surface. (Conformance coverage is currently uneven — the
+`command` adapter has it, `claude` does not: OPS-427.)
 
 **Live trace is an optional adapter capability (`factory.trace/v1`).** An
 adapter may stream what the agent is doing mid-run — via the `onTrace`
@@ -591,6 +611,15 @@ Aggregation is deterministic where possible: collect terminal states, validate
 that all required outputs exist, and assemble an ordered input object. Spawn a
 synthesis agent only when semantic synthesis is actually required.
 
+What is built is the **discovered** form, not the declared one: a completed run
+whose artifact carries a typed recommendation (`recommendationField` in
+`edges.json`) emits one internal event through the same intake, and the planner
+proposes the follow-up — watched like everything else. Chains are therefore
+linear and depth-unbounded rather than a graph with joins: the CI chain is three
+nodes (`ci-log-capture@1` → `ci-doctor@2` → `ci-rerun@1` | `ci-notify@1`). The
+`dependsOn` workflow node above, and the deterministic join into a synthesis
+run, are **not implemented**; they wait for an event type that actually fans out.
+
 Per §2, the DAG engine is earned by slice 2 (`keephq.disk-alert.raised`,
 OPS-208): a read-only LLM diagnose node followed — only after watched approval
 of its typed plan — by a **deterministic-command remediation node**. That
@@ -605,14 +634,12 @@ nothing beyond a two-node chain is built until a real workflow needs it.
 Watched approval is the MVP's centerpiece, so it must be concrete, not a box in
 a diagram.
 
-**Where.** A TUI, in the terminal, like `orchestrator/run.mjs` and
-`watch.jsx`: it lists open proposals and takes `approve <id>` /
-`reject <id> <reason>`. The TUI is the only operator surface in the MVP — a
-web app can come later (specified in
-[event-runtime-webui.md](event-runtime-webui.md)) — but it is a **client, not
-the runtime**: every read
-and every verb goes through the same control API the runtime exposes, never
-directly into the database. That keeps a future web app a second client of
+**Where.** Two operator surfaces ship, and neither is the TUI this section
+originally proposed: `cli.mjs`, a one-shot verb CLI (`proposals`, `approve
+<id>`, `reject <id> "<reason>"`), and the web control plane at
+`event-runtime/web/` ([event-runtime-webui.md](event-runtime-webui.md)). Both
+are **clients, not the runtime**: every read and every verb goes through the
+same control API the runtime exposes, never directly into the database. That keeps a future web app a second client of
 identical endpoints, with the same audit trail, rather than a reimplementation.
 There is no push notification in watched mode — the operator is, by
 definition, watching. A notification channel (the existing `notify.py`
@@ -657,8 +684,13 @@ lifecycle transitions with the operator as actor:
 - **workers** — the registered worker processes: host, pid, labels, state,
   current run, and heartbeat age. Leases prove an *attempt* is held; this
   answers which processes are alive and what they may claim (OPS-233).
-- **replay** — re-inject a stored event body through the same intake function
-  the webhook uses; dedup rules apply unchanged.
+- **inject** — re-inject a stored event body through the same intake function
+  the webhook uses (`POST /replay`); dedup rules apply unchanged. The CLI verb
+  is `inject`; `replay` is the endpoint name.
+- **trace** — the live trace for a run: assistant text, tool calls, usage.
+- **agents / schedule / repos** — the registries as loaded: agent definitions
+  with their pins and event routing, scheduled loops with last fire and next
+  due, and the factory repo list.
 - **requeue** — re-plan a dead-lettered or `human_needed` event in place:
   same admitted event, a fresh planning pass against current state. Replay is
   for a fixed *event body*; requeue is for a fixed *world* — after a registry
@@ -717,12 +749,15 @@ after the fact. The enforcement path, in order:
 Until one of these exists, a compromised or confused agent is limited by the
 watched approval gate and read-only scope, not by the capability list.
 
-**The control API is a trust surface of its own.** In the MVP it binds to
-loopback only, so the TUI needs no authentication story beyond local user
-access. The day a web app consumes the same endpoints, approval and cancel
-become network-reachable actions and require real authentication and an
-authenticated actor identity in the audit trail — that is part of the web-app
-step, not something to retrofit after exposure.
+**The control API is a trust surface of its own.** It binds to loopback only,
+so the clients need no authentication story beyond local user access. The web
+app (OPS-212) consumes the same endpoints and deliberately kept that boundary
+rather than adding auth: `ACTOR` is hardcoded `"operator"`, and the web server
+is a loopback static+proxy process. Real authentication and an authenticated
+actor identity are a **precondition** of either surface ever binding to a
+non-loopback address — not something to retrofit after exposure. Loopback is
+not by itself a defence against a browser: see OPS-408 (no `Origin`/`Host`
+check on mutating routes).
 
 A rejected event writes no run. It may record a minimal rejection receipt that
 contains hashes and reason codes but not a sensitive webhook body.

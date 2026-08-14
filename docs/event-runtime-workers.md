@@ -1,6 +1,6 @@
 # Event runtime: workers, placement, and chaining
 
-Status: **design note; nothing here is implemented**. Tracking: OPS-221.
+Status: **stage 1 shipped (OPS-233); stages 2–3 are still design**. Tracking: OPS-221.
 Companion to [event-runtime.md](event-runtime.md) §3, §8, §10, §11 — this
 note expands the "second process → Postgres → remote workers" line of §10
 into something ticket-shaped, without changing any decision made there.
@@ -11,18 +11,18 @@ cut-lines for when the operator says go.
 
 ## 1. Today, precisely
 
-One `serve` process is API, planner, and worker. "Worker" is a role inside
-the 1-second tick, not a process: `runOnce` claims **at most one** `QUEUED`
-run, executes it to a terminal state (the adapter spawn is the only real
-child process), and the `busy` flag stops ticks from overlapping.
+`serve` is API, planner, scheduler, chain resolver and outbox publisher. It
+runs **no worker**: execution lives in one or more `cli.mjs work` processes,
+each registering in the worker table with labels and a heartbeat.
+`--with-worker` restores the all-in-one for a demo.
 
 Two consequences worth stating because they answer real operator questions:
 
-- **Concurrency is exactly 1.** Approving five proposals queues five runs;
-  they execute one after another, ~one claim per tick. This is §3's "at most
-  one event worker" made structural, not a missing feature: every
-  claude-adapter run draws on the same unobservable subscription usage
-  window as interactive sessions (architecture.md §2.9).
+- **Concurrency is a worker count, and the count is a deployment choice.** Two
+  `work` processes execute two runs at once, and the claim is correct under
+  contention (`BEGIN IMMEDIATE`, leases, fencing tokens). The reason to keep it
+  at one is the unobservable subscription usage window (architecture.md §2.9),
+  not a structural limit.
 - **A run occupies the worker for its whole duration.** A 10-minute agent
   run means 10 minutes of queue. The lease (spec timeout + 120 s grace) and
   fencing token already make this safe to change — they were built for the
@@ -118,7 +118,7 @@ threshold age, with the missing labels named.
 
 ## 5. Chaining agents
 
-Already designed — §11 — and not yet built (earned by slice 2). The rules
+Shipped as the discovered form (OPS-223): `lib/chain.mjs` plus `edges.json`. The rules
 that answer "can agent A trigger agent B":
 
 - **Agents never message or spawn agents.** A finished run's accepted result
