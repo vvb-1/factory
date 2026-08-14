@@ -250,10 +250,12 @@ export function Proposals({
     selected: selectedIndex,
     onSelect: (i) => onSelectProposal(visible[i]?.id ?? null),
     onClose: () => {
-      if (selectedId) onSelectProposal(null);
-      else {
+      if (sel) onSelectProposal(null);
+      else if (filter || expiredOnly) {
         if (filter) setFilter("");
         if (expiredOnly) setExpiredOnly(false);
+      } else if (selectedId) {
+        onSelectProposal(null);
       }
     },
     keys: {
@@ -470,9 +472,7 @@ export function Proposals({
                         ? "No open proposals — the operator's work is done, for now."
                         : "No decided proposals yet."
                 }
-                action={
-                  escClearsFilter ? <span className="text-[11px]">Esc clears the filter</span> : undefined
-                }
+                escHint={escClearsFilter}
               />
             )}
           </tbody>

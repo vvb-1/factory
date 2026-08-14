@@ -225,6 +225,14 @@ describe("matchesFilterQuery", () => {
     expect(matchProposal("is:expired", proposal({ expired: true }))).toBe(true);
   });
 
+  test("Proposals is:stale only flags open proposals whose run left PROPOSED, not decided history rows", () => {
+    expect(matchProposal("is:stale", proposal({ status: "open" }), new Map([["run_48ac91", "CANCELLED"]]))).toBe(true);
+    expect(matchProposal("is:stale", proposal({ status: "open" }), new Map([["run_48ac91", "PROPOSED"]]))).toBe(false);
+    expect(matchProposal("is:stale", proposal({ status: "approved" }), new Map([["run_48ac91", "COMPLETED"]]))).toBe(false);
+    expect(matchProposal("is:stale", proposal({ status: "rejected" }), new Map([["run_48ac91", "FAILED"]]))).toBe(false);
+    expect(matchProposal("is:stale", proposal({ status: "expired" }), new Map([["run_48ac91", "CANCELLED"]]))).toBe(false);
+  });
+
   test("Proposals keyed fields cover the columns the list shows", () => {
     expect(matchProposal("agent:ci-doctor decision:run status:open")).toBe(true);
     expect(matchProposal("decision:human_needed")).toBe(false);
@@ -293,5 +301,12 @@ describe("proposalRunState", () => {
     expect(proposalRunState({ runId: "r1" }, new Map([["r1", "RUNNING"]]))).toBe("RUNNING");
     expect(proposalRunState({ runId: "r1" }, new Map())).toBeNull();
     expect(proposalRunState({ runId: null }, new Map([["r1", "RUNNING"]]))).toBeNull();
+  });
+
+  test("decided proposals (status !== 'open') are never stale even if run is terminal", () => {
+    expect(proposalRunState({ runId: "r1", status: "open" }, new Map([["r1", "COMPLETED"]]))).toBe("COMPLETED");
+    expect(proposalRunState({ runId: "r1", status: "approved" }, new Map([["r1", "COMPLETED"]]))).toBeNull();
+    expect(proposalRunState({ runId: "r1", status: "rejected" }, new Map([["r1", "FAILED"]]))).toBeNull();
+    expect(proposalRunState({ runId: "r1", status: "expired" }, new Map([["r1", "CANCELLED"]]))).toBeNull();
   });
 });
