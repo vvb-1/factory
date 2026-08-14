@@ -325,6 +325,11 @@ export interface ApproveOutcome {
   proposal?: Proposal;
 }
 
+export interface CancelOutcome {
+  cancelled: boolean;
+  ambiguousOpenProposals?: { runId: string; count: number }[];
+}
+
 /** Deep-link payload for the Events inbox (tab, type chip, and/or a specific row). */
 export interface EventFocus {
   status?: string;

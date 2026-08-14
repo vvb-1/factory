@@ -289,8 +289,9 @@ describe("worker", () => {
       actor: "test", policyVersion: "test", now: T0,
     });
     linkEvent(db, spec.runId);
-    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    const outcome = cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
     expect(runState(db, spec.runId)).toBe("CANCELLED");
+    expect(outcome.proposalClose).toEqual({ closed: true, id: `prop-${spec.runId}` });
     const proposal = db.query(`SELECT * FROM proposals WHERE run_id = ?`).get(spec.runId);
     expect(proposal.status).toBe("rejected");
     expect(proposal.reason).toBe("run_cancelled");
@@ -306,8 +307,9 @@ describe("worker", () => {
       spec, specJson: canonicalJson(spec), specHash: hashJson(spec),
       actor: "test", policyVersion: "test", now: T0,
     });
-    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    const outcome = cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
     expect(runState(db, spec.runId)).toBe("CANCELLED");
+    expect(outcome.proposalClose).toEqual({ closed: false });
     expect(db.query(`SELECT COUNT(*) AS n FROM proposals`).get().n).toBe(0);
   });
 
@@ -325,8 +327,9 @@ describe("worker", () => {
       `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
        VALUES (?, ?, ?, ?, 'RUN_SPEC', ?, 1800)`,
     ).run(`prop-${spec.runId}-extra`, "test", `evt-${spec.runId}`, spec.runId, at);
-    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    const outcome = cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
     expect(runState(db, spec.runId)).toBe("CANCELLED");
+    expect(outcome.proposalClose).toEqual({ closed: false, ambiguous: true, count: 2 });
     const open = db.query(`SELECT COUNT(*) AS n FROM proposals WHERE run_id = ? AND status = 'open'`).get(spec.runId);
     expect(open.n).toBe(2);
   });

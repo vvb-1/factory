@@ -715,9 +715,13 @@ export function createApi({
         const body = parseJson(await readBody(req)).value ?? {};
         try {
           if (verb === "cancel") {
-            cancelRun(db, runId, { actor: ACTOR, reason: body.reason ?? "operator_cancel", now: nowMs, policyVersion });
-            const clash = ambiguousOpenProposalRuns(db).find((row) => row.runId === runId);
-            if (clash) return send(res, 200, { cancelled: true, ambiguousOpenProposals: clash.count });
+            const outcome = cancelRun(db, runId, { actor: ACTOR, reason: body.reason ?? "operator_cancel", now: nowMs, policyVersion });
+            if (outcome.proposalClose?.ambiguous) {
+              return send(res, 200, {
+                cancelled: true,
+                ambiguousOpenProposals: [{ runId, count: outcome.proposalClose.count }],
+              });
+            }
             return send(res, 200, { cancelled: true });
           }
           retryRun(db, runId, { actor: ACTOR, force: body.force === true, now: nowMs, policyVersion });
