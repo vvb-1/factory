@@ -153,6 +153,11 @@ export function Workers({
   const query = useQuery({ queryKey: ["workers"], queryFn: api.workers, refetchInterval: 2000 });
   const rows = query.data?.workers ?? [];
 
+  const liveCount = useMemo(
+    () => rows.filter((w) => !w.stale && w.state !== "stopped").length,
+    [rows],
+  );
+
   const [filter, setFilter] = useState("");
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -225,6 +230,27 @@ export function Workers({
                 label="Filter workers"
               />
             </div>
+            {query.isSuccess && liveCount === 0 && (
+              <div
+                className="mb-3 rounded-md border border-[color:var(--hue-warn)] bg-[color:color-mix(in_oklch,var(--hue-warn)_8%,var(--surface-1))] p-3 text-[12px]"
+                style={{ color: "var(--hue-warn)" }}
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  <span className="size-2 shrink-0 rounded-full bg-[color:var(--hue-warn)] animate-pulse" />
+                  <span>No live workers detected</span>
+                </div>
+                <div className="mt-1 text-(--text-dim)">
+                  {rows.length === 0
+                    ? "No workers have registered with the runtime."
+                    : `${rows.length} registered worker${rows.length === 1 ? " is" : "s are"} stopped or stale.`}{" "}
+                  Queued runs will remain waiting until a worker is started with{" "}
+                  <code className="mono rounded bg-(--surface-2) px-1.5 py-0.5 text-[11px] text-(--text)">
+                    bun event-runtime/cli.mjs work
+                  </code>
+                  .
+                </div>
+              </div>
+            )}
           </>
         }
       >
