@@ -31,6 +31,9 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
       # Web .test.tsx files resolve React's JSX runtime from
       # event-runtime/web/node_modules. Root `bun test` used to run first, so
       # those files died with `Cannot find module 'react/jsx-dev-runtime'`
@@ -39,7 +42,7 @@ jobs:
       - name: Install event-runtime/web deps
         run: cd event-runtime/web && bun install --frozen-lockfile
 
-      - name: Collision detection tests
+      - name: Unit and integration tests
         run: bun test
 
       - name: Generated tree matches shared/
@@ -53,8 +56,14 @@ jobs:
       - name: Typecheck and build event-runtime/web
         run: cd event-runtime/web && bun run build
 
-      - name: Schedule renders
-        run: bun deploy/gen.mjs
+      - name: Schedule renders match deploy/launchd
+        run: bun deploy/gen.mjs && git diff --exit-code deploy/launchd/
+
+      - name: Shell syntax check
+        run: |
+          for f in bin/*.sh bin/factory; do
+            bash -n "$f" || exit 1
+          done
 
       - name: Supervisor lists jobs
         # Cheap smoke test: proves schedule.yaml parses and every job is
@@ -66,3 +75,30 @@ jobs:
           for f in .claude-plugin/marketplace.json plugins/core/.claude-plugin/plugin.json; do
             bun -e "JSON.parse(await Bun.file('$f').text())" || exit 1
           done
+
+      - name: E2E demo runtime seed and verify
+        run: |
+          set -e
+          PORT=7399
+          DIR=$(mktemp -d)
+          export FACTORY_EVENT_HOME="$DIR"
+          export FACTORY_EVENT_PORT="$PORT"
+
+          bun event-runtime/cli.mjs serve --adapter-override fake &
+          SERVE_PID=$!
+          bun event-runtime/cli.mjs work --adapter-override fake &
+          WORK_PID=$!
+
+          cleanup() {
+            kill -9 $SERVE_PID $WORK_PID 2>/dev/null || true
+            rm -rf "$DIR"
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 50); do
+            curl -sf "http://127.0.0.1:$PORT/health" >/dev/null && break
+            sleep 0.1
+          done
+
+          bun event-runtime/demo/seed.mjs --port "$PORT" --prefix "ci-demo"
+          bun event-runtime/demo/verify.mjs --port "$PORT"
