@@ -96,13 +96,19 @@ export function openPrHold(branch, openPrs) {
   return `branch ${branch} is still the head of open PR ${list} — leaving it in place (WM-17)`;
 }
 
-/** Open PRs in a repo, or null when `gh` could not answer. */
-export function listOpenPrs(repoPath, run = spawnSync) {
-  const r = run("gh", ["pr", "list", "--state", "open", "--limit", "200", "--json", "number,headRefName"], { cwd: repoPath, encoding: "utf8" });
+/**
+ * Open PRs in a repo, or null when `gh` could not answer.
+ * Fail closed (return null) when hitting the fetch limit so we never miss
+ * an open PR holder due to pagination limits (WM-56).
+ */
+export function listOpenPrs(repoPath, run = spawnSync, limit = 200) {
+  const r = run("gh", ["pr", "list", "--state", "open", "--limit", String(limit), "--json", "number,headRefName"], { cwd: repoPath, encoding: "utf8" });
   if (r.status !== 0) return null;
   try {
     const parsed = JSON.parse(r.stdout || "[]");
-    return Array.isArray(parsed) ? parsed : null;
+    if (!Array.isArray(parsed)) return null;
+    if (parsed.length >= limit) return null;
+    return parsed;
   } catch {
     return null;
   }
@@ -132,7 +138,10 @@ export function ticketBranches(repoPath, root, tickets, run = spawnSync) {
  * a real checkout: `run` is the only way this reaches the filesystem, so a test
  * that injects a recorder proves a held ticket never reaches worktree-down.sh.
  */
-export function reclaim(finished, { repoPath, down, branches = {}, openPrs = [], run = spawnSync }) {
+export function reclaim(finished, { repoPath, down, branches = {}, openPrs, run = spawnSync } = {}) {
+  if (!Array.isArray(openPrs)) {
+    throw new Error("reclaim requires openPrs array — refusing unguarded teardown (WM-56)");
+  }
   const removed = [];
   const refused = [];
   const held = [];

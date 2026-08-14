@@ -104,6 +104,18 @@ describe("listOpenPrs", () => {
     expect(listOpenPrs("/repo", recorder(() => ({ status: 1, stderr: "gh: not authenticated" })))).toBeNull();
     expect(listOpenPrs("/repo", recorder(() => ({ status: 0, stdout: "not json" })))).toBeNull();
   });
+
+  test("fails closed (returns null) when hitting the fetch limit (WM-56)", () => {
+    const atLimit = Array.from({ length: 200 }, (_, i) => ({ number: i + 1, headRefName: `branch-${i + 1}` }));
+    const run = recorder(() => ({ status: 0, stdout: JSON.stringify(atLimit) }));
+    expect(listOpenPrs("/repo", run, 200)).toBeNull();
+  });
+
+  test("returns PRs when below the fetch limit (WM-56)", () => {
+    const belowLimit = Array.from({ length: 199 }, (_, i) => ({ number: i + 1, headRefName: `branch-${i + 1}` }));
+    const run = recorder(() => ({ status: 0, stdout: JSON.stringify(belowLimit) }));
+    expect(listOpenPrs("/repo", run, 200)).toHaveLength(199);
+  });
 });
 
 describe("ticketBranches", () => {
@@ -174,5 +186,13 @@ describe("reclaim (WM-17 regression: branch A merged while a second PR still hea
     const run = recorder();
     reclaim(["CLNT-600"], { ...scenario, run });
     expect(run.calls[0].args).not.toContain("--force");
+  });
+
+  test("reclaim throws if openPrs is missing, null, or not an array (WM-56)", () => {
+    const run = recorder();
+    expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: undefined, run })).toThrow("reclaim requires openPrs array");
+    expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: null, run })).toThrow("reclaim requires openPrs array");
+    expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: "invalid", run })).toThrow("reclaim requires openPrs array");
+    expect(() => reclaim(["CLNT-520"], { repoPath: "/repo", down: "down.sh" })).toThrow("reclaim requires openPrs array");
   });
 });
