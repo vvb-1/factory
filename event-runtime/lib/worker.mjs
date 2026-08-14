@@ -316,29 +316,54 @@ export async function executeClaimed(db, registry, adapters, claim, {
       if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
       return { cancelled: true };
     }
-    throw err;
+    const reasonCode = "adapter_error";
+    const journalReason = `adapter_error: ${err?.message ?? String(err)}`;
+    try {
+      failTerminal("FAILED", journalReason, reasonCode, { requeue: true });
+    } catch {
+      // if failTerminal could not transition, continue
+    }
+    if (workspaceDir) {
+      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+    }
+    return { runId, attempt, terminalState: "FAILED", reasonCode, error: err?.message };
   }
 }
 
 /**
  * Re-queue LEASED/RUNNING runs whose current attempt's lease expired. The
  * stale attempt keeps its (now lower) fencing token, so a late publish from
- * it is fenced out.
+ * it is fenced out. Respects maxAttempts and dead-letters beyond it.
  */
 export function reapExpiredLeases(db, { now = Date.now(), policyVersion = "unknown" } = {}) {
   return tx(db, () => {
     const rows = db
       .query(
-        `SELECT r.run_id, r.attempts FROM runs r
+        `SELECT r.run_id, r.attempts, r.spec_json, r.state FROM runs r
          JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
          WHERE r.state IN ('LEASED', 'RUNNING') AND a.lease_expires_at < ?`,
       )
       .all(iso(now));
     for (const row of rows) {
-      transition(db, {
-        runId: row.run_id, to: "QUEUED",
-        actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
-      });
+      const spec = JSON.parse(row.spec_json);
+      if (row.attempts < spec.maxAttempts) {
+        transition(db, {
+          runId: row.run_id, to: "QUEUED",
+          actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
+        });
+      } else {
+        if (row.state === "LEASED") {
+          transition(db, {
+            runId: row.run_id, to: "RUNNING",
+            actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now,
+          });
+        }
+        transition(db, {
+          runId: row.run_id, to: "FAILED",
+          actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now,
+        });
+        finishAttempt(db, row.run_id, row.attempts, "FAILED", "lease_expired", now);
+      }
     }
     return rows.length;
   });
