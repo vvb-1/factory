@@ -22,6 +22,10 @@ Non-negotiable for every agent in this repo, in any harness. Full protocol: `~/D
 
 **Bundling several tickets into one worktree is the human's call, never yours.** When the human explicitly asks for a set of tickets to be done together, they share one worktree, one branch (named after the lead ticket) and one PR: claim _every_ ticket in the bundle and heartbeat all of them, keep one commit per ticket, scope the work to the union of their `Owned Paths`, and give the PR body a `Fixes <ISSUE-ID>` line per ticket. If one of them turns out to be bigger than it looked or gets blocked, unassign it back to `Todo` and ship the rest — never stall the others behind it. Absent that explicit instruction it is one ticket, one worktree; noticing that two tickets are related is a reason to say so, not to merge them yourself.
 
+**Never use `git stash` in worktrees.** The `git stash` stack is repository-global, not isolated per worktree. Running `git stash` or `git stash pop` in one worktree will push to or pop from a stack shared across all concurrent agent worktrees. If `git stash push <path>` runs on clean/committed files, it is a no-op that exits 0 without creating a stash entry, and a subsequent `git stash pop` silently pops another agent's stashed uncommitted changes into your worktree, causing silent cross-session data loss and corruption. Strictly avoid `git stash` in agent worktrees. For temporary checks (such as observing regression tests fail before applying a fix), use safe per-file alternatives:
+- Temporarily test pre-fix state: `git show <ref>:<path> > <path>`
+- Restore working state: `git checkout HEAD -- <path>`
+
 **Stay inside `Owned Paths`.** That glob set is what makes parallel work safe; the dispatcher refuses to run two tickets whose sets intersect. Work discovered outside it becomes a new `Triage` issue — it never expands the current ticket.
 
 **Heartbeat** at each phase change (claimed → implemented → verified → PR open) and at least every 20 minutes, saying what changed. After 45 minutes of silence the ticket is reclaimed.
