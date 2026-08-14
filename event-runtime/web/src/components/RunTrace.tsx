@@ -383,6 +383,14 @@ function TraceBody({
       </div>
     );
   }
+  if (kind === "lifecycle" && p.note === "policy_denial") {
+    return (
+      <div className="min-w-0 flex-1" style={{ color: "var(--hue-err)" }}>
+        <span className="font-medium">Denied: {p.tool ?? "tool"}</span>
+        {p.rule ? <span className="ml-1 text-(--text-dim)">— {p.rule}</span> : null}
+      </div>
+    );
+  }
   if (kind === "assistant_text") {
     return (
       <div className="min-w-0 flex-1">
@@ -464,6 +472,7 @@ function TraceBody({
 const isToolKind = (k: string) => k === "tool_use" || k === "tool_result";
 const isReasoningKind = (k: string) => k === "assistant_text";
 const isErrorKind = (e: TraceEntry) =>
+  (e.kind === "lifecycle" && e.payload?.note === "policy_denial") ||
   (e.kind === "tool_result" && Boolean(e.payload?.isError)) ||
   (e.kind === "lifecycle" && e.payload?.note === "trace_truncated");
 const isUsageKind = (k: string) => k === "usage";
