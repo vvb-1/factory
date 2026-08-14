@@ -647,9 +647,9 @@ export function Proposals({
             <>
               <Button onClick={() => copyText(sel.id, "proposal id")}>Copy id</Button>
               <Button onClick={copyLink}>Copy link</Button>
-              <Button onClick={() => onSelectProposal(null)}>Close</Button>
             </>
           }
+          close={<Button onClick={() => onSelectProposal(null)}>Close</Button>}
         >
 
           <Section title="Proposal">
