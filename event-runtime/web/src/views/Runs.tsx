@@ -766,7 +766,7 @@ export function Runs({
               answer to a budget about to be spent on a hung agent. */}
           {current && clocks && (
             <Section title="Deadlines">
-              <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums">
+              <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums" aria-live="off">
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="text-(--text-faint)">
                     attempt #{current.attempt}{" "}
