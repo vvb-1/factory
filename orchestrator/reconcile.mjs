@@ -83,10 +83,18 @@ function prState(nameWithOwner, number) {
   try { return JSON.parse(p.stdout.toString()); } catch { return null; }
 }
 
-/** Remove only factory lifecycle markers; preserve all project labels. */
-function settledLabelIds(issue) {
+export const LIFECYCLE_LABELS = [
+  "ai:in-progress",
+  "ai:needs-review",
+  "ai:agent-ready",
+  "ai:escalated",
+  "ai:blocked",
+];
+
+/** Remove all factory lifecycle markers; preserve all project labels (WM-16). */
+export function settledLabelIds(issue) {
   return (issue.labels?.nodes ?? [])
-    .filter((l) => !["ai:in-progress", "ai:needs-review", "ai:agent-ready"].includes(l.name) && !l.name.startsWith("agent:"))
+    .filter((l) => !LIFECYCLE_LABELS.includes(l.name) && !l.name.startsWith("agent:"))
     .map((l) => l.id);
 }
 
