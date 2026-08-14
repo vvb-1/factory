@@ -3,8 +3,10 @@
  * The factory's Linear surface, as a shell command.
  *
  *   bun tools/linear.mjs get CLNT-616
+ *   bun tools/linear.mjs comments CLNT-616
  *   bun tools/linear.mjs claim CLNT-616 --agent claude
  *   bun tools/linear.mjs comment CLNT-616 "verified: 42 tests pass"
+ *   bun tools/linear.mjs labels CLNT-616 --add ai:needs-review --remove ai:in-progress
  *   bun tools/linear.mjs state CLNT-616 "In Review" --add ai:needs-review
  *   bun tools/linear.mjs file --team CLNT --title "..." --body "..." --type bug
  *   bun tools/linear.mjs queue --repo bj29
@@ -146,13 +148,38 @@ export function formatTicket(i) {
   return lines.join("\n");
 }
 
+/** Compact comment rendering — author, timestamp, and body. */
+export function formatComment(c) {
+  const author = c.user?.name ?? "(unknown)";
+  const when = c.createdAt ?? "";
+  const header = when ? `${author}  ${when}` : author;
+  return `${header}\n${c.body ?? ""}`;
+}
+
+export function formatComments(nodesOrIssue) {
+  const nodes = Array.isArray(nodesOrIssue)
+    ? nodesOrIssue
+    : nodesOrIssue?.comments?.nodes ?? [];
+  if (!nodes.length) return "(no comments)";
+  return nodes.map(formatComment).join("\n\n---\n\n");
+}
+
 // --------------------------------------------------------------- helpers ---
 const ISSUE_FIELDS = `id identifier title url description
   state{ id name type } assignee{ id name }
   labels(first:30){ nodes{ id name } }`;
 
+const COMMENTS_FIELDS = `id identifier title
+  comments(first:50){ nodes{ id body createdAt user{ id name } } }`;
+
 async function issueByKey(key) {
   const d = await gql(`query($k:String!){ issue(id:$k){ ${ISSUE_FIELDS} } }`, { k: key });
+  if (!d?.issue) throw new Error(`no such issue: ${key}`);
+  return d.issue;
+}
+
+async function issueCommentsByKey(key) {
+  const d = await gql(`query($k:String!){ issue(id:$k){ ${COMMENTS_FIELDS} } }`, { k: key });
   if (!d?.issue) throw new Error(`no such issue: ${key}`);
   return d.issue;
 }
@@ -231,6 +258,14 @@ const VERBS = {
     out(issue, formatTicket(issue));
   },
 
+  async comments() {
+    const key = positional[0];
+    if (!key) throw new Error(`usage: comments <ISSUE-ID>`);
+    const issue = await issueCommentsByKey(key);
+    const nodes = issue.comments?.nodes ?? [];
+    out(nodes, formatComments(nodes));
+  },
+
   async claim() {
     const key = positional[0];
     const harness = flag("agent", "claude");
@@ -266,25 +301,53 @@ const VERBS = {
     out({ ok: true, identifier: key }, `commented on ${key}`);
   },
 
+  async labels() {
+    const key = positional[0];
+    if (!key) throw new Error(`usage: labels <ISSUE-ID> [--add <label>] [--remove <label>]`);
+    const issue = await issueByKey(key);
+    const add = flagAll("add"), remove = flagAll("remove");
+    if (!add.length && !remove.length) {
+      const current = (issue.labels?.nodes ?? []).map((l) => l.name);
+      out(current, current.join(" ") || "(none)");
+      return;
+    }
+    const labelIds = await applyLabels(issue, add, remove);
+    await gql(`mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
+      { id: issue.id, in: { labelIds } });
+    out({ ok: true, identifier: key, added: add, removed: remove }, `${key} labels updated`);
+  },
+
+  async label() {
+    return VERBS.labels();
+  },
+
   async state() {
     const key = positional[0];
     const wanted = positional[1];
-    if (!wanted) throw new Error(`usage: state <ISSUE-ID> "<State Name>" [--add label] [--remove label]`);
-    const issue = await issueByKey(key);
-    let { states } = await statesFor(teamOf(key));
-    let target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
-    if (!target) ({ states } = await statesFor(teamOf(key), true)); // stale cache? refetch once before failing
-    target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
-    if (!target) throw new Error(`no state "${wanted}" on team ${teamOf(key)} — have: ${states.map((s) => s.name).join(", ")}`);
-
     const add = flagAll("add"), remove = flagAll("remove");
-    const input = { stateId: target.id };
+    if (!key) throw new Error(`usage: state <ISSUE-ID> ["<State Name>"] [--add label] [--remove label]`);
+    if (!wanted && !add.length && !remove.length && !has("unassign")) {
+      throw new Error(`usage: state <ISSUE-ID> "<State Name>" [--add label] [--remove label]`);
+    }
+    const issue = await issueByKey(key);
+    const input = {};
+    let target = null;
+    if (wanted) {
+      let { states } = await statesFor(teamOf(key));
+      target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
+      if (!target) ({ states } = await statesFor(teamOf(key), true)); // stale cache? refetch once before failing
+      target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
+      if (!target) throw new Error(`no state "${wanted}" on team ${teamOf(key)} — have: ${states.map((s) => s.name).join(", ")}`);
+      input.stateId = target.id;
+    }
+
     if (add.length || remove.length) input.labelIds = await applyLabels(issue, add, remove);
     if (has("unassign")) input.assigneeId = null;
 
     await gql(`mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
       { id: issue.id, in: input });
-    out({ ok: true, identifier: key, state: target.name }, `${key} -> ${target.name}`);
+    const msg = target ? `${key} -> ${target.name}` : `${key} labels updated`;
+    out({ ok: true, identifier: key, ...(target ? { state: target.name } : {}) }, msg);
   },
 
   async file() {
