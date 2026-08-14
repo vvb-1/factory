@@ -303,6 +303,95 @@ constraints, not vibes:
 
 The target is "quiet tool you live in", not "dashboard demo".
 
+### 5.2 Iconography, glyphs, and color application (WM-133)
+
+§5.1 gives the palette machinery; this section gives the rules for _applying_
+it, plus the icon/glyph system. It exists because a 2026-08-14 audit found the
+predictable drift: three syntaxes for the same hue, six ad-hoc wash strengths,
+state hues borrowed for team identity, and unicode glyphs chosen locally with
+no shared set. Every rule below is checkable in review.
+
+#### Three visual tiers — use the lowest that works
+
+1. **Text.** The default. Verbs are words ("clear", "add", "collapsed"), not
+   icons. If a word fits in the space, no glyph and no icon.
+2. **Approved unicode glyphs.** A _closed_ set, each with exactly one meaning:
+
+   | Glyph     | Meaning                     | Where                                            |
+   | --------- | --------------------------- | ------------------------------------------------ |
+   | `▶`       | collapse/expand chevron     | `GroupHeaderRow` only — 9px, `rotate-90` on open |
+   | `×`       | dismiss/remove this item    | chips and tokens only — never "failed"           |
+   | `↑` / `↓` | sort direction              | `Th` header cells only                           |
+   | `·`       | inline metadata separator   | footer/status lines                              |
+   | `…`       | truncation / "more follows" | labels, placeholders (`add…`), loading copy      |
+   | `⌘` etc.  | keyboard hints              | inside `<kbd>` or `.mono` spans only             |
+
+   Rules: always `aria-hidden` (the control carries the accessible name);
+   never a glyph as the _only_ content of an interactive element without
+   `title` + `aria-label`; **no emoji anywhere** in the UI. Adding a glyph to
+   this table is a spec change, not a local decision.
+
+3. **Inline SVG icons.** The only tier for _state_ iconography, per OPS-498:
+   14px viewBox, 1.5px stroke (matches the app's hairline weight),
+   `currentColor` fill/stroke so the hue system does the coloring,
+   shape-coded per lifecycle state (dashed circle = proposed, half-disc =
+   running, disc+check = completed, disc+× = failed, …). Icons sit **left of
+   the text label at `gap-1.5` and never replace it** — shape is redundancy
+   for color-blind and peripheral reading, not a substitute for words. No
+   icon font, no icon npm package: hand-rolled inline SVG keeps the bundle
+   honest and the set closed.
+
+   The nav rail stays **text-only** deliberately. An icon rail is deferred
+   until the label list outgrows the 52-width rail — icons there would be
+   decoration, and decoration is what §5.1 forbids.
+
+#### Color application
+
+- **Hue means state, never identity.** The six semantic hues — `--hue-ok`,
+  `--hue-warn`, `--hue-err`, `--hue-info`, `--hue-verify`, `--hue-idle` — are
+  reserved for lifecycle/status meaning. Teams, repos, environments, and
+  other identities must not borrow them: green must not mean "COMPLETED" in
+  one view and "CLNT team" in the next. (The Projects team map is the known
+  violation; identity color, if ever needed, gets its own derivation, not
+  these tokens.)
+- **Hue maps live in `components/ui.tsx` only** (`STATE_HUES`,
+  `EVENT_STATUS_HUES`, `PROPOSAL_STATUS_HUES`, `DECISION_HUES`). Views import
+  them; a view file defining its own `Record<string, hue>` is a review flag.
+- **Wash strengths are fixed, not vibes.** Backgrounds mix the hue into
+  transparency at exactly these strengths:
+
+  | Strength | Pattern                                          |
+  | -------- | ------------------------------------------------ |
+  | 6%       | full-row wash (`row-wash-err`/`-warn`)           |
+  | 8%       | banner/callout fill (paired with hue border)     |
+  | 10%      | inline error block (`VerbError`)                 |
+  | 12%      | badge/chip fill (`StateBadge`)                   |
+  | 15–16%   | selection and env-chip fills (accent, not state) |
+
+  A new component picks the row of this table it belongs to; it does not
+  invent 9% or 14%.
+
+- **One syntax per situation.** Static token color uses Tailwind v4
+  parenthesized form: `text-(--hue-ok)`, `bg-(--surface-2)`. Runtime-computed
+  hues use inline `style={{ color: hue }}`. The bracketed legacy form
+  `text-[color:var(--hue-warn)]` is banned in new code — three spellings of
+  the same thing is how grep-ability dies.
+
+#### Dot anatomy — three dots, three meanings
+
+- `size-1.5`, no halo — the dot _inside_ `StateBadge`; part of the badge, not
+  freestanding.
+- `size-2` + 18% halo ring — section/group identity dot (`GroupHeaderRow`).
+- `size-2` + `animate-pulse` — **liveness only** (connection indicator,
+  active-attention banner). Pulse means "happening now"; a static state never
+  pulses.
+
+#### Known debt (filed, not fixed here)
+
+State-icon implementation is OPS-498. Syntax normalization, wash
+normalization, and the Projects team-hue fix are follow-up tickets — this
+section is the standard they normalize _to_.
+
 ## 6. Liveness and concurrency honesty
 
 - TanStack Query, `refetchInterval` 2 s on the focused view, paused on hidden
