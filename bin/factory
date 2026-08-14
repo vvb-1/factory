@@ -68,9 +68,11 @@ case "$cmd" in
   next)         run_bun orchestrator/next.mjs "$@" ;;
   state)        run_bun orchestrator/state.mjs "$@" ;;
   status)       run_bun orchestrator/status.mjs "$@" ;;
+  ps)           run_bun orchestrator/ps.mjs "$@" ;;
   friction)     run_bun orchestrator/friction.mjs "$@" ;;
   economics)    run_bun orchestrator/economics.mjs "$@" ;;
   ci)           run_bun orchestrator/ci.mjs "$@" ;;
+  actions-cache) run_bun orchestrator/actions-cache.mjs "$@" ;;
   label-guard)  run_bun orchestrator/label-guard.mjs "$@" ;;
   digest)       run_bun orchestrator/digest.mjs "$@" ;;
   doctor)       run_bun orchestrator/doctor.mjs "$@" ;;
@@ -80,6 +82,50 @@ case "$cmd" in
   janitor)      run_bun orchestrator/janitor.mjs "$@" ;;
   warm)         run_bun orchestrator/warm.mjs "$@" ;;
   tick)         run_bun orchestrator/tick.mjs "$@" ;;
+  dispatch)     run_bun tools/dispatch.mjs "$@" ;;
+  events)       run_bun event-runtime/cli.mjs "$@" ;;
+  serve)
+    _has_web=0
+    for _a in "$@"; do
+      if [[ "$_a" == "--web" || "$_a" == "--all" ]]; then _has_web=1; break; fi
+    done
+    if [[ "$_has_web" -eq 1 ]]; then
+      _args=()
+      for _a in "$@"; do
+        [[ "$_a" != "--web" && "$_a" != "--all" ]] && _args+=("$_a")
+      done
+      bun "$ROOT/event-runtime/web/serve.mjs" &
+      exec bun "$ROOT/event-runtime/cli.mjs" serve "${_args[@]}"
+    else
+      run_bun event-runtime/cli.mjs serve "$@"
+    fi
+    ;;
+  web)
+    _dev=0
+    for _a in "$@"; do
+      if [[ "$_a" == "--dev" ]]; then _dev=1; break; fi
+    done
+    if [[ "$_dev" -eq 1 ]]; then
+      _args=()
+      for _a in "$@"; do [[ "$_a" != "--dev" ]] && _args+=("$_a"); done
+      cd "$ROOT/event-runtime/web" && exec bunx vite "${_args[@]}"
+    else
+      run_bun event-runtime/web/serve.mjs "$@"
+    fi
+    ;;
+  demo)
+    _down=0
+    for _a in "$@"; do
+      if [[ "$_a" == "--down" ]]; then _down=1; break; fi
+    done
+    if [[ "$_down" -eq 1 ]]; then
+      _args=()
+      for _a in "$@"; do [[ "$_a" != "--down" ]] && _args+=("$_a"); done
+      exec bash "$ROOT/bin/worktree-down.sh" --here "${_args[@]}"
+    else
+      exec bash "$ROOT/bin/worktree-up.sh" --here "$@"
+    fi
+    ;;
   run)          run_sh runners/run-agent.sh "$@" ;;
   notify)
     # A cwd-independent wrapper for the factory floor's interrupt channel.
@@ -114,9 +160,11 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   next          orchestrator/next.mjs
   state         orchestrator/state.mjs
   status        orchestrator/status.mjs (repo, deployment, and factory snapshot)
+  ps            orchestrator/ps.mjs (factory processes, ports, workers, and agents)
   friction      orchestrator/friction.mjs
   economics     orchestrator/economics.mjs
   ci            orchestrator/ci.mjs
+  actions-cache Actions cache usage guard (exits non-zero at warning threshold)
   label-guard   orchestrator/label-guard.mjs
   digest        orchestrator/digest.mjs
   doctor        orchestrator/doctor.mjs
@@ -126,6 +174,11 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   janitor       orchestrator/janitor.mjs
   warm          orchestrator/warm.mjs
   tick          orchestrator/tick.mjs
+  dispatch      tools/dispatch.mjs (swift event task runner: triage, status, janitor)
+  events        event-runtime/cli.mjs (status, ps, runs, proposals, approve, reject, inject, requeue)
+  serve         start event runtime control API (use --web or --all to launch web UI too)
+  web           start event runtime web UI server (use --dev for Vite live HMR mode)
+  demo          provision & run isolated seeded demo env (use --down to stop)
   run           runners/run-agent.sh
   notify        ~/Develop/hdkiller/scripts/notify.py (human interrupt channel)
   security      lib/security-check.sh (gitleaks + semgrep + actionlint on cwd repo)

@@ -19,3 +19,6 @@ graphify-out/
 .claude/commands/factory-*.md
 .cursor/commands/factory-*.md
 # FACTORY:HARNES:END
+
+# Event-runtime web bundle — built from source, never committed
+event-runtime/web/dist/

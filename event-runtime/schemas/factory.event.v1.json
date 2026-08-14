@@ -1,0 +1,18 @@
+{
+  "title": "factory.event/v1 — inbound event envelope (docs/event-runtime.md §5.1)",
+  "type": "object",
+  "required": ["schemaVersion", "eventId", "type", "source", "occurredAt", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "factory.event/v1" },
+    "eventId": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "subject": { "type": ["string", "null"] },
+    "occurredAt": { "type": "string", "minLength": 1 },
+    "receivedAt": { "type": ["string", "null"] },
+    "correlationId": { "type": ["string", "null"] },
+    "causationId": { "type": ["string", "null"] },
+    "payload": { "type": "object" }
+  }
+}
