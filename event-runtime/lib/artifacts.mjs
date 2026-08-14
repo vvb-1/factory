@@ -8,7 +8,7 @@
  * so identical bytes are stored once and a result row never references a file
  * that no longer exists.
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,7 +32,15 @@ export function storeCollected({ entries, storeRoot }) {
   mkdirSync(storeRoot, { recursive: true });
   return entries.map((entry) => {
     const dest = artifactPath(storeRoot, entry.sha256);
-    if (!existsSync(dest)) copyFileSync(fileURLToPath(entry.uri), dest);
+    const src = fileURLToPath(entry.uri);
+    if (!existsSync(src)) {
+      throw new Error(`artifact source does not exist: ${src}`);
+    }
+    const stat = lstatSync(src);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`cannot store symlinked artifact: ${src}`);
+    }
+    if (!existsSync(dest)) copyFileSync(src, dest);
     return { ...entry, uri: `file://${dest}`, sizeBytes: statSync(dest).size };
   });
 }
@@ -62,7 +70,18 @@ export function materializeArtifact({ storeRoot, sha256hex, workspaceDir, as }) 
   const root = path.resolve(workspaceDir);
   const dest = path.resolve(root, as);
   if (!dest.startsWith(root + path.sep)) throw new Error(`artifact target "${as}" escapes the workspace`);
+  const realRoot = existsSync(root) ? realpathSync(root) : root;
   mkdirSync(path.dirname(dest), { recursive: true });
+  const realDir = realpathSync(path.dirname(dest));
+  if (realDir !== realRoot && !realDir.startsWith(realRoot + path.sep)) {
+    throw new Error(`artifact target "${as}" escapes the workspace`);
+  }
+  if (existsSync(dest)) {
+    const stat = lstatSync(dest);
+    if (stat.isSymbolicLink()) throw new Error(`artifact target "${as}" is a symlink`);
+    const realDest = realpathSync(dest);
+    if (!realDest.startsWith(realRoot + path.sep)) throw new Error(`artifact target "${as}" escapes the workspace`);
+  }
   copyFileSync(found.file, dest);
   return { path: dest, sha256: sha256hex, sizeBytes: found.sizeBytes };
 }
