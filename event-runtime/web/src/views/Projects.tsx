@@ -13,6 +13,7 @@ import {
   ListEmpty,
   ListPane,
   Section,
+  VerbError,
   copyLink,
   copyText,
   notify,
@@ -45,6 +46,18 @@ export function Projects({
   const [applyResult, setApplyResult] = useState<JanitorResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmInput, setConfirmInput] = useState("");
+  const [dispatchConfirm, setDispatchConfirm] = useState<{
+    type: string;
+    payload: Record<string, unknown>;
+    label: string;
+    repo: string;
+  } | null>(null);
+
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: api.health,
+  });
+  const env = health.data?.env;
 
   const query = useQuery({
     queryKey: ["repos"],
@@ -79,6 +92,7 @@ export function Projects({
     setApplyResult(null);
     setConfirmOpen(false);
     setConfirmInput("");
+    setDispatchConfirm(null);
   }, [selectedName]);
 
   useEffect(() => {
@@ -111,7 +125,7 @@ export function Projects({
       notify(`Dry run complete: ${res.reclaimable.length} reclaimable worktrees found`);
     },
     onError: (err: ApiError) => {
-      notify(`Dry run failed: ${err.message}`);
+      notify(`Dry run failed: ${err.message}`, "err");
     },
   });
 
@@ -126,7 +140,7 @@ export function Projects({
       notify(`Cleaned ${res.removed.length} worktrees for ${res.repo}`);
     },
     onError: (err: ApiError) => {
-      notify(`Janitor apply failed: ${err.message}`);
+      notify(`Janitor apply failed: ${err.message}`, "err");
     },
   });
 
@@ -137,12 +151,13 @@ export function Projects({
     },
     onSuccess: (data) => {
       notify(`Dispatched ${data.label}`);
+      setDispatchConfirm(null);
       queryClient.invalidateQueries({ queryKey: ["events"] });
       queryClient.invalidateQueries({ queryKey: ["proposals"] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
     },
     onError: (err: ApiError) => {
-      notify(`Dispatch failed: ${err.message}`);
+      notify(`Dispatch failed: ${err.message}`, "err");
     },
   });
 
@@ -158,30 +173,33 @@ export function Projects({
         label: `⚡ Dispatch Triage Scan on ${r.name}`,
         hint: "triage",
         run: () =>
-          quickDispatchMutation.mutate({
+          setDispatchConfirm({
             type: "factory.triage.requested",
             payload: { repo: r.name },
             label: `Triage Scan on ${r.name}`,
+            repo: r.name,
           }),
       },
       {
         label: `⚡ Dispatch Status Report for ${r.name}`,
         hint: "status",
         run: () =>
-          quickDispatchMutation.mutate({
+          setDispatchConfirm({
             type: "factory.status-report.requested",
             payload: { repos: [r.name] },
             label: `Status Report for ${r.name}`,
+            repo: r.name,
           }),
       },
       {
         label: `⚡ Dispatch Janitor Scan on ${r.name}`,
         hint: "janitor",
         run: () =>
-          quickDispatchMutation.mutate({
+          setDispatchConfirm({
             type: "factory.janitor-scan.requested",
             payload: { repo: r.name },
             label: `Janitor Scan on ${r.name}`,
+            repo: r.name,
           }),
       },
       {
@@ -207,7 +225,7 @@ export function Projects({
         : []),
     ]);
     return () => setContextActions([]);
-  }, [sel, dryMutation, quickDispatchMutation]);
+  }, [sel, dryMutation]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -370,14 +388,27 @@ export function Projects({
         >
           <div className="space-y-4">
             <Section title="⚡ Quick Dispatch (Agent Tasks)">
+              {env?.name === "live" && (
+                <div
+                  className="mb-2 inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
+                  style={{
+                    color: "var(--hue-warn)",
+                    background: "color-mix(in oklch, var(--hue-warn) 15%, transparent)",
+                  }}
+                >
+                  <span className="size-1.5 rounded-full" style={{ background: "var(--hue-warn)" }} />
+                  Live Environment
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Button
                   disabled={!connected || quickDispatchMutation.isPending}
                   onClick={() =>
-                    quickDispatchMutation.mutate({
+                    setDispatchConfirm({
                       type: "factory.triage.requested",
                       payload: { repo: sel.name },
                       label: `Triage Scan on ${sel.name}`,
+                      repo: sel.name,
                     })
                   }
                 >
@@ -386,10 +417,11 @@ export function Projects({
                 <Button
                   disabled={!connected || quickDispatchMutation.isPending}
                   onClick={() =>
-                    quickDispatchMutation.mutate({
+                    setDispatchConfirm({
                       type: "factory.status-report.requested",
                       payload: { repos: [sel.name] },
                       label: `Status Report for ${sel.name}`,
+                      repo: sel.name,
                     })
                   }
                 >
@@ -398,10 +430,11 @@ export function Projects({
                 <Button
                   disabled={!connected || quickDispatchMutation.isPending}
                   onClick={() =>
-                    quickDispatchMutation.mutate({
+                    setDispatchConfirm({
                       type: "factory.janitor-scan.requested",
                       payload: { repo: sel.name },
                       label: `Janitor Scan on ${sel.name}`,
+                      repo: sel.name,
                     })
                   }
                 >
@@ -530,10 +563,11 @@ export function Projects({
                   <Button
                     disabled={!connected || quickDispatchMutation.isPending}
                     onClick={() =>
-                      quickDispatchMutation.mutate({
+                      setDispatchConfirm({
                         type: "factory.janitor-scan.requested",
                         payload: { repo: sel.name },
                         label: `Janitor Scan on ${sel.name}`,
+                        repo: sel.name,
                       })
                     }
                   >
@@ -550,6 +584,8 @@ export function Projects({
                     Apply is disabled: report-only repo "{sel.name}" has no worktree_down script.
                   </div>
                 )}
+
+                <VerbError error={dryMutation.error ?? applyMutation.error} />
 
                 {dryResult && (
                   <div className="mt-3 space-y-2 border-t border-(--border) pt-3 text-[12px]">
@@ -669,7 +705,10 @@ export function Projects({
       {confirmOpen && sel && (
         <Dialog
           title={`Clean Worktrees for ${sel.name}`}
-          onClose={() => setConfirmOpen(false)}
+          onClose={() => {
+            setConfirmOpen(false);
+            applyMutation.reset();
+          }}
         >
           <div className="space-y-3">
             <div className="text-[13px] text-(--text-dim)">
@@ -692,14 +731,95 @@ export function Projects({
               />
             </div>
 
+            <VerbError error={applyMutation.error} />
+
             <div className="flex justify-end gap-2 pt-2">
-              <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  setConfirmOpen(false);
+                  applyMutation.reset();
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 variant="danger"
                 disabled={confirmInput.trim() !== sel.name || applyMutation.isPending}
                 onClick={() => applyMutation.mutate(sel.name)}
               >
                 {applyMutation.isPending ? "Tearing down…" : "Confirm & Clean"}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {dispatchConfirm && (
+        <Dialog
+          title={`Dispatch ${dispatchConfirm.label}?`}
+          onClose={() => {
+            setDispatchConfirm(null);
+            quickDispatchMutation.reset();
+          }}
+        >
+          <div className="space-y-3">
+            <div className="text-[13px] text-(--text-dim)">
+              Injects an event into the queue for worker lease with live trace streaming.
+            </div>
+
+            {env?.name === "live" && (
+              <div
+                className="flex items-center gap-2 rounded-md border p-2.5 text-[12px] font-medium"
+                style={{
+                  borderColor: "var(--hue-warn)",
+                  color: "var(--hue-warn)",
+                  background: "color-mix(in oklch, var(--hue-warn) 10%, transparent)",
+                }}
+              >
+                <span className="font-bold">LIVE ENVIRONMENT</span>
+                <span className="text-(--text-dim)">— dispatches trigger real agent runs in production.</span>
+              </div>
+            )}
+
+            <div className="rounded border border-(--border) bg-(--surface-0) p-2 text-[12px]">
+              <KV k="Event Type" v={<span className="mono text-(--text)">{dispatchConfirm.type}</span>} />
+              <KV k="Repository" v={<span className="mono text-(--text)">{dispatchConfirm.repo}</span>} />
+              <KV
+                k="Environment"
+                v={
+                  <span
+                    className="rounded px-1.5 py-0.2 text-[10px] font-semibold tracking-wide uppercase"
+                    style={{
+                      color: env?.name === "live" ? "var(--hue-warn)" : "var(--hue-info)",
+                      background: `color-mix(in oklch, ${
+                        env?.name === "live" ? "var(--hue-warn)" : "var(--hue-info)"
+                      } 15%, transparent)`,
+                    }}
+                  >
+                    {env?.name ?? "unknown"}
+                  </span>
+                }
+              />
+            </div>
+
+            <VerbError error={quickDispatchMutation.error} />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  setDispatchConfirm(null);
+                  quickDispatchMutation.reset();
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant={env?.name === "live" ? "danger" : "primary"}
+                autoFocus
+                disabled={!connected || quickDispatchMutation.isPending}
+                onClick={() => quickDispatchMutation.mutate(dispatchConfirm)}
+              >
+                {quickDispatchMutation.isPending ? "Dispatching…" : "Confirm & Dispatch"}
               </Button>
             </div>
           </div>
