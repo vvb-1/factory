@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
 import { hashPath } from "../hash";
+import { dur } from "../heartbeat";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
@@ -43,13 +44,6 @@ export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OU
  */
 const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING"];
 
-/** `m:ss` while seconds decide, coarser once they stop mattering. */
-const dur = (ms: number) => {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
-  return `${Math.floor(s / 86400)}d${Math.floor((s % 86400) / 3600)}h`;
-};
 
 /** `off`: no deadline running yet. `spent`: the deadline passed; the runtime has not caught up. */
 type Clock = { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };
