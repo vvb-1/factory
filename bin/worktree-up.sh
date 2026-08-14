@@ -3,6 +3,7 @@
 #
 #   bin/worktree-up.sh OPS-123                 # worktree + branch feat/OPS-123
 #   bin/worktree-up.sh OPS-123 fix modal-bug   # branch fix/OPS-123-modal-bug
+#   bin/worktree-up.sh OPS-123 --checkout-only # git worktree only (no daemons/install)
 #   bin/worktree-up.sh --here                  # demo env in the CURRENT checkout
 #   bin/worktree-up.sh OPS-123 --no-seed       # start empty (no demo data)
 #   bin/worktree-up.sh OPS-123 --reseed        # seed again under a fresh prefix
@@ -28,6 +29,7 @@ HERE=0
 SEED=1
 RESEED=0
 LIVE=0
+CHECKOUT_ONLY=0
 POS=0
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --live) LIVE=1; SEED=0 ;;
     --no-seed) SEED=0 ;;
     --reseed) RESEED=1 ;;
+    --checkout-only) CHECKOUT_ONLY=1 ;;
     -h | --help)
       sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
@@ -61,24 +64,29 @@ if [[ "$HERE" -eq 1 ]]; then
   WT="$REPO"
   LABEL="here"
 else
-  [[ -n "$TICKET" ]] || die "usage: worktree-up.sh <TICKET-ID> [type] [slug] | --here   (--no-seed, --reseed)"
+  [[ -n "$TICKET" ]] || die "usage: worktree-up.sh <TICKET-ID> [type] [slug] | --here   (--checkout-only, --no-seed, --reseed)"
   [[ "$TICKET" =~ ^[A-Z]+-[0-9]+(-[A-Za-z0-9][A-Za-z0-9-]*)?$ ]] || die "ticket must look like OPS-123 or OPS-123-scratch"
   WT="$WT_ROOT/$TICKET"
   LABEL="$TICKET"
   BRANCH="$TYPE/$TICKET${SLUG:+-$SLUG}"
 
   if [[ -d "$WT" ]]; then
-    info "worktree already exists: $WT"
+    [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "worktree already exists: $WT"
   else
-    info "fetching origin/$BASE_BRANCH"
+    [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "fetching origin/$BASE_BRANCH"
     git -C "$REPO" fetch origin "$BASE_BRANCH" --quiet || die "could not fetch origin/$BASE_BRANCH"
-    info "creating worktree $WT on $BRANCH"
+    [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "creating worktree $WT on $BRANCH"
     if git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
-      git -C "$REPO" worktree add "$WT" "$BRANCH" || die "git worktree add failed (git worktree list)"
+      git -C "$REPO" worktree add --quiet "$WT" "$BRANCH" >/dev/null 2>&1 || die "git worktree add failed (git worktree list)"
     else
-      git -C "$REPO" worktree add "$WT" -b "$BRANCH" "origin/$BASE_BRANCH" || die "git worktree add failed"
+      git -C "$REPO" worktree add --quiet "$WT" -b "$BRANCH" "origin/$BASE_BRANCH" >/dev/null 2>&1 || die "git worktree add failed"
     fi
   fi
+fi
+
+if [[ "$CHECKOUT_ONLY" -eq 1 ]]; then
+  printf '%s\n' "$WT"
+  exit 0
 fi
 
 RUN_DIR="$(run_dir "$WT")"
@@ -132,8 +140,9 @@ fi
 # ------------------------------------------------------------ dependencies ---
 command -v bun >/dev/null || die "bun is required (https://bun.sh)"
 info "installing dependencies (bun install, root + web)"
-(cd "$WT" && bun install --frozen-lockfile >/dev/null) || die "bun install failed in $WT"
-(cd "$WT/event-runtime/web" && bun install --frozen-lockfile >/dev/null) || die "bun install failed in $WT/event-runtime/web"
+locked_bun_install "$WT" || die "bun install failed in $WT"
+locked_bun_install "$WT/event-runtime/web" || die "bun install failed in $WT/event-runtime/web"
+
 
 # Rebuild only when the build inputs changed since the last successful build.
 # The stamp lives inside dist/, so vite wiping the output dir also wipes the

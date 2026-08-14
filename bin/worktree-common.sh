@@ -186,3 +186,55 @@ web_build_hash() { # <web-dir>
     find src public -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 cat 2>/dev/null
   ) | shasum | cut -d' ' -f1
 }
+
+# File-locked bun install with retry on SQLITE_BUSY (OPS-322).
+# Prevents concurrent worktree bring-ups from racing on bun's global cache DB.
+locked_bun_install() { # <dir>
+  local target_dir="$1"
+  local lock_dir="${HOME}/.factory/locks/bun-install.lock"
+  local max_wait=120
+  local start_time
+  start_time=$(date +%s)
+
+  mkdir -p "$(dirname "$lock_dir")"
+
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    if [[ -f "$lock_dir/pid" ]]; then
+      local holder
+      holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
+      if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+        rm -rf "$lock_dir" 2>/dev/null || true
+        continue
+      fi
+    fi
+    local now
+    now=$(date +%s)
+    if (( now - start_time >= max_wait )); then
+      die "timed out waiting for bun install lock ($lock_dir)"
+    fi
+    sleep 0.1
+  done
+  echo $$ > "$lock_dir/pid"
+
+  local attempt=1 max_attempts=5 out code=0
+  while [[ $attempt -le $max_attempts ]]; do
+    out=$(cd "$target_dir" && bun install --frozen-lockfile 2>&1) && code=0 || code=$?
+    if [[ $code -eq 0 ]]; then
+      rm -rf "$lock_dir" 2>/dev/null || true
+      return 0
+    fi
+    if [[ "$out" =~ "SQLITE_BUSY" || "$out" =~ "database is locked" ]]; then
+      warn "bun install in $target_dir hit SQLITE_BUSY (attempt $attempt/$max_attempts) — retrying"
+      sleep $(( attempt ))
+      attempt=$(( attempt + 1 ))
+    else
+      rm -rf "$lock_dir" 2>/dev/null || true
+      printf '%s\n' "$out" >&2
+      return $code
+    fi
+  done
+  rm -rf "$lock_dir" 2>/dev/null || true
+  printf '%s\n' "$out" >&2
+  return $code
+}
+
