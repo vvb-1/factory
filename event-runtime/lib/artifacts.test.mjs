@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -11,6 +13,7 @@ import path from "node:path";
 import {
   artifactPath,
   findArtifact,
+  hashFile,
   materializeArtifact,
   pinRunArtifact,
   pruneArtifacts,
@@ -95,6 +98,81 @@ describe("storeCollected (OPS-406)", () => {
     const entries = [{ kind: "log", uri: `file://${missingFile}`, sha256: hash }];
     expect(() => storeCollected({ entries, storeRoot })).toThrow(/does not exist/);
   });
+
+  test("rejects source file when content hash does not match declared sha256 (OPS-439)", () => {
+    const storeRoot = tmp("evrt-store-");
+    const workspaceDir = tmp("evrt-ws-");
+    const file = path.join(workspaceDir, "out.log");
+    writeFileSync(file, "actual content");
+    const wrongHash = sha256Hex(Buffer.from("expected different content"));
+
+    const entries = [{ kind: "log", uri: `file://${file}`, sha256: wrongHash }];
+    expect(() => storeCollected({ entries, storeRoot })).toThrow(/hash mismatch/);
+    expect(existsSync(path.join(storeRoot, wrongHash))).toBe(false);
+  });
+
+  test("replaces corrupted existing store artifact when storing valid source (OPS-439)", () => {
+    const storeRoot = tmp("evrt-store-");
+    mkdirSync(storeRoot, { recursive: true });
+    const workspaceDir = tmp("evrt-ws-");
+    const file = path.join(workspaceDir, "valid.log");
+    writeFileSync(file, "complete valid content");
+    const hash = sha256Hex(Buffer.from("complete valid content"));
+
+    // Pre-populate store with corrupted/truncated artifact
+    const dest = path.join(storeRoot, hash);
+    writeFileSync(dest, "truncated");
+
+    const entries = [{ kind: "log", uri: `file://${file}`, sha256: hash }];
+    const stored = storeCollected({ entries, storeRoot });
+    expect(stored[0].uri).toBe(`file://${dest}`);
+    expect(stored[0].sizeBytes).toBe(Buffer.byteLength("complete valid content"));
+    expect(readFileSync(dest, "utf8")).toBe("complete valid content");
+  });
+
+  test("skips rewriting when destination already holds verified matching content", () => {
+    const storeRoot = tmp("evrt-store-");
+    mkdirSync(storeRoot, { recursive: true });
+    const workspaceDir = tmp("evrt-ws-");
+    const file = path.join(workspaceDir, "valid.log");
+    writeFileSync(file, "identical content");
+    const hash = sha256Hex(Buffer.from("identical content"));
+
+    const dest = path.join(storeRoot, hash);
+    writeFileSync(dest, "identical content");
+
+    const entries = [{ kind: "log", uri: `file://${file}`, sha256: hash }];
+    const stored = storeCollected({ entries, storeRoot });
+    expect(stored[0].uri).toBe(`file://${dest}`);
+    expect(stored[0].sizeBytes).toBe(Buffer.byteLength("identical content"));
+  });
+
+  test("interrupted or failed write leaves no tmp files and no readable entry (OPS-439)", () => {
+    const storeRoot = tmp("evrt-store-");
+    const workspaceDir = tmp("evrt-ws-");
+    const file = path.join(workspaceDir, "data.bin");
+    writeFileSync(file, "some data");
+    const hash = sha256Hex(Buffer.from("some data"));
+
+    // Cause a failure by passing an invalid declared sha256
+    const entries = [{ kind: "bin", uri: `file://${file}`, sha256: "0".repeat(64) }];
+    expect(() => storeCollected({ entries, storeRoot })).toThrow();
+
+    // Verify store directory has neither destination nor tmp files
+    const remainingFiles = readdirSync(storeRoot);
+    expect(remainingFiles).toEqual([]);
+    expect(existsSync(path.join(storeRoot, hash))).toBe(false);
+  });
+});
+
+describe("hashFile", () => {
+  test("computes SHA256 of file on disk", () => {
+    const dir = tmp("evrt-hash-");
+    const file = path.join(dir, "sample.txt");
+    writeFileSync(file, "hello crypto world");
+    const expected = sha256Hex(Buffer.from("hello crypto world"));
+    expect(hashFile(file)).toBe(expected);
+  });
 });
 
 describe("materializeArtifact (OPS-406)", () => {
@@ -139,6 +217,25 @@ describe("materializeArtifact (OPS-406)", () => {
     expect(() =>
       materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "link.txt" })
     ).toThrow(/symlink/);
+  });
+
+  test("fails loudly and removes corrupt store entry when stored bytes do not match expected hash (OPS-439)", () => {
+    const storeRoot = tmp("evrt-store-");
+    mkdirSync(storeRoot, { recursive: true });
+    const fullContent = "full complete transcript data";
+    const hash = sha256Hex(Buffer.from(fullContent));
+    const storeFile = path.join(storeRoot, hash);
+
+    // Simulate truncated/corrupted write in store
+    writeFileSync(storeFile, "full complete");
+
+    const workspaceDir = tmp("evrt-ws-");
+    expect(() =>
+      materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "transcript.json" })
+    ).toThrow(/corrupt/);
+
+    // Corrupt entry must be removed from store
+    expect(existsSync(storeFile)).toBe(false);
   });
 });
 
