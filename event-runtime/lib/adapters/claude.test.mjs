@@ -1,11 +1,17 @@
 /**
- * Unit tests for the pure stream-json → factory.trace/v1 mapper. The adapter
- * itself is never executed here — no model spawning in CI; fixtures mirror
+ * Unit tests for the pure stream-json → factory.trace/v1 mapper and CLI argument construction.
+ * The adapter itself is never executed against real LLM in CI; fixtures mirror
  * the NDJSON shapes observed from `claude -p --output-format stream-json
  * --verbose` (message types system/assistant/user/result).
  */
 import { describe, expect, test } from "bun:test";
-import { mapStreamEvent } from "./claude.mjs";
+import {
+  buildClaudeArgv,
+  deriveAllowedTools,
+  mapStreamEvent,
+  READ_ONLY_TOOLS,
+  WRITE_TOOLS,
+} from "./claude.mjs";
 
 describe("mapStreamEvent", () => {
   test("assistant text block → assistant_text", () => {
@@ -111,5 +117,53 @@ describe("mapStreamEvent", () => {
     expect(event.kind).toBe("assistant_text");
     expect(event.payload.text.length).toBeLessThan(5_000);
     expect(event.payload.text.endsWith("…[truncated]")).toBe(true);
+  });
+});
+
+describe("deriveAllowedTools (OPS-407)", () => {
+  test("defaults to read-only tools when mutating is false", () => {
+    const def = { mutating: false };
+    expect(deriveAllowedTools(def)).toEqual(READ_ONLY_TOOLS);
+  });
+
+  test("filters out write tools when mutating is false even if requested in capabilities", () => {
+    const def = {
+      mutating: false,
+      capabilities: {
+        tools: ["Read", "Write", "Edit", "Grep", "Bash"],
+      },
+    };
+    const tools = deriveAllowedTools(def);
+    expect(tools).toEqual(["Read", "Grep"]);
+    for (const tool of tools) {
+      expect(WRITE_TOOLS.has(tool)).toBe(false);
+    }
+  });
+
+  test("allows requested tools when mutating is true", () => {
+    const def = {
+      mutating: true,
+      capabilities: {
+        tools: ["Read", "Write", "Bash"],
+      },
+    };
+    expect(deriveAllowedTools(def)).toEqual(["Read", "Write", "Bash"]);
+  });
+});
+
+describe("buildClaudeArgv (OPS-407)", () => {
+  test("constructs argv with --allowedTools and --strict-mcp-config", () => {
+    const def = { mutating: false };
+    const prompt = "Do a status check.";
+    const argv = buildClaudeArgv({ prompt, def });
+
+    expect(argv).toContain("-p");
+    expect(argv).toContain(prompt);
+    expect(argv).toContain("--output-format");
+    expect(argv).toContain("stream-json");
+    expect(argv).toContain("--verbose");
+    expect(argv).toContain("--allowedTools");
+    expect(argv).toContain("Read,Grep,Glob");
+    expect(argv).toContain("--strict-mcp-config");
   });
 });
