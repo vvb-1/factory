@@ -133,7 +133,6 @@ export function FilterInput({
           ref={inputRef}
           data-view-filter
           value={value}
-          title={hintText || undefined}
           aria-describedby={query ? hintId : undefined}
           onChange={(e) => onChange(e.target.value)}
           onFocus={() => setHint(true)}
@@ -165,7 +164,6 @@ export function FilterInput({
         {query && (
           <span
             id={hintId}
-            role="tooltip"
             className={
               hint && !value
                 ? "absolute top-full right-0 z-20 mt-1 w-72 rounded-md border border-(--border-strong) bg-(--surface-2) px-2 py-1 text-[11px] text-(--text-faint)"
