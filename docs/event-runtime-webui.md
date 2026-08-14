@@ -250,6 +250,12 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
   table in `nav.ts` rather than spelling it out, after a hand-listed footer
   had already fallen one chord behind; OPS-311 additionally shows the armed
   `g` on screen while it waits for its suffix.
+- Context strip toolbar (`role="toolbar"`): single Tab stop with roving
+  tabindex among All / open repos / In flight. `Left`/`Right` arrows (and
+  `Home`/`End`) move focus within the strip; `Enter`/`Space` activates the
+  focused filter. On a focused closable repo tab, `Delete` or `Backspace`
+  closes that tab without using the `×` button and returns focus to the active
+  tab, without stealing `[`/`]`, `g`, `j`/`k`, or list verbs.
 - Every verb the palette offers checks current state first — it never shows
   "approve" on a decided proposal or "cancel" on a terminal run.
 
