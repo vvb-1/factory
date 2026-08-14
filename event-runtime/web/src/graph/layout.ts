@@ -8,6 +8,7 @@ const elk = new ELK();
 
 export const NODE_WIDTH = 236;
 export const NODE_HEIGHT = 92;
+export const LAYOUT_TIMEOUT_MS = 3000;
 
 const OPTIONS = {
   "elk.algorithm": "layered",
@@ -19,16 +20,34 @@ const OPTIONS = {
   "elk.edgeRouting": "SPLINES",
 };
 
-export async function layoutGraph(graph: CapabilityGraph): Promise<Map<string, { x: number; y: number }>> {
-  const result = await elk.layout({
-    id: "root",
-    layoutOptions: OPTIONS,
-    children: graph.nodes.map((n) => ({ id: n.id, width: NODE_WIDTH, height: NODE_HEIGHT })),
-    edges: graph.edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+export async function layoutGraph(
+  graph: CapabilityGraph,
+  timeoutMs: number = LAYOUT_TIMEOUT_MS,
+): Promise<Map<string, { x: number; y: number }>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`ELK layout calculation timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
   });
-  const positions = new Map<string, { x: number; y: number }>();
-  for (const child of result.children ?? []) {
-    positions.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 });
+
+  try {
+    const layoutPromise = elk.layout({
+      id: "root",
+      layoutOptions: OPTIONS,
+      children: graph.nodes.map((n) => ({ id: n.id, width: NODE_WIDTH, height: NODE_HEIGHT })),
+      edges: graph.edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+    });
+
+    const result = await Promise.race([layoutPromise, timeoutPromise]);
+    const positions = new Map<string, { x: number; y: number }>();
+    for (const child of result.children ?? []) {
+      positions.set(child.id, { x: child.x ?? 0, y: child.y ?? 0 });
+    }
+    return positions;
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
   }
-  return positions;
 }

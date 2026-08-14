@@ -36,6 +36,7 @@ const STATE_TABS: (RunState | "ALL")[] = [
   "ALL", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
 ];
 export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
+export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && state !== "VERIFYING";
 
 /**
  * The two states `reapExpiredLeases` sweeps (lib/worker.mjs) — so exactly the
@@ -511,7 +512,7 @@ export function Runs({
     },
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
-      x: () => sel && connected && !TERMINAL.includes(sel.state) && setConfirm("cancel"),
+      x: () => sel && connected && isCancellable(sel.state) && setConfirm("cancel"),
       c: () => sel && copyText(sel.runId, "run id"),
     },
   });
@@ -541,7 +542,7 @@ export function Runs({
         setContextActions(copy);
       } else {
         setContextActions([
-          ...(!TERMINAL.includes(d.run.state)
+          ...(isCancellable(d.run.state)
             ? [{ label: `Cancel ${d.run.runId}…`, hint: "x", run: () => setConfirm("cancel") }]
             : []),
           ...(d.run.state === "FAILED"
@@ -766,7 +767,7 @@ export function Runs({
               answer to a budget about to be spent on a hung agent. */}
           {current && clocks && (
             <Section title="Deadlines">
-              <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums">
+              <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums" aria-live="off">
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="text-(--text-faint)">
                     attempt #{current.attempt}{" "}
@@ -801,7 +802,7 @@ export function Runs({
           )}
 
           <div className="mb-4 flex gap-2">
-            {!TERMINAL.includes(d.run.state) && (
+            {isCancellable(d.run.state) && (
               <Button variant="danger" disabled={!connected} onClick={() => setConfirm("cancel")}>
                 Cancel <span className="mono ml-1 opacity-70">x</span>
               </Button>
@@ -834,10 +835,7 @@ export function Runs({
                     {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
                   </span>
                   <span className="truncate text-(--text-faint)">
-                    {/* `.mono` is unlayered author CSS at 11.5px; a utility
-                        `text-[13px]` loses the cascade. The important modifier
-                        is what actually matches the 13px prose beside it. */}
-                    <ActorRef actor={e.actor} className="text-[13px]!" />
+                    <ActorRef actor={e.actor} className="text-[13px]" />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
                 </div>
@@ -939,6 +937,7 @@ export function Runs({
               ? "The running attempt is stopped with TERM, then KILL, and terminates as cancelled."
               : "The run is cancelled before execution; the operator is recorded as actor."}
           </div>
+          <VerbError error={cancel.error} />
           <input
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}

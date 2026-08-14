@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { api } from "./api";
 import { ContextTabs } from "./components/ContextTabs";
 import {
@@ -19,14 +19,16 @@ import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { ToastContainer, copyLink, copyText } from "./components/ui";
 import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
-import { Graph } from "./views/Graph";
 import { Overview } from "./views/Overview";
-import { Projects } from "./views/Projects";
 import { Proposals } from "./views/Proposals";
 import { RunFull } from "./views/RunFull";
 import { Runs } from "./views/Runs";
 import { Workers } from "./views/Workers";
 import { NAV } from "./nav";
+
+const Graph = lazy(() => import("./views/Graph").then((m) => ({ default: m.Graph })));
+const Projects = lazy(() => import("./views/Projects").then((m) => ({ default: m.Projects })));
+const Schedules = lazy(() => import("./views/Schedules").then((m) => ({ default: m.Schedules })));
 
 export function App() {
   const [route, navigateRaw] = useHashRoute();
@@ -98,6 +100,7 @@ export function App() {
   const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
   const focusRepoName = view === "projects" ? (route[1] ?? null) : null;
   const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
+  const focusScheduleLoop = view === "schedules" ? (route[1] ?? null) : null;
   const focusWorkerId = view === "workers" ? (route[1] ?? null) : null;
   const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
   const hashEvent: EventFocus | null =
@@ -182,6 +185,8 @@ export function App() {
   // null until the first status lands: reading "no workers" off a pending
   // fetch is the same false alarm as flashing "unreachable" on first load.
   const liveWorkers = status.data?.workers.live ?? null;
+  const stoppedSchedulesCount =
+    ((status.data?.anomalies as any)?.stoppedSchedules ?? []).length;
 
   const env = health.data?.env;
   const envHue = !connected
@@ -319,6 +324,15 @@ export function App() {
                   ? { count: scopedRunsNav ? 0 : activeRuns, hue: "var(--accent)" }
                   : n.key === "events"
                     ? { count: scopedNav ? 0 : eventAttention, hue: "var(--accent)" }
+                    : n.key === "schedules"
+                      ? stoppedSchedulesCount > 0
+                        ? {
+                            count: stoppedSchedulesCount,
+                            hue: "var(--hue-err)",
+                            word: "stopped",
+                            title: `${stoppedSchedulesCount} scheduled loop${stoppedSchedulesCount === 1 ? "" : "s"} stopped or errored`,
+                          }
+                        : { count: 0, hue: "var(--accent)" }
                     : n.key === "workers"
                       ? staleWorkers > 0
                         ? {
@@ -497,25 +511,43 @@ export function App() {
               rejumpEpoch={rejumpEpoch}
             />
           ) : view === "projects" ? (
-            <Projects
-              connected={connected}
-              focusRepoName={focusRepoName}
-              onSelectRepo={(name) => navigate(hashPath("projects", name))}
-            />
+            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading projects…</div>}>
+              <Projects
+                connected={connected}
+                focusRepoName={focusRepoName}
+                onSelectRepo={(name) => navigate(hashPath("projects", name))}
+              />
+            </Suspense>
           ) : view === "graph" ? (
-            <Graph
-              context={context}
-              focusNodeId={focusGraphNode}
-              onSelectNode={(id) => navigate(hashPath("graph", id))}
-              onJumpAgent={jumpToAgent}
-              onJumpEvents={jumpToEvents}
-            />
+            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading graph…</div>}>
+              <Graph
+                context={context}
+                focusNodeId={focusGraphNode}
+                onSelectNode={(id) => navigate(hashPath("graph", id))}
+                onJumpAgent={jumpToAgent}
+                onJumpEvents={jumpToEvents}
+              />
+            </Suspense>
           ) : view === "agents" ? (
             <Agents
               context={context}
               focusAgentRef={focusAgentRef}
               onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
             />
+          ) : view === "schedules" ? (
+            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading schedules…</div>}>
+              <Schedules
+                connected={connected}
+                context={context}
+                focusScheduleLoop={focusScheduleLoop}
+                onSelectSchedule={(loop) => navigate(hashPath("schedules", loop))}
+                onJumpProposal={jumpToProposal}
+                onJumpRun={jumpToRun}
+                onJumpEvent={jumpToEvent}
+                onJumpAgent={jumpToAgent}
+                rejumpEpoch={rejumpEpoch}
+              />
+            </Suspense>
           ) : view === "workers" ? (
             <Workers
               context={context}

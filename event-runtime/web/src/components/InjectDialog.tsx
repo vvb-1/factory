@@ -89,7 +89,7 @@ export function InjectDialog({
   }
 
   function applySelection(next: string | null) {
-    if (next === selected) return;
+    if (next === checkedId) return;
     if (next === null) {
       setSelected(null);
       setText(pretty(blankEnvelope(openedAt)));

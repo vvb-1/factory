@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { RunState, TraceEntry, TracePayload } from "../types";
-import { Disclosure, humanSize, JsonBlock, Section, notify } from "./ui";
+import { humanSize, JsonBlock, Section, notify } from "./ui";
 
 function copyText(text: string, label: string = "text") {
   navigator.clipboard.writeText(text);
@@ -311,6 +311,48 @@ function TimingWaterfall({ durationMs, maxMs }: { durationMs: number; maxMs: num
   );
 }
 
+/**
+ * Lazy disclosure for trace entries: does not mount or tokenize JSON payloads
+ * until expanded. Supports forceOpen from expandAll without re-mounting the row.
+ */
+function Disclosure({
+  label,
+  children,
+  defaultOpen,
+  forceOpen,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+  forceOpen?: boolean;
+}) {
+  const initialOpen = forceOpen ?? defaultOpen ?? false;
+  const [open, setOpen] = useState(initialOpen);
+  const [rendered, setRendered] = useState(initialOpen);
+
+  useEffect(() => {
+    if (forceOpen !== undefined) {
+      setOpen(forceOpen);
+      if (forceOpen) setRendered(true);
+    }
+  }, [forceOpen]);
+
+  const onToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+    const isOpen = e.currentTarget.open;
+    setOpen(isOpen);
+    if (isOpen) setRendered(true);
+  };
+
+  return (
+    <details open={open} onToggle={onToggle} className="mb-1.5">
+      <summary className="cursor-pointer text-[11px] text-(--text-faint) select-none hover:text-(--text-dim)">
+        {label}
+      </summary>
+      {rendered && <div className="mt-1.5">{children}</div>}
+    </details>
+  );
+}
+
 /** One trace row body, by kind. The recorder's truncation marker wins. */
 function TraceBody({
   kind,
@@ -334,7 +376,7 @@ function TraceBody({
           {kind} payload truncated · original {humanSize(p.originalBytes ?? 0)}
         </span>
         {p.preview && (
-          <Disclosure label="preview" defaultOpen={forceOpen ?? false}>
+          <Disclosure label="preview" forceOpen={forceOpen}>
             <ContentBlock content={p.preview} />
           </Disclosure>
         )}
@@ -361,7 +403,7 @@ function TraceBody({
           {durationMs != null && maxMs != null && <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />}
         </div>
         {p.input !== undefined && (
-          <Disclosure label="input" defaultOpen={forceOpen ?? false}>
+          <Disclosure label="input" forceOpen={forceOpen}>
             <JsonBlock value={p.input} />
           </Disclosure>
         )}
@@ -372,7 +414,7 @@ function TraceBody({
     return (
       <div className="min-w-0 flex-1">
         <Disclosure
-          defaultOpen={forceOpen ?? false}
+          forceOpen={forceOpen}
           label={
             p.isError ? (
               <span style={{ color: "var(--hue-err)" }}>tool result — error</span>
@@ -392,7 +434,7 @@ function TraceBody({
         {p.numTurns ?? "?"} turns · {p.durationMs != null ? `${(p.durationMs / 1000).toFixed(1)}s` : "?"} ·{" "}
         {p.costUSD != null ? `$${p.costUSD.toFixed(4)}` : "?"}
         {p.usage && Object.keys(p.usage).length > 0 && (
-          <Disclosure label="tokens" defaultOpen={forceOpen ?? false}>
+          <Disclosure label="tokens" forceOpen={forceOpen}>
             <JsonBlock value={p.usage} />
           </Disclosure>
         )}
@@ -412,7 +454,7 @@ function TraceBody({
   // Unknown kind (future factory.trace versions): show, do not reinterpret.
   return (
     <div className="min-w-0 flex-1">
-      <Disclosure label={kind} defaultOpen={forceOpen ?? false}>
+      <Disclosure label={kind} forceOpen={forceOpen}>
         <JsonBlock value={p} />
       </Disclosure>
     </div>
@@ -692,7 +734,7 @@ export function RunTrace({
               const isMatch = searchMatches.includes(i);
               const isActiveMatch = searchMatches.length > 0 && searchMatches[activeMatch % searchMatches.length] === i;
               return (
-                <Fragment key={`${e.seq}-${expandAll ? "open" : "shut"}`}>
+                <Fragment key={e.seq}>
                   {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
                     <div className="border-b border-(--border) py-1 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
                       Attempt #{e.attempt}

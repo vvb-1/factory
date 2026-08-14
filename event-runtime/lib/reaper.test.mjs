@@ -5,6 +5,7 @@ import { openDb } from "./db.mjs";
 import { createRun, runState, transition } from "./lifecycle.mjs";
 import { reapExpiredLeases } from "./reaper.mjs";
 import { cancelRun, claimNext, forceFailRun, retryRun } from "./worker.mjs";
+import { deregisterWorker, listWorkers, registerWorker } from "./workers.mjs";
 
 const T0 = Date.parse("2026-08-12T10:00:00Z");
 
@@ -140,5 +141,26 @@ describe("reaper (OPS-416)", () => {
     const lastTwo = events.slice(-2);
     expect(lastTwo[0]).toEqual({ from_state: "VERIFYING", to_state: "FAILED", reason: "operator_retry_verifying" });
     expect(lastTwo[1]).toEqual({ from_state: "FAILED", to_state: "QUEUED", reason: "operator_retry" });
+  });
+
+  test("prunes stale stopped workers during reap cycle (OPS-431)", () => {
+    const db = openDb(":memory:");
+    // w1: stopped 30 hours ago (> 24h retention window)
+    registerWorker(db, { workerId: "w1", now: T0 - 48 * 60 * 60 * 1000 });
+    deregisterWorker(db, "w1", { now: T0 - 30 * 60 * 60 * 1000 });
+
+    // w2: active worker
+    registerWorker(db, { workerId: "w2", now: T0 });
+
+    // w3: stopped 2 hours ago (< 24h retention window)
+    registerWorker(db, { workerId: "w3", now: T0 - 5 * 60 * 60 * 1000 });
+    deregisterWorker(db, "w3", { now: T0 - 2 * 60 * 60 * 1000 });
+
+    expect(listWorkers(db, { now: T0 })).toHaveLength(3);
+
+    reapExpiredLeases(db, { now: T0, policyVersion: "test" });
+
+    const remaining = listWorkers(db, { now: T0 });
+    expect(remaining.map((w) => w.workerId).sort()).toEqual(["w2", "w3"]);
   });
 });

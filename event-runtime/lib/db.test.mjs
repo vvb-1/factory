@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openDb, txImmediate } from "./db.mjs";
+import {
+  CURRENT_SCHEMA_VERSION,
+  MIGRATIONS,
+  assertSchema,
+  getSchemaVersion,
+  migrateDb,
+  openDb,
+  setSchemaVersion,
+  txImmediate,
+} from "./db.mjs";
 import { createIsolatedHome, realFactorySnapshot } from "../test-helpers.mjs";
 
 const freshFile = () => path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-db-")), "runtime.db");
@@ -87,6 +97,110 @@ describe("cold start (OPS-376, OPS-424)", () => {
     const verifyDb = openDb(file);
     expect(verifyDb.query("PRAGMA journal_mode").get().journal_mode).toBe("wal");
     verifyDb.close();
+  });
+});
+
+describe("synchronous mode (OPS-414)", () => {
+  test("openDb sets synchronous = FULL (2) to guarantee durability on power loss", () => {
+    const file = freshFile();
+    const db = openDb(file);
+    const syncMode = db.query("PRAGMA synchronous").get()?.synchronous;
+    expect(syncMode).toBe(2); // 2 = FULL
+    db.close();
+  });
+});
+
+describe("schema migration runner and assertions (OPS-415)", () => {
+  test("a fresh database is migrated to CURRENT_SCHEMA_VERSION on open", () => {
+    const file = freshFile();
+    const db = openDb(file);
+    expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
+    assertSchema(db);
+    db.close();
+  });
+
+  test("an older/unversioned database (user_version 0) is migrated on open", () => {
+    const file = freshFile();
+    // Simulate an unversioned raw sqlite db
+    const rawDb = new Database(file);
+    expect(getSchemaVersion(rawDb)).toBe(0);
+    rawDb.close();
+
+    const db = openDb(file);
+    expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
+    expect(db.query("SELECT count(*) as count FROM events").get()?.count).toBe(0);
+    db.close();
+  });
+
+  test("a database at a newer user_version refuses to open loudly with a clear message", () => {
+    const file = freshFile();
+    const db = openDb(file);
+    setSchemaVersion(db, 999);
+    db.close();
+
+    expect(() => openDb(file)).toThrow(
+      "Database schema version (999) is newer than code version (1). Please upgrade the runtime.",
+    );
+  });
+
+  test("adding a column in a migration works against an existing populated database fixture", () => {
+    const file = freshFile();
+    const db = openDb(file);
+
+    // Populate with existing event fixture
+    db.query(
+      `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
+       VALUES ('github', 'evt-415', 'issue.opened', '2026-08-14T00:00:00Z', '2026-08-14T00:00:01Z', '{}', 'hash1', '2026-08-14T00:00:01Z')`,
+    ).run();
+
+    expect(getSchemaVersion(db)).toBe(1);
+
+    // Apply a custom migration v2 that adds a column
+    const migrationsV2 = [
+      MIGRATIONS[0],
+      {
+        version: 2,
+        name: "add_priority_to_events",
+        up(targetDb) {
+          targetDb.exec("ALTER TABLE events ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';");
+        },
+      },
+    ];
+
+    migrateDb(db, { migrations: migrationsV2, targetVersion: 2 });
+    expect(getSchemaVersion(db)).toBe(2);
+
+    // Verify existing row is preserved and has default value
+    const row = db.query("SELECT event_id, priority FROM events WHERE event_id = 'evt-415'").get();
+    expect(row.event_id).toBe("evt-415");
+    expect(row.priority).toBe("normal");
+
+    // Verify we can write with the new column
+    db.query(
+      `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at, priority)
+       VALUES ('github', 'evt-416', 'issue.closed', '2026-08-14T00:01:00Z', '2026-08-14T00:01:01Z', '{}', 'hash2', '2026-08-14T00:01:01Z', 'urgent')`,
+    ).run();
+
+    const row2 = db.query("SELECT event_id, priority FROM events WHERE event_id = 'evt-416'").get();
+    expect(row2.priority).toBe("urgent");
+
+    db.close();
+  });
+
+  test("startup schema assertion catches drift / missing table", () => {
+    const file = freshFile();
+    const db = openDb(file);
+    db.exec("DROP TABLE counters;");
+    expect(() => assertSchema(db)).toThrow('Database schema drift detected: missing table "counters"');
+    db.close();
+  });
+
+  test("startup schema assertion catches user_version mismatch", () => {
+    const file = freshFile();
+    const db = openDb(file);
+    setSchemaVersion(db, 0);
+    expect(() => assertSchema(db)).toThrow("Database schema assertion failed: user_version is 0, expected 1");
+    db.close();
   });
 });
 
