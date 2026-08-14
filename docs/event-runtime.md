@@ -372,8 +372,10 @@ entire adapter surface.
 **Live trace is an optional adapter capability (`factory.trace/v1`).** An
 adapter may stream what the agent is doing mid-run — via the `onTrace`
 callback the worker passes to `execute()` — as events from a closed kind set:
-`assistant_text`, `tool_use`, `tool_result`, `usage`, `lifecycle`. The trace
-is agent-influenced output and treated as untrusted under the §14 size rules:
+`assistant_text`, `tool_use`, `tool_result`, `usage`, `lifecycle`. A
+`lifecycle` event whose note is `policy_denial` records the tool and rule that
+rejected it; it is an operator-facing failure explanation, not an instruction
+from the model. The trace is agent-influenced output and treated as untrusted under the §14 size rules:
 unknown kinds are dropped (and counted, never thrown), each event's payload is
 byte-bounded and truncated in place when oversize, and an attempt records at
 most 2,000 events — at the cap the runtime writes exactly one `lifecycle`
@@ -430,10 +432,16 @@ result rows never reference files that died with a workspace. Passing work
 between agents means materializing an accepted artifact into a new workspace,
 not letting two agents share a live directory.
 
-Working-directory separation is not a security sandbox. Filesystem, network,
-secrets, CPU, memory, and process isolation are separate policy axes. A future
-container provider may enforce them without changing the agent or result
-contract.
+Working-directory separation alone is not a security sandbox. For Claude
+`mutating: false` runs, the adapter additionally passes a generated settings
+policy: Bash is sandboxed with unsandboxed fallback disabled, the repository
+checkout is denied filesystem writes, and `Edit`/`Write` are denied there while
+workspace-local `result.json` remains allowed. The worker independently checks
+`git status --porcelain` before accepting an output from a repository workspace;
+any dirt is retained as `workspace_integrity_violation` and never published.
+Filesystem, network, secrets, CPU, memory, and process isolation remain
+separate policy axes; the future container provider can strengthen those axes
+without changing the agent or result contract.
 
 A persistent workspace, if eventually required, carries a stable workspace ID,
 an expected version, and a single-writer fencing token. Stale writers cannot
@@ -737,13 +745,14 @@ The MVP therefore requires:
 - schema validation before downstream publication; and
 - complete admission, approval, lease, execution, and result audit events.
 
-**Capability declarations are audited, not enforced, in the MVP.** Honesty
-matters here: the Linear API key is full-scope, workspace separation is not a
-sandbox (§7), and the worker injects ambient credentials into the agent
-process. `linear:read` therefore answers *what was authorized*, not *what was
-possible*. The declaration still earns its place — it is validated against the
-agent registry at admission, recorded immutably in the `RunSpec`, and auditable
-after the fact. The enforcement path, in order:
+**Capabilities are only partially enforced in the MVP.** For Claude
+`mutating: false` repository runs, the settings policy and post-run integrity
+gate enforce the filesystem boundary, and the adapter launches the child with
+a minimal runtime environment instead of copying the worker environment. That
+does not yet turn declarations such as `linear:read` into network authority:
+those still answer *what was authorized*, not *what was possible*. The
+declaration is validated at admission, recorded immutably in the `RunSpec`, and
+auditable after the fact. The remaining enforcement path, in order:
 
 1. **A worker-local egress proxy** that permits only declared services — for
    `linear:read`, a GraphQL proxy that forwards queries and rejects mutations.
