@@ -11,7 +11,7 @@ import {
   type OperatorContext,
 } from "./context";
 import { eventsHash, hashPath, hashProject, hashSearch, withProject } from "./hash";
-import { keyGuard, useHashRoute, useTheme, type Theme } from "./hooks";
+import { keyGuard, THEMES, useHashRoute, useTheme } from "./hooks";
 import type { EventFocus } from "./types";
 import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
 import { InjectDialog } from "./components/InjectDialog";
@@ -41,11 +41,6 @@ const NAV = [
   { key: "workers", label: "Workers", go: "w" },
   { key: "graph", label: "Graph", go: "g" },
 ] as const;
-
-// Display-only mirror of the cycle useTheme() implements: both the footer
-// control and the ⌘K label promise what one click does, so the promise has to
-// name the same order the hook advances in.
-const THEME_ORDER: readonly Theme[] = ["dark", "light", "contrast"];
 
 export function App() {
   const [route, navigateRaw] = useHashRoute();
@@ -252,7 +247,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
-  const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+  const nextTheme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
 
   const paletteActions: PaletteAction[] = [
     ...NAV.map((n) => ({
@@ -276,7 +271,7 @@ export function App() {
     },
     { label: "Copy link to this page", run: copyLink },
     { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },
-    { label: `Cycle theme (${THEME_ORDER.join(" → ")})`, run: cycleTheme },
+    { label: `Cycle theme (${THEMES.join(" → ")})`, run: cycleTheme },
   ];
 
   return (
