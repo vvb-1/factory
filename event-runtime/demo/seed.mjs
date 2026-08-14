@@ -22,9 +22,15 @@
  * Plus two open proposals: one approvable (`run`) and one `human_needed`
  * (empty repos fails the input schema's minItems).
  *
+ * Some fixtures carry a second repo — a real config/repos.yaml name appended
+ * after the mode (`["ok", "bj29"]`). The web UI's project tabs filter on
+ * `repos[]`, so without it every tab on a freshly seeded runtime reads empty
+ * (OPS-366). Only appended, never substituted: repos[0] stays the mode.
+ *
  *   bun event-runtime/demo/seed.mjs [--port 7381] [--prefix demo]
  */
 import { apiClient } from "../lib/client.mjs";
+import { loadRepos } from "../lib/repos.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => {
@@ -37,6 +43,25 @@ const client = apiClient({ port });
 
 const log = (line) => console.log(`seed: ${line}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Real repos.yaml names for the project tags. Optional by design: a checkout
+ * without config/repos.yaml (or with no entries) must still seed a full demo
+ * set, so a missing registry costs the tags, not the run.
+ */
+function projectNames() {
+  try {
+    return [...loadRepos().keys()];
+  } catch (err) {
+    log(`no repo registry (${err.message}) — seeding without project tags`);
+    return [];
+  }
+}
+
+const [projectA, projectB = projectA] = projectNames();
+
+/** repos[0] must stay the fake adapter's mode — the project name only trails it. */
+const tag = (mode, project) => (project ? [mode, project] : [mode]);
 
 function envelope(id, repos) {
   return {
@@ -115,10 +140,14 @@ if (probe.spec?.adapter !== "fake") {
 }
 await client.reject(probe.id, "adapter probe — not part of the demo set");
 
+log(projectA ? `project tags: ${[...new Set([projectA, projectB])].join(", ")}` : "project tags: none");
+
 // Quick terminals first: the single worker handles them one per tick. The
 // hang run is approved last so it never blocks the rest of the seed.
+// Only some fixtures get a project tag: a tab that matches every row proves
+// nothing about filtering.
 const terminals = [
-  { id: "completed", repos: ["ok"], wanted: "COMPLETED" },
+  { id: "completed", repos: tag("ok", projectA), wanted: "COMPLETED" },
   { id: "refused", repos: ["refuse"], wanted: "REFUSED" },
   { id: "failed-crash", repos: ["crash"], wanted: "FAILED" },
   { id: "failed-contract", repos: ["invalid-artifact"], wanted: "FAILED" },
@@ -132,14 +161,14 @@ for (const t of terminals) {
 }
 
 // CANCELLED via the reject verb.
-await client.replay(envelope("rejected", ["ok"]));
+await client.replay(envelope("rejected", tag("ok", projectB)));
 const rejected = await openProposalFor(`${prefix}-rejected`);
 await client.reject(rejected.id, "demo: rejected on purpose");
 await runTerminal(rejected.runId, "CANCELLED");
 log(`${rejected.runId} → CANCELLED (proposal rejected)`);
 
 // Two open proposals: one approvable, one human_needed (empty repos).
-await client.replay(envelope("open", ["ok"]));
+await client.replay(envelope("open", tag("ok", projectA)));
 const open = await openProposalFor(`${prefix}-open`);
 log(`${open.id} left open (approvable → instant COMPLETED)`);
 await client.replay(envelope("human-needed", []));
@@ -147,7 +176,7 @@ const human = await humanNeededProposal();
 log(`${human.id} left open (human_needed: ${human.reason})`);
 
 // RUNNING, last: occupies the single worker until the 600s spec timeout.
-await client.replay(envelope("running", ["hang"]));
+await client.replay(envelope("running", tag("hang", projectB)));
 const hang = await openProposalFor(`${prefix}-running`);
 await client.approve(hang.id);
 await until(`run ${hang.runId} → RUNNING`, async () => {
@@ -158,6 +187,6 @@ log(`${hang.runId} → RUNNING (hang mode; TIMED_OUT after the 600s timeout — 
 
 log("done — one of everything:");
 const { runs } = await client.runs();
-for (const r of runs) log(`  ${r.runId}  ${r.state}`);
+for (const r of runs) log(`  ${r.runId}  ${r.state}  repos:[${(r.repos ?? []).join(", ")}]`);
 const { proposals } = await client.proposals();
-for (const p of proposals) log(`  ${p.id}  ${p.decision} (open)`);
+for (const p of proposals) log(`  ${p.id}  ${p.decision} (open)  repos:[${(p.repos ?? []).join(", ")}]`);

@@ -320,10 +320,17 @@ export function ToastContainer() {
     };
   }, []);
 
+  const polite = toasts.filter((t) => t.type !== "err");
+  const assertive = toasts.filter((t) => t.type === "err");
+  // An empty region is still a zero-height flex item, so a constant gap would
+  // reserve 8px under the last visible toast and lift the stack off the bottom
+  // inset. Space the two regions apart only while both hold a toast.
+  const gap = polite.length > 0 && assertive.length > 0 ? "gap-2" : "";
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-      <ToastRegion role="status" live="polite" toasts={toasts.filter((t) => t.type !== "err")} />
-      <ToastRegion role="alert" live="assertive" toasts={toasts.filter((t) => t.type === "err")} />
+    <div className={`fixed bottom-4 right-4 z-50 flex flex-col pointer-events-none ${gap}`}>
+      <ToastRegion role="status" live="polite" toasts={polite} />
+      <ToastRegion role="alert" live="assertive" toasts={assertive} />
     </div>
   );
 }
