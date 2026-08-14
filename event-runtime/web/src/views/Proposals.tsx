@@ -250,10 +250,12 @@ export function Proposals({
     selected: selectedIndex,
     onSelect: (i) => onSelectProposal(visible[i]?.id ?? null),
     onClose: () => {
-      if (selectedId) onSelectProposal(null);
-      else {
+      if (sel) onSelectProposal(null);
+      else if (filter || expiredOnly) {
         if (filter) setFilter("");
         if (expiredOnly) setExpiredOnly(false);
+      } else if (selectedId) {
+        onSelectProposal(null);
       }
     },
     keys: {
