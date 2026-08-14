@@ -1,5 +1,5 @@
 /**
- * Closed action-list executor (docs/event-runtime.md §11, §14; OPS-208).
+ * Closed action-list executor (docs/event-runtime.md §11, §14; OPS-208, OPS-410).
  *
  * Slice 2's remediation node: executes an *approved list of action IDs*, each
  * resolved to a fixed remote command from the definition's action registry —
@@ -25,8 +25,48 @@ import { FACTORY_ROOT } from "../config.mjs";
 
 const OUTPUT_TAIL_CHARS = 2_000;
 
+/**
+ * Validate that every placeholder in a remote template or probeRemote corresponds
+ * to an input-schema property constrained by an enum or an anchored pattern (OPS-410).
+ */
+export function validateRemotePlaceholders(def, inputSchema) {
+  const templates = [];
+  if (typeof def?.probeRemote === "string") templates.push(def.probeRemote);
+  if (Array.isArray(def?.probeRemote)) templates.push(...def.probeRemote);
+  if (def?.actionRegistry && typeof def.actionRegistry === "object") {
+    for (const action of Object.values(def.actionRegistry)) {
+      if (typeof action?.remote === "string") templates.push(action.remote);
+      if (Array.isArray(action?.remote)) templates.push(...action.remote);
+    }
+  }
+  const properties = inputSchema?.properties ?? {};
+  for (const tpl of templates) {
+    const matches = typeof tpl === "string" ? tpl.matchAll(/\{([A-Za-z0-9_]+)\}/g) : [];
+    for (const match of matches) {
+      const field = match[1];
+      const prop = properties[field];
+      if (!prop) {
+        throw new Error(`unconstrained placeholder "{${field}}" in remote template: field is missing from input schema`);
+      }
+      const hasEnum = Array.isArray(prop.enum) && prop.enum.length > 0;
+      const hasPattern = typeof prop.pattern === "string" && prop.pattern.startsWith("^") && prop.pattern.endsWith("$");
+      if (!hasEnum && !hasPattern) {
+        throw new Error(
+          `unconstrained placeholder "{${field}}" in remote template: input schema property must declare an enum or anchored pattern`,
+        );
+      }
+    }
+  }
+}
+
 /** {mount}-style substitution in a remote command string; fields are schema-validated at plan time. */
-function substituteRemote(remote, input) {
+export function substituteRemote(remote, input) {
+  if (Array.isArray(remote)) {
+    return remote.map((item) => substituteRemote(item, input));
+  }
+  if (typeof remote !== "string") {
+    throw new Error(`remote template must be a string or array of strings, got ${typeof remote}`);
+  }
   return remote.replace(/\{([A-Za-z0-9_]+)\}/g, (_, field) => {
     const value = input?.[field];
     if (value === undefined || value === null || !["string", "number"].includes(typeof value)) {
@@ -36,19 +76,36 @@ function substituteRemote(remote, input) {
   });
 }
 
-function buildArgv(exec, target, remote) {
-  return exec.map((element) => element.replace("{target}", target).replace("{remote}", remote));
+/**
+ * Build argv array safely using function replacers to prevent $ patterns from being interpreted (OPS-410).
+ */
+export function buildArgv(exec, target, remote) {
+  const targetStr = String(target);
+  const result = [];
+  for (const element of exec) {
+    if (element === "{remote}" && Array.isArray(remote)) {
+      result.push(...remote);
+    } else {
+      const remoteStr = Array.isArray(remote) ? remote.join(" ") : String(remote);
+      result.push(
+        element
+          .replace(/\{target\}/g, () => targetStr)
+          .replace(/\{remote\}/g, () => remoteStr),
+      );
+    }
+  }
+  return result;
 }
 
 /** Last integer in probe output — `df --output=used -B1 <mount> | tail -1`. */
-function probeBytes(raw) {
+export function probeBytes(raw) {
   const match = String(raw ?? "").trim().match(/(\d+)\s*$/);
   if (!match) throw new Error(`probe output has no byte count: "${String(raw).slice(0, 120)}"`);
   return Number(match[1]);
 }
 
 /** Substitute {field} placeholders across an argv template (item-list mode). */
-function substituteArgv(argv, context) {
+export function substituteArgv(argv, context) {
   return argv.map((element) =>
     element.replace(/\{([A-Za-z0-9_]+)\}/g, (_, field) => {
       const value = context?.[field];
@@ -154,6 +211,15 @@ export async function execute({ spec, def, workspaceDir, timeoutMs }) {
   const target = def.hosts?.[input.host];
   if (!target) return fail(`host "${input.host}" is not in the definition's host allowlist`);
 
+  const schema = def.inputSchema ?? spec.inputSchema;
+  if (schema) {
+    try {
+      validateRemotePlaceholders(def, schema);
+    } catch (err) {
+      return fail(err.message);
+    }
+  }
+
   // Resolve EVERYTHING before executing ANYTHING — an unregistered action ID
   // in the approved plan is a refusal, not a partial execution (OPS-208 AC).
   let probeRemote;
@@ -174,13 +240,15 @@ export async function execute({ spec, def, workspaceDir, timeoutMs }) {
   const outputs = {};
   const run = (label, remote) => {
     const budget = Math.max(1000, deadline - Date.now());
-    const proc = spawnSync(buildArgv(exec, target, remote)[0], buildArgv(exec, target, remote).slice(1), {
+    const argv = buildArgv(exec, target, remote);
+    const proc = spawnSync(argv[0], argv.slice(1), {
       encoding: "utf8",
       timeout: budget,
     });
     const raw = `${proc.stdout ?? ""}${proc.stderr ?? ""}`;
     outputs[label] = raw.slice(-OUTPUT_TAIL_CHARS);
-    appendFileSync(log, `$ ${label}: ${remote}\n${outputs[label]}\n`, "utf8");
+    const cmdStr = Array.isArray(remote) ? remote.join(" ") : remote;
+    appendFileSync(log, `$ ${label}: ${cmdStr}\n${outputs[label]}\n`, "utf8");
     if (proc.error?.code === "ETIMEDOUT") throw Object.assign(new Error(`${label} timed out`), { timedOut: true });
     if (proc.status !== 0) throw new Error(`${label} exited ${proc.status}`);
     return proc.stdout ?? "";
@@ -211,7 +279,10 @@ export async function execute({ spec, def, workspaceDir, timeoutMs }) {
           evidence: {
             probeBefore,
             probeAfter,
-            commands: [probeRemote, ...actionCommands.map((a) => a.remote)],
+            commands: [
+              Array.isArray(probeRemote) ? probeRemote.join(" ") : probeRemote,
+              ...actionCommands.map((a) => (Array.isArray(a.remote) ? a.remote.join(" ") : a.remote)),
+            ],
             outputs,
           },
           artifacts: [{ kind: "log", path: ".actions.log" }],

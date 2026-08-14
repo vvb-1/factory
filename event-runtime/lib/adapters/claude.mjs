@@ -1,10 +1,13 @@
 /**
- * Claude Code adapter (docs/event-runtime.md §6) — the one real registry
- * entry. Spawns a bounded `claude -p` process with the workspace as its cwd,
- * enforces the run spec's timeout with the factory's shutdown discipline
- * (TERM, then KILL after 30s), and strips ANTHROPIC_API_KEY so the CLI uses
- * subscription auth (docs/architecture.md §2.9) — an event run must never
- * silently bill an API key that happens to be in the environment.
+ * Claude Code adapter (docs/event-runtime.md §6, §14; OPS-407) — the one real
+ * registry entry. Spawns a bounded `claude -p` process with the workspace as
+ * its cwd, enforces the run spec's timeout with the factory's shutdown discipline
+ * (TERM, then KILL after 30s), strips ANTHROPIC_API_KEY so the CLI uses
+ * subscription auth (docs/architecture.md §2.9), and confines tool access:
+ *   - passes `--allowedTools` derived from `def.capabilities`, denying write tools
+ *     when `mutating: false`
+ *   - passes `--strict-mcp-config` and sets `CLAUDE_CONFIG_DIR` to an isolated
+ *     runtime directory with no ambient MCP servers or global memory
  *
  * Output is `--output-format stream-json` (NDJSON; the CLI requires
  * `--verbose` with it in -p mode): the full raw stream is captured to
@@ -14,7 +17,7 @@
  * best-effort — an unparseable or unrecognized line is ignored, never fatal.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, readFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -25,6 +28,48 @@ const TEXT_PREVIEW_CHARS = 4000;
 
 const PROMPT_SUFFIX =
   "\n\n---\nInput is at ./input.json. Write ./result.json per the factory.agent-result/v1 contract. Work only inside this directory.";
+
+export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
+export const WRITE_TOOLS = new Set([
+  "Write",
+  "Edit",
+  "Replace",
+  "NotebookEdit",
+  "Bash",
+  "Kill",
+  "DeleteFile",
+  "CreateFile",
+]);
+
+/**
+ * Derive allowed tools from definition capabilities and mutating flag (OPS-407).
+ * When mutating is false, write tools are strictly forbidden.
+ */
+export function deriveAllowedTools(def) {
+  if (def?.mutating === false) {
+    if (Array.isArray(def?.capabilities?.tools)) {
+      return def.capabilities.tools.filter((t) => !WRITE_TOOLS.has(t));
+    }
+    return [...READ_ONLY_TOOLS];
+  }
+  if (Array.isArray(def?.capabilities?.tools)) {
+    return [...def.capabilities.tools];
+  }
+  return [...READ_ONLY_TOOLS];
+}
+
+/**
+ * Build argv for spawning claude (OPS-407).
+ * Enforces --allowedTools and --strict-mcp-config.
+ */
+export function buildClaudeArgv({ prompt, def, allowedTools = deriveAllowedTools(def) }) {
+  const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
+  if (allowedTools && allowedTools.length > 0) {
+    args.push("--allowedTools", allowedTools.join(","));
+  }
+  args.push("--strict-mcp-config");
+  return args;
+}
 
 function clip(text) {
   const s = String(text ?? "");
@@ -86,15 +131,17 @@ export function mapStreamEvent(msg) {
     for (const key of ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]) {
       if (typeof msg.usage?.[key] === "number") usage[key] = msg.usage[key];
     }
-    return [{
-      kind: "usage",
-      payload: {
-        durationMs: msg.duration_ms ?? null,
-        numTurns: msg.num_turns ?? null,
-        costUSD: msg.total_cost_usd ?? null,
-        usage,
+    return [
+      {
+        kind: "usage",
+        payload: {
+          durationMs: msg.duration_ms ?? null,
+          numTurns: msg.num_turns ?? null,
+          costUSD: msg.total_cost_usd ?? null,
+          usage,
+        },
       },
-    }];
+    ];
   }
 
   return []; // system/init, hooks, partials — not part of the trace contract
@@ -105,12 +152,16 @@ export function mapStreamEvent(msg) {
  */
 export async function execute({ spec, def, workspaceDir, timeoutMs, env = {}, onTrace }) {
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
-  const childEnv = { ...process.env, ...env };
+  const configDir = path.join(workspaceDir, ".claude-config");
+  mkdirSync(configDir, { recursive: true });
+
+  const childEnv = { ...process.env, ...env, CLAUDE_CONFIG_DIR: configDir };
   delete childEnv.ANTHROPIC_API_KEY;
 
+  const argv = buildClaudeArgv({ prompt, def });
+
   return new Promise((resolve, reject) => {
-    // stream-json requires --verbose in -p mode (the CLI errors without it).
-    const child = spawn("claude", ["-p", prompt, "--output-format", "stream-json", "--verbose"], {
+    const child = spawn("claude", argv, {
       cwd: workspaceDir,
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
@@ -130,7 +181,11 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env = {}, on
       const lines = createInterface({ input: child.stdout });
       lines.on("line", (line) => {
         try {
-          for (const event of mapStreamEvent(JSON.parse(line))) {
+          const parsed = JSON.parse(line);
+          for (const event of mapStreamEvent(parsed)) {
+            if (def?.mutating === false && event.kind === "tool_use" && WRITE_TOOLS.has(event.payload?.name)) {
+              child.kill("SIGTERM");
+            }
             onTrace(event.kind, event.payload);
           }
         } catch {

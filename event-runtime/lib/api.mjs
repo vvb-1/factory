@@ -462,6 +462,25 @@ function admit(db, registry, res, buffer, nowMs, onEvent) {
 }
 
 /**
+ * Loopback host validation (OPS-408): only loopback addresses are accepted.
+ * Defends against DNS rebinding attacks.
+ */
+export function isLoopbackHost(hostHeader) {
+  if (!hostHeader || typeof hostHeader !== "string") return false;
+  const raw = hostHeader.trim();
+  let host;
+  if (raw.startsWith("[")) {
+    const closeBracket = raw.indexOf("]");
+    if (closeBracket === -1) return false;
+    host = raw.slice(1, closeBracket);
+  } else {
+    host = raw.split(":")[0];
+  }
+  const lower = host.toLowerCase();
+  return lower === "127.0.0.1" || lower === "localhost" || lower === "::1";
+}
+
+/**
  * Build the request handler. Returned directly (rather than only inside a
  * server) so tests can compose it however they like.
  */
@@ -486,6 +505,17 @@ export function createApi({
 
   return async function handle(req, res) {
     try {
+      // Security confinement (OPS-408): loopback Host check & Origin rejection.
+      const hostHeader = req.headers["host"];
+      if (!isLoopbackHost(hostHeader)) {
+        return send(res, 403, { error: "invalid_host" });
+      }
+
+      const isMutating = req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE";
+      if (isMutating && req.headers["origin"]) {
+        return send(res, 403, { error: "cross_origin_rejected" });
+      }
+
       const url = new URL(req.url, `http://${API_HOST}`);
       const route = `${req.method} ${url.pathname}`;
       const nowMs = now();

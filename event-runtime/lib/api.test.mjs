@@ -3,8 +3,9 @@ import { createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
 import * as fake from "./adapters/fake.mjs";
-import { janitorArgv, repoNamesFromInput, startApi } from "./api.mjs";
+import { isLoopbackHost, janitorArgv, repoNamesFromInput, startApi } from "./api.mjs";
 import { apiClient } from "./client.mjs";
 import { openDb } from "./db.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
@@ -872,3 +873,104 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
     expect(apply.filter((a) => a === "--apply")).toHaveLength(1);
   });
 });
+
+describe("Host and Origin header security confinement (OPS-408)", () => {
+  let s;
+  beforeAll(async () => {
+    s = await makeServer();
+  });
+  afterAll(() => s.close());
+
+  function rawRequest({ host = "127.0.0.1", path = "/", method = "GET", headers = {}, body } = {}) {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: s.port,
+          path,
+          method,
+          headers: { host, ...headers },
+        },
+        (res) => {
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            const text = Buffer.concat(chunks).toString("utf8");
+            let json = null;
+            try {
+              json = JSON.parse(text);
+            } catch {}
+            resolve({ status: res.statusCode, json, text });
+          });
+        },
+      );
+      req.on("error", reject);
+      if (body) req.write(body);
+      req.end();
+    });
+  }
+
+  test("isLoopbackHost accepts loopback variants and rejects remote/malformed hosts", () => {
+    expect(isLoopbackHost("127.0.0.1")).toBe(true);
+    expect(isLoopbackHost("127.0.0.1:7381")).toBe(true);
+    expect(isLoopbackHost("localhost")).toBe(true);
+    expect(isLoopbackHost("localhost:7381")).toBe(true);
+    expect(isLoopbackHost("[::1]")).toBe(true);
+    expect(isLoopbackHost("[::1]:7381")).toBe(true);
+
+    expect(isLoopbackHost("evil.com")).toBe(false);
+    expect(isLoopbackHost("evil.com:7381")).toBe(false);
+    expect(isLoopbackHost("192.168.1.100")).toBe(false);
+    expect(isLoopbackHost("")).toBe(false);
+    expect(isLoopbackHost(null)).toBe(false);
+    expect(isLoopbackHost(undefined)).toBe(false);
+  });
+
+  test("rejects request with non-loopback Host header", async () => {
+    const res = await rawRequest({ host: "attacker.com", path: "/health" });
+    expect(res.status).toBe(403);
+    expect(res.json?.error).toBe("invalid_host");
+  });
+
+  test("rejects mutating request carrying an Origin header", async () => {
+    const res = await rawRequest({
+      method: "POST",
+      path: "/replay",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://evil.com",
+      },
+      body: JSON.stringify(envelope()),
+    });
+    expect(res.status).toBe(403);
+    expect(res.json?.error).toBe("cross_origin_rejected");
+  });
+
+  test("rejects janitor apply carrying an Origin header", async () => {
+    const res = await rawRequest({
+      method: "POST",
+      path: "/repos/watched/janitor",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://evil.com",
+      },
+      body: JSON.stringify({ apply: true }),
+    });
+    expect(res.status).toBe(403);
+    expect(res.json?.error).toBe("cross_origin_rejected");
+  });
+
+  test("allows normal loopback mutating requests without Origin header", async () => {
+    const res = await rawRequest({
+      method: "POST",
+      path: "/replay",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(envelope()),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json?.admitted).toBe(true);
+  });
+});
+
