@@ -299,6 +299,15 @@ export interface EnvIdentity {
   adapter: string | null;
 }
 
+/** A registered scheduler loop that has missed ticks or errored (§9). */
+export interface StoppedSchedule {
+  loop: string;
+  every: string;
+  lastSlot: string | null;
+  intervalsLate: number;
+  error: string | null;
+}
+
 export interface StatusView {
   env: EnvIdentity;
   events: Record<string, number>;
@@ -309,11 +318,13 @@ export interface StatusView {
   /** Artifact store rollup; `orphans` counts files no result references. Cached ~10s server-side (`at` = when computed). */
   artifacts: { files: number; bytes: number; orphans: number; orphanBytes: number; at?: string };
   anomalies: {
+    configuration?: string[];
     expiredOpenProposals: string[];
     staleLeases: number;
     unpublishedOutbox: number;
     deadLettered: { source: string; eventId: string; lastError: string | null }[];
     stalledWorkers: StalledWorker[];
+    stoppedSchedules?: StoppedSchedule[];
     /** Queued runs with no live worker to claim them. */
     noWorkers: boolean;
     ambiguousOpenProposals: { runId: string; count: number }[];
