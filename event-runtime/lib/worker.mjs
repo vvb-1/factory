@@ -78,7 +78,7 @@ export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknow
     const candidates = db
       .query(
         `SELECT run_id, spec_json, attempts FROM runs
-         WHERE state = 'QUEUED' ORDER BY created_at, run_id LIMIT 50`,
+         WHERE state = 'QUEUED' ORDER BY created_at, run_id`,
       )
       .all();
     let row = null;
