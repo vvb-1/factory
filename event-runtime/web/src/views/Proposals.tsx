@@ -22,6 +22,7 @@ import { SpecDiff } from "../components/SpecDiff";
 import { decideRevealFilters } from "../reveal";
 import {
   Ago,
+  BulkActionBar,
   Button,
   Countdown,
   DECISION_HUES,
@@ -208,6 +209,14 @@ export function Proposals({
   const [replan, setReplan] = useState<{ before: Proposal; after: Proposal } | null>(null);
   const reasonRef = useRef<HTMLInputElement>(null);
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkReason, setBulkReason] = useState("");
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const bulkReasonRef = useRef<HTMLInputElement>(null);
+
   const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   // The expired chip only exists on Open; History rows have no live TTL. Derive
   // the gate once so the row filter and the empty copy can never disagree.
@@ -223,6 +232,104 @@ export function Proposals({
       return matchesFilterQuery(p, parsed, PROPOSAL_FACETS, { runStates });
     });
   }, [scoped, parsed, expiredFilter, runStates]);
+
+  const actionableVisible = useMemo(
+    () => (tab === "open" ? visible.filter((p) => p.status === "open") : []),
+    [tab, visible],
+  );
+  const allActionableSelected =
+    actionableVisible.length > 0 && actionableVisible.every((p) => selectedIds.has(p.id));
+  const someActionableSelected =
+    actionableVisible.some((p) => selectedIds.has(p.id)) && !allActionableSelected;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someActionableSelected;
+    }
+  }, [someActionableSelected]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allActionableSelected) {
+        actionableVisible.forEach((p) => next.delete(p.id));
+      } else {
+        actionableVisible.forEach((p) => next.add(p.id));
+      }
+      return next;
+    });
+  };
+
+  const selectedRows = useMemo(
+    () => rows.filter((p) => selectedIds.has(p.id)),
+    [rows, selectedIds],
+  );
+  const approvableSelected = useMemo(
+    () => selectedRows.filter((p) => p.status === "open" && p.decision === "run" && !staleState(p)),
+    [selectedRows, runStates],
+  );
+  const rejectableSelected = useMemo(
+    () => selectedRows.filter((p) => p.status === "open"),
+    [selectedRows],
+  );
+
+  const handleBulkApprove = async () => {
+    if (!approvableSelected.length) return;
+    setBulkApproving(true);
+    let ok = 0;
+    let replanned = 0;
+    let err = 0;
+    for (const p of approvableSelected) {
+      try {
+        const o = await api.approve(p.id);
+        if (o.approved && o.runId) {
+          ok++;
+          onRunQueued(o.runId);
+        } else if (o.replanned && o.proposal) {
+          replanned++;
+        }
+      } catch {
+        err++;
+      }
+    }
+    invalidate();
+    setSelectedIds(new Set());
+    setBulkApproving(false);
+    if (ok) notify(`Approved ${ok} proposal${ok === 1 ? "" : "s"}`, "ok");
+    if (replanned) notify(`${replanned} proposal${replanned === 1 ? "" : "s"} expired and re-planned`, "info");
+    if (err) notify(`Failed to approve ${err} proposal${err === 1 ? "" : "s"}`, "err");
+  };
+
+  const handleBulkReject = async () => {
+    const why = bulkReason.trim();
+    if (!rejectableSelected.length || !why) return;
+    setBulkRejecting(true);
+    let ok = 0;
+    let err = 0;
+    for (const p of rejectableSelected) {
+      try {
+        await api.reject(p.id, why);
+        ok++;
+      } catch {
+        err++;
+      }
+    }
+    invalidate();
+    setSelectedIds(new Set());
+    setBulkRejecting(false);
+    setBulkRejectOpen(false);
+    setBulkReason("");
+    if (ok) notify(`Rejected ${ok} proposal${ok === 1 ? "" : "s"}`, "info");
+    if (err) notify(`Failed to reject ${err} proposal${err === 1 ? "" : "s"}`, "err");
+  };
 
   // What the list would show without the text filter. An empty list under the
   // expired chip has two causes and needs two messages: no expired opens exist
@@ -318,9 +425,11 @@ export function Proposals({
     );
     if (inOpen && tab !== "open") {
       setTab("open");
+      setSelectedIds(new Set());
     } else if (!inOpen && inHistory && tab === "open") {
       setTab("history");
       setExpiredOnly(false);
+      setSelectedIds(new Set());
     }
   }, [focusProposalId, query.isPending, history.isPending, query.data, history.data, tab]);
 
@@ -329,6 +438,7 @@ export function Proposals({
     setTab("open");
     setExpiredOnly(true);
     setFilter("");
+    setSelectedIds(new Set());
     onFocusExpiredConsumed();
   }, [focusExpired, onFocusExpiredConsumed]);
 
@@ -424,6 +534,7 @@ export function Proposals({
     setTab(t);
     setExpiredOnly(false);
     onSelectProposal(null);
+    setSelectedIds(new Set());
   };
   useTabKeys(PROPOSAL_TABS, tab, selectTab);
 
@@ -496,6 +607,19 @@ export function Proposals({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
+              {tab === "open" && (
+                <th className="sticky top-0 z-10 h-7 w-8 bg-(--surface-0) px-3 shadow-[inset_0_-1px_0_var(--border)]">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all proposals"
+                    ref={headerCheckboxRef}
+                    checked={allActionableSelected}
+                    disabled={actionableVisible.length === 0}
+                    onChange={toggleSelectAll}
+                    className="cursor-pointer"
+                  />
+                </th>
+              )}
               {cols.map((c) => {
                 const sort = displayConfig.sorts.find((s) => s.column === c.key);
                 return (
@@ -512,6 +636,7 @@ export function Proposals({
           </thead>
           <tbody>
             {(() => {
+              const totalColSpan = cols.length + (tab === "open" ? 1 : 0);
               const tdCls = "border-b border-(--border) px-3 py-1.5";
               const renderRow = (p: Proposal) => (
                 <tr
@@ -520,6 +645,20 @@ export function Proposals({
                   aria-selected={p.id === selectedId}
                   className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${p.id === selectedId ? "row-selected" : ""}`}
                 >
+                  {tab === "open" && (
+                    <td className={`${tdCls} w-8`} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select proposal ${p.id}`}
+                        checked={selectedIds.has(p.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleSelect(p.id);
+                        }}
+                        className="cursor-pointer"
+                      />
+                    </td>
+                  )}
                   <td className={tdCls}>
                     {p.agent ? (
                       <JumpLink
@@ -590,7 +729,7 @@ export function Proposals({
                 return (
                   <Fragment key={s.key}>
                     <GroupHeaderRow
-                      colSpan={cols.length}
+                      colSpan={totalColSpan}
                       section={s}
                       collapsed={closed}
                       onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
@@ -602,7 +741,7 @@ export function Proposals({
                             return (
                               <Fragment key={child.key}>
                                 <GroupHeaderRow
-                                  colSpan={cols.length}
+                                  colSpan={totalColSpan}
                                   section={child}
                                   collapsed={childClosed}
                                   onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
@@ -619,7 +758,7 @@ export function Proposals({
             })()}
             {visible.length === 0 && (
               <ListEmpty
-                colSpan={cols.length}
+                colSpan={cols.length + (tab === "open" ? 1 : 0)}
                 query={tab === "open" ? query : history}
                 filtered={unfilteredCount > 0}
                 noun="proposals"
@@ -904,6 +1043,82 @@ export function Proposals({
               }}
             >
               Approve new proposal
+            </Button>
+          </div>
+        </Dialog>
+      )}
+
+      {selectedIds.size > 0 && tab === "open" && (
+        <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
+          <Button
+            variant="primary"
+            disabled={!connected || bulkApproving || approvableSelected.length === 0}
+            onClick={handleBulkApprove}
+          >
+            {bulkApproving ? "Approving…" : `Approve selected (${selectedIds.size})`}
+          </Button>
+          <Button
+            variant="danger"
+            disabled={!connected || bulkRejecting || rejectableSelected.length === 0}
+            onClick={() => {
+              setBulkRejectOpen(true);
+              setBulkReason("");
+            }}
+          >
+            Reject selected ({selectedIds.size})
+          </Button>
+        </BulkActionBar>
+      )}
+
+      {bulkRejectOpen && (
+        <Dialog
+          title={`Reject ${rejectableSelected.length} selected proposal${rejectableSelected.length === 1 ? "" : "s"}`}
+          onClose={() => setBulkRejectOpen(false)}
+        >
+          <div className="mb-3 text-[12px] text-(--text-dim)">
+            Provide a rejection reason for all {rejectableSelected.length} selected proposals:
+          </div>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {CANNED_REJECTION_REASONS.map((tmpl) => (
+              <button
+                key={tmpl}
+                type="button"
+                onClick={() => {
+                  setBulkReason(tmpl);
+                  bulkReasonRef.current?.focus();
+                }}
+                className={`rounded border px-2 py-0.5 text-[11px] transition-colors ${
+                  bulkReason === tmpl
+                    ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                    : "border-(--border) bg-(--surface-1) text-(--text-dim) hover:bg-(--surface-2)"
+                }`}
+              >
+                {tmpl}
+              </button>
+            ))}
+          </div>
+          <input
+            ref={bulkReasonRef}
+            autoFocus
+            value={bulkReason}
+            onChange={(e) => setBulkReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && bulkReason.trim() && !bulkRejecting) {
+                e.preventDefault();
+                handleBulkReject();
+              }
+            }}
+            placeholder="Reason (required — rejections are audit records)"
+            className="w-full rounded-md border border-(--border-strong) bg-(--surface-0) px-2.5 py-1.5 text-[12px] text-(--text) outline-none focus:border-(--accent)"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button onClick={() => setBulkRejectOpen(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              disabled={!bulkReason.trim() || bulkRejecting || !connected}
+              onClick={handleBulkReject}
+            >
+              {bulkRejecting ? "Rejecting…" : `Reject ${rejectableSelected.length} proposals`}
             </Button>
           </div>
         </Dialog>
