@@ -4,6 +4,8 @@
 # ports or state directories — these scripts do.
 set -euo pipefail
 
+_WORKTREE_COMMON_LOADED=1
+
 WT_ROOT="${FACTORY_WT_ROOT:-$HOME/Develop/.worktrees/factory}"
 BASE_BRANCH="${FACTORY_BASE_BRANCH:-develop}"
 
@@ -267,4 +269,7 @@ locked_bun_install() { # <dir>
   printf '%s\n' "$out" >&2
   return $code
 }
+
+source "$(dirname "${BASH_SOURCE[0]}")/worktree-daemons.sh"
+
 
