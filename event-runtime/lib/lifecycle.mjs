@@ -53,13 +53,17 @@ function appendJournal(db, record) {
   );
 }
 
+function resolveNow(now) {
+  return typeof now === "function" ? now() : (now ?? Date.now());
+}
+
 /**
  * Create a run in PROPOSED with its immutable spec. The idempotency key's
  * UNIQUE constraint is the §5.4 guarantee — a duplicate plan throws here and
  * the caller resolves to the existing run.
  */
-export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash, actor, correlationId, causationId, policyVersion, now = Date.now() }) {
-  const at = new Date(now).toISOString();
+export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash, actor, correlationId, causationId, policyVersion, now = () => Date.now() }) {
+  const at = new Date(resolveNow(now)).toISOString();
   return txImmediate(db, () => {
     db.query(
       `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
@@ -78,8 +82,8 @@ export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash,
  * `expectFrom` when the caller must not race another mover (worker vs
  * operator): the transition then only applies if the state is still that one.
  */
-export function transition(db, { runId, to, expectFrom, actor, reason, attempt, correlationId, causationId, policyVersion, now = Date.now() }) {
-  const at = new Date(now).toISOString();
+export function transition(db, { runId, to, expectFrom, actor, reason, attempt, correlationId, causationId, policyVersion, now = () => Date.now() }) {
+  const at = new Date(resolveNow(now)).toISOString();
   return txImmediate(db, () => {
     const run = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new IllegalTransition(runId, undefined, to);
@@ -98,4 +102,32 @@ export function runState(db, runId) {
 
 export function lifecycleOf(db, runId) {
   return db.query(`SELECT * FROM lifecycle_events WHERE run_id = ? ORDER BY seq`).all(runId);
+}
+
+/**
+ * Resolve an existing run for an idempotency key and event correlation context (§5.4).
+ * A duplicate delivery (same idempotencyKey and matching correlationId / causationId)
+ * resolves to the existing run. A repeat trigger (different correlationId / eventId)
+ * with identical inputHash is NOT falsely suppressed and returns null.
+ */
+export function resolveIdempotency(db, { idempotencyKey, correlationId, causationId, eventId } = {}) {
+  if (!idempotencyKey) return null;
+  const run = db.query(`SELECT run_id, idempotency_key, state FROM runs WHERE idempotency_key = ?`).get(idempotencyKey);
+  if (!run) return null;
+
+  const correlation = correlationId ?? eventId ?? null;
+  if (!correlation && !causationId) return run;
+
+  const journal = db
+    .query(`SELECT correlation_id, causation_id FROM lifecycle_events WHERE run_id = ? AND from_state IS NULL LIMIT 1`)
+    .get(run.run_id);
+  if (!journal) return run;
+
+  if (correlation && journal.correlation_id && journal.correlation_id !== correlation) {
+    return null;
+  }
+  if (causationId && journal.causation_id && journal.causation_id !== causationId) {
+    return null;
+  }
+  return run;
 }

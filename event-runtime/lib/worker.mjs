@@ -10,8 +10,9 @@
  * mid-flight surfaces here as IllegalTransition; the worker stops quietly,
  * publishing nothing.
  */
+import { existsSync, readFileSync } from "node:fs";
 import { storeCollected } from "./artifacts.mjs";
-import { canonicalJson, hashJson } from "./canonical.mjs";
+import { canonicalJson, hashJson, sha256Hex } from "./canonical.mjs";
 import { artifactsRoot } from "./config.mjs";
 import { nextCounter, tx, txImmediate } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
@@ -21,7 +22,7 @@ import { computeDefHash, createReceipt, verifyDefHash } from "./receipts.mjs";
 import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { satisfiesPlacement } from "./workers.mjs";
-import { createWorkspace, destroyWorkspace } from "./workspace.mjs";
+import { createWorkspace, destroyWorkspace, PathViolation, safeJoin } from "./workspace.mjs";
 
 /**
  * Runtime-injected artifacts: adapters that capture the agent's output write
@@ -33,8 +34,12 @@ const RUNTIME_ARTIFACTS = [{ kind: "transcript", path: ".transcript.json" }];
 /** Grace added to the spec timeout before a lease is considered abandoned. */
 const LEASE_GRACE_SECONDS = 120;
 
+function resolveNow(now) {
+  return typeof now === "function" ? now() : (now ?? Date.now());
+}
+
 function iso(now) {
-  return new Date(now).toISOString();
+  return new Date(resolveNow(now)).toISOString();
 }
 
 function finishAttempt(db, runId, attempt, terminalState, reasonCode, now) {
@@ -95,7 +100,7 @@ function originatingEvent(db, runId) {
  *
  * @returns {{ runId: string, attempt: number, fencingToken: number, spec: object } | null}
  */
-export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknown", labels = {}, adapters = null, adapterOverride } = {}) {
+export function claimNext(db, { owner, now = () => Date.now(), policyVersion = "unknown", labels = {}, adapters = null, adapterOverride } = {}) {
   // BEGIN IMMEDIATE, not the default deferred transaction: two workers must
   // not both read the same QUEUED row before either writes (OPS-233).
   return txImmediate(db, () => {
@@ -121,17 +126,18 @@ export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknow
     if (!row) return null;
     const attempt = row.attempts + 1;
     const fencingToken = nextCounter(db, "fencing");
-    const leaseExpiresAt = iso(now + (spec.timeoutSeconds + LEASE_GRACE_SECONDS) * 1000);
+    const claimNow = resolveNow(now);
+    const leaseExpiresAt = iso(claimNow + (spec.timeoutSeconds + LEASE_GRACE_SECONDS) * 1000);
 
     db.query(`UPDATE runs SET attempts = ?, updated_at = ? WHERE run_id = ?`)
-      .run(attempt, iso(now), row.run_id);
+      .run(attempt, iso(claimNow), row.run_id);
     db.query(
       `INSERT INTO attempts (run_id, attempt, fencing_token, lease_owner, lease_expires_at)
        VALUES (?, ?, ?, ?, ?)`,
     ).run(row.run_id, attempt, fencingToken, owner, leaseExpiresAt);
     transition(db, {
       runId: row.run_id, to: "LEASED", expectFrom: "QUEUED",
-      actor: owner, reason: "claimed", attempt, policyVersion, now,
+      actor: owner, reason: "claimed", attempt, policyVersion, now: claimNow,
     });
 
     return { runId: row.run_id, attempt, fencingToken, spec };
@@ -148,7 +154,7 @@ const ACTIVE_EXECUTIONS = new Map();
  * { fenced: true } when a newer attempt owns the run at publish time.
  */
 export async function executeClaimed(db, registry, adapters, claim, {
-  workspacesRoot, artifactStore = artifactsRoot(), now = Date.now(), policyVersion = "unknown", adapterOverride,
+  workspacesRoot, artifactStore = artifactsRoot(), now = () => Date.now(), policyVersion = "unknown", adapterOverride,
 } = {}) {
   const { runId, attempt, fencingToken, spec } = claim;
   const owner = db
@@ -158,6 +164,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
   let workspaceDir = null;
   let checkoutPath = null;
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
+
+  const nowFn = typeof now === "function" ? now : () => (now ?? Date.now());
 
   const abortController = new AbortController();
   ACTIVE_EXECUTIONS.set(runId, {
@@ -181,19 +189,20 @@ export async function executeClaimed(db, registry, adapters, claim, {
   /** Terminal failure-shaped write: transition + attempts row, one tx. */
   const failTerminal = (to, journalReason, reasonCode, { requeue = false } = {}) =>
     txImmediate(db, () => {
+      const currentNow = nowFn();
       if (!assertCurrentToken(db, runId, fencingToken)) {
-        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
         return { fenced: true };
       }
       transition(db, {
         runId, to, expectFrom: "RUNNING",
-        actor: owner, reason: journalReason, attempt, policyVersion, now,
+        actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
       });
-      finishAttempt(db, runId, attempt, to, reasonCode, now);
+      finishAttempt(db, runId, attempt, to, reasonCode, currentNow);
       if (requeue && attempt < spec.maxAttempts) {
         transition(db, {
           runId, to: "QUEUED", expectFrom: "FAILED",
-          actor: owner, reason: "retry", attempt, policyVersion, now,
+          actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
         });
       }
       return { ok: true };
@@ -201,16 +210,17 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
   try {
     const started = txImmediate(db, () => {
+      const currentNow = nowFn();
       if (!assertCurrentToken(db, runId, fencingToken)) {
-        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
         return { fenced: true };
       }
       transition(db, {
         runId, to: "RUNNING", expectFrom: "LEASED",
-        actor: owner, reason: "started", attempt, policyVersion, now,
+        actor: owner, reason: "started", attempt, policyVersion, now: currentNow,
       });
       db.query(`UPDATE attempts SET started_at = ? WHERE run_id = ? AND attempt = ?`)
-        .run(iso(now), runId, attempt);
+        .run(iso(currentNow), runId, attempt);
       return { ok: true };
     });
     if (started?.fenced) {
@@ -313,12 +323,13 @@ export async function executeClaimed(db, registry, adapters, claim, {
     if (abortController.signal.aborted) {
       if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
       const res = txImmediate(db, () => {
+        const currentNow = nowFn();
         if (!assertCurrentToken(db, runId, fencingToken)) {
-          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
           return { fenced: true };
         }
         try {
-          finishAttempt(db, runId, attempt, "CANCELLED", "cancelled", now);
+          finishAttempt(db, runId, attempt, "CANCELLED", "cancelled", currentNow);
         } catch {
           // ignore
         }
@@ -345,13 +356,14 @@ export async function executeClaimed(db, registry, adapters, claim, {
     }
 
     const toVerifying = txImmediate(db, () => {
+      const currentNow = nowFn();
       if (!assertCurrentToken(db, runId, fencingToken)) {
-        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
         return { fenced: true };
       }
       transition(db, {
         runId, to: "VERIFYING", expectFrom: "RUNNING",
-        actor: owner, reason: "exit_0", attempt, policyVersion, now,
+        actor: owner, reason: "exit_0", attempt, policyVersion, now: currentNow,
       });
       return { ok: true };
     });
@@ -368,20 +380,21 @@ export async function executeClaimed(db, registry, adapters, claim, {
       // Invalid output is a typed contract failure and emits no completion
       // event (§15) — no results row, no outbox row.
       const res = txImmediate(db, () => {
+        const currentNow = nowFn();
         if (!assertCurrentToken(db, runId, fencingToken)) {
-          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
           return { fenced: true };
         }
         transition(db, {
           runId, to: "FAILED", expectFrom: "VERIFYING",
           actor: owner, reason: `contract_violation: ${err.violations.join(", ")}`,
-          attempt, policyVersion, now,
+          attempt, policyVersion, now: currentNow,
         });
-        finishAttempt(db, runId, attempt, "FAILED", "contract_violation", now);
+        finishAttempt(db, runId, attempt, "FAILED", "contract_violation", currentNow);
         if (attempt < spec.maxAttempts) {
           transition(db, {
             runId, to: "QUEUED", expectFrom: "FAILED",
-            actor: owner, reason: "retry", attempt, policyVersion, now,
+            actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
           });
         }
         return { ok: true };
@@ -392,16 +405,36 @@ export async function executeClaimed(db, registry, adapters, claim, {
     }
 
     if (verified.kind === "refused") {
+      const collected = [];
+      for (const entry of RUNTIME_ARTIFACTS) {
+        let abs;
+        try {
+          abs = safeJoin(workspaceDir, entry.path);
+        } catch (err) {
+          if (!(err instanceof PathViolation)) throw err;
+          continue;
+        }
+        if (existsSync(abs)) {
+          collected.push({ kind: entry.kind, uri: `file://${abs}`, sha256: sha256Hex(readFileSync(abs)) });
+        }
+      }
+      const artifacts = storeCollected({ entries: collected, storeRoot: artifactStore });
+      const refusedResult = {
+        ...verified.result,
+        artifacts,
+      };
+
       // Refusal is not failure (§5.3): store the typed result, publish no
       // completion event, clean the workspace normally.
       const res = txImmediate(db, () => {
+        const currentNow = nowFn();
         if (!assertCurrentToken(db, runId, fencingToken)) {
-          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+          recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
           return { fenced: true };
         }
         transition(db, {
           runId, to: "REFUSED", expectFrom: "VERIFYING",
-          actor: owner, reason: verified.reasonCode, attempt, policyVersion, now,
+          actor: owner, reason: verified.reasonCode, attempt, policyVersion, now: currentNow,
         });
         const receipt = createReceipt({
           runId,
@@ -416,10 +449,10 @@ export async function executeClaimed(db, registry, adapters, claim, {
           `INSERT INTO results (run_id, attempt, result_json, artifact_hash, evidence_set_hash, verification_json, receipt_json, accepted_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
-          runId, attempt, canonicalJson(verified.result), "none", null,
-          canonicalJson(verified.result.verification), canonicalJson(receipt), iso(now),
+          runId, attempt, canonicalJson(refusedResult), "none", null,
+          canonicalJson(refusedResult.verification), canonicalJson(receipt), iso(currentNow),
         );
-        finishAttempt(db, runId, attempt, "REFUSED", verified.reasonCode, now);
+        finishAttempt(db, runId, attempt, "REFUSED", verified.reasonCode, currentNow);
         return { ok: true, receipt };
       });
       destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
@@ -435,8 +468,9 @@ export async function executeClaimed(db, registry, adapters, claim, {
     // Completed: fencing check, result, receipt, outbox event, and the
     // COMPLETED transition are one transaction.
     const published = txImmediate(db, () => {
+      const currentNow = nowFn();
       if (!assertCurrentToken(db, runId, fencingToken)) {
-        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now });
+        recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
         return { fenced: true };
       }
 
@@ -456,7 +490,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId, attempt, canonicalJson(result), result.artifactHash, result.evidenceSetHash,
-        canonicalJson(result.verification), canonicalJson(receipt), iso(now),
+        canonicalJson(result.verification), canonicalJson(receipt), iso(currentNow),
       );
 
       const origin = originatingEvent(db, runId);
@@ -466,19 +500,19 @@ export async function executeClaimed(db, registry, adapters, claim, {
         type: origin ? origin.type.replace(/\.requested$/, ".completed") : "factory.run.completed",
         source: "event-runtime",
         subject: spec.agent,
-        occurredAt: iso(now),
+        occurredAt: iso(currentNow),
         correlationId: origin?.correlation_id ?? null,
         causationId: origin?.causation_id ?? null,
         payload: { runId, attempt, artifactHash: result.artifactHash, outputContract: spec.outputContract },
       };
       db.query(`INSERT INTO outbox (event_json, created_at) VALUES (?, ?)`)
-        .run(canonicalJson(envelope), iso(now));
+        .run(canonicalJson(envelope), iso(currentNow));
 
       transition(db, {
         runId, to: "COMPLETED", expectFrom: "VERIFYING",
-        actor: owner, reason: "ok", attempt, policyVersion, now,
+        actor: owner, reason: "ok", attempt, policyVersion, now: currentNow,
       });
-      finishAttempt(db, runId, attempt, "COMPLETED", "ok", now);
+      finishAttempt(db, runId, attempt, "COMPLETED", "ok", currentNow);
       return { receipt };
     });
 
@@ -525,7 +559,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
  * The stale attempt keeps its (now lower) fencing token, so a late publish from
  * it is fenced out. Respects maxAttempts and dead-letters beyond it.
  */
-export function reapExpiredLeases(db, { now = Date.now(), policyVersion = "unknown" } = {}) {
+export function reapExpiredLeases(db, { now = () => Date.now(), policyVersion = "unknown" } = {}) {
+  const currentNow = resolveNow(now);
   return txImmediate(db, () => {
     const rows = db
       .query(
@@ -533,37 +568,37 @@ export function reapExpiredLeases(db, { now = Date.now(), policyVersion = "unkno
          JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
          WHERE r.state IN ('LEASED', 'RUNNING', 'VERIFYING') AND a.lease_expires_at < ?`,
       )
-      .all(iso(now));
+      .all(iso(currentNow));
     for (const row of rows) {
       const spec = JSON.parse(row.spec_json);
       if (row.attempts < spec.maxAttempts) {
         if (row.state === "VERIFYING") {
           transition(db, {
             runId: row.run_id, to: "FAILED",
-            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
+            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now: currentNow,
           });
           transition(db, {
             runId: row.run_id, to: "QUEUED",
-            actor: "reaper", reason: "retry", attempt: row.attempts, policyVersion, now,
+            actor: "reaper", reason: "retry", attempt: row.attempts, policyVersion, now: currentNow,
           });
         } else {
           transition(db, {
             runId: row.run_id, to: "QUEUED",
-            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
+            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now: currentNow,
           });
         }
       } else {
         if (row.state === "LEASED") {
           transition(db, {
             runId: row.run_id, to: "RUNNING",
-            actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now,
+            actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now: currentNow,
           });
         }
         transition(db, {
           runId: row.run_id, to: "FAILED",
-          actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now,
+          actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now: currentNow,
         });
-        finishAttempt(db, row.run_id, row.attempts, "FAILED", "lease_expired", now);
+        finishAttempt(db, row.run_id, row.attempts, "FAILED", "lease_expired", currentNow);
       }
     }
     return rows.length;
@@ -582,21 +617,22 @@ export async function runOnce(db, registry, adapters, opts = {}) {
  * For VERIFYING, transitions to FAILED with reason operator_cancel.
  * A still-open proposal for the run is closed in the same transaction.
  */
-export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = Date.now(), policyVersion } = {}) {
+export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = () => Date.now(), policyVersion } = {}) {
+  const currentNow = resolveNow(now);
   return txImmediate(db, () => {
     const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new Error(`unknown run ${runId}`);
     let result;
     if (run.state === "VERIFYING") {
-      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now });
-      finishAttempt(db, runId, run.attempts, "FAILED", "cancelled", now);
+      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now: currentNow });
+      finishAttempt(db, runId, run.attempts, "FAILED", "cancelled", currentNow);
     } else {
-      result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+      result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now: currentNow });
       if (run.state === "RUNNING" || run.state === "LEASED") {
-        finishAttempt(db, runId, run.attempts, "CANCELLED", "cancelled", now);
+        finishAttempt(db, runId, run.attempts, "CANCELLED", "cancelled", currentNow);
       }
     }
-    const proposalClose = closeOpenProposalForRun(db, runId, { actor, now });
+    const proposalClose = closeOpenProposalForRun(db, runId, { actor, now: currentNow });
     const active = ACTIVE_EXECUTIONS.get(runId);
     if (active) {
       active.abort(reason);
@@ -608,24 +644,25 @@ export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = 
 /**
  * Force-fail a stranded or non-terminal run with a journaled transition.
  */
-export function forceFailRun(db, runId, { actor = "operator", reason = "operator_force_fail", now = Date.now(), policyVersion = "unknown" } = {}) {
+export function forceFailRun(db, runId, { actor = "operator", reason = "operator_force_fail", now = () => Date.now(), policyVersion = "unknown" } = {}) {
+  const currentNow = resolveNow(now);
   return txImmediate(db, () => {
     const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new Error(`unknown run ${runId}`);
     let result;
     if (run.state === "VERIFYING" || run.state === "RUNNING") {
-      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now });
-      finishAttempt(db, runId, run.attempts, "FAILED", reason, now);
+      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now: currentNow });
+      finishAttempt(db, runId, run.attempts, "FAILED", reason, currentNow);
     } else if (run.state === "LEASED") {
-      transition(db, { runId, to: "RUNNING", actor, reason: "force_fail_start", attempt: run.attempts, policyVersion, now });
-      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now });
-      finishAttempt(db, runId, run.attempts, "FAILED", reason, now);
+      transition(db, { runId, to: "RUNNING", actor, reason: "force_fail_start", attempt: run.attempts, policyVersion, now: currentNow });
+      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now: currentNow });
+      finishAttempt(db, runId, run.attempts, "FAILED", reason, currentNow);
     } else if (run.state === "QUEUED" || run.state === "APPROVED" || run.state === "PROPOSED") {
-      result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+      result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now: currentNow });
     } else {
       throw new Error(`cannot force-fail run in terminal state ${run.state}`);
     }
-    closeOpenProposalForRun(db, runId, { actor, now });
+    closeOpenProposalForRun(db, runId, { actor, now: currentNow });
     return result;
   });
 }
@@ -634,23 +671,24 @@ export function forceFailRun(db, runId, { actor = "operator", reason = "operator
  * Operator retry (§13): FAILED → QUEUED, or recovery from VERIFYING. Retrying past maxAttempts requires
  * the explicit force override, which is recorded in the journal reason.
  */
-export function retryRun(db, runId, { actor, force = false, now = Date.now(), policyVersion } = {}) {
+export function retryRun(db, runId, { actor, force = false, now = () => Date.now(), policyVersion } = {}) {
+  const currentNow = resolveNow(now);
   const row = db.query(`SELECT state, spec_json, attempts FROM runs WHERE run_id = ?`).get(runId);
   if (!row) throw new Error(`unknown run ${runId}`);
   const spec = JSON.parse(row.spec_json);
   if (!force && row.attempts >= spec.maxAttempts) throw new Error("attempts_exhausted");
   if (row.state === "VERIFYING") {
     return txImmediate(db, () => {
-      transition(db, { runId, to: "FAILED", actor, reason: "operator_retry_verifying", policyVersion, now });
-      finishAttempt(db, runId, row.attempts, "FAILED", "operator_retry", now);
+      transition(db, { runId, to: "FAILED", actor, reason: "operator_retry_verifying", policyVersion, now: currentNow });
+      finishAttempt(db, runId, row.attempts, "FAILED", "operator_retry", currentNow);
       return transition(db, {
         runId, to: "QUEUED", actor,
-        reason: force ? "operator_retry_forced" : "operator_retry", policyVersion, now,
+        reason: force ? "operator_retry_forced" : "operator_retry", policyVersion, now: currentNow,
       });
     });
   }
   return transition(db, {
     runId, to: "QUEUED", actor,
-    reason: force ? "operator_retry_forced" : "operator_retry", policyVersion, now,
+    reason: force ? "operator_retry_forced" : "operator_retry", policyVersion, now: currentNow,
   });
 }
