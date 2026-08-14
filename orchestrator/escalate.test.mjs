@@ -18,6 +18,7 @@ const repos = Bun.YAML.parse(
 const cashsaasGlobs = repos.find((repo) => repo.name === "cashsaas")?.escalate_paths;
 const wmHomeGlobs = repos.find((repo) => repo.name === "wm-home")?.escalate_paths;
 const wattsMobileGlobs = repos.find((repo) => repo.name === "watts-mobile")?.escalate_paths;
+const coachWattzGlobs = repos.find((repo) => repo.name === "coach-wattz")?.escalate_paths;
 
 test("wm-home config protects its schema, auth, admin, and deployment boundaries", () => {
   expect(wmHomeGlobs).toBeDefined();
@@ -101,6 +102,55 @@ test("watts-mobile config leaves ordinary feature screens and components unflagg
         "docs/setup.md",
       ],
       wattsMobileGlobs,
+    ),
+  ).toEqual([]);
+});
+
+test("coach-wattz config protects stripe, auth, prisma, and deployment boundaries", () => {
+  expect(coachWattzGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "server/api/stripe/webhook.ts",
+      "server/api/subscriptions/sync.ts",
+      "server/api/auth/login.ts",
+      "server/api/oauth/callback.ts",
+      "server/middleware/auth.ts",
+      "server/middleware/session-impersonation.ts",
+      "prisma/schema.prisma",
+      "prisma/migrations/20260223120700_init/migration.sql",
+      "docker-compose.yml",
+      "Dockerfile",
+      ".github/workflows/ci.yml",
+    ],
+    coachWattzGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "server/api/stripe/webhook.ts",
+    "server/api/subscriptions/sync.ts",
+    "server/api/auth/login.ts",
+    "server/api/oauth/callback.ts",
+    "server/middleware/auth.ts",
+    "server/middleware/session-impersonation.ts",
+    "prisma/schema.prisma",
+    "prisma/migrations/20260223120700_init/migration.sql",
+    "docker-compose.yml",
+    "Dockerfile",
+    ".github/workflows/ci.yml",
+  ]);
+});
+
+test("coach-wattz config leaves ordinary Vue pages and components unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "app/pages/index.vue",
+        "app/components/UserProfile.vue",
+        "README.md",
+        "docs/ARCHITECTURE.md",
+      ],
+      coachWattzGlobs,
     ),
   ).toEqual([]);
 });

@@ -137,6 +137,18 @@ repos:
     worktree_warm: bin/worktree-warm.sh
     worktree_root: ~/Develop/.worktrees/coach-wattz
     report_only: true            # Dispatch remains disabled; janitor may use the teardown script.
+    escalate_paths:
+      - server/api/stripe/**
+      - server/api/subscriptions/**
+      - server/api/auth/**
+      - server/api/oauth/**
+      - server/middleware/auth.ts
+      - server/middleware/session-impersonation.ts
+      - prisma/schema.prisma
+      - prisma/migrations/**
+      - docker-compose.yml
+      - Dockerfile
+      - .github/workflows/**
 
   - name: watts-mobile
     path: ~/Develop/watts-mobile
