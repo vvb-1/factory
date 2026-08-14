@@ -114,36 +114,9 @@ case "$cmd" in
       run_bun event-runtime/web/serve.mjs "$@"
     fi
     ;;
-  up)
-    _has_target=0
-    for _a in "$@"; do
-      case "$_a" in
-        --here|-h|--help) _has_target=1; break ;;
-        -*) ;;
-        *) _has_target=1; break ;;
-      esac
-    done
-    if [[ "$_has_target" -eq 1 ]]; then
-      exec bash "$ROOT/bin/worktree-up.sh" "$@"
-    else
-      exec bash "$ROOT/bin/worktree-up.sh" --here "$@"
-    fi
-    ;;
-  down)
-    _has_target=0
-    for _a in "$@"; do
-      case "$_a" in
-        --here|-h|--help) _has_target=1; break ;;
-        -*) ;;
-        *) _has_target=1; break ;;
-      esac
-    done
-    if [[ "$_has_target" -eq 1 ]]; then
-      exec bash "$ROOT/bin/worktree-down.sh" "$@"
-    else
-      exec bash "$ROOT/bin/worktree-down.sh" --here "$@"
-    fi
-    ;;
+  up)           exec bash "$ROOT/bin/live-stack.sh" up "$@" ;;
+  down)         exec bash "$ROOT/bin/live-stack.sh" down "$@" ;;
+  tail)         exec bash "$ROOT/bin/live-stack.sh" tail "$@" ;;
   demo)
     _down=0
     for _a in "$@"; do
@@ -210,9 +183,10 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   events        event-runtime/cli.mjs (status, ps, runs, proposals, approve, reject, inject, requeue)
   serve         start event runtime control API (use --web or --all to launch web UI too)
   web           start event runtime web UI server (use --dev for Vite live HMR mode)
-  up            start worker, api server, and web UI in current checkout (or ticket worktree)
-  down          stop worker, api server, and web UI in current checkout (or ticket worktree)
-  demo          provision & run isolated seeded demo env (alias for factory up)
+  up            start live event-runtime stack (API 7381, live worker, and Web UI 7382)
+  down          stop live event-runtime stack
+  tail          tail live daemon logs (~/.factory/run/{serve,worker,web}.log)
+  demo          provision & run isolated seeded demo env (use --down to stop)
   run           runners/run-agent.sh
   notify        ~/Develop/hdkiller/scripts/notify.py (human interrupt channel)
   security      lib/security-check.sh (gitleaks + semgrep + actionlint on cwd repo)
