@@ -48,7 +48,7 @@
   "mutating": true,
   "pins": {
     "agents/disk-remediate.md": "sha256:f886a34a264a2c83356b9e5cc5a96df7e994dbbbebd278afa5b4564c4b99c1e8",
-    "schemas/disk-remediate.input.json": "sha256:35468a6619856bdb6b751260f941c770b9dab144a0881cf4cdd3eac0a759966f",
+    "schemas/disk-remediate.input.json": "sha256:b73ad4bb5307bf6947b94df8ced5f475ad0c4852b083b09e963afb2252799844",
     "schemas/disk-remediation.output.json": "sha256:2ead535aeab711c998a5f074ff0408acd9799ff18d95635f66bbde6116efb806"
   }
 }

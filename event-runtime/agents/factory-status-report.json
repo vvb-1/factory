@@ -22,7 +22,7 @@
   "mutating": false,
   "pins": {
     "agents/factory-status-report.md": "sha256:dd0fde64a31eb88178a94e07efffa6035c8be7a90e13efe8c577d3da4dd4fda3",
-    "schemas/factory-status-report.input.json": "sha256:f36a1b1752b860e5c9bced6a8f542b469927be31de065fa76bff6b3366adc3e5",
+    "schemas/factory-status-report.input.json": "sha256:44036797807c8b3ead4226e84dc8c0c1c70476fc7a8cbe9250760ccfe41a4435",
     "schemas/factory-status-report.output.json": "sha256:d837152174abfa145dae38497d651d90da1fc440ce95d71b2f2a6d01bcc4e481"
   }
 }

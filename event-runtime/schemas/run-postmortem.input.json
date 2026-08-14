@@ -4,16 +4,35 @@
   "required": ["runId"],
   "additionalProperties": false,
   "properties": {
-    "runId": { "type": "string", "minLength": 1 },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Run id of the terminal run to analyse"
+    },
     "runPin": {
       "type": "object",
       "required": ["runId", "transcript"],
       "additionalProperties": false,
+      "description": "Filled by the planner from the run record at plan time — not operator-supplied",
       "properties": {
-        "runId": { "type": "string", "minLength": 1 },
-        "transcript": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "state": { "type": "string" },
-        "agent": { "type": "string" }
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Echo of the pinned run id"
+        },
+        "transcript": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "sha256 of the run transcript in the artifact store; mounted into the workspace"
+        },
+        "state": {
+          "type": "string",
+          "description": "Terminal state the run ended in"
+        },
+        "agent": {
+          "type": "string",
+          "description": "agent@version that executed the pinned run"
+        }
       }
     }
   }
