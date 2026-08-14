@@ -58,7 +58,7 @@ export const api = {
   proposalHistory: (status = "all") =>
     call<{ proposals: Proposal[] }>("GET", `/proposals?status=${encodeURIComponent(status)}`),
   approve: (id: string) => call<ApproveOutcome>("POST", `/proposals/${encodeURIComponent(id)}/approve`, {}),
-  reject: (id: string, reason: string) =>
+  reject: (id: string, reason?: string) =>
     call<{ rejected: boolean }>("POST", `/proposals/${encodeURIComponent(id)}/reject`, { reason }),
   runs: (state?: string) =>
     call<{ runs: RunListItem[] }>("GET", `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`),

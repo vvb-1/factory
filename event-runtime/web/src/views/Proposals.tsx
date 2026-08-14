@@ -264,7 +264,7 @@ export function Proposals({
   });
 
   const reject = useMutation({
-    mutationFn: ({ id, why }: { id: string; why: string }) => api.reject(id, why),
+    mutationFn: ({ id, why }: { id: string; why?: string }) => api.reject(id, why),
     onSuccess: (_, { id }) => {
       invalidate();
       notify(`Rejected proposal ${id}`, "info");
@@ -662,8 +662,15 @@ export function Proposals({
                   Approve… <span className="mono ml-1 opacity-70">a</span>
                 </Button>
               )}
+              <Button
+                variant="danger"
+                disabled={!connected || reject.isPending}
+                onClick={() => reject.mutate({ id: sel.id })}
+              >
+                Dismiss
+              </Button>
               <Button variant="danger" disabled={!connected || reject.isPending} onClick={openReject}>
-                Reject <span className="mono ml-1 opacity-70">x</span>
+                Reject… <span className="mono ml-1 opacity-70">x</span>
               </Button>
             </div>
           )}

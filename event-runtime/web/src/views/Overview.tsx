@@ -125,18 +125,29 @@ export function Overview({
     onError: () => queryClient.invalidateQueries(),
   });
 
+  const dismiss = useMutation({
+    mutationFn: (proposalId: string) => api.reject(proposalId),
+    onSuccess: (_, proposalId) => {
+      queryClient.invalidateQueries();
+      notify(`Dismissed proposal ${proposalId}`, "ok");
+    },
+    onError: () => queryClient.invalidateQueries(),
+  });
+
   const s = status.data;
   const anomalies = s?.anomalies;
   const anomalyRows: {
     text: string;
     links: { label: string; go: () => void }[];
     requeue?: { source: string; eventId: string };
+    dismissProposalId?: string;
   }[] = [];
   if (anomalies) {
     for (const id of anomalies.expiredOpenProposals) {
       anomalyRows.push({
         text: `expired open proposal ${id}`,
         links: [{ label: "View proposal", go: () => onJumpProposal(id) }],
+        dismissProposalId: id,
       });
     }
     if (anomalies.staleLeases > 0) {
@@ -248,6 +259,14 @@ export function Overview({
                       onClick={() => requeue.mutate(a.requeue!)}
                     >
                       Requeue
+                    </Button>
+                  )}
+                  {a.dismissProposalId && (
+                    <Button
+                      disabled={!connected || dismiss.isPending}
+                      onClick={() => dismiss.mutate(a.dismissProposalId!)}
+                    >
+                      Dismiss
                     </Button>
                   )}
                   {a.links.map((l) => (
