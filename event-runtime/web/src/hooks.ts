@@ -116,6 +116,21 @@ export function useListKeys(opts: {
   }, [count, selected, onSelect, onOpen, onClose, keys]);
 }
 
+/**
+ * Marks the context strip's tablist. The strip renders above every view and its
+ * tabs are `role="tab"` too, so `[` / `]` scroll-into-view has to skip them to
+ * reach the view's own status tabs.
+ */
+export const CONTEXT_TABS_ATTR = "data-context-tabs";
+
+/** The selected status tab of the current view — never a context-strip tab. */
+function selectedStatusTab(): HTMLElement | null {
+  const strip = document.querySelector(`[${CONTEXT_TABS_ATTR}]`);
+  const selected = document.querySelectorAll<HTMLElement>('[role="tab"][aria-selected="true"]');
+  for (const tab of selected) if (!strip?.contains(tab)) return tab;
+  return null;
+}
+
 /** `[` / `]` cycle a view's status tabs (Linear's issue-state keys). */
 export function useTabKeys<T extends string>(
   tabs: readonly T[],
@@ -136,9 +151,7 @@ export function useTabKeys<T extends string>(
     return () => window.removeEventListener("keydown", onKey);
   }, [tabs, current, onSelect]);
   useEffect(() => {
-    document
-      .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
-      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    selectedStatusTab()?.scrollIntoView({ inline: "nearest", block: "nearest" });
   }, [current]);
 }
 
