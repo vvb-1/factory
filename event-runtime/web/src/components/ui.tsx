@@ -770,6 +770,11 @@ function dismissToast(id: string) {
   toastListeners.forEach((l) => l(activeToasts));
 }
 
+export function clearToasts() {
+  activeToasts = [];
+  toastListeners.forEach((l) => l(activeToasts));
+}
+
 /**
  * Both regions stay mounted even while empty: a screen reader only announces
  * nodes inserted into a live region that already existed, so mounting the
