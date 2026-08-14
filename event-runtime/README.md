@@ -213,7 +213,12 @@ Port allocation (so instances never collide):
 | :--- | :--- | :--- |
 | interactive default (`serve`) | 7381 | 7382 |
 | `--here` demo | 7391 | 7392 |
-| ticket worktree | 7400 + 2·(ticket % 200) | API + 1 |
+| ticket worktree | dynamic (7400–7798 band) | API + 1 |
+
+Ticket worktrees hash the ticket ID into a preferred even port in the 7400–7798
+band, scanning forward for the first free slot and persisting the assigned ports
+in `.factory/run/ports` (OPS-460). Operators should check the startup banner
+or `.factory/run/ports` rather than calculating fixed offsets.
 
 The seed (`event-runtime/demo/seed.mjs`) drives one of everything through the
 real intake/approval surfaces, using the fake adapter's input modes
