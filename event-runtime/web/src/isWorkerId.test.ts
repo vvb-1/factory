@@ -2,7 +2,7 @@ import { createElement } from "react";
 import "./test-dom";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { ActorRef, isWorkerId } from "./views/Runs";
+import { ActorRef, isWorkerId } from "./components/RunDetailBlocks";
 
 describe("isWorkerId", () => {
   test("static system actors and bare worker are not worker ids", () => {
