@@ -158,7 +158,16 @@ if (import.meta.main) {
     }
   }
 
-  const openPrs = listOpenPrs(repoPath);
+  let openPrs;
+  if (process.env.FACTORY_BRANCH_GUARD_OPEN_PRS_JSON) {
+    try {
+      openPrs = JSON.parse(process.env.FACTORY_BRANCH_GUARD_OPEN_PRS_JSON);
+    } catch {
+      openPrs = null;
+    }
+  } else {
+    openPrs = listOpenPrs(repoPath);
+  }
   if (openPrs === null) {
     console.error(`CANNOT EVALUATE — could not list open PRs in ${repoName}`);
     process.exit(EXIT.CANNOT_EVALUATE);

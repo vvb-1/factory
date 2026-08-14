@@ -220,6 +220,7 @@ repos:
         env: {
           ...process.env,
           FACTORY_BRANCH_GUARD_REPOS_YAML: tmpConfig,
+          FACTORY_BRANCH_GUARD_OPEN_PRS_JSON: "[]",
         },
         encoding: "utf8",
       },
@@ -255,6 +256,7 @@ repos:
         env: {
           ...process.env,
           FACTORY_BRANCH_GUARD_REPOS_YAML: tmpConfig,
+          FACTORY_BRANCH_GUARD_OPEN_PRS_JSON: "[]",
         },
         encoding: "utf8",
       },
