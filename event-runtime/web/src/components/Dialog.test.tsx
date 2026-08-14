@@ -108,4 +108,37 @@ describe("Dialog", () => {
     fireEvent.keyDown(window, { key: "Tab" });
     expect(document.activeElement).toBe(envelope);
   });
+
+  test("Shift+Tab from the first control wraps to the last inside the panel", () => {
+    const r = render(<OpenDialog onClose={() => {}} />);
+    const envelope = r.getByTestId("envelope");
+    const chip = r.getByTestId("chip");
+    envelope.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(chip);
+  });
+
+  test("overlay backdrop click calls current onClose after parent re-render and ignores inner clicks", () => {
+    const closed: string[] = [];
+    function Parent({ tag }: { tag: string }) {
+      return (
+        <OpenDialog onClose={() => closed.push(tag)}>
+          <button type="button" data-testid="inner-btn">
+            inner
+          </button>
+        </OpenDialog>
+      );
+    }
+    const r = render(<Parent tag="first" />);
+    r.rerender(<Parent tag="current" />);
+
+    const dialogPanel = r.getByRole("dialog");
+    fireEvent.mouseDown(dialogPanel);
+    fireEvent.mouseDown(r.getByTestId("inner-btn"));
+    expect(closed).toEqual([]);
+
+    const overlay = dialogPanel.parentElement!;
+    fireEvent.mouseDown(overlay);
+    expect(closed).toEqual(["current"]);
+  });
 });

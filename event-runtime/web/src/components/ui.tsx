@@ -701,7 +701,7 @@ export function Dialog({
   return (
     <div
       className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[10vh]"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onMouseDown={(e) => e.target === e.currentTarget && onCloseRef.current()}
     >
       <div
         ref={panelRef}
