@@ -40,6 +40,12 @@ describe("cli", () => {
     expect(r.all).toContain("usage:");
   });
 
+  test("work rejects an unsafe idle poll interval", () => {
+    const r = runCli(["work", "--poll-ms", "0"]);
+    expect(r.status).not.toBe(0);
+    expect(r.all).toContain("work: --poll-ms must be an integer between 25 and 5000");
+  });
+
   test("status against a dead port says serve is not running, non-zero exit", () => {
     const r = runCli(["status"], { FACTORY_EVENT_PORT: DEAD_PORT });
     expect(r.status).not.toBe(0);

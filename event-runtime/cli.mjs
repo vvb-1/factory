@@ -450,10 +450,14 @@ async function serve(args) {
  * on one machine SQLite (WAL + BEGIN IMMEDIATE claims) makes concurrent
  * claiming correct; Postgres is what remote nodes need, not this.
  *
- *   bun event-runtime/cli.mjs work [--label k=v ...] [--adapter-override fake]
+ *   bun event-runtime/cli.mjs work [--label k=v ...] [--adapter-override fake] [--poll-ms 500]
  */
 async function work(args) {
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
+  const pollMs = Number(flagValue(args, "--poll-ms") ?? 500);
+  if (!Number.isInteger(pollMs) || pollMs < 25 || pollMs > 5_000) {
+    fail("work: --poll-ms must be an integer between 25 and 5000");
+  }
   const adapters = { actions, claude, command, fake };
   if (adapterOverride && !adapters[adapterOverride]) {
     fail(`work: unknown --adapter-override "${adapterOverride}" (have: ${Object.keys(adapters).join(", ")})`);
@@ -504,7 +508,7 @@ async function work(args) {
           ...(adapterOverride ? { adapterOverride } : {}),
         });
         if (!claim) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, pollMs));
           continue;
         }
         inFlight = claim.runId;

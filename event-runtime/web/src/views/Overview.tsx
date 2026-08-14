@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { hashPath } from "../hash";
 import { useNow } from "../hooks";
-import type { JournalEntry, EventFocus, RunState } from "../types";
+import type { JournalEntry, EventFocus, Proposal, RunState } from "../types";
 import type { OperatorContext } from "../context";
 import { ScopeCaption } from "../components/ContextTabs";
 import {
@@ -11,6 +11,7 @@ import {
   Button,
   Disclosure,
   EVENT_STATUS_HUES,
+  humanSize,
   JsonBlock,
   JumpLink,
   Section,
@@ -23,6 +24,59 @@ import {
 } from "../components/ui";
 
 const FEED_CAP = 50;
+
+/**
+ * One collapsed activity-feed row (WM-100): a consecutive span of state
+ * transitions belonging to the same run, keyed by its most recent entry.
+ */
+export interface ActivityGroup {
+  /** seq of the most recent entry in the span — stable render key. */
+  seq: number;
+  runId: string;
+  /** Starting state of the span (the `from` of its oldest transition). */
+  from: string | null;
+  /** Last (most recent) state — carries the state color badge. */
+  to: string;
+  /** Number of transitions collapsed into this row. */
+  count: number;
+  /** Actor / reason / attempt of the most recent transition. */
+  actor: string;
+  reason: string | null;
+  attempt: number | null;
+  /** Timestamp of the most recent transition. */
+  at: string;
+}
+
+/**
+ * Collapse consecutive transitions of the same run into one row (WM-100).
+ * `entries` is newest-first (as kept by useJournalFeed); the output preserves
+ * that order. A run interleaved with other runs' activity produces a separate
+ * group per consecutive span — only adjacent same-run entries merge.
+ */
+export function groupJournalEntries(entries: JournalEntry[]): ActivityGroup[] {
+  const groups: ActivityGroup[] = [];
+  for (const e of entries) {
+    const open = groups[groups.length - 1];
+    if (open && open.runId === e.runId) {
+      // `e` is older than the entries already merged: extend the span's start.
+      open.from = e.from;
+      open.count += 1;
+    } else {
+      groups.push({
+        seq: e.seq,
+        runId: e.runId,
+        from: e.from,
+        to: e.to,
+        count: 1,
+        actor: e.actor,
+        reason: e.reason,
+        attempt: e.attempt,
+        at: e.at,
+      });
+    }
+  }
+  return groups;
+}
 
 /**
  * Live activity feed off GET /journal: first fetch seeds the latest entries,
@@ -98,6 +152,14 @@ export function Overview({
     queryFn: () => api.outbox(15),
     refetchInterval: 2000,
   });
+  // Client-side join for the anomaly deck (WM-95): the doctor only reports
+  // expired proposal ids, so pull the same proposals list the Proposals view
+  // uses to enrich each id with agent/decision/reason/origin/age.
+  const proposalsForDeck = useQuery({
+    queryKey: ["proposals"],
+    queryFn: api.proposals,
+    refetchInterval: 2000,
+  });
   const feed = useJournalFeed();
 
   const requeue = useMutation({
@@ -136,16 +198,23 @@ export function Overview({
 
   const s = status.data;
   const anomalies = s?.anomalies;
+  const proposalsById = new Map<string, Proposal>(
+    (proposalsForDeck.data?.proposals ?? []).map((p) => [p.id, p]),
+  );
   const anomalyRows: {
     text: string;
     links: { label: string; go: () => void }[];
     requeue?: { source: string; eventId: string };
     dismissProposalId?: string;
+    proposalId?: string;
+    proposal?: Proposal;
   }[] = [];
   if (anomalies) {
     for (const id of anomalies.expiredOpenProposals) {
       anomalyRows.push({
         text: `expired open proposal ${id}`,
+        proposalId: id,
+        proposal: proposalsById.get(id),
         links: [{ label: "View proposal", go: () => onJumpProposal(id) }],
         dismissProposalId: id,
       });
@@ -244,13 +313,45 @@ export function Overview({
                 key={i}
                 className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 border-b border-(--border) px-3 py-2 last:border-0"
               >
-                <span
-                  className="min-w-0 break-words sm:truncate text-[12px]"
-                  title={a.text}
-                  style={{ color: "var(--hue-warn)" }}
-                >
-                  {a.text}
-                </span>
+                {a.proposalId ? (
+                  <span className="min-w-0 flex flex-col gap-0.5 text-[12px]" style={{ color: "var(--hue-warn)" }}>
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 break-words">
+                      <span>expired open proposal</span>
+                      <span className="text-(--text-faint)">·</span>
+                      <span>agent: {a.proposal?.agent ?? "—"}</span>
+                      <span className="text-(--text-faint)">·</span>
+                      <span>
+                        {a.proposal?.decision ?? "—"}
+                        {a.proposal?.reason ? ` — ${a.proposal.reason}` : ""}
+                      </span>
+                      <span className="text-(--text-faint)">·</span>
+                      <span className="text-(--text-faint)">
+                        origin {a.proposal?.eventSource ?? "—"}/{a.proposal?.eventId ?? "—"}
+                      </span>
+                      <span className="text-(--text-faint)">·</span>
+                      {a.proposal?.created_at ? (
+                        <Ago iso={a.proposal.created_at} now={now} className="mono text-(--text-faint)" />
+                      ) : (
+                        <span className="text-(--text-faint)">age —</span>
+                      )}
+                    </span>
+                    <span
+                      className="mono truncate text-[11px] text-(--text-faint) cursor-pointer"
+                      title={`${a.proposalId} — click to copy`}
+                      onClick={() => copyText(a.proposalId!, "proposal id")}
+                    >
+                      {a.proposalId}
+                    </span>
+                  </span>
+                ) : (
+                  <span
+                    className="min-w-0 break-words sm:truncate text-[12px]"
+                    title={a.text}
+                    style={{ color: "var(--hue-warn)" }}
+                  >
+                    {a.text}
+                  </span>
+                )}
                 <span className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:shrink-0">
                   <Button onClick={() => copyText(a.text, "anomaly")}>Copy</Button>
                   {a.requeue && (
@@ -374,6 +475,22 @@ export function Overview({
               />
             </div>
           </div>
+
+          {/* Stage 3: Artifact store health */}
+          <div>
+            <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              4. Artifact Store
+            </div>
+            <div className="grid grid-cols-3 gap-2 lg:max-w-md">
+              <StatTile label="artifacts · files" value={s.artifacts.files} />
+              <StatTile label="artifacts · size" value={humanSize(s.artifacts.bytes)} />
+              <StatTile
+                label="artifacts · orphans"
+                value={s.artifacts.orphans}
+                hue={s.artifacts.orphanBytes > 0 ? "var(--hue-warn)" : undefined}
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -400,23 +517,28 @@ export function Overview({
                   : "No lifecycle activity yet."}
             </div>
           ) : (
-            <div className="rounded-md border border-(--border) px-3 py-1" aria-live="off">
-              {feed.entries.map((e) => (
-                <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                  <Ago iso={e.at} now={now} className="mono w-[52px] shrink-0 text-(--text-faint)" />
+            <div
+              className="max-h-[420px] overflow-y-auto rounded-md border border-(--border) px-3 py-1"
+              aria-live="off"
+            >
+              {groupJournalEntries(feed.entries).map((g) => (
+                <div key={g.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
+                  <Ago iso={g.at} now={now} className="mono w-[52px] shrink-0 text-(--text-faint)" />
                   <JumpLink
-                    onClick={() => onJumpRun(e.runId)}
-                    title={e.runId}
+                    onClick={() => onJumpRun(g.runId)}
+                    title={g.runId}
                     className="max-w-36 shrink-0 truncate"
                   >
-                    {e.runId}
+                    {g.runId}
                   </JumpLink>
                   <span className="shrink-0">
-                    {e.from ?? "·"} → <StateBadge state={e.to} />
+                    {g.from ?? "·"} → {g.count > 1 ? "… → " : ""}
+                    <StateBadge state={g.to} />
                   </span>
                   <span className="truncate text-(--text-faint)">
-                    by {e.actor}
-                    {e.reason ? ` (${e.reason})` : ""}
+                    by {g.actor}
+                    {g.reason ? ` (${g.reason})` : ""}
+                    {g.count > 1 ? ` · ${g.count} transitions` : ""}
                   </span>
                 </div>
               ))}

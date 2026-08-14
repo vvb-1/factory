@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError, artifactUrl } from "../api";
+import { api, ApiError } from "../api";
 import { keyGuard, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
@@ -9,7 +9,6 @@ import {
   Button,
   Dialog,
   Disclosure,
-  humanSize,
   JsonBlock,
   JumpLink,
   KV,
@@ -20,7 +19,7 @@ import {
   copyText,
   notify,
 } from "../components/ui";
-import { ActorRef, TERMINAL } from "./Runs";
+import { ActorRef, ArtifactRow, RunFailureBanner, TERMINAL } from "./Runs";
 
 /**
  * Full-page run view (`#/run/:id`, webui doc §10.11) — the trace at a
@@ -173,6 +172,9 @@ export function RunFull({
             {detail.isError ? "Could not load run detail." : "Loading run…"}
           </div>
         ) : (
+          <>
+          {/* The failure first, full width under the header (WM-93) — renders nothing for other states. */}
+          <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} className="mx-6 mt-6 mb-0" />
           <div className="flex flex-col gap-8 p-6 xl:flex-row">
             {/* Main column: the trace, at a readable measure — the point of the page. */}
             <main className="min-w-0 flex-1 xl:max-w-[900px]">
@@ -315,28 +317,7 @@ export function RunFull({
                   ) : (
                     <div className="rounded-md border border-(--border) px-3 py-1">
                       {(d.result.artifacts ?? []).map((a) => (
-                        <div
-                          key={a.sha256}
-                          className="flex items-baseline justify-between gap-3 border-b border-(--border) py-1.5 last:border-0"
-                        >
-                          <span className="truncate">
-                            {a.kind}
-                            <span className="mono ml-2 text-[11px] text-(--text-faint)" title={a.sha256}>
-                              {a.sha256.slice(0, 12)}
-                            </span>
-                          </span>
-                          <span className="flex shrink-0 items-baseline gap-3">
-                            <span className="tabular-nums text-(--text-faint)">{humanSize(a.sizeBytes)}</span>
-                            <a
-                              href={artifactUrl(a.sha256)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-(--accent) hover:underline"
-                            >
-                              Open
-                            </a>
-                          </span>
-                        </div>
+                        <ArtifactRow key={a.sha256} a={a} />
                       ))}
                     </div>
                   )}
@@ -352,6 +333,7 @@ export function RunFull({
               )}
             </aside>
           </div>
+          </>
         )}
       </div>
 

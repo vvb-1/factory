@@ -11,7 +11,7 @@ import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
 import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
-import type { Attempt, ArtifactRef, RunListItem, RunState } from "../types";
+import type { Attempt, ArtifactRef, LifecycleEvent, RunListItem, RunState } from "../types";
 import {
   Ago,
   Button,
@@ -162,6 +162,57 @@ function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
   );
 }
 
+/** Terminal states whose reason is a failure the operator reads first (WM-93). */
+const ERROR_STATES: RunState[] = ["FAILED", "TIMED_OUT", "REFUSED"];
+
+/**
+ * Why the run ended badly, surfaced first (WM-93): a FAILED/TIMED_OUT/REFUSED
+ * run's reason used to live only in the last LIFECYCLE row, below the spec
+ * JSON. Derived from the same lifecycle data the LIFECYCLE section renders —
+ * the last transition into the current terminal state — no new API surface.
+ * Renders nothing for any other state.
+ */
+export function RunFailureBanner({
+  state,
+  lifecycle,
+  className = "mb-4",
+}: {
+  state: RunState;
+  lifecycle: LifecycleEvent[];
+  className?: string;
+}) {
+  if (!ERROR_STATES.includes(state)) return null;
+  const terminal = [...lifecycle].reverse().find((e) => e.to_state === state);
+  const reason = terminal?.reason ?? null;
+  const hue = state === "REFUSED" ? "var(--hue-warn)" : "var(--hue-err)";
+  return (
+    <div
+      role="alert"
+      className={`rounded-md border px-3 py-2 ${className}`}
+      style={{ borderColor: hue, background: `color-mix(in oklch, ${hue} 8%, transparent)` }}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[11px] font-medium tracking-wider uppercase" style={{ color: hue }}>
+          {state}
+        </span>
+        {reason && (
+          <button
+            type="button"
+            onClick={() => copyText(reason, "failure reason")}
+            className="shrink-0 text-[12px] text-(--text-dim) hover:text-(--accent)"
+          >
+            Copy reason
+          </button>
+        )}
+      </div>
+      {/* Full string, wrapping allowed — never truncate the one line that explains the failure. */}
+      <div className="mono mt-1 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-(--text)">
+        {reason ?? "No reason recorded on the terminal transition."}
+      </div>
+    </div>
+  );
+}
+
 const rowWash = (s: string) =>
   s === "FAILED" || s === "TIMED_OUT" ? "row-wash-err" : s === "REFUSED" ? "row-wash-warn" : "";
 
@@ -183,7 +234,7 @@ export function ActorRef({ actor, className }: { actor: string; className?: stri
 const isTextArtifact = (k: string) =>
   /^(transcript|diff|report|evidence)$/i.test(k) || /\.(txt|json|jsonl|md|log)$/i.test(k);
 
-function ArtifactRow({ a }: { a: ArtifactRef }) {
+export function ArtifactRow({ a }: { a: ArtifactRef }) {
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -233,7 +284,7 @@ function ArtifactRow({ a }: { a: ArtifactRef }) {
             </button>
           )}
           <a
-            href={artifactUrl(a.sha256)}
+            href={artifactUrl(a.sha256, a.kind)}
             target="_blank"
             rel="noreferrer"
             className="text-(--accent) hover:underline"
@@ -650,6 +701,19 @@ export function Runs({
                         ? "No runs."
                         : `No ${tab} runs.`
                 }
+                action={
+                  // Only In flight can strand an operator with no way back but the
+                  // context strip's All tab — offer the same exit inline (WM-91).
+                  context.kind === "inflight" ? (
+                    <Button
+                      onClick={() => {
+                        if (typeof window !== "undefined") window.location.hash = "#/runs";
+                      }}
+                    >
+                      Show all runs
+                    </Button>
+                  ) : undefined
+                }
               />
             )}
           </tbody>
@@ -693,6 +757,8 @@ export function Runs({
 
           {d && (
             <>
+          <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} />
+
           <Section title="Run">
             <KV k="run" v={d.run.runId} />
             <KV
