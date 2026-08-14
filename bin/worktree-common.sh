@@ -11,7 +11,10 @@ BASE_BRANCH="${FACTORY_BASE_BRANCH:-develop}"
 # 7382 default web, 7383/7384 seen in ad-hoc second instances); the --here
 # demo env and per-ticket worktrees live above it:
 #   --here demo:      API 7391, web 7392
-#   ticket worktrees: API 7400 + 2*(ticket % 200), web = API + 1  (7400–7799)
+#   ticket worktrees: even API port in 7400–7798 from a hash of the *full*
+#                     ticket string (OPS-123 ≠ OPS-123-scratch, OPS-201 ≠
+#                     OPS-401), persisted in .factory/run/ports. Occupied
+#                     slots walk forward. web = API + 1.
 PORT_BASE=7400
 PORT_SPAN=200
 HERE_API_PORT=7391
@@ -30,15 +33,126 @@ ticket_number() {
   [[ "$1" =~ ^[A-Z]+-([0-9]+) ]] || die "ticket must look like OPS-123 (got '$1')"
   printf '%s' "${BASH_REMATCH[1]}"
 }
-ticket_api_port() { printf '%s' "$((PORT_BASE + 2 * ($(ticket_number "$1") % PORT_SPAN)))"; }
+
+# Preferred even API port for a ticket. Hashes the full id so a numeric
+# collision (N and N+200) or a -scratch suffix cannot share a port.
+ticket_api_port() {
+  local hash
+  hash=$(printf '%s' "$1" | cksum | awk '{print $1}')
+  printf '%s' "$((PORT_BASE + 2 * (hash % PORT_SPAN)))"
+}
 
 # Runtime state for a checkout lives under its own .factory/ (gitignored):
 #   .factory/event-runtime/   FACTORY_EVENT_HOME (db + workspaces)
-#   .factory/run/             pidfiles + logs
+#   .factory/run/             pidfiles + logs + ports
 run_dir() { printf '%s/.factory/run' "$1"; }
 event_home() { printf '%s/.factory/event-runtime' "$1"; }
 
 pid_alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+# Persist / restore the ports this checkout actually bound (OPS-460).
+read_ports() { # <worktree> → prints "api web"
+  local f api="" web="" k v
+  f="$(run_dir "$1")/ports"
+  [[ -f "$f" ]] || return 1
+  while IFS='=' read -r k v; do
+    case "$k" in
+      api) api="$v" ;;
+      web) web="$v" ;;
+    esac
+  done <"$f"
+  [[ "$api" =~ ^[0-9]+$ && "$web" =~ ^[0-9]+$ ]] || return 1
+  printf '%s %s\n' "$api" "$web"
+}
+
+write_ports() { # <worktree> <api> <web>
+  mkdir -p "$(run_dir "$1")"
+  printf 'api=%s\nweb=%s\n' "$2" "$3" >"$(run_dir "$1")/ports"
+}
+
+# Listening TCP port for a pidfile, or fail. Used to recover ports from a
+# daemon started before .factory/run/ports existed.
+listen_tcp_port() { # <pidfile>
+  pid_alive "$1" || return 1
+  command -v lsof >/dev/null || return 1
+  local port
+  port=$(lsof -nP -iTCP -sTCP:LISTEN -p "$(cat "$1")" 2>/dev/null \
+    | awk 'NR>1 {print $9; exit}' | awk -F: '{print $NF}')
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$port"
+}
+
+health_json() { # <port>
+  curl -sf -m 1 "http://127.0.0.1:$1/health" 2>/dev/null || true
+}
+
+# Extract env.<field> from a /health JSON body. Empty if missing/null/unparseable.
+health_field() { # <json> <field>
+  local json="$1" field="$2"
+  [[ -n "$json" ]] || return 0
+  FACTORY_HEALTH_JSON="$json" FACTORY_HEALTH_FIELD="$field" bun --eval '
+    let d;
+    try { d = JSON.parse(process.env.FACTORY_HEALTH_JSON); } catch { process.exit(0); }
+    const v = d?.env?.[process.env.FACTORY_HEALTH_FIELD];
+    if (v != null) process.stdout.write(String(v));
+  '
+}
+
+# First even port at or after preferred in the ticket band that is free or
+# already serving expected_home. Dies if the whole band is someone else's.
+allocate_api_port() { # <preferred> <expected_home>
+  local preferred="$1" expected="$2"
+  local port="$preferred" i=0 json occupant=""
+  [[ "$preferred" =~ ^[0-9]+$ ]] || die "invalid preferred port '$preferred'"
+  while [[ $i -lt $PORT_SPAN ]]; do
+    json=$(health_json "$port")
+    occupant=$(health_field "$json" home)
+    if [[ -z "$occupant" || "$occupant" == "$expected" ]]; then
+      printf '%s' "$port"
+      return 0
+    fi
+    warn "port $port is owned by $occupant — trying next"
+    port=$((port + 2))
+    if [[ $port -ge $((PORT_BASE + 2 * PORT_SPAN)) ]]; then
+      port=$PORT_BASE
+    fi
+    i=$((i + 1))
+  done
+  die "no free API port in $PORT_BASE–$((PORT_BASE + 2 * PORT_SPAN - 2)); $preferred is owned by ${occupant:-unknown}"
+}
+
+# Refuse to proceed (and never seed) when /health is a different event home.
+assert_event_home() { # <health_json> <expected_home> <port>
+  local json="$1" expected="$2" port="$3" got
+  got=$(health_field "$json" home)
+  if [[ "$got" != "$expected" ]]; then
+    die "port $port is owned by another runtime (env.home=${got:-unknown}, this worktree=$expected) — refusing to seed"
+  fi
+}
+
+# live_flag=1 means --live (no adapter override → env.adapter is null).
+# live_flag=0 means fake (env.adapter must be "fake").
+assert_event_adapter() { # <health_json> <live_flag> <port>
+  local json="$1" live="$2" port="$3" got
+  got=$(health_field "$json" adapter)
+  if [[ "$live" -eq 1 ]]; then
+    if [[ -n "$got" ]]; then
+      die "port $port reports adapter '$got' but --live requested no override"
+    fi
+  else
+    if [[ "$got" != "fake" ]]; then
+      die "port $port reports adapter '${got:-none}' but fake-adapter mode was requested (restart without --live, or with --adapter-override fake)"
+    fi
+  fi
+}
+
+adapter_banner() { # <adapter from /health>
+  case "$1" in
+    fake) printf '%s' "(fake adapter — approvals are harmless)" ;;
+    "")   printf '%s' "(live adapters)" ;;
+    *)    printf '%s' "(adapter $1)" ;;
+  esac
+}
 
 # Teardown is two-phase so the waits overlap: term_daemon every pidfile first,
 # then await_daemon each — total cost is the slowest daemon's exit, not the
