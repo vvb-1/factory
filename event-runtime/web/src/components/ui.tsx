@@ -620,7 +620,7 @@ export function Button({
 }) {
   const styles = {
     default: "border-(--border-strong) bg-(--surface-2) text-(--text) hover:bg-(--surface-3)",
-    primary: "border-transparent bg-(--accent) text-white hover:opacity-90",
+    primary: "border-transparent bg-(--accent) text-(--on-accent) hover:opacity-90",
     danger:
       "border-(--border-strong) bg-(--surface-2) hover:bg-(--surface-3) text-[color:var(--hue-err)]",
   }[variant];
