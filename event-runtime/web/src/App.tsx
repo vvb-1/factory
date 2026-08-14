@@ -20,15 +20,22 @@ import { ToastContainer, copyLink, copyText } from "./components/ui";
 import { Agents } from "./views/Agents";
 import { Events } from "./views/Events";
 import { Overview } from "./views/Overview";
-import { Proposals } from "./views/Proposals";
 import { RunFull } from "./views/RunFull";
 import { Runs } from "./views/Runs";
 import { Workers } from "./views/Workers";
-import { NAV } from "./nav";
+import { NAV, type NavKey } from "./nav";
+
+type NavBadge = {
+  count: number;
+  hue: string;
+  word?: string;
+  title?: string;
+};
 
 const Graph = lazy(() => import("./views/Graph").then((m) => ({ default: m.Graph })));
 const Projects = lazy(() => import("./views/Projects").then((m) => ({ default: m.Projects })));
 const Schedules = lazy(() => import("./views/Schedules").then((m) => ({ default: m.Schedules })));
+const Proposals = lazy(() => import("./views/Proposals").then((m) => ({ default: m.Proposals })));
 
 export function App() {
   const [route, navigateRaw] = useHashRoute();
@@ -188,6 +195,42 @@ export function App() {
   const stoppedSchedulesCount =
     ((status.data?.anomalies as any)?.stoppedSchedules ?? []).length;
 
+  // Workers is the one badge whose meaning can flip: a stale
+  // heartbeat is a worker that is gone while claiming to work, so it
+  // outranks the busy count. The word carries that — reading the
+  // count off the tone alone fails in the contrast theme.
+  const navBadges: Record<NavKey, NavBadge> = {
+    overview: { count: 0, hue: "var(--accent)" },
+    events: { count: scopedNav ? 0 : eventAttention, hue: "var(--accent)" },
+    proposals: { count: scopedNav ? 0 : openProposals, hue: "var(--accent)" },
+    runs: { count: scopedRunsNav ? 0 : activeRuns, hue: "var(--accent)" },
+    projects: { count: 0, hue: "var(--accent)" },
+    agents: { count: 0, hue: "var(--accent)" },
+    schedules:
+      stoppedSchedulesCount > 0
+        ? {
+            count: stoppedSchedulesCount,
+            hue: "var(--hue-err)",
+            word: "stopped",
+            title: `${stoppedSchedulesCount} scheduled loop${stoppedSchedulesCount === 1 ? "" : "s"} stopped or errored`,
+          }
+        : { count: 0, hue: "var(--accent)" },
+    workers:
+      staleWorkers > 0
+        ? {
+            count: staleWorkers,
+            hue: "var(--hue-warn)",
+            word: "stale",
+            title: `${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`,
+          }
+        : {
+            count: busyWorkers,
+            hue: "var(--accent)",
+            title: `${busyWorkers} worker${busyWorkers === 1 ? "" : "s"} busy`,
+          },
+    graph: { count: 0, hue: "var(--accent)" },
+  };
+
   const env = health.data?.env;
   const envHue = !connected
     ? "var(--hue-err)"
@@ -316,40 +359,7 @@ export function App() {
         </div>
         <div className="flex-1 px-2">
           {NAV.map((n) => {
-            // Workers is the one badge whose meaning can flip: a stale
-            // heartbeat is a worker that is gone while claiming to work, so it
-            // outranks the busy count. The word carries that — reading the
-            // count off the tone alone fails in the contrast theme.
-            const badge: { count: number; hue: string; word?: string; title?: string } =
-              n.key === "proposals"
-                ? { count: scopedNav ? 0 : openProposals, hue: "var(--accent)" }
-                : n.key === "runs"
-                  ? { count: scopedRunsNav ? 0 : activeRuns, hue: "var(--accent)" }
-                  : n.key === "events"
-                    ? { count: scopedNav ? 0 : eventAttention, hue: "var(--accent)" }
-                    : n.key === "schedules"
-                      ? stoppedSchedulesCount > 0
-                        ? {
-                            count: stoppedSchedulesCount,
-                            hue: "var(--hue-err)",
-                            word: "stopped",
-                            title: `${stoppedSchedulesCount} scheduled loop${stoppedSchedulesCount === 1 ? "" : "s"} stopped or errored`,
-                          }
-                        : { count: 0, hue: "var(--accent)" }
-                    : n.key === "workers"
-                      ? staleWorkers > 0
-                        ? {
-                            count: staleWorkers,
-                            hue: "var(--hue-warn)",
-                            word: "stale",
-                            title: `${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`,
-                          }
-                        : {
-                            count: busyWorkers,
-                            hue: "var(--accent)",
-                            title: `${busyWorkers} worker${busyWorkers === 1 ? "" : "s"} busy`,
-                          }
-                      : { count: 0, hue: "var(--accent)" };
+            const badge = navBadges[n.key];
             return (
               <button
                 key={n.key}
@@ -488,18 +498,20 @@ export function App() {
         )}
         <div className="min-h-0 flex-1">
           {view === "proposals" ? (
-            <Proposals
-              connected={connected}
-              context={context}
-              onRunQueued={jumpToRun}
-              focusProposalId={focusProposalId}
-              onSelectProposal={(id) => navigate(hashPath("proposals", id))}
-              focusExpired={focusExpired}
-              onFocusExpiredConsumed={() => setFocusExpired(false)}
-              onJumpAgent={jumpToAgent}
-              onJumpEvent={jumpToEvent}
-              rejumpEpoch={rejumpEpoch}
-            />
+            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading proposals…</div>}>
+              <Proposals
+                connected={connected}
+                context={context}
+                onRunQueued={jumpToRun}
+                focusProposalId={focusProposalId}
+                onSelectProposal={(id) => navigate(hashPath("proposals", id))}
+                focusExpired={focusExpired}
+                onFocusExpiredConsumed={() => setFocusExpired(false)}
+                onJumpAgent={jumpToAgent}
+                onJumpEvent={jumpToEvent}
+                rejumpEpoch={rejumpEpoch}
+              />
+            </Suspense>
           ) : view === "run" && fullRunId ? (
             <RunFull
               runId={fullRunId}
@@ -631,7 +643,7 @@ export function App() {
         />
       )}
       {helpOpen && <ShortcutsDialog onClose={() => setHelpOpen(false)} />}
-      <GoPrefixHint armed={goArmed} />
+      <GoPrefixHint armed={goArmed} currentView={view} />
       <ToastContainer />
     </div>
   );
@@ -648,7 +660,7 @@ export function App() {
  * while empty — a screen reader only announces nodes inserted into a live
  * region that already existed (see ToastContainer).
  */
-function GoPrefixHint({ armed }: { armed: boolean }) {
+export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentView?: string }) {
   return (
     <div
       role="status"
@@ -674,11 +686,28 @@ function GoPrefixHint({ armed }: { armed: boolean }) {
               g
             </span>
             <span className="text-(--text-dim)">then</span>
-            {NAV.map((n) => (
-              <span key={n.key} className="whitespace-nowrap text-(--text-faint)">
-                <span className="mono text-(--text)">{n.go}</span> {n.label}
-              </span>
-            ))}
+            {NAV.map((n) => {
+              const isCurrent =
+                n.key === currentView || (n.key === "runs" && currentView === "run");
+              if (isCurrent) {
+                return (
+                  <span
+                    key={n.key}
+                    className="whitespace-nowrap opacity-60 text-(--text-faint)"
+                  >
+                    <span className="mono text-(--text-dim)">{n.go}</span> {n.label}{" "}
+                    <span className="rounded px-1 text-[10px] text-(--text-faint) ring-1 ring-inset ring-(--border)">
+                      current
+                    </span>
+                  </span>
+                );
+              }
+              return (
+                <span key={n.key} className="whitespace-nowrap text-(--text-faint)">
+                  <span className="mono text-(--text)">{n.go}</span> {n.label}
+                </span>
+              );
+            })}
           </div>
         </>
       )}

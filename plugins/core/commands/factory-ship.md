@@ -1,6 +1,7 @@
 ---
 description: Release — open a develop → master PR, wait for CI, merge, verify the deploy
-argument-hint: [optional: repo name from config/repos.yaml; default the current repo]
+argument-hint:
+  [optional: repo name from config/repos.yaml; default the current repo]
 model: opus
 ---
 

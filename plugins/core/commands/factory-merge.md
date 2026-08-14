@@ -1,6 +1,10 @@
 ---
 description: Review open PRs thoroughly, fix what's fixable, merge what's good
-argument-hint: [optional: PR numbers or issue IDs, e.g. "123" or "CW-310"; default all open PRs]
+argument-hint:
+  [
+    optional: PR numbers or issue IDs,
+    e.g. "123" or "CW-310"; default all open PRs,
+  ]
 model: opus
 ---
 

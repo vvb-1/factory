@@ -1,7 +1,8 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { Button, Countdown, DetailPane, notify, shortId, ToastContainer } from "./ui";
+import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, notify, shortId, ToastContainer } from "./ui";
+import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 
 function stackOf(r: ReturnType<typeof render>): HTMLElement {
   const parent = r.getByRole("status").parentElement;
@@ -15,14 +16,11 @@ function classes(el: HTMLElement): string[] {
 
 beforeEach(() => {
   jest.useFakeTimers();
+  clearToasts();
 });
 
 afterEach(() => {
-  // activeToasts in ui.tsx is module-scoped with no exported reset. Drain the
-  // 3s dismiss timeouts so leftover toasts cannot leak into the next test.
-  act(() => {
-    jest.runOnlyPendingTimers();
-  });
+  clearToasts();
   jest.useRealTimers();
   cleanup();
 });
@@ -203,3 +201,118 @@ describe("DetailPane", () => {
     expect(r.queryByText("Close")).toBeNull();
   });
 });
+
+describe("getValueHue", () => {
+  test("returns matching hues for states, decisions, and statuses", () => {
+    expect(getValueHue("state", "failed")).toBe("var(--hue-err)");
+    expect(getValueHue("state", "COMPLETED")).toBe("var(--hue-ok)");
+    expect(getValueHue("state", "RUNNING")).toBe("var(--hue-warn)");
+    expect(getValueHue("decision", "run")).toBe("var(--hue-info)");
+    expect(getValueHue("status", "admitted")).toBe("var(--hue-info)");
+  });
+});
+
+describe("FilterInput autocomplete (OPS-506)", () => {
+  function renderFilter(props: {
+    value?: string;
+    onChange?: (v: string) => void;
+    query?: ReturnType<typeof parseFilterQuery>;
+    facets?: typeof RUN_FACETS;
+  } = {}) {
+    const { value = "", onChange = () => {}, query, facets = RUN_FACETS } = props;
+    const parsed = query ?? parseFilterQuery(value, facets);
+    return render(
+      <FilterInput
+        value={value}
+        onChange={onChange}
+        placeholder="Filter runs"
+        label="Filter runs"
+        query={parsed}
+        facets={facets}
+      />,
+    );
+  }
+
+  test("shows suggestions dropdown when focused and detects active token", () => {
+    const r = renderFilter({ value: "" });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const listbox = r.getByRole("listbox");
+    expect(listbox).toBeTruthy();
+    expect(r.getByText("state:")).toBeTruthy();
+    expect(r.getByText("agent:")).toBeTruthy();
+    expect(r.getByText("is:stale")).toBeTruthy();
+  });
+
+  test("suggests available enum values with hues when typing facet value", () => {
+    const r = renderFilter({ value: "state:" });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const listbox = r.getByRole("listbox");
+    expect(listbox).toBeTruthy();
+    const failedOption = r.getByText("failed");
+    expect(failedOption).toBeTruthy();
+  });
+
+  test("navigates suggestions with ArrowDown / ArrowUp and selects with Enter", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "st", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const options = r.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("state:");
+  });
+
+  test("selects active suggestion with Tab", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "state:fa", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(onChange).toHaveBeenCalledWith("state:failed ");
+  });
+
+  test("Esc dismisses dropdown, subsequent Esc clears filter", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "state:fa", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    expect(r.queryByRole("listbox")).toBeTruthy();
+
+    // First Esc: dismisses popover
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(r.queryByRole("listbox")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+
+    // Second Esc: clears filter
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  test("clicking a suggestion item selects it and updates input value", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const agentOpt = r.getByText("agent:");
+    fireEvent.mouseDown(agentOpt);
+    expect(onChange).toHaveBeenCalledWith("agent:");
+  });
+});
+

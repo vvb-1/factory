@@ -16,9 +16,9 @@ concurrency:
 jobs:
   verify:
     name: Verify
-    # Self-hosted per project-conventions PC-03 — cloud runners are forbidden in
-    # private repos (billing).
-    runs-on: [self-hosted, Linux]
+    # Self-hosted per project-conventions PC-03 / PC-22 — cloud runners are
+    # forbidden, and shadow is the dedicated host runner label.
+    runs-on: [self-hosted, shadow]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -41,6 +41,9 @@ jobs:
       # is why local `bun test event-runtime` was a false green.
       - name: Install event-runtime/web deps
         run: cd event-runtime/web && bun install --frozen-lockfile
+
+      - name: Formatting check (prettier)
+        run: bun run format:check
 
       - name: Unit and integration tests
         run: bun test

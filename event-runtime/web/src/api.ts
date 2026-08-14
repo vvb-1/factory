@@ -101,7 +101,42 @@ export const api = {
     call<JanitorResult>("POST", `/repos/${encodeURIComponent(name)}/janitor`, { apply }),
   // The worker registry: which processes are alive, where, and what they run.
   workers: () => call<{ workers: Worker[] }>("GET", "/workers"),
+  // The schedule registry: recurring loops, cadence, timing, and health.
+  schedules: () => call<{ schedules: ScheduleItem[] }>("GET", "/schedules"),
+  // Trigger an ad-hoc run of a registered schedule loop.
+  triggerSchedule: (loop: string) =>
+    call<TriggerOutcome>("POST", `/schedules/${encodeURIComponent(loop)}/run`, {}),
 };
+
+export interface ScheduleItem {
+  loop: string;
+  every: string;
+  cadenceSeconds: number | null;
+  eventType: string;
+  approval: "watched" | "auto";
+  catchUp: "none" | "last" | "all";
+  singleton: boolean;
+  enabled: boolean;
+  lastSlot: string | null;
+  lastCompletedSlot: string | null;
+  neverCompleted: boolean;
+  nextDue: string | null;
+  intervalsLate: number | null;
+  stopped: boolean;
+  error: string | null;
+}
+
+export interface TriggerOutcome {
+  admitted: boolean;
+  duplicate: boolean;
+  eventId: string;
+  proposalId: string | null;
+  runId: string | null;
+  decision: string;
+  reason: string | null;
+  disabled: boolean;
+  loop: string;
+}
 
 /** Browser URL for a stored artifact's bytes (streamed by the control API); `name` becomes the save-as filename. */
 export const artifactUrl = (sha256: string, name?: string) =>

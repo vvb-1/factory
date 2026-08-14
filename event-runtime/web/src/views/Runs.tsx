@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
-import { hashPath } from "../hash";
+import { hashPath, hashProject, withProject } from "../hash";
 import { dur } from "../heartbeat";
 import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
 import {
@@ -9,11 +9,12 @@ import {
   cycleColumnSort,
   flattenSections,
   grouped,
+  sortRows,
   toggleCollapsed,
   visibleColumns,
   type DisplayConfig,
 } from "../displayOptions";
-import { DisplayOptions } from "../components/DisplayOptions";
+import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
 import { readPinnedRuns, savePinnedRuns } from "../components/ContextTabs";
@@ -268,12 +269,16 @@ export function RunFailureBanner({
 const rowWash = (s: string) =>
   s === "FAILED" || s === "TIMED_OUT" ? "row-wash-err" : s === "REFUSED" ? "row-wash-warn" : "";
 
+export function isWorkerId(actor: string): boolean {
+  return /^worker_.+/.test(actor);
+}
+
 export function ActorRef({ actor, className }: { actor: string; className?: string }) {
-  if (!/^worker_.+/.test(actor)) return <>{actor}</>;
+  if (!isWorkerId(actor)) return <>{actor}</>;
   return (
     <JumpLink
       onClick={() => {
-        window.location.hash = `#/${hashPath("workers", actor)}`;
+        window.location.hash = `#/${withProject(hashPath("workers", actor), hashProject(window.location.hash))}`;
       }}
       title={actor}
       className={className}
@@ -669,6 +674,13 @@ export function Runs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.runId, d?.run.runId, d?.run.state, attemptsExhausted, connected]);
 
+  const handleExport = () => {
+    const sorted = sortRows(visible, displayConfig, display);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportJson(`runs-export-${dateStr}.json`, sorted);
+    notify(`Exported ${sorted.length} run${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+  };
+
   return (
     <div className="flex h-full min-w-0">
       <ListPane
@@ -709,7 +721,12 @@ export function Runs({
             })}
           </div>
           <span className="ml-auto">
-            <DisplayOptions config={displayConfig} state={display} onChange={setDisplay} />
+            <DisplayOptions
+              config={displayConfig}
+              state={display}
+              onChange={setDisplay}
+              onExport={visible.length > 0 ? handleExport : undefined}
+            />
           </span>
           <FilterInput
             value={filter}
@@ -879,16 +896,29 @@ export function Runs({
         <DetailPane
           widthClass="w-[460px]"
           title={
-            <span className="flex min-w-0 items-center gap-2">
-              <StateBadge state={sel.state} />
-              <JumpLink
-                onClick={() => onOpenFull(sel.runId)}
-                title={`Open ${sel.runId}`}
-                className="truncate"
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal">
+              <button
+                type="button"
+                onClick={() => onSelectRun(null)}
+                className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
+                title="Back to runs list"
               >
-                {shortId(sel.runId)}
-              </JumpLink>
-            </span>
+                Runs
+              </button>
+              <span className="text-(--text-faint)" aria-hidden="true">
+                /
+              </span>
+              <span className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)" aria-current="page">
+                <StateBadge state={sel.state} />
+                <JumpLink
+                  onClick={() => onOpenFull(sel.runId)}
+                  title={`Open ${sel.runId}`}
+                  className="truncate mono"
+                >
+                  {shortId(sel.runId)}
+                </JumpLink>
+              </span>
+            </nav>
           }
           actions={
             <>
