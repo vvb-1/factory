@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { hashJson } from "./canonical.mjs";
 import { DEAD_LETTER_AFTER } from "./config.mjs";
 import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
-import { lifecycleOf, runState } from "./lifecycle.mjs";
+import { createRun, lifecycleOf, runState } from "./lifecycle.mjs";
 import { buildRunSpec, idempotencyKeyFor, planAdmittedEvents, planEvent } from "./planner.mjs";
 import { loadRegistry } from "./registry.mjs";
 
@@ -299,6 +300,112 @@ describe("planAdmittedEvents", () => {
     const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
     expect(event.status).toBe("admitted");
     expect(event.plan_failures).toBe(0);
+  });
+
+  test("TTL re-plan preserves repoPin for repository workspace agent across expiry (OPS-418)", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "evrt-plan-factory-"));
+    mkdirSync(path.join(root, "config"), { recursive: true });
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), "evrt-repo-"));
+    execFileSync("git", ["init", "--quiet", "--initial-branch=develop"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+    writeFileSync(path.join(repoDir, "README.md"), "bj29\n");
+    execFileSync("git", ["add", "."], { cwd: repoDir });
+    execFileSync("git", ["commit", "--quiet", "-m", "init"], { cwd: repoDir });
+
+    writeFileSync(
+      path.join(root, "config", "repos.yaml"),
+      `repos:\n  - name: bj29\n    path: ${repoDir}\n    github: watt-mind/bj29\n    base: develop\n`,
+    );
+    const oldReposRoot = process.env.FACTORY_REPOS_ROOT;
+    const oldHome = process.env.FACTORY_EVENT_HOME;
+    process.env.FACTORY_REPOS_ROOT = root;
+    process.env.FACTORY_EVENT_HOME = mkdtempSync(path.join(os.tmpdir(), "evrt-plan-home-"));
+
+    try {
+      const db = openDb(":memory:");
+      const ref = admit(db, {
+        eventId: "triage-1",
+        type: "factory.triage.requested",
+        payload: { repo: "bj29", ref: "develop" },
+      });
+      const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test" });
+      expect(outcome.decision).toBe("run");
+      const originalSpec = JSON.parse(outcome.proposal.spec_json);
+      expect(originalSpec.input.repoPin).toBeTruthy();
+      expect(originalSpec.input.repoPin.sha).toMatch(/^[0-9a-f]{40}$/);
+
+      // Stored event envelope now carries repoPin
+      const storedEvent = db.query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+      const storedEnvelope = JSON.parse(storedEvent.envelope_json);
+      expect(storedEnvelope.payload.repoPin).toBeTruthy();
+
+      const mapping = registry.eventTypes["factory.triage.requested"];
+      const replannedSpec = buildRunSpec(registry, storedEnvelope, mapping, {
+        runId: outcome.runId,
+        policyVersion: "git:test",
+        now: NOW + 3600 * 1000,
+      });
+      expect(replannedSpec.input.repoPin).toEqual(originalSpec.input.repoPin);
+      expect(hashJson(replannedSpec)).toBe(outcome.proposal.spec_hash);
+      expect(replannedSpec.idempotencyKey).toBe(originalSpec.idempotencyKey);
+    } finally {
+      process.env.FACTORY_REPOS_ROOT = oldReposRoot;
+      process.env.FACTORY_EVENT_HOME = oldHome;
+    }
+  });
+
+  test("TTL re-plan preserves runPin for artifacts workspace agent across expiry (OPS-418)", () => {
+    const db = openDb(":memory:");
+    const priorRunId = "run_prior_123";
+    createRun(db, {
+      runId: priorRunId,
+      idempotencyKey: "prior-key",
+      spec: {},
+      specJson: JSON.stringify({ agent: "factory-status-report@1" }),
+      specHash: "sha256:0",
+      actor: "test",
+      policyVersion: "git:test",
+    });
+    db.query(
+      `INSERT INTO results (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
+       VALUES (?, 1, ?, 'sha256:a', '{}', '{}', ?)`,
+    ).run(
+      priorRunId,
+      JSON.stringify({
+        artifacts: [{ kind: "transcript", uri: "file:///tmp/t.json", sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }],
+      }),
+      new Date(NOW).toISOString(),
+    );
+
+    const artifactStore = mkdtempSync(path.join(os.tmpdir(), "evrt-pm-store-"));
+    const transcriptSha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    writeFileSync(path.join(artifactStore, transcriptSha), "{}");
+
+    const ref = admit(db, {
+      eventId: "postmortem-1",
+      type: "factory.run-postmortem.requested",
+      payload: { runId: priorRunId },
+    });
+    const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test", artifactStore });
+    expect(outcome.decision).toBe("run");
+    const originalSpec = JSON.parse(outcome.proposal.spec_json);
+    expect(originalSpec.input.runPin).toBeTruthy();
+    expect(originalSpec.input.runPin.transcript).toBe("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+
+    const storedEvent = db.query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+    const storedEnvelope = JSON.parse(storedEvent.envelope_json);
+    expect(storedEnvelope.payload.runPin).toBeTruthy();
+
+    const mapping = registry.eventTypes["factory.run-postmortem.requested"];
+    const replannedSpec = buildRunSpec(registry, storedEnvelope, mapping, {
+      runId: outcome.runId,
+      policyVersion: "git:test",
+      now: NOW + 3600 * 1000,
+    });
+    expect(replannedSpec.input.runPin).toEqual(originalSpec.input.runPin);
+    expect(hashJson(replannedSpec)).toBe(outcome.proposal.spec_hash);
+    expect(replannedSpec.idempotencyKey).toBe(originalSpec.idempotencyKey);
   });
 });
 

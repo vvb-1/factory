@@ -47,9 +47,18 @@ export function idempotencyKeyFor(mapping, def, envelope, inputHash) {
  */
 export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion, adapterOverride, now = Date.now() } = {}) {
   const def = getAgent(registry, mapping.agent);
-  const inputHash = hashJson(envelope.payload);
+  let payload = envelope.payload;
+  if (def.workspace?.type === "repository" && payload?.repo) {
+    try {
+      payload = { ...payload, repoPin: pinRepo(payload.repo, payload.ref ?? undefined) };
+    } catch (err) {
+      if (!payload?.repoPin) throw err;
+    }
+  }
+  const inputHash = hashJson(payload);
   const placement = def.placement ?? mapping.placement ?? undefined;
-  let idempotencyKey = idempotencyKeyFor(mapping, def, envelope, inputHash);
+  const specEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
+  let idempotencyKey = idempotencyKeyFor(mapping, def, specEnvelope, inputHash);
   const correlation = envelope.correlationId ?? envelope.eventId ?? null;
   if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
     idempotencyKey = `${idempotencyKey}:${correlation}`;
@@ -58,7 +67,7 @@ export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion
     schemaVersion: "factory.run-spec/v1",
     runId,
     agent: mapping.agent,
-    input: envelope.payload,
+    input: payload,
     inputHash,
     workspace: def.workspace,
     adapter: adapterOverride ?? mapping.adapter,
@@ -189,6 +198,10 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     }
 
     const pinnedEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
+    if (pinnedEnvelope !== envelope) {
+      db.query(`UPDATE events SET envelope_json = ? WHERE source = ? AND event_id = ?`)
+        .run(canonicalJson(pinnedEnvelope), event.source, event.event_id);
+    }
     let idempotencyKey = idempotencyKeyFor(mapping, def, pinnedEnvelope, hashJson(payload));
     const correlation = envelope.correlationId ?? envelope.eventId ?? null;
     if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
