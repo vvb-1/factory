@@ -15,7 +15,7 @@ The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In P
 3. **Verify** with the ticket's exact `Verification Command`. Never proceed past failing output; never weaken a test to get green.
 4. **UX critique** after verification and before opening the PR when this introduces or materially changes a user-completable flow, interaction, state transition, error/recovery path, responsive layout, authentication, payment, onboarding, or destructive action. Spawn `factory-ux-critic`, fix in-scope `FIX-FIRST` findings, maximum 2 rounds, and file the rest to `Triage`. Skip it for isolated styling, copy-only edits, static content, icons/assets, and internal/admin-only surfaces unless the ticket identifies UX risk. State `UX critique: required` or `UX critique: skipped — <reason>` in the PR.
 5. **Never `sleep` to wait for CI.** Use `gh pr checks <PR> --watch --fail-fast` — it returns the moment checks settle and exits non-zero on the first failure. Sleep-polling is blocked by the harness, and a blocked tool call **kills the run**: four tickets died exactly this way overnight (`sleep 480`, `sleep 240`, `for i in $(seq 1 40)`), after 55–106 turns and ~$22 of work already done, leaving branches pushed and no PR. The same rule applies to any wait — poll a condition with a real command, never a fixed sleep.
-6. **Push and open a PR** against the repo's base branch with `Fixes <ISSUE-ID>` in the body. Move the ticket to `In Review` + `ai:needs-review`, remove `ai:in-progress`, and post a **Handoff comment** on the ticket — this is the merge stage's input, in exactly this shape:
+6. **Push and open a PR** against the repo's base branch with `Fixes <ISSUE-ID>` in the body. Post the mandatory structured **`## Handoff` comment** on the ticket before transitioning state:
 
    ```
    ## Handoff
@@ -26,7 +26,7 @@ The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In P
    - Risks: <what the reviewer should look at first, or "none known">
    ```
 
-   The merge stage reviews from this comment, so a vague Handoff costs a slower review; a missing one is a protocol finding against this run. For user-facing changes attach before/after screenshots to the ticket — never commit them to the repo. Always report your explicit terminal state (`STATE: PR_OPEN`).
+   Then move the ticket to `In Review` + `ai:needs-review`, remove `ai:in-progress`. Posting this comment is a mandatory prerequisite before transitioning to `In Review` — the merge stage reviews directly from this comment, so a vague Handoff costs a slower review; a missing one is a protocol violation. For user-facing changes attach before/after screenshots to the ticket — never commit them to the repo. Always report your explicit terminal state (`STATE: PR_OPEN`).
 7. **Heartbeat** the ticket at each phase change and at least every 20 minutes, saying what changed. Silence for 45 minutes and the reaper takes the ticket back.
 
 ## Don't

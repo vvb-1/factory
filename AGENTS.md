@@ -34,6 +34,19 @@ Non-negotiable for every agent in this repo, in any harness. Full protocol: `~/D
 
 **Negative testing and falsifiability.** New regression tests must be observed failing before applying the fix to prove they test the actual failure mode and are not vacuous. Verify that tests distinguish correct implementations from plausible incorrect ones (without using `git stash`; use safe per-file reverts such as `git show <ref>:<path> > <path>`). A test that passes before the fix is applied tests nothing.
 
+**Mandatory `## Handoff` comment.** Before moving a ticket to `In Review`, post a structured `## Handoff` comment on the Linear ticket with these exact fields:
+
+```
+## Handoff
+- PR: <url>
+- Verification: `<the ticket's exact command>` — pass, <one-line result summary>
+- UX critique: required — SHIP | required — FIX-FIRST resolved in <n> round(s) | skipped — <reason>
+- Files: <n> changed, all within Owned Paths   (or: exceptions listed with why)
+- Risks: <what the reviewer should look at first, or "none known">
+```
+
+Posting this structured comment is a mandatory prerequisite before advancing a ticket to `In Review`. The merge stage reviews directly from this comment; a vague Handoff slows review, and a missing or unformatted one is a protocol violation.
+
 **`Done` means merged and running:** PR merged, base-branch CI green after the merge, and the post-deploy smoke check green where the repo has one.
 
 ### Never auto-merge
