@@ -179,11 +179,18 @@ function emptySurvey(repo, apply) {
   };
 }
 
-async function survey(repo, { apply }) {
+export async function survey(repo, { apply }, {
+  readdir = readdirSync,
+  exists = existsSync,
+  queryIssues,
+  getBranches = ticketBranches,
+  getOpenPrs = listOpenPrs,
+  doReclaim = reclaim,
+} = {}) {
   const result = emptySurvey(repo, apply);
   const root = expand(repo.worktree_root ?? "");
   const repoPath = expand(repo.path);
-  if (!root || !existsSync(root)) {
+  if (!root || !exists(root)) {
     result.missingRoot = true;
     return result;
   }
@@ -192,15 +199,20 @@ async function survey(repo, { apply }) {
   // branch, a scratch checkout) are somebody's deliberate workspace and are not
   // this tool's business.
   const pattern = new RegExp(`^${repo.team}-\\d+$`);
-  const all = readdirSync(root);
+  const all = readdir(root);
   const tickets = all.filter((d) => pattern.test(d));
   result.named = all.filter((d) => !pattern.test(d) && !d.startsWith("."));
 
   let states = {};
   if (tickets.length) {
     const nums = tickets.map((t) => Number(t.split("-")[1]));
-    const q = `query($n:[Float!]){ issues(first:250, filter:{ number:{in:$n}, team:{key:{eq:"${repo.team}"}} }){ nodes{ identifier state{name type} } } }`;
-    const nodes = (await gql(q, { n: nums }))?.issues?.nodes ?? [];
+    let nodes = [];
+    if (queryIssues) {
+      nodes = await queryIssues(repo.team, nums);
+    } else {
+      const q = `query($n:[Float!]){ issues(first:250, filter:{ number:{in:$n}, team:{key:{eq:"${repo.team}"}} }){ nodes{ identifier state{name type} } } }`;
+      nodes = (await gql(q, { n: nums }))?.issues?.nodes ?? [];
+    }
     states = Object.fromEntries(nodes.map((n) => [n.identifier, n.state]));
   }
 
@@ -213,8 +225,8 @@ async function survey(repo, { apply }) {
   // WM-17: the open-PR hold is evaluated in the survey, not just under --apply,
   // so a held worktree is neither reported as reclaimable nor allowed to keep
   // the --gate firing on work that every apply run will correctly decline.
-  const branches = allFinished.length ? ticketBranches(repoPath, root, allFinished) : {};
-  const openPrs = allFinished.length ? listOpenPrs(repoPath) : [];
+  const branches = allFinished.length ? getBranches(repoPath, root, allFinished) : {};
+  const openPrs = allFinished.length ? getOpenPrs(repoPath) : [];
   const cannotTell = openPrs === null || branches === null;
   if (cannotTell) {
     // Dry and apply both: do not advertise as reclaimable what we will not
@@ -246,14 +258,14 @@ async function survey(repo, { apply }) {
     return result;
   }
 
-  if (!down || !existsSync(path.join(repoPath, down))) {
+  if (!down || !exists(path.join(repoPath, down))) {
     result.skippedApplyReason = `${repo.name} has no worktree_down script (${down}) — refusing to remove by hand`;
     return result;
   }
 
   // `finished` is already free of open-PR heads; reclaim() re-checks anyway so
   // the guard travels with the teardown call rather than with this caller.
-  const outcome = reclaim(finished, { repoPath, down, branches, openPrs });
+  const outcome = doReclaim(finished, { repoPath, down, branches, openPrs });
   result.removed = outcome.removed;
   result.refused = outcome.refused;
   return result;

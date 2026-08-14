@@ -15,7 +15,7 @@
  * misses: they release themselves as soon as the holding PR closes.
  */
 import { test, expect, describe } from "bun:test";
-import { parseWorktreeBranches, openPrHold, listOpenPrs, ticketBranches, reclaim } from "./janitor.mjs";
+import { parseWorktreeBranches, openPrHold, listOpenPrs, ticketBranches, reclaim, survey } from "./janitor.mjs";
 
 /** A spawnSync stand-in that records every call and never touches the disk. */
 function recorder(handler = () => ({ status: 0, stdout: "", stderr: "" })) {
@@ -194,5 +194,91 @@ describe("reclaim (WM-17 regression: branch A merged while a second PR still hea
     expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: null, run })).toThrow("reclaim requires openPrs array");
     expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: "invalid", run })).toThrow("reclaim requires openPrs array");
     expect(() => reclaim(["CLNT-520"], { repoPath: "/repo", down: "down.sh" })).toThrow("reclaim requires openPrs array");
+  });
+});
+
+describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
+  const repo = {
+    name: "legalease",
+    team: "CLNT",
+    path: "/Users/x/Develop/legalease",
+    worktree_root: "/Users/x/Develop/.worktrees/legalease",
+    worktree_down: "bin/worktree-down.sh",
+  };
+
+  const defaultDeps = {
+    readdir: () => ["CLNT-520", "CLNT-600"],
+    exists: () => true,
+    queryIssues: async () => [
+      { identifier: "CLNT-520", state: { name: "Done", type: "completed" } },
+      { identifier: "CLNT-600", state: { name: "Done", type: "completed" } },
+    ],
+    getBranches: () => ({ "CLNT-520": "feat/CLNT-520", "CLNT-600": "fix/CLNT-600" }),
+    getOpenPrs: () => [{ number: 261, headRefName: "feat/CLNT-520" }],
+  };
+
+  test("an open-PR hold populates the held array and is excluded from reclaimable (dry run)", () => {
+    const res = survey(repo, { apply: false }, defaultDeps);
+    return res.then((surveyRes) => {
+      expect(surveyRes.held).toHaveLength(1);
+      expect(surveyRes.held[0].id).toBe("CLNT-520");
+      expect(surveyRes.held[0].reason).toContain("#261");
+      expect(surveyRes.reclaimable).toEqual([{ id: "CLNT-600", state: "Done" }]);
+      expect(surveyRes.skippedApplyReason).toBeNull();
+    });
+  });
+
+  test("an open-PR hold populates the held array and is excluded from reclaimable (apply run)", async () => {
+    let reclaimed = null;
+    const res = await survey(repo, { apply: true }, {
+      ...defaultDeps,
+      doReclaim: (finished, opts) => {
+        reclaimed = finished;
+        return { removed: finished, refused: [], held: [] };
+      },
+    });
+    expect(res.held).toHaveLength(1);
+    expect(res.held[0].id).toBe("CLNT-520");
+    expect(res.reclaimable).toEqual([{ id: "CLNT-600", state: "Done" }]);
+    expect(res.removed).toEqual(["CLNT-600"]);
+    expect(reclaimed).toEqual(["CLNT-600"]);
+  });
+
+  test("cannot-tell from gh (getOpenPrs returns null) yields empty reclaimable and populates skippedApplyReason (dry and apply)", async () => {
+    const dry = await survey(repo, { apply: false }, {
+      ...defaultDeps,
+      getOpenPrs: () => null,
+    });
+    expect(dry.reclaimable).toEqual([]);
+    expect(dry.held).toEqual([]);
+    expect(dry.skippedApplyReason).toContain("could not list open PRs");
+
+    const apply = await survey(repo, { apply: true }, {
+      ...defaultDeps,
+      getOpenPrs: () => null,
+    });
+    expect(apply.reclaimable).toEqual([]);
+    expect(apply.held).toEqual([]);
+    expect(apply.skippedApplyReason).toContain("could not list open PRs");
+  });
+
+  test("cannot-tell from git worktree list (getBranches returns null) yields empty reclaimable and populates skippedApplyReason (dry and apply)", async () => {
+    const dry = await survey(repo, { apply: false }, {
+      ...defaultDeps,
+      getBranches: () => null,
+      getOpenPrs: () => [],
+    });
+    expect(dry.reclaimable).toEqual([]);
+    expect(dry.held).toEqual([]);
+    expect(dry.skippedApplyReason).toContain("could not list worktree branches");
+
+    const apply = await survey(repo, { apply: true }, {
+      ...defaultDeps,
+      getBranches: () => null,
+      getOpenPrs: () => [],
+    });
+    expect(apply.reclaimable).toEqual([]);
+    expect(apply.held).toEqual([]);
+    expect(apply.skippedApplyReason).toContain("could not list worktree branches");
   });
 });
