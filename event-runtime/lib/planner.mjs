@@ -13,7 +13,7 @@ import { canonicalJson, hashJson } from "./canonical.mjs";
 import { artifactsRoot, DEAD_LETTER_AFTER, DEFAULT_PROPOSAL_TTL_SECONDS } from "./config.mjs";
 import { isBusyError, tx, txImmediate } from "./db.mjs";
 import { newProposalId, newRunId } from "./ids.mjs";
-import { createRun } from "./lifecycle.mjs";
+import { createRun, resolveIdempotency } from "./lifecycle.mjs";
 import { getAgent, getEventType } from "./registry.mjs";
 import { pinRepo } from "./repository.mjs";
 import { validate } from "./schema.mjs";
@@ -49,6 +49,11 @@ export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion
   const def = getAgent(registry, mapping.agent);
   const inputHash = hashJson(envelope.payload);
   const placement = def.placement ?? mapping.placement ?? undefined;
+  let idempotencyKey = idempotencyKeyFor(mapping, def, envelope, inputHash);
+  const correlation = envelope.correlationId ?? envelope.eventId ?? null;
+  if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
+    idempotencyKey = `${idempotencyKey}:${correlation}`;
+  }
   return {
     schemaVersion: "factory.run-spec/v1",
     runId,
@@ -63,7 +68,7 @@ export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion
     capabilities: def.capabilities.services,
     timeoutSeconds: def.limits.timeout_seconds,
     maxAttempts: def.limits.attempts,
-    idempotencyKey: idempotencyKeyFor(mapping, def, envelope, inputHash),
+    idempotencyKey,
     ...(placement ? { placement } : {}),
   };
 }
@@ -184,8 +189,17 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     }
 
     const pinnedEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
-    const idempotencyKey = idempotencyKeyFor(mapping, def, pinnedEnvelope, hashJson(payload));
-    const existingRun = db.query(`SELECT run_id FROM runs WHERE idempotency_key = ?`).get(idempotencyKey);
+    let idempotencyKey = idempotencyKeyFor(mapping, def, pinnedEnvelope, hashJson(payload));
+    const correlation = envelope.correlationId ?? envelope.eventId ?? null;
+    if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
+      idempotencyKey = `${idempotencyKey}:${correlation}`;
+    }
+    const existingRun = resolveIdempotency(db, {
+      idempotencyKey,
+      correlationId: envelope.correlationId,
+      causationId: envelope.causationId,
+      eventId: envelope.eventId,
+    });
     if (existingRun) {
       const proposal = insertProposal(db, {
         id: newProposalId(), event, runId: existingRun.run_id, decision: "noop",

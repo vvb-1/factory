@@ -133,6 +133,55 @@ describe("planEvent", () => {
     expect(event.status).toBe("noop");
   });
 
+  test("repeat remediations with identical payload but distinct correlationId produce distinct runs (OPS-419)", () => {
+    const db = openDb(":memory:");
+    const ref1 = admit(db, {
+      eventId: "keep-1",
+      correlationId: "alert-1",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+    const ref2 = admit(db, {
+      eventId: "keep-2",
+      correlationId: "alert-2",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+
+    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
+    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+
+    expect(first.decision).toBe("run");
+    expect(second.decision).toBe("run");
+    expect(second.runId).not.toBe(first.runId);
+    expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
+  });
+
+  test("duplicate delivery of remediation with same correlationId converges to one run (OPS-419)", () => {
+    const db = openDb(":memory:");
+    const ref1 = admit(db, {
+      eventId: "keep-1",
+      correlationId: "alert-1",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+    const ref2 = admit(db, {
+      eventId: "keep-dup",
+      correlationId: "alert-1",
+      type: "keephq.disk-remediate.requested",
+      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+    });
+
+    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
+    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+
+    expect(first.decision).toBe("run");
+    expect(second.decision).toBe("noop");
+    expect(second.reason).toBe("duplicate_run");
+    expect(second.runId).toBe(first.runId);
+    expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
+  });
+
   test("unregistered event type → human_needed", () => {
     const db = openDb(":memory:");
     const ref = admit(db, { type: "totally.unknown.type" });

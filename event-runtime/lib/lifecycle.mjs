@@ -99,3 +99,31 @@ export function runState(db, runId) {
 export function lifecycleOf(db, runId) {
   return db.query(`SELECT * FROM lifecycle_events WHERE run_id = ? ORDER BY seq`).all(runId);
 }
+
+/**
+ * Resolve an existing run for an idempotency key and event correlation context (§5.4).
+ * A duplicate delivery (same idempotencyKey and matching correlationId / causationId)
+ * resolves to the existing run. A repeat trigger (different correlationId / eventId)
+ * with identical inputHash is NOT falsely suppressed and returns null.
+ */
+export function resolveIdempotency(db, { idempotencyKey, correlationId, causationId, eventId } = {}) {
+  if (!idempotencyKey) return null;
+  const run = db.query(`SELECT run_id, idempotency_key, state FROM runs WHERE idempotency_key = ?`).get(idempotencyKey);
+  if (!run) return null;
+
+  const correlation = correlationId ?? eventId ?? null;
+  if (!correlation && !causationId) return run;
+
+  const journal = db
+    .query(`SELECT correlation_id, causation_id FROM lifecycle_events WHERE run_id = ? AND from_state IS NULL LIMIT 1`)
+    .get(run.run_id);
+  if (!journal) return run;
+
+  if (correlation && journal.correlation_id && journal.correlation_id !== correlation) {
+    return null;
+  }
+  if (causationId && journal.causation_id && journal.causation_id !== causationId) {
+    return null;
+  }
+  return run;
+}
