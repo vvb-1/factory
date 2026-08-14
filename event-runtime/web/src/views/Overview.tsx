@@ -381,7 +381,7 @@ export function Overview({
                   : "No lifecycle activity yet."}
             </div>
           ) : (
-            <div className="rounded-md border border-(--border) px-3 py-1">
+            <div className="rounded-md border border-(--border) px-3 py-1" aria-live="off">
               {feed.entries.map((e) => (
                 <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
                   <Ago iso={e.at} now={now} className="mono w-[52px] shrink-0 text-(--text-faint)" />
@@ -416,7 +416,7 @@ export function Overview({
                   : "Nothing published yet."}
             </div>
           ) : (
-            <div className="rounded-md border border-(--border) px-3 py-1">
+            <div className="rounded-md border border-(--border) px-3 py-1" aria-live="off">
               {(outbox.data?.outbox ?? []).map((o) => (
                 <div key={o.seq} className="border-b border-(--border) py-1.5 last:border-0">
                   <div className="flex items-baseline justify-between gap-3">
