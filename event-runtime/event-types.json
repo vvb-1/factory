@@ -97,6 +97,82 @@
     ],
     "proposalTtlSeconds": 1800
   },
+  "factory.reconcile.requested": {
+    "agent": "reconcile@1",
+    "adapter": "command",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.label-guard.requested": {
+    "agent": "label-guard@1",
+    "adapter": "command",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.warm.requested": {
+    "agent": "warm@1",
+    "adapter": "command",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.unblock.requested": {
+    "agent": "unblock-scan@1",
+    "adapter": "claude",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.unblock-apply.requested": {
+    "agent": "unblock-apply@1",
+    "adapter": "actions",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.sweep.requested": {
+    "agent": "sweep-scan@1",
+    "adapter": "claude",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.sweep-apply.requested": {
+    "agent": "sweep-apply@1",
+    "adapter": "actions",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.unblock-digest.requested": {
+    "agent": "unblock-digest@1",
+    "adapter": "command",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
+  },
+  "factory.ticket.dispatched": {
+    "observe": true
+  },
+  "factory.ticket.reaped": {
+    "observe": true
+  },
+  "factory.ticket.reconciled": {
+    "observe": true
+  },
+  "factory.worktree.reclaimed": {
+    "observe": true
+  },
   "clock.tick.reaper": {
     "agent": "reaper@1",
     "adapter": "command",
