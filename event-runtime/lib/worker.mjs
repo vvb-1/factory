@@ -331,8 +331,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
 }
 
 /**
- * Re-queue LEASED/RUNNING runs whose current attempt's lease expired. The
- * stale attempt keeps its (now lower) fencing token, so a late publish from
+ * Re-queue LEASED/RUNNING/VERIFYING runs whose current attempt's lease expired.
+ * The stale attempt keeps its (now lower) fencing token, so a late publish from
  * it is fenced out. Respects maxAttempts and dead-letters beyond it.
  */
 export function reapExpiredLeases(db, { now = Date.now(), policyVersion = "unknown" } = {}) {
@@ -341,16 +341,27 @@ export function reapExpiredLeases(db, { now = Date.now(), policyVersion = "unkno
       .query(
         `SELECT r.run_id, r.attempts, r.spec_json, r.state FROM runs r
          JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
-         WHERE r.state IN ('LEASED', 'RUNNING') AND a.lease_expires_at < ?`,
+         WHERE r.state IN ('LEASED', 'RUNNING', 'VERIFYING') AND a.lease_expires_at < ?`,
       )
       .all(iso(now));
     for (const row of rows) {
       const spec = JSON.parse(row.spec_json);
       if (row.attempts < spec.maxAttempts) {
-        transition(db, {
-          runId: row.run_id, to: "QUEUED",
-          actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
-        });
+        if (row.state === "VERIFYING") {
+          transition(db, {
+            runId: row.run_id, to: "FAILED",
+            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
+          });
+          transition(db, {
+            runId: row.run_id, to: "QUEUED",
+            actor: "reaper", reason: "retry", attempt: row.attempts, policyVersion, now,
+          });
+        } else {
+          transition(db, {
+            runId: row.run_id, to: "QUEUED",
+            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now,
+          });
+        }
       } else {
         if (row.state === "LEASED") {
           transition(db, {
@@ -377,28 +388,73 @@ export async function runOnce(db, registry, adapters, opts = {}) {
 }
 
 /**
- * Operator cancel (§13): legal from any state before VERIFYING; a VERIFYING
- * or terminal run throws IllegalTransition to the caller. A still-open
- * proposal for the run is closed in the same transaction (reason
- * `run_cancelled`); none, or more than one, is left untouched.
+ * Operator cancel (§13): cancels runs in pre-terminal states.
+ * For VERIFYING, transitions to FAILED with reason operator_cancel.
+ * A still-open proposal for the run is closed in the same transaction.
  */
 export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = Date.now(), policyVersion } = {}) {
   return tx(db, () => {
-    const result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+    const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
+    if (!run) throw new Error(`unknown run ${runId}`);
+    let result;
+    if (run.state === "VERIFYING") {
+      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now });
+      finishAttempt(db, runId, run.attempts, "FAILED", "cancelled", now);
+    } else {
+      result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+      if (run.state === "RUNNING" || run.state === "LEASED") {
+        finishAttempt(db, runId, run.attempts, "CANCELLED", "cancelled", now);
+      }
+    }
     closeOpenProposalForRun(db, runId, { actor, now });
     return result;
   });
 }
 
 /**
- * Operator retry (§13): FAILED → QUEUED. Retrying past maxAttempts requires
+ * Force-fail a stranded or non-terminal run with a journaled transition.
+ */
+export function forceFailRun(db, runId, { actor = "operator", reason = "operator_force_fail", now = Date.now(), policyVersion = "unknown" } = {}) {
+  return tx(db, () => {
+    const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
+    if (!run) throw new Error(`unknown run ${runId}`);
+    let result;
+    if (run.state === "VERIFYING" || run.state === "RUNNING") {
+      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now });
+      finishAttempt(db, runId, run.attempts, "FAILED", reason, now);
+    } else if (run.state === "LEASED") {
+      transition(db, { runId, to: "RUNNING", actor, reason: "force_fail_start", attempt: run.attempts, policyVersion, now });
+      result = transition(db, { runId, to: "FAILED", actor, reason, policyVersion, now });
+      finishAttempt(db, runId, run.attempts, "FAILED", reason, now);
+    } else if (run.state === "QUEUED" || run.state === "APPROVED" || run.state === "PROPOSED") {
+      result = transition(db, { runId, to: "CANCELLED", actor, reason, policyVersion, now });
+    } else {
+      throw new Error(`cannot force-fail run in terminal state ${run.state}`);
+    }
+    closeOpenProposalForRun(db, runId, { actor, now });
+    return result;
+  });
+}
+
+/**
+ * Operator retry (§13): FAILED → QUEUED, or recovery from VERIFYING. Retrying past maxAttempts requires
  * the explicit force override, which is recorded in the journal reason.
  */
 export function retryRun(db, runId, { actor, force = false, now = Date.now(), policyVersion } = {}) {
-  const row = db.query(`SELECT spec_json, attempts FROM runs WHERE run_id = ?`).get(runId);
+  const row = db.query(`SELECT state, spec_json, attempts FROM runs WHERE run_id = ?`).get(runId);
   if (!row) throw new Error(`unknown run ${runId}`);
   const spec = JSON.parse(row.spec_json);
   if (!force && row.attempts >= spec.maxAttempts) throw new Error("attempts_exhausted");
+  if (row.state === "VERIFYING") {
+    return tx(db, () => {
+      transition(db, { runId, to: "FAILED", actor, reason: "operator_retry_verifying", policyVersion, now });
+      finishAttempt(db, runId, row.attempts, "FAILED", "operator_retry", now);
+      return transition(db, {
+        runId, to: "QUEUED", actor,
+        reason: force ? "operator_retry_forced" : "operator_retry", policyVersion, now,
+      });
+    });
+  }
   return transition(db, {
     runId, to: "QUEUED", actor,
     reason: force ? "operator_retry_forced" : "operator_retry", policyVersion, now,
