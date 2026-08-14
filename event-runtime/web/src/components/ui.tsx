@@ -1056,3 +1056,42 @@ export function VerbError({ error }: { error: unknown }) {
     </div>
   );
 }
+
+/** Floating bulk action bar that pins above the bottom edge when items are selected. */
+export function BulkActionBar({
+  count,
+  onClear,
+  children,
+}: {
+  count: number;
+  onClear?: () => void;
+  children: ReactNode;
+}) {
+  if (count <= 0) return null;
+  return (
+    <div
+      role="toolbar"
+      aria-label="Bulk actions"
+      className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-(--border-strong) bg-(--surface-1) px-4 py-2.5 shadow-2xl backdrop-blur-sm"
+    >
+      <div className="flex items-center gap-2 text-[12px] font-medium text-(--text)">
+        <span className="tabular-nums font-semibold">{count}</span> selected
+      </div>
+      <div className="h-4 w-px bg-(--border)" />
+      <div className="flex items-center gap-2">{children}</div>
+      {onClear && (
+        <>
+          <div className="h-4 w-px bg-(--border)" />
+          <button
+            type="button"
+            onClick={onClear}
+            className="cursor-pointer text-[11px] text-(--text-faint) hover:text-(--text)"
+          >
+            Clear
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
