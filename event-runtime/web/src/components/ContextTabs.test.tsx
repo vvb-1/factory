@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("ContextTabs", () => {
-  test("renders exactly one tablist and one selected tab for a given active context", () => {
+  test("renders role='toolbar' with aria-label='Context' and no tablist or tab roles", () => {
     const r = render(
       <ContextTabs
         repos={[repo("factory")]}
@@ -41,9 +41,16 @@ describe("ContextTabs", () => {
       />,
     );
 
-    expect(r.getAllByRole("tablist")).toHaveLength(1);
-    const selected = r.getAllByRole("tab").filter((el) => el.getAttribute("aria-selected") === "true");
-    expect(selected).toHaveLength(1);
-    expect(selected[0].textContent).toBe("factory");
+    expect(r.getAllByRole("toolbar")).toHaveLength(1);
+    expect(r.getByRole("toolbar", { name: "Context" })).toBeDefined();
+    expect(r.queryByRole("tablist")).toBeNull();
+    expect(r.queryByRole("tab")).toBeNull();
+
+    const pressed = r.getAllByRole("button").filter((el) => el.getAttribute("aria-pressed") === "true");
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0].textContent).toBe("factory");
+
+    const closeBtn = r.getByRole("button", { name: "Close factory" });
+    expect(closeBtn.getAttribute("tabindex")).toBe("-1");
   });
 });
