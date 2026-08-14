@@ -4,6 +4,30 @@ import { INFLIGHT } from "../context";
 import { CONTEXT_TABS_ATTR } from "../hooks";
 import type { RepoItem } from "../types";
 
+export const PINNED_RUNS_STORAGE_KEY = "factory.pinnedRuns";
+
+export const readPinnedRuns = (): string[] => {
+  try {
+    return JSON.parse(sessionStorage.getItem(PINNED_RUNS_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+};
+
+export const savePinnedRuns = (runs: string[]) => {
+  try {
+    sessionStorage.setItem(PINNED_RUNS_STORAGE_KEY, JSON.stringify(runs));
+  } catch {}
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("factory:pinnedRunsChanged", { detail: runs }));
+  }
+};
+
+const getHashRunId = () => {
+  const m = typeof window !== "undefined" ? window.location.hash.match(/^#\/runs?\/([^?&#]+)/) : null;
+  return m ? decodeURIComponent(m[1]) : null;
+};
+
 export function ScopeCaption({
   context,
   surface,
@@ -12,23 +36,20 @@ export function ScopeCaption({
   surface: "fleet" | "registry" | "graph" | "overview";
 }) {
   if (context.kind === "all") return null;
-  const text =
-    context.kind === "inflight"
-      ? surface === "overview"
-        ? "In flight scopes the Runs list — counts below are factory-wide."
-        : "In flight scopes the Runs list — this view is not."
-      : surface === "fleet"
-        ? `Fleet is not scoped to ${context.name}.`
-        : surface === "registry"
-          ? `The registry is not scoped to ${context.name}.`
-          : surface === "graph"
-            ? `The graph is not scoped to ${context.name}.`
-            : `Overview counts are factory-wide — they are not scoped to ${context.name}.`;
-  return <p className="mb-3 text-[11px] text-(--text-faint)">{text}</p>;
+  const n = context.kind === "inflight" ? "In flight" : context.name;
+  return (
+    <p className="mb-3 text-[11px] text-(--text-faint)">
+      {context.kind === "inflight"
+        ? surface === "overview"
+          ? "In flight scopes Runs list — counts are factory-wide."
+          : "In flight scopes Runs list."
+        : `${surface === "overview" ? "Overview counts are" : `${surface} is`} not scoped to ${n}.`}
+    </p>
+  );
 }
 
 /**
- * Linear-style context strip: All (pinned) · open repos · In flight (pinned) · +.
+ * Linear-style context strip: All (pinned) · open repos · pinned run tabs · In flight (pinned) · +.
  * A tab is a filter, not a container. Closing a repo tab returns to All.
  */
 export function ContextTabs({
@@ -39,6 +60,8 @@ export function ContextTabs({
   onSelect,
   onOpen,
   onClose,
+  pinnedRuns: propPinnedRuns,
+  onUnpinRun: propOnUnpinRun,
 }: {
   repos: RepoItem[];
   reposError: boolean;
@@ -47,42 +70,83 @@ export function ContextTabs({
   onSelect: (ctx: OperatorContext) => void;
   onOpen: (name: string) => void;
   onClose: (name: string) => void;
+  pinnedRuns?: string[];
+  onUnpinRun?: (runId: string) => void;
 }) {
   const [picker, setPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
+  const [internalPinned, setInternalPinned] = useState<string[]>(readPinnedRuns);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => setInternalPinned(readPinnedRuns());
+    window.addEventListener("factory:pinnedRunsChanged", handler);
+    window.addEventListener("storage", handler);
+    return () => {
+      window.removeEventListener("factory:pinnedRunsChanged", handler);
+      window.removeEventListener("storage", handler);
+    };
+  }, []);
+
+  const pinnedRuns = propPinnedRuns ?? internalPinned;
+  const [activeRunId, setActiveRunId] = useState<string | null>(getHashRunId);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHash = () => setActiveRunId(getHashRunId());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const unpinRun = (runId: string) => {
+    if (propOnUnpinRun) propOnUnpinRun(runId);
+    else {
+      const next = pinnedRuns.filter((id) => id !== runId);
+      setInternalPinned(next);
+      savePinnedRuns(next);
+    }
+    if (activeRunId === runId && typeof window !== "undefined") {
+      window.location.hash = "#/runs";
+    }
+  };
+
   const available = useMemo(
     () => repos.filter((r) => !openRepos.includes(r.name)),
     [repos, openRepos],
   );
-  const activeId = active.kind === "repo" ? active.name : active.kind;
+
+  const activeId =
+    activeRunId && pinnedRuns.includes(activeRunId)
+      ? `run:${activeRunId}`
+      : active.kind === "repo"
+        ? active.name
+        : active.kind;
+
   const activeTab = () =>
     stripRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? null;
 
-  const tabIds = useMemo(() => ["all", ...openRepos, INFLIGHT], [openRepos]);
+  const tabIds = useMemo(
+    () => ["all", ...openRepos, ...pinnedRuns.map((id) => `run:${id}`), INFLIGHT],
+    [openRepos, pinnedRuns],
+  );
   const [tabStopId, setTabStopId] = useState<string | null>(null);
 
-  const effectiveTabStop = useMemo(() => {
-    if (tabStopId && tabIds.includes(tabStopId)) return tabStopId;
-    if (tabIds.includes(activeId)) return activeId;
-    return "all";
-  }, [tabStopId, tabIds, activeId]);
+  const effectiveTabStop =
+    tabStopId && tabIds.includes(tabStopId)
+      ? tabStopId
+      : tabIds.includes(activeId)
+        ? activeId
+        : "all";
 
   useEffect(() => {
     setTabStopId(tabIds.includes(activeId) ? activeId : "all");
   }, [activeId, tabIds]);
 
-  // The strip scrolls its own active tab: `[` / `]` scroll-into-view belongs to
-  // the view's status tabs, and a repo tab can go active without being clicked
-  // (opening a project, the command palette), so it may sit past the overflow.
   useEffect(() => {
     activeTab()?.scrollIntoView({ inline: "nearest", block: "nearest" });
   }, [activeId]);
 
-  // A closed tab takes its × button with it. Chromium focuses the button on
-  // click, so unmount drops focus to <body> and the next Tab restarts at the
-  // top of the page. Safari/Firefox leave focus where it was (a list row, a
-  // filter); only recover when it was actually lost.
   const [closes, setCloses] = useState(0);
   useEffect(() => {
     if (!closes) return;
@@ -111,46 +175,28 @@ export function ContextTabs({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const target = (e.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-context-tab]");
-    if (!target) return;
-    const currentId = target.getAttribute("data-context-tab");
+    const currentId = (e.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-context-tab]")?.getAttribute("data-context-tab");
     if (!currentId) return;
     const currentIndex = tabIds.indexOf(currentId);
     if (currentIndex === -1) return;
 
-    if (e.key === "ArrowRight") {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
       e.preventDefault();
-      const nextIndex = (currentIndex + 1) % tabIds.length;
-      const nextId = tabIds[nextIndex];
+      const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      const nextId =
+        e.key === "Home"
+          ? tabIds[0]
+          : e.key === "End"
+            ? tabIds[tabIds.length - 1]
+            : tabIds[(currentIndex + delta + tabIds.length) % tabIds.length];
       setTabStopId(nextId);
-      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
-      btn?.focus();
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      const nextIndex = (currentIndex - 1 + tabIds.length) % tabIds.length;
-      const nextId = tabIds[nextIndex];
-      setTabStopId(nextId);
-      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
-      btn?.focus();
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      const nextId = tabIds[0];
-      setTabStopId(nextId);
-      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
-      btn?.focus();
-    } else if (e.key === "End") {
-      e.preventDefault();
-      const nextId = tabIds[tabIds.length - 1];
-      setTabStopId(nextId);
-      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
-      btn?.focus();
+      stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`)?.focus();
     } else if (e.key === "Delete" || e.key === "Backspace") {
-      if (openRepos.includes(currentId)) {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose(currentId);
-        setCloses((n) => n + 1);
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (openRepos.includes(currentId)) onClose(currentId);
+      else if (currentId.startsWith("run:")) unpinRun(currentId.slice(4));
+      setCloses((n) => n + 1);
     }
   };
 
@@ -173,9 +219,12 @@ export function ContextTabs({
           type="button"
           data-context-tab="all"
           tabIndex={effectiveTabStop === "all" ? 0 : -1}
-          aria-pressed={active.kind === "all"}
+          aria-pressed={!activeRunId && active.kind === "all"}
           className={tabClass("all")}
-          onClick={() => onSelect({ kind: "all" })}
+          onClick={() => {
+            if (activeRunId && typeof window !== "undefined") window.location.hash = "#/runs";
+            onSelect({ kind: "all" });
+          }}
           onFocus={() => setTabStopId("all")}
         >
           All
@@ -190,9 +239,12 @@ export function ContextTabs({
                 type="button"
                 data-context-tab={name}
                 tabIndex={effectiveTabStop === name ? 0 : -1}
-                aria-pressed={active.kind === "repo" && active.name === name}
+                aria-pressed={!activeRunId && active.kind === "repo" && active.name === name}
                 className={tabClass(name)}
-                onClick={() => onSelect({ kind: "repo", name })}
+                onClick={() => {
+                  if (activeRunId && typeof window !== "undefined") window.location.hash = `#/runs?project=${encodeURIComponent(name)}`;
+                  onSelect({ kind: "repo", name });
+                }}
                 onFocus={() => setTabStopId(name)}
               >
                 {name}
@@ -213,14 +265,56 @@ export function ContextTabs({
               </button>
             </div>
           ))}
+          {pinnedRuns.map((runId) => {
+            const isRunActive = activeRunId === runId;
+            const tabKey = `run:${runId}`;
+            return (
+              <div key={tabKey} role="presentation" className="flex shrink-0 items-center">
+                <button
+                  type="button"
+                  data-context-tab={tabKey}
+                  tabIndex={effectiveTabStop === tabKey ? 0 : -1}
+                  aria-pressed={isRunActive}
+                  className={tabClass(tabKey)}
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      window.location.hash = `#/runs/${encodeURIComponent(runId)}`;
+                    }
+                  }}
+                  onFocus={() => setTabStopId(tabKey)}
+                  title={`Run ${runId}`}
+                >
+                  <span className="opacity-70 text-[10px]" aria-hidden="true">▶</span>
+                  <span className="mono max-w-32 truncate">{runId}</span>
+                </button>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label={`Close ${runId}`}
+                  title={`Close ${runId}`}
+                  className="rounded px-1 text-[11px] text-(--text-faint) hover:text-(--text)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unpinRun(runId);
+                    setCloses((n) => n + 1);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
         <button
           type="button"
           data-context-tab={INFLIGHT}
           tabIndex={effectiveTabStop === INFLIGHT ? 0 : -1}
-          aria-pressed={active.kind === "inflight"}
+          aria-pressed={!activeRunId && active.kind === "inflight"}
           className={tabClass(INFLIGHT)}
-          onClick={() => onSelect({ kind: "inflight" })}
+          onClick={() => {
+            if (activeRunId && typeof window !== "undefined") window.location.hash = "#/runs?project=inflight";
+            onSelect({ kind: "inflight" });
+          }}
           onFocus={() => setTabStopId(INFLIGHT)}
         >
           In flight
