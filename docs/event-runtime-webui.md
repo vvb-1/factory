@@ -247,7 +247,7 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
   Overview / Events / Proposals / Runs / Projects / Agents / Workers / Graph.
   Projects took `g f` because `p` and `r` were already Proposals and Runs.
   The rail footer and the `?` cheatsheet render this list from the single `NAV`
-  table in `App.tsx` rather than spelling it out, after a hand-listed footer
+  table in `nav.ts` rather than spelling it out, after a hand-listed footer
   had already fallen one chord behind; OPS-311 additionally shows the armed
   `g` on screen while it waits for its suffix.
 - Every verb the palette offers checks current state first — it never shows
