@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { OperatorContext } from "../context";
 import { INFLIGHT } from "../context";
+import { CONTEXT_TABS_ATTR } from "../hooks";
 import type { RepoItem } from "../types";
 
 export function ScopeCaption({
@@ -49,11 +50,28 @@ export function ContextTabs({
 }) {
   const [picker, setPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const available = useMemo(
     () => repos.filter((r) => !openRepos.includes(r.name)),
     [repos, openRepos],
   );
   const activeId = active.kind === "repo" ? active.name : active.kind;
+  const activeTab = () =>
+    stripRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null;
+
+  // The strip scrolls its own active tab: `[` / `]` scroll-into-view belongs to
+  // the view's status tabs, and a repo tab can go active without being clicked
+  // (opening a project, the command palette), so it may sit past the overflow.
+  useEffect(() => {
+    activeTab()?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeId]);
+
+  // A closed tab takes its × button — and the focus — with it. Without this,
+  // focus falls to <body> and the next Tab restarts from the top of the page.
+  const [closes, setCloses] = useState(0);
+  useEffect(() => {
+    if (closes) activeTab()?.focus();
+  }, [closes]);
 
   useEffect(() => {
     if (!picker) return;
@@ -81,55 +99,63 @@ export function ContextTabs({
 
   return (
     <div className="flex h-9 shrink-0 items-stretch gap-0.5 border-b border-(--border) bg-(--surface-1) px-2">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={active.kind === "all"}
-        className={tabClass("all")}
-        onClick={() => onSelect({ kind: "all" })}
-      >
-        All
-      </button>
       <div
-        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+        ref={stripRef}
+        className="flex min-w-0 flex-1 items-stretch gap-0.5"
         role="tablist"
-        aria-label="Open repo contexts"
+        aria-label="Context"
+        {...{ [CONTEXT_TABS_ATTR]: "" }}
       >
-        {openRepos.map((name) => (
-          <div key={name} className="flex shrink-0 items-center">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={active.kind === "repo" && active.name === name}
-              className={tabClass(name)}
-              onClick={() => onSelect({ kind: "repo", name })}
-            >
-              {name}
-            </button>
-            <button
-              type="button"
-              aria-label={`Close ${name}`}
-              title={`Close ${name}`}
-              className="rounded px-1 text-[11px] text-(--text-faint) hover:text-(--text)"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(name);
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active.kind === "all"}
+          className={tabClass("all")}
+          onClick={() => onSelect({ kind: "all" })}
+        >
+          All
+        </button>
+        <div
+          role="presentation"
+          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+        >
+          {openRepos.map((name) => (
+            <div key={name} role="presentation" className="flex shrink-0 items-center">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={active.kind === "repo" && active.name === name}
+                className={tabClass(name)}
+                onClick={() => onSelect({ kind: "repo", name })}
+              >
+                {name}
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${name}`}
+                title={`Close ${name}`}
+                className="rounded px-1 text-[11px] text-(--text-faint) hover:text-(--text)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(name);
+                  setCloses((n) => n + 1);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={active.kind === "inflight"}
+          className={tabClass(INFLIGHT)}
+          onClick={() => onSelect({ kind: "inflight" })}
+        >
+          In flight
+        </button>
       </div>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={active.kind === "inflight"}
-        className={tabClass(INFLIGHT)}
-        onClick={() => onSelect({ kind: "inflight" })}
-      >
-        In flight
-      </button>
       <div className="relative flex shrink-0 items-center" ref={pickerRef}>
         <button
           type="button"
