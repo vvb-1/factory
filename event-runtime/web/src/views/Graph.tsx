@@ -39,7 +39,7 @@ export function Graph({
 }) {
   const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 10_000 });
   const [positioned, setPositioned] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
-  const [layoutFailed, setLayoutFailed] = useState(false);
+  const [layoutError, setLayoutError] = useState<"chunk" | "layout" | "mapping" | null>(null);
   const flowRef = useRef<{
     getZoom: () => number;
     fitView: (opts: {
@@ -52,56 +52,72 @@ export function Graph({
   } | null>(null);
   const [flowReady, setFlowReady] = useState(0);
 
-  const graph = useMemo(
-    () => (registry.data ? buildCapabilityGraph(registry.data) : null),
-    [registry.data],
-  );
+  const { graph, mappingError } = useMemo(() => {
+    if (!registry.data) return { graph: null, mappingError: false };
+    try {
+      return { graph: buildCapabilityGraph(registry.data), mappingError: false };
+    } catch (err) {
+      console.error("graph mapping failed", err);
+      return { graph: null, mappingError: true };
+    }
+  }, [registry.data]);
 
   useEffect(() => {
     if (!graph) return;
     let cancelled = false;
-    setLayoutFailed(false);
+    setLayoutError(null);
     // elkjs is ~1.4 MB of pre-minified layout engine, so it rides in its own
     // async chunk (OPS-255) — fetched the first time there is a graph to lay
     // out, never by the list views.
     import("../graph/layout")
-      .then(({ layoutGraph, NODE_HEIGHT, NODE_WIDTH }) =>
-        layoutGraph(graph).then((positions) => {
+      .then(
+        ({ layoutGraph, NODE_HEIGHT, NODE_WIDTH }) =>
+          layoutGraph(graph)
+            .then((positions) => {
+              if (cancelled) return;
+              try {
+                setPositioned({
+                  nodes: graph.nodes.map((node) => ({
+                    id: node.id,
+                    type: node.kind,
+                    position: positions.get(node.id) ?? { x: 0, y: 0 },
+                    data: { node },
+                    draggable: true,
+                    width: NODE_WIDTH,
+                    height: NODE_HEIGHT,
+                  })),
+                  edges: graph.edges.map((edge) => ({
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    label: edge.label,
+                    animated: false,
+                    style: {
+                      stroke: edge.kind === "recommends" ? "var(--accent)" : "var(--border-strong)",
+                      strokeWidth: 1.5,
+                      strokeDasharray: edge.kind === "recommends" ? "4 3" : undefined,
+                    },
+                    labelStyle: { fill: "var(--text-faint)", fontSize: 10 },
+                    labelBgStyle: { fill: "var(--surface-0)" },
+                  })),
+                });
+              } catch (err) {
+                if (cancelled) return;
+                console.error("graph node/edge positioning failed", err);
+                setLayoutError("mapping");
+              }
+            })
+            .catch((err: unknown) => {
+              if (cancelled) return;
+              console.error("graph layout calculation failed", err);
+              setLayoutError("layout");
+            }),
+        (err: unknown) => {
           if (cancelled) return;
-          setPositioned({
-            nodes: graph.nodes.map((node) => ({
-              id: node.id,
-              type: node.kind,
-              position: positions.get(node.id) ?? { x: 0, y: 0 },
-              data: { node },
-              draggable: true,
-              width: NODE_WIDTH,
-              height: NODE_HEIGHT,
-            })),
-            edges: graph.edges.map((edge) => ({
-              id: edge.id,
-              source: edge.source,
-              target: edge.target,
-              label: edge.label,
-              animated: false,
-              style: {
-                stroke: edge.kind === "recommends" ? "var(--accent)" : "var(--border-strong)",
-                strokeWidth: 1.5,
-                strokeDasharray: edge.kind === "recommends" ? "4 3" : undefined,
-              },
-              labelStyle: { fill: "var(--text-faint)", fontSize: 10 },
-              labelBgStyle: { fill: "var(--surface-0)" },
-            })),
-          });
-        }),
-      )
-      // A stale index.html after a redeploy points at a chunk that is no longer
-      // there; without this the view sits on "Laying out…" and reads as busy.
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        console.error("graph layout failed", err);
-        setLayoutFailed(true);
-      });
+          console.error("graph layout chunk import failed", err);
+          setLayoutError("chunk");
+        },
+      );
     return () => {
       cancelled = true;
     };
@@ -172,11 +188,15 @@ export function Graph({
     ? "Loading the capability map…"
     : registry.isError
       ? "Cannot reach the control API — the graph will appear when /agents is up."
-      : graph && graph.nodes.length === 0
-        ? "No registered event types or agents."
-        : layoutFailed
+      : mappingError || layoutError === "mapping"
+        ? "Could not map the capability graph from registry data."
+        : layoutError === "chunk"
           ? "Could not load the graph layout engine — reload the page; if it persists the deployed build is incomplete."
-          : "Laying out the capability map…";
+          : layoutError === "layout"
+            ? "Could not calculate the graph layout — the layout engine failed or timed out."
+            : graph && graph.nodes.length === 0
+              ? "No registered event types or agents."
+              : "Laying out the capability map…";
 
   return (
     <div className="flex h-full min-w-0">
