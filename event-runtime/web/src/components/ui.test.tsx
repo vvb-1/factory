@@ -19,10 +19,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // activeToasts in ui.tsx is module-scoped with no exported reset. Drain the
-  // 3s dismiss timeouts so leftover toasts cannot leak into the next test.
+  // activeToasts in ui.tsx is module-scoped with no exported reset. Drain all
+  // dismiss timeouts (up to 6s for err toasts) so leftover toasts cannot leak into the next test.
   act(() => {
-    jest.runOnlyPendingTimers();
+    jest.advanceTimersByTime(10000);
   });
   jest.useRealTimers();
   cleanup();
