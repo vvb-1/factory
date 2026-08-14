@@ -75,16 +75,14 @@ If the repo has GitHub's native merge queue enabled, prefer it over any of this 
 
 After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
 
-Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, check that no **other open PR** still has it as its head (WM-17):
+Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, run `factory branch-guard` to mechanically verify that the branch is not protected (`base` / `deploy_branch` / `develop` / `master` / `main`) and that no **other open PR** still has it as its head (WM-17, WM-51):
 
 ```bash
 HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
-HOLDERS="$(gh pr list --head "$HEAD_REF" --state open --json number -q '.[].number')" ||
-  { echo "cannot tell whether $HEAD_REF is held — not deleting"; exit 1; }
-if [ -n "$HOLDERS" ]; then
-  echo "keeping $HEAD_REF — still the head of open PR $HOLDERS"
-else
+if factory branch-guard --repo <name> --pr <PR> --head "$HEAD_REF"; then
   git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+else
+  echo "branch-guard refused or held deletion for $HEAD_REF — keeping branch"
 fi
 ```
 
