@@ -157,6 +157,28 @@ describe("snapshot and reporting", () => {
     expect(report).toContain("Event Worker");
     expect(report).toContain("Web UI Server");
   });
+
+  test("collectFactoryPsSnapshot probes multiple candidate ports concurrently without stalling", async () => {
+    const fakeLsof = [
+      "COMMAND     PID     USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME",
+      "bun         901 hdkiller   12u  IPv4 0xd8ab2a49ff842cbf      0t0  TCP 127.0.0.1:7404 (LISTEN)",
+      "bun         902 hdkiller   12u  IPv4 0xd8ab2a49ff842cbf      0t0  TCP 127.0.0.1:7405 (LISTEN)",
+      "bun         903 hdkiller   12u  IPv4 0xd8ab2a49ff842cbf      0t0  TCP 127.0.0.1:7406 (LISTEN)",
+      "bun         904 hdkiller   12u  IPv4 0xd8ab2a49ff842cbf      0t0  TCP 127.0.0.1:7407 (LISTEN)",
+      "bun         905 hdkiller   12u  IPv4 0xd8ab2a49ff842cbf      0t0  TCP 127.0.0.1:7408 (LISTEN)",
+    ].join("\n");
+
+    const start = performance.now();
+    const snapshot = await collectFactoryPsSnapshot({
+      psOutput: "",
+      lsofOutput: fakeLsof,
+      fetchApi: true,
+    });
+    const duration = performance.now() - start;
+
+    expect(snapshot.apiProbes.length).toBe(6);
+    expect(duration).toBeLessThan(2500);
+  });
 });
 
 describe("cli integration", () => {
