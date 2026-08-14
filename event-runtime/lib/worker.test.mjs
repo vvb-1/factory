@@ -466,5 +466,34 @@ describe("worker", () => {
     const db = openDb(":memory:");
     expect(await runOnce(db, registry, adapters, opts())).toBeNull();
   });
+
+  test("accurate attempt timestamps: started_at < finished_at with clock function (OPS-430)", async () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(db, makeSpec());
+    linkEvent(db, spec.runId);
+    let t = T0;
+    const clock = () => (t += 1000);
+    const o = opts({ now: clock });
+
+    const summary = await runOnce(db, registry, adapters, o);
+    expect(summary.terminalState).toBe("COMPLETED");
+
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.started_at).toBeTruthy();
+    expect(attempt.finished_at).toBeTruthy();
+    expect(Date.parse(attempt.started_at)).toBeLessThan(Date.parse(attempt.finished_at));
+
+    const journal = lifecycleOf(db, spec.runId);
+    const leased = journal.find((e) => e.to_state === "LEASED");
+    const running = journal.find((e) => e.to_state === "RUNNING");
+    const verifying = journal.find((e) => e.to_state === "VERIFYING");
+    const completed = journal.find((e) => e.to_state === "COMPLETED");
+
+    expect(Date.parse(leased.at)).toBeLessThan(Date.parse(running.at));
+    expect(Date.parse(running.at)).toBeLessThan(Date.parse(verifying.at));
+    expect(Date.parse(verifying.at)).toBeLessThan(Date.parse(completed.at));
+    expect(attempt.started_at).toBe(running.at);
+    expect(attempt.finished_at).toBe(completed.at);
+  });
 });
 
