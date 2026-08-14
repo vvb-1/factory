@@ -9,7 +9,7 @@ import type { AdmittedEvent, EventFocus } from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
 import { EVENT_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
-import { formatRevealNotification } from "../reveal";
+import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import {
   Ago,
   Button,
@@ -75,6 +75,7 @@ export function Events({
   onJumpRun,
   onTriggerAgain,
   onInject,
+  rejumpEpoch,
 }: {
   connected: boolean;
   context: OperatorContext;
@@ -86,6 +87,7 @@ export function Events({
   onJumpRun: (runId: string) => void;
   onTriggerAgain: (envelope: Record<string, unknown>) => void;
   onInject: () => void;
+  rejumpEpoch?: number;
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
@@ -158,43 +160,73 @@ export function Events({
   // keeps the chips. Under `fetchAll` the row can sit in `rows` while another
   // status tab is active, so deciding on presence alone would clear the chips
   // before the tab effect below has made the row renderable.
-  const pendingReveal = useRef<string | null>(null);
+  const pendingReveal = useRef<{
+    key: string;
+    snapshot: { filter: string; typeFilter: string | null; sourceFilter: string | null };
+  } | null>(null);
   const lastKey = useRef<string | null>(null);
+  const lastRejump = useRef<number | undefined>(rejumpEpoch);
   const tabChangedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedKey !== lastKey.current) {
-      lastKey.current = selectedKey;
-      pendingReveal.current = selectedKey;
+    const isNewKey = selectedKey !== lastKey.current;
+    const isRejump = rejumpEpoch !== lastRejump.current;
+    lastKey.current = selectedKey;
+    lastRejump.current = rejumpEpoch;
+
+    if (selectedKey && (isNewKey || isRejump)) {
+      pendingReveal.current = {
+        key: selectedKey,
+        snapshot: { filter, typeFilter, sourceFilter },
+      };
     }
-    const key = pendingReveal.current;
-    if (!key || key !== selectedKey) return;
-    const row = rows.find((e) => keyOf(e) === key);
+    const latch = pendingReveal.current;
+    if (!latch || latch.key !== selectedKey) return;
+    const row = rows.find((e) => keyOf(e) === latch.key);
     if (!row) return; // tab switch / poll still pending
     if (fetchAll && tab !== "all" && row.status !== tab) return; // waiting on the tab switch
     pendingReveal.current = null; // decided once
-    const isHidden = !visible.some((e) => keyOf(e) === key);
-    let filterCleared = false;
-    if (isHidden) {
-      if (filter || sourceFilter || (typeFilter && !focusEvent?.type)) {
-        filterCleared = true;
+    const isVisible = visible.some((e) => keyOf(e) === latch.key);
+    const currentFilters = { filter, typeFilter, sourceFilter };
+    const emptyFilters = {
+      filter: "",
+      typeFilter: focusEvent?.type ?? null,
+      sourceFilter: null,
+    };
+    const decision = decideRevealFilters(latch.snapshot, currentFilters, emptyFilters, isVisible);
+    if (decision.cleared) {
+      if (decision.clearedFields.includes("filter")) setFilter(decision.next.filter);
+      if (decision.clearedFields.includes("sourceFilter")) setSourceFilter(decision.next.sourceFilter);
+      if (decision.clearedFields.includes("typeFilter")) {
+        setTypeFilter(decision.next.typeFilter);
+        if (!focusEvent?.type) onSelectType(null);
       }
-      setFilter("");
-      setSourceFilter(null);
-      if (!focusEvent?.type) setTypeFilter(null);
     }
-    const tabChanged = tabChangedFor.current === key;
+    const tabChanged = tabChangedFor.current === latch.key;
     tabChangedFor.current = null;
-    if (tabChanged || filterCleared) {
+    if (tabChanged || decision.cleared) {
       const msg = formatRevealNotification({
         kind: "event",
         id: focusEvent?.eventId ?? row.eventId,
         state: row.status,
         tabChanged,
-        filterCleared,
+        filterCleared: decision.cleared,
       });
       if (msg) notify(msg, "info");
     }
-  }, [selectedKey, rows, visible, focusEvent?.type, focusEvent?.eventId, fetchAll, tab, filter, sourceFilter, typeFilter]);
+  }, [
+    selectedKey,
+    rejumpEpoch,
+    rows,
+    visible,
+    focusEvent?.type,
+    focusEvent?.eventId,
+    fetchAll,
+    tab,
+    filter,
+    sourceFilter,
+    typeFilter,
+    onSelectType,
+  ]);
 
   // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
   // With a repo context the fetch ignores the tab, so the row's own status —
@@ -280,12 +312,14 @@ export function Events({
       onSelectEvent(e ? e.source : null, e?.eventId);
     },
     onClose: () => {
-      if (selectedKey) onSelectEvent(null);
+      if (sel) onSelectEvent(null);
       else if (filter || typeFilter || sourceFilter) {
         setFilter("");
         setTypeFilter(null);
         setSourceFilter(null);
         onSelectType(null);
+      } else if (selectedKey) {
+        onSelectEvent(null);
       }
     },
     keys: {

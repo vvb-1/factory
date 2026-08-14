@@ -744,6 +744,23 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
     }
   });
 
+  test("GET /repos surfaces malformed repos.yaml as RepoError instead of internal_error (OPS-346)", async () => {
+    const malformed = mkdtempSync(path.join(os.tmpdir(), "evrt-api-badrepos-"));
+    mkdirSync(path.join(malformed, "config"), { recursive: true });
+    writeFileSync(path.join(malformed, "config", "repos.yaml"), "repos: [ invalid: {");
+    const { server, port, close } = await makeServer({ repos: () => loadRepos({ root: malformed }) });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/repos`);
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toContain("invalid YAML:");
+      expect(body.error).not.toBe("internal_error");
+    } finally {
+      close();
+      server.close();
+    }
+  });
+
   test("POST /repos/:name/janitor dry-runs by default and never calls apply (OPS-301)", async () => {
     const calls = [];
     const fixture = new Map([

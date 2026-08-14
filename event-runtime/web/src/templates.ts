@@ -15,7 +15,7 @@ export interface TriggerTemplate {
 }
 
 /** A plausible starting value for one schema property — never a lie, just a seed. */
-function seedFor(name: string, schema: any): unknown {
+function seedFor(name: string, schema: any, nowMs: number = Date.now()): unknown {
   if (!schema || typeof schema !== "object") return "";
   if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
   if (schema.const !== undefined) return schema.const;
@@ -30,11 +30,11 @@ function seedFor(name: string, schema: any): unknown {
     case "array": {
       // minItems > 0 means "empty is invalid" — seed one element so the
       // template is submittable, not a guaranteed 422.
-      const item = seedFor(name, schema.items);
+      const item = seedFor(name, schema.items, nowMs);
       return (schema.minItems ?? 0) > 0 ? [item] : [];
     }
     case "object":
-      return buildSkeleton(schema);
+      return buildSkeleton(schema, nowMs);
     default:
       // Pattern-constrained strings get a hint the operator can recognise and
       // replace; anything else stays empty rather than inventing content.
@@ -44,17 +44,33 @@ function seedFor(name: string, schema: any): unknown {
         if (schema.pattern.startsWith("^/")) return "/";
         if (schema.pattern.includes("/")) return "owner/name";
       }
+      if (
+        schema.format === "date-time" ||
+        schema.format === "date" ||
+        name === "at" ||
+        /(?:[a-z0-9](?:At|_at|-at))$/.test(name)
+      ) {
+        return new Date(nowMs).toISOString();
+      }
+      if (
+        schema.format === "uuid" ||
+        name === "id" ||
+        name === "ID" ||
+        /(?:[a-z0-9](?:Id|_id|-id)|ID)$/.test(name)
+      ) {
+        return triggerId(nowMs);
+      }
       return "";
   }
 }
 
 /** Required properties only: the smallest envelope that can pass validation. */
-export function buildSkeleton(schema: any): Record<string, unknown> {
+export function buildSkeleton(schema: any, nowMs: number = Date.now()): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const required: string[] = schema?.required ?? [];
   const props = schema?.properties ?? {};
   for (const name of required) {
-    out[name] = seedFor(name, props[name]);
+    out[name] = seedFor(name, props[name], nowMs);
   }
   return out;
 }
@@ -93,7 +109,7 @@ export function buildTemplates(view: AgentsView, nowMs: number): TriggerTemplate
         subject: "factory",
         occurredAt: new Date(nowMs).toISOString(),
         correlationId: id,
-        payload: buildSkeleton(def?.inputSchema),
+        payload: buildSkeleton(def?.inputSchema, nowMs),
       },
     };
   });

@@ -55,4 +55,84 @@ describe("validate", () => {
     const { errors } = validate(schema, { repos: [{}] });
     expect(errors[0]).toContain("$.repos[0]");
   });
+
+  describe("prototype-inherited keys and pollution (OPS-438)", () => {
+    test("rejects prototype-inherited keys when additionalProperties is false", () => {
+      const schema = {
+        type: "object",
+        additionalProperties: false,
+        properties: { a: { type: "string" } },
+      };
+      expect(validate(schema, { a: "x", toString: "evil" }).valid).toBe(false);
+      expect(validate(schema, { a: "x", valueOf: "evil" }).valid).toBe(false);
+      expect(validate(schema, { a: "x", constructor: "evil" }).valid).toBe(false);
+      expect(validate(schema, { a: "x", isPrototypeOf: "evil" }).valid).toBe(false);
+    });
+
+    test("validates additionalProperties schema on prototype-named own keys", () => {
+      const schema = {
+        type: "object",
+        additionalProperties: { type: "integer" },
+        properties: { a: { type: "string" } },
+      };
+      const res = validate(schema, { a: "x", toString: "not-an-int" });
+      expect(res.valid).toBe(false);
+      expect(res.errors[0]).toContain("$.toString");
+    });
+
+    test("rejects missing required property even if name matches Object.prototype method", () => {
+      const schema = {
+        type: "object",
+        required: ["toString", "valueOf", "constructor"],
+      };
+      const res = validate(schema, {});
+      expect(res.valid).toBe(false);
+      expect(res.errors.length).toBe(3);
+      expect(res.errors.some((e) => e.includes('"toString"'))).toBe(true);
+      expect(res.errors.some((e) => e.includes('"valueOf"'))).toBe(true);
+      expect(res.errors.some((e) => e.includes('"constructor"'))).toBe(true);
+    });
+
+    test("does not validate schema against prototype methods when property is absent on value", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          toString: { type: "string" },
+          valueOf: { type: "string" },
+        },
+      };
+      const res = validate(schema, {});
+      expect(res.valid).toBe(true);
+    });
+
+    test("validates objects created with Object.create(null)", () => {
+      const schema = {
+        type: "object",
+        required: ["name"],
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+        },
+      };
+      const obj = Object.create(null);
+      obj.name = "safe";
+      expect(validate(schema, obj).valid).toBe(true);
+
+      const invalidObj = Object.create(null);
+      invalidObj.extra = "bad";
+      expect(validate(schema, invalidObj).valid).toBe(false);
+    });
+
+    test("schema does not pick up polluted prototype properties", () => {
+      try {
+        Object.prototype.unsupportedCustomKeyword = "polluted";
+        Object.prototype.minimum = 100;
+        const schema = { type: "number" };
+        expect(validate(schema, 5).valid).toBe(true);
+      } finally {
+        delete Object.prototype.unsupportedCustomKeyword;
+        delete Object.prototype.minimum;
+      }
+    });
+  });
 });

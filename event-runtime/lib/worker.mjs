@@ -68,7 +68,7 @@ function originatingEvent(db, runId) {
  *
  * @returns {{ runId: string, attempt: number, fencingToken: number, spec: object } | null}
  */
-export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknown", labels = {}, adapters = null } = {}) {
+export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknown", labels = {}, adapters = null, adapterOverride } = {}) {
   // BEGIN IMMEDIATE, not the default deferred transaction: two workers must
   // not both read the same QUEUED row before either writes (OPS-233).
   return txImmediate(db, () => {
@@ -86,7 +86,7 @@ export function claimNext(db, { owner, now = Date.now(), policyVersion = "unknow
     for (const candidate of candidates) {
       const candidateSpec = JSON.parse(candidate.spec_json);
       if (!satisfiesPlacement(labels, candidateSpec.placement)) continue;
-      if (adapters && !adapters.includes(candidateSpec.adapter)) continue;
+      if (adapters && !adapterOverride && !adapters.includes(candidateSpec.adapter)) continue;
       row = candidate;
       spec = candidateSpec;
       break;
@@ -121,7 +121,7 @@ const ACTIVE_EXECUTIONS = new Map();
  * { fenced: true } when a newer attempt owns the run at publish time.
  */
 export async function executeClaimed(db, registry, adapters, claim, {
-  workspacesRoot, artifactStore = artifactsRoot(), now = Date.now(), policyVersion = "unknown",
+  workspacesRoot, artifactStore = artifactsRoot(), now = Date.now(), policyVersion = "unknown", adapterOverride,
 } = {}) {
   const { runId, attempt, fencingToken, spec } = claim;
   const owner = db
@@ -186,7 +186,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
     db.query(`UPDATE attempts SET workspace_path = ? WHERE run_id = ? AND attempt = ?`)
       .run(workspaceDir, runId, attempt);
 
-    const adapter = adapters[spec.adapter];
+    const adapterKey = adapterOverride ?? spec.adapter;
+    const adapter = adapters[adapterKey];
     if (!adapter) {
       failTerminal("FAILED", "unknown_adapter", "unknown_adapter");
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });

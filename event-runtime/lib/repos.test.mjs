@@ -104,6 +104,39 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
     scratch.push(empty);
     expect(() => loadRepos({ root: empty })).toThrow(RepoError);
   });
+
+  test("max_in_flight must be a positive number when present, or null when absent/null (OPS-347)", () => {
+    const valid = loadRepos({
+      root: factoryRoot(`repos:
+  - name: explicit-null
+    path: /tmp/a
+    max_in_flight: null
+  - name: positive-num
+    path: /tmp/b
+    max_in_flight: 5
+`),
+    });
+    expect(valid.get("explicit-null").maxInFlight).toBeNull();
+    expect(valid.get("positive-num").maxInFlight).toBe(5);
+
+    const invalidCases = [
+      `repos:\n  - name: str-cap\n    path: /tmp/c\n    max_in_flight: "20"\n`,
+      `repos:\n  - name: zero-cap\n    path: /tmp/d\n    max_in_flight: 0\n`,
+      `repos:\n  - name: neg-cap\n    path: /tmp/e\n    max_in_flight: -1\n`,
+      `repos:\n  - name: bool-cap\n    path: /tmp/f\n    max_in_flight: true\n`,
+      `repos:\n  - name: obj-cap\n    path: /tmp/g\n    max_in_flight: { cap: 5 }\n`,
+    ];
+
+    for (const yaml of invalidCases) {
+      expect(() => loadRepos({ root: factoryRoot(yaml) })).toThrow(RepoError);
+    }
+  });
+
+  test("malformed YAML throws RepoError with file path and parse error message (OPS-346)", () => {
+    const root = factoryRoot("repos: [ invalid: {");
+    expect(() => loadRepos({ root })).toThrow(RepoError);
+    expect(() => loadRepos({ root })).toThrow(/invalid YAML:/);
+  });
 });
 
 describe("reposView is what the control API serves", () => {

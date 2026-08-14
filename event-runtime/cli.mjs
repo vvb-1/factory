@@ -48,6 +48,9 @@ usage: bun event-runtime/cli.mjs <command>
                                  separate "work" processes so serve restarts
                                  never kill a running agent.
                                  --watch restarts on event-runtime/ changes
+  work [--label k=v ...] [--adapter-override fake] [--drain-timeout N]
+                                 worker process: claim, execute, verify, and publish
+                                 runs from the database
   status                         events, proposals, runs, anomalies
   events [status]                admitted events, optionally filtered by status
   ps [state]                     running event processes/runs (default: RUNNING or LEASED)
@@ -67,7 +70,7 @@ usage: bun event-runtime/cli.mjs <command>
   trace <run-id>                 live agent trace: assistant text, tool calls, usage
   update-pins                    re-pin agent definition content hashes (edits repo files)
 
-All commands except serve and update-pins are clients of the control API and
+All commands except serve, work, and update-pins are clients of the control API and
 need serve running on ${API_HOST}:${DEFAULT_PORT} (FACTORY_EVENT_PORT to change).`;
 
 const stamp = () => new Date().toISOString();
@@ -169,6 +172,7 @@ export async function tick({
     await runStep("worker", async () => {
       await runOnce(db, registry, adapters, {
         workspacesRoot: workspacesRoot(), owner, now, policyVersion: pv,
+        ...(adapterOverride ? { adapterOverride } : {}),
       });
     });
   }
@@ -423,6 +427,7 @@ async function work(args) {
         const claim = claimNext(db, {
           owner: workerId, policyVersion: pv, labels,
           adapters: adapterOverride ? null : adapterNames,
+          ...(adapterOverride ? { adapterOverride } : {}),
         });
         if (!claim) {
           await new Promise((resolve) => setTimeout(resolve, 500));

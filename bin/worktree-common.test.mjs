@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "bun:test";
@@ -119,6 +119,77 @@ test("allocate_api_port skips port occupied by another runtime", async () => {
     expect(r.stdout.trim()).toBe("7762");
   } finally {
     server.stop(true);
+  }
+});
+
+test("ticket_number extracts numeric ID from valid ticket strings", () => {
+  expect(sh('ticket_number OPS-123').stdout.trim()).toBe("123");
+  expect(sh('ticket_number CLNT-456').stdout.trim()).toBe("456");
+  expect(sh('ticket_number WM-1').stdout.trim()).toBe("1");
+  expect(sh('ticket_number OPS-999-scratch').stdout.trim()).toBe("999");
+});
+
+test("ticket_number dies on malformed ticket inputs", () => {
+  const invalidCases = ["", "123", "ops-123", "OPS_123", "NO-DASH", "OPS-"];
+  for (const input of invalidCases) {
+    const r = sh(`ticket_number "${input}"`);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("ticket must look like OPS-123");
+  }
+});
+
+test("web_build_hash computes deterministic sha1 and changes on file rename or content edit", () => {
+  const mockWebDir = mkdtempSync(path.join(tmpdir(), "mock-web-build-"));
+  try {
+    const srcDir = path.join(mockWebDir, "src");
+    const componentsDir = path.join(srcDir, "components");
+    const publicDir = path.join(mockWebDir, "public");
+    mkdirSync(componentsDir, { recursive: true });
+    mkdirSync(publicDir, { recursive: true });
+
+    writeFileSync(path.join(mockWebDir, "package.json"), JSON.stringify({ name: "mock-web" }));
+    writeFileSync(path.join(mockWebDir, "bun.lock"), "lockfile-v1");
+    writeFileSync(path.join(mockWebDir, "vite.config.ts"), "export default {};");
+    writeFileSync(path.join(mockWebDir, "tsconfig.json"), "{}");
+    writeFileSync(path.join(mockWebDir, "index.html"), "<!DOCTYPE html><html></html>");
+    writeFileSync(path.join(srcDir, "main.ts"), "console.log('init');");
+    writeFileSync(path.join(componentsDir, "Button.vue"), "<template><button>OK</button></template>");
+    writeFileSync(path.join(publicDir, "favicon.ico"), "binary-icon-content");
+
+    const initial = sh(`web_build_hash "${mockWebDir}"`);
+    expect(initial.status).toBe(0);
+    const initialHash = initial.stdout.trim();
+    expect(initialHash).toMatch(/^[0-9a-f]{40}$/);
+
+    // Identical hash on untouched directory
+    const repeat = sh(`web_build_hash "${mockWebDir}"`);
+    expect(repeat.stdout.trim()).toBe(initialHash);
+
+    // 1. Content edit in src/
+    writeFileSync(path.join(srcDir, "main.ts"), "console.log('updated');");
+    const edited = sh(`web_build_hash "${mockWebDir}"`);
+    expect(edited.stdout.trim()).not.toBe(initialHash);
+
+    // Revert content edit -> restores initial hash
+    writeFileSync(path.join(srcDir, "main.ts"), "console.log('init');");
+    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).toBe(initialHash);
+
+    // 2. File rename in src/components/
+    const oldBtn = path.join(componentsDir, "Button.vue");
+    const newBtn = path.join(componentsDir, "Btn.vue");
+    renameSync(oldBtn, newBtn);
+    const renamed = sh(`web_build_hash "${mockWebDir}"`);
+    expect(renamed.stdout.trim()).not.toBe(initialHash);
+
+    // Revert rename -> restores initial hash
+    renameSync(newBtn, oldBtn);
+    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).toBe(initialHash);
+
+    // 3. Edit root config files
+    writeFileSync(path.join(mockWebDir, "package.json"), JSON.stringify({ name: "mock-web-2" }));
+    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).not.toBe(initialHash);
+  } finally {
+    rmSync(mockWebDir, { recursive: true, force: true });
   }
 });
 

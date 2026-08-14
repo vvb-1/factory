@@ -89,6 +89,18 @@ export type HashWriter = {
   cancel: () => void;
 };
 
+let activeHashWriter: HashWriter | null = null;
+
+/** Register the active writer so direct readers of the URL (copyLink) can flush. */
+export function setActiveHashWriter(writer: HashWriter | null) {
+  activeHashWriter = writer;
+}
+
+/** Write any buffered hash immediately to the URL. Safe no-op when none is active. */
+export function flushHash() {
+  activeHashWriter?.flush();
+}
+
 const timerScheduler: HashWriteScheduler = {
   now: () => Date.now(),
   after: (fn, ms) => {

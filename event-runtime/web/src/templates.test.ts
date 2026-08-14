@@ -85,6 +85,68 @@ describe("buildSkeleton", () => {
       }),
     ).toEqual({ outer: { inner: 3 } });
   });
+
+  test("seeds uuid-like property names or format: 'uuid' to a non-empty id", () => {
+    expect(
+      buildSkeleton(
+        {
+          required: ["id", "ID", "eventId", "correlationId", "alertId", "user_id", "task-id", "customRef", "grid"],
+          properties: {
+            id: { type: "string" },
+            ID: { type: "string" },
+            eventId: { type: "string" },
+            correlationId: { type: "string" },
+            alertId: { type: "string" },
+            user_id: { type: "string" },
+            "task-id": { type: "string" },
+            customRef: { type: "string", format: "uuid" },
+            grid: { type: "string" },
+          },
+        },
+        NOW,
+      ),
+    ).toEqual({
+      id: triggerId(NOW),
+      ID: triggerId(NOW),
+      eventId: triggerId(NOW),
+      correlationId: triggerId(NOW),
+      alertId: triggerId(NOW),
+      user_id: triggerId(NOW),
+      "task-id": triggerId(NOW),
+      customRef: triggerId(NOW),
+      grid: "",
+    });
+  });
+
+  test("seeds date/timestamp property names or format: 'date-time' / 'date' to an ISO timestamp", () => {
+    expect(
+      buildSkeleton(
+        {
+          required: ["occurredAt", "createdAt", "updated_at", "started-at", "at", "timeField", "dateOnly", "plain"],
+          properties: {
+            occurredAt: { type: "string" },
+            createdAt: { type: "string" },
+            updated_at: { type: "string" },
+            "started-at": { type: "string" },
+            at: { type: "string" },
+            timeField: { type: "string", format: "date-time" },
+            dateOnly: { type: "string", format: "date" },
+            plain: { type: "string" },
+          },
+        },
+        NOW,
+      ),
+    ).toEqual({
+      occurredAt: "2026-08-13T09:15:00.000Z",
+      createdAt: "2026-08-13T09:15:00.000Z",
+      updated_at: "2026-08-13T09:15:00.000Z",
+      "started-at": "2026-08-13T09:15:00.000Z",
+      at: "2026-08-13T09:15:00.000Z",
+      timeField: "2026-08-13T09:15:00.000Z",
+      dateOnly: "2026-08-13T09:15:00.000Z",
+      plain: "",
+    });
+  });
 });
 
 describe("buildTemplates", () => {
@@ -126,7 +188,7 @@ describe("buildTemplates", () => {
       type: "keephq.disk-alert.raised",
       source: "web-trigger",
       occurredAt: "2026-08-13T09:15:00.000Z",
-      payload: { host: "lab", mount: "/", usedPct: 0, alertId: "" },
+      payload: { host: "lab", mount: "/", usedPct: 0, alertId: triggerId(NOW) },
     });
   });
 
