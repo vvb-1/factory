@@ -9,6 +9,7 @@ import { matchesRepo } from "../context";
 import { PROPOSAL_FACETS, matchesFilterQuery, parseFilterQuery, proposalRunState } from "../filterQuery";
 import { ScopeCaption } from "../components/ContextTabs";
 import { SpecDiff } from "../components/SpecDiff";
+import { decideRevealFilters } from "../reveal";
 import {
   Ago,
   Button,
@@ -165,22 +166,34 @@ export function Proposals({
   // until the row exists in `rows` (tab switch / re-plan / poll); decide once
   // so a later 2s poll does not wipe a typed filter. Click on a visible row
   // (including under the expired chip) keeps the filters.
-  const pendingReveal = useRef<string | null>(null);
+  const pendingReveal = useRef<{
+    key: string;
+    snapshot: { filter: string; expiredOnly: boolean };
+  } | null>(null);
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
     if (focusProposalId !== lastKey.current) {
       lastKey.current = focusProposalId;
-      pendingReveal.current = focusProposalId;
+      pendingReveal.current = focusProposalId
+        ? {
+            key: focusProposalId,
+            snapshot: { filter, expiredOnly },
+          }
+        : null;
     }
-    const key = pendingReveal.current;
-    if (!key || key !== focusProposalId) return;
-    if (!rows.some((p) => p.id === key)) return; // tab switch / poll still pending
+    const latch = pendingReveal.current;
+    if (!latch || latch.key !== focusProposalId) return;
+    if (!rows.some((p) => p.id === latch.key)) return; // tab switch / poll still pending
     pendingReveal.current = null; // decided once
-    if (visible.some((p) => p.id === key)) return; // visible: keep the filters
-    setFilter("");
-    const row = rows.find((p) => p.id === key);
-    if (expiredOnly && row && !row.expired) setExpiredOnly(false);
-  }, [focusProposalId, rows, visible, expiredOnly]);
+    const isVisible = visible.some((p) => p.id === latch.key);
+    const currentFilters = { filter, expiredOnly };
+    const emptyFilters = { filter: "", expiredOnly: false };
+    const decision = decideRevealFilters(latch.snapshot, currentFilters, emptyFilters, isVisible);
+    if (decision.cleared) {
+      if (decision.clearedFields.includes("filter")) setFilter(decision.next.filter);
+      if (decision.clearedFields.includes("expiredOnly")) setExpiredOnly(decision.next.expiredOnly);
+    }
+  }, [focusProposalId, rows, visible, filter, expiredOnly]);
 
   // Deep link: open tab first, then history if the id is a decided proposal.
   // Hash stays; we only switch tabs so the row is in `visible` — the selection
