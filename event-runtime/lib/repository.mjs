@@ -102,6 +102,9 @@ export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "rep
   }
   if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
     mkdirSync(target, { recursive: true });
+    // The worker's integrity gate must be able to inspect every repository
+    // workspace, including a CI/demo fallback with no local source checkout.
+    git(["init", "--quiet", target]);
     return { path: target, sha };
   }
   const mirror = syncMirror(repo, { root: mirrors });

@@ -137,6 +137,18 @@ describe("mirror + pinned checkout", () => {
     expect(git(["worktree", "list"], mirrorPath("testrepo", mirrors))).not.toContain(workspaceDir);
   }, { timeout: GIT_MS });
 
+  test("fallback checkout is an empty Git repository for integrity checks", () => {
+    const missing = path.join(tmp("evrt-missing-"), "does-not-exist");
+    const reposRoot = makeFactoryRoot(missing);
+    const workspaceDir = tmp("evrt-ws-");
+    const checkout = materializeCheckout({
+      workspaceDir, repoName: "testrepo", sha: "0".repeat(40), reposRoot,
+    });
+    expect(git(["status", "--porcelain"], checkout.path)).toBe("");
+    writeFileSync(path.join(checkout.path, "agent-write.txt"), "dirty\n");
+    expect(git(["status", "--porcelain"], checkout.path)).toContain("?? agent-write.txt");
+  }, { timeout: GIT_MS });
+
   test("a checkout may not escape its workspace", () => {
     const src = makeRepo();
     const mirrors = tmp("evrt-mirrors-");
