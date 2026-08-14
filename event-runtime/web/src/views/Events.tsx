@@ -157,9 +157,11 @@ export function Events({
   }, [focusEvent?.status, focusEvent?.type]);
 
   // Reveal a hash-selected row only when current filters hide it. Latch until
-  // the row exists in `rows` (inject / tab switch / poll); decide once so a
+  // the row is on the active tab (inject / tab switch / poll); decide once so a
   // later 2s poll does not wipe a typed filter. j/k/click on a visible row
-  // keeps the chips.
+  // keeps the chips. Under `fetchAll` the row can sit in `rows` while another
+  // status tab is active, so deciding on presence alone would clear the chips
+  // before the tab effect below has made the row renderable.
   const pendingReveal = useRef<string | null>(null);
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
@@ -169,21 +171,27 @@ export function Events({
     }
     const key = pendingReveal.current;
     if (!key || key !== selectedKey) return;
-    if (!rows.some((e) => keyOf(e) === key)) return; // tab switch / poll still pending
+    const row = rows.find((e) => keyOf(e) === key);
+    if (!row) return; // tab switch / poll still pending
+    if (fetchAll && tab !== "all" && row.status !== tab) return; // waiting on the tab switch
     pendingReveal.current = null; // decided once
     if (visible.some((e) => keyOf(e) === key)) return; // visible: keep the filters
     setFilter("");
     setSourceFilter(null);
     if (!focusEvent?.type) setTypeFilter(null);
-  }, [selectedKey, rows, visible, focusEvent?.type]);
+  }, [selectedKey, rows, visible, focusEvent?.type, fetchAll, tab]);
 
   // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
+  // With a repo context the fetch ignores the tab, so the row's own status —
+  // not its presence in `rows` — decides whether this tab can render it.
   useEffect(() => {
     if (!focusEvent?.source || !focusEvent?.eventId) return;
     const key = `${focusEvent.source}:${focusEvent.eventId}`;
-    if (!rows.some((e) => keyOf(e) === key) && tab !== "all") setTab("all");
+    const row = rows.find((e) => keyOf(e) === key);
+    const onTab = !!row && (!fetchAll || tab === "all" || row.status === tab);
+    if (!onTab && tab !== "all") setTab("all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusEvent?.source, focusEvent?.eventId, rows, tab]);
+  }, [focusEvent?.source, focusEvent?.eventId, rows, tab, fetchAll]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });

@@ -367,15 +367,21 @@ export function Runs({
   const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
 
   // Deep link / jump: switch to ALL if the run isn't on this tab. Hash stays put.
-  // Reveal (clear filter) once per focus id, after the run is in `rows` so a
+  // Reveal (clear filter) once per focus id, after the run is on the tab so a
   // late arrival still surfaces. Typing a filter does not re-reveal.
+  // Under `fetchAll` the list carries every state, so presence in `rows` says
+  // nothing about the tab — the tab has to be part of the membership test, or
+  // the switch to ALL never fires and the row stays unrendered.
   const revealedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!focusRunId) {
       revealedFor.current = null;
       return;
     }
-    if (rows.some((r) => r.runId === focusRunId)) {
+    const onTab = rows.some(
+      (r) => r.runId === focusRunId && (!fetchAll || tab === "ALL" || r.state === tab),
+    );
+    if (onTab) {
       if (revealedFor.current !== focusRunId) {
         revealedFor.current = focusRunId;
         if (!visible.some((r) => r.runId === focusRunId)) setFilter("");
@@ -383,7 +389,7 @@ export function Runs({
       return;
     }
     if (tab !== "ALL") setTab("ALL");
-  }, [focusRunId, rows, tab, visible]);
+  }, [focusRunId, rows, tab, visible, fetchAll]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {
