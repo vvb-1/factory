@@ -10,14 +10,27 @@ import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { keyGuard } from "../hooks";
+import { keyGuard, useNow } from "../hooks";
 import { buildCapabilityGraph, type GraphNode } from "../graph/model";
 import { nodeTypes } from "../graph/nodes";
 import { largestComponentIds, matchNodes } from "../graph/search";
 import { EDGE_STYLES, legendEntries } from "../graph/style";
 import type { EventFocus } from "../types";
 import type { OperatorContext } from "../context";
-import { Button, DetailPane, JsonBlock, JumpLink, KV, Section, copyText, copyLink } from "../components/ui";
+import {
+  Ago,
+  Button,
+  DECISION_HUES,
+  DetailPane,
+  JsonBlock,
+  JumpLink,
+  KV,
+  Section,
+  STATE_HUES,
+  StateBadge,
+  copyText,
+  copyLink,
+} from "../components/ui";
 import { ScopeCaption } from "../components/ContextTabs";
 
 // Fit-all on a large graph lands at ~0.1–0.3 zoom where labels are unreadable
@@ -26,10 +39,9 @@ import { ScopeCaption } from "../components/ContextTabs";
 const INITIAL_FIT_MIN_ZOOM = 0.65;
 
 /**
- * Graph (webui roadmap / OPS-224 phase 1, chrome OPS-230): the capability map
- * — what this runtime *can* do, drawn from the registry alone. Same inverted-L
- * as the list views: canvas + right detail, jumps to Events/Agents, Copy id,
- * honest empty when /agents is down. Phase 2 overlays live run state.
+ * Graph (webui roadmap / OPS-224 phase 1, chrome OPS-230, phase 2 overlays OPS-227):
+ * the capability map overlaid with live run states, admitted/planned event counts,
+ * causation invocation counts on recommendation edges, and open proposal ghost nodes.
  */
 export function Graph({
   context,
@@ -45,6 +57,12 @@ export function Graph({
   onJumpEvents: (focus: EventFocus) => void;
 }) {
   const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents, refetchInterval: 10_000 });
+  const runsQ = useQuery({ queryKey: ["runs"], queryFn: () => api.runs(), refetchInterval: 5_000 });
+  const eventsQ = useQuery({ queryKey: ["events"], queryFn: () => api.events(), refetchInterval: 5_000 });
+  const proposalsQ = useQuery({ queryKey: ["proposals"], queryFn: api.proposals, refetchInterval: 5_000 });
+  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 5_000 });
+  const now = useNow();
+
   const [positioned, setPositioned] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [layoutError, setLayoutError] = useState<"chunk" | "layout" | "mapping" | null>(null);
   const flowRef = useRef<{
@@ -62,12 +80,20 @@ export function Graph({
   const { graph, mappingError } = useMemo(() => {
     if (!registry.data) return { graph: null, mappingError: false };
     try {
-      return { graph: buildCapabilityGraph(registry.data), mappingError: false };
+      return {
+        graph: buildCapabilityGraph(registry.data, {
+          runs: runsQ.data?.runs,
+          events: eventsQ.data?.events,
+          proposals: proposalsQ.data?.proposals,
+          status: statusQ.data,
+        }),
+        mappingError: false,
+      };
     } catch (err) {
       console.error("graph mapping failed", err);
       return { graph: null, mappingError: true };
     }
-  }, [registry.data]);
+  }, [registry.data, runsQ.data, eventsQ.data, proposalsQ.data, statusQ.data]);
 
   useEffect(() => {
     if (!graph) return;
@@ -393,6 +419,12 @@ export function Graph({
                 <KV k="adapter" v={selected.adapter} />
                 <KV k="idempotency scope" v={selected.scope.join(" + ") || "—"} />
                 <KV k="proposal ttl" v={selected.ttl ? `${selected.ttl}s` : "—"} />
+                {selected.admittedCount !== undefined && (
+                  <KV k="admitted events" v={String(selected.admittedCount)} />
+                )}
+                {selected.plannedCount !== undefined && (
+                  <KV k="planned events" v={String(selected.plannedCount)} />
+                )}
               </Section>
               <Button onClick={() => onJumpEvents({ type: selected.label })}>
                 Show in Events
@@ -407,6 +439,58 @@ export function Graph({
                 run that returns one of these completes and chains no further.
               </div>
             </Section>
+          )}
+
+          {selected.kind === "proposal" && (
+            <>
+              <Section title="Pending proposal">
+                <KV k="id" v={selected.proposalId} />
+                <KV k="decision" v={<StateBadge state={selected.decision} hues={DECISION_HUES} />} />
+                <KV
+                  k="agent"
+                  v={
+                    selected.agentRef ? (
+                      <JumpLink onClick={() => onJumpAgent(selected.agentRef!)} title="Open in Agents">
+                        {selected.agentRef}
+                      </JumpLink>
+                    ) : (
+                      "—"
+                    )
+                  }
+                />
+                <KV
+                  k="origin"
+                  v={`${selected.proposal.eventSource ?? "—"} · ${selected.proposal.eventId ?? "—"}`}
+                />
+                <KV k="created" v={<Ago iso={selected.proposal.created_at} now={now} />} />
+                <KV
+                  k="ttl"
+                  v={`${selected.proposal.ttl_seconds}s ${selected.proposal.expired ? "(expired)" : "remaining"}`}
+                />
+                {selected.proposal.reason && <KV k="reason" v={selected.proposal.reason} />}
+                {selected.eventType && (
+                  <KV
+                    k="event type"
+                    v={
+                      <JumpLink
+                        onClick={() => onJumpEvents({ type: selected.eventType! })}
+                        title="Open in Events"
+                      >
+                        {selected.eventType}
+                      </JumpLink>
+                    }
+                  />
+                )}
+              </Section>
+              {selected.proposal.spec && (
+                <Section title="Run spec">
+                  <JsonBlock value={selected.proposal.spec} />
+                </Section>
+              )}
+              {selected.agentRef && (
+                <Button onClick={() => onJumpAgent(selected.agentRef!)}>Open in Agents</Button>
+              )}
+            </>
           )}
 
           {selected.kind === "agent" && agentDef && (
@@ -426,6 +510,25 @@ export function Graph({
                 <KV k="capabilities" v={agentDef.capabilities?.services?.join(", ") ?? "—"} />
                 <KV k="timeout" v={`${agentDef.limits?.timeout_seconds ?? "—"}s`} />
                 <KV k="attempts" v={String(agentDef.limits?.attempts ?? "—")} />
+                {selected.activeRuns && selected.activeRuns.length > 0 && (
+                  <KV
+                    k="active runs"
+                    v={
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {selected.activeRuns.map(({ state, count }) => (
+                          <StateBadge
+                            key={state}
+                            state={count > 1 ? `${state} ${count}` : state}
+                            hues={{
+                              ...STATE_HUES,
+                              [`${state} ${count}`]: STATE_HUES[state] ?? "var(--hue-idle)",
+                            }}
+                          />
+                        ))}
+                      </span>
+                    }
+                  />
+                )}
               </Section>
               {agentDef.command && (
                 <Section title="Closed command template">

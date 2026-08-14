@@ -22,6 +22,18 @@ describe("nodeStyleKey", () => {
     expect(
       nodeStyleKey({ id: "terminal:a@1", kind: "terminal", label: "chain ends", reason: "done" }),
     ).toBe("terminal");
+    expect(
+      nodeStyleKey({
+        id: "proposal:p1",
+        kind: "proposal",
+        label: "pending: a@1",
+        proposalId: "p1",
+        decision: "run",
+        agentRef: "a@1",
+        eventType: null,
+        proposal: {} as any,
+      }),
+    ).toBe("proposal");
   });
 });
 
@@ -46,10 +58,21 @@ describe("legendEntries", () => {
         agent("a@1", false),
         agent("b@1", true),
         { id: "terminal:b@1", kind: "terminal", label: "chain ends", reason: "done" },
+        {
+          id: "proposal:p1",
+          kind: "proposal",
+          label: "pending: b@1",
+          proposalId: "p1",
+          decision: "run",
+          agentRef: "b@1",
+          eventType: "a",
+          proposal: {} as any,
+        },
       ],
       edges: [
         { id: "routes:a", source: "event:a", target: "agent:a@1", kind: "routes" },
         { id: "rec:b@1:x", source: "agent:b@1", target: "event:a", kind: "recommends" },
+        { id: "prop:1", source: "event:a", target: "proposal:p1", kind: "proposal" },
       ],
     };
     const legend = legendEntries(graph);
@@ -58,10 +81,12 @@ describe("legendEntries", () => {
       { key: "agentReadOnly", ...NODE_STYLES.agentReadOnly },
       { key: "agentMutating", ...NODE_STYLES.agentMutating },
       { key: "terminal", ...NODE_STYLES.terminal },
+      { key: "proposal", ...NODE_STYLES.proposal },
     ]);
     expect(legend.edges).toEqual([
       { kind: "routes", ...EDGE_STYLES.routes },
       { kind: "recommends", ...EDGE_STYLES.recommends },
+      { kind: "proposal", ...EDGE_STYLES.proposal },
     ]);
   });
 
