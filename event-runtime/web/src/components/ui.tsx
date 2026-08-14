@@ -673,11 +673,13 @@ export function Dialog({
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     modal.depth += 1;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
       else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
     };
     window.addEventListener("keydown", onKey);
@@ -689,7 +691,8 @@ export function Dialog({
       window.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose lives in the ref
+  }, []);
   return (
     <div
       className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[10vh]"
