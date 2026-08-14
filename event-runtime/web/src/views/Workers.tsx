@@ -42,21 +42,7 @@ import {
   copyText,
   shortId,
 } from "../components/ui";
-
-/** Four mutually exclusive tokens; `stale` is the loudest because it is a lie detector. */
-const WORKER_HUES: Record<string, string> = {
-  idle: "var(--hue-ok)",
-  busy: "var(--hue-warn)",
-  stopped: "var(--hue-idle)",
-  stale: "var(--hue-err)",
-};
-
-/**
- * A stale heartbeat outranks whatever the row claims: a stale busy worker is
- * gone, not busy. `listWorkers` never marks a cleanly stopped worker stale, so
- * these four are disjoint.
- */
-const health = (w: Worker) => (w.stale ? "stale" : w.state);
+import { health, WORKER_HUES } from "../workerHealth";
 
 export const WORKER_TABS = ["ALL", "LIVE", "STOPPED"] as const;
 export type WorkerTab = (typeof WORKER_TABS)[number];
