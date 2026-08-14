@@ -203,6 +203,8 @@ repos:
     # means. mcp/** narrowed to the OAuth boundary itself — the tool
     # implementations under mcp/tools/ are ordinary CRUD behind that boundary.
     escalate_paths:
+      - legalease/legalease/urls.py
+      - legalease/main/decorators.py
       - legalease/main/migrations/**
       - legalease/legalease/settings*.py
       - legalease/main/services/access_control.py
