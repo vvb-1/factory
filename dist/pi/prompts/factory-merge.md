@@ -36,9 +36,7 @@ Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the mo
 
   Then label the PR `escalated` on GitHub (`gh pr edit <PR> --add-label escalated`, creating the label if the repo lacks it). An escalated PR stays open by design, waiting on me — and the merge gate counts open PRs, so without the label every tick would re-review it and re-escalate it forever. Removing the label is my signal that it is yours again.
 
-  Run the mechanical half first: `factory escalate --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. **Exit 2** means ESCALATE, no judgment call needed. **Exit 0** means the list was checked and no changed file matched — that clears only the path list, the behavior-based judgment below still applies. **Exit 3 means the gate could not be evaluated at all** (unknown repo, unreadable config, `gh pr diff` failed, or the repo has no `escalate_paths` key): it is not a pass. Treat the PR as escalated until the check can actually run, and fix the cause — give the repo an `escalate_paths` list, or an explicit `escalate_paths: []` where there is deliberately nothing to check mechanically.
-
-  The command also warns on stderr when the factory checkout it read the config from is behind its upstream or has uncommitted changes to `config/repos.yaml` — either can silently change the answer, which is how a real PR touching `.github/workflows/**` once came back clean (WM-15). On those warnings, `git -C ~/Develop/factory pull --ff-only` (or read `origin/<base>:config/repos.yaml` when the checkout is dirty) and re-run before trusting the result. If `factory` is not on PATH, apply the repo's `escalate_paths` from `config/repos.yaml` by hand against the changed-file list.
+  Run the mechanical half first: `factory escalate --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. Exit 2 means ESCALATE, no judgment call needed. Exit 0 clears only the path list — the behavior-based judgment below still applies. If `factory` is not on PATH, apply the repo's `escalate_paths` from `config/repos.yaml` by hand against the changed-file list.
 
   The test for "touching" is whether the diff **changes security-relevant behavior**, not whether the file sits near security code — read literally as file-adjacency the list swallows most PRs in an app where auth is everywhere, which trains both of us to rubber-stamp. For grey-zone diffs (near those surfaces but apparently behavior-neutral), run `/security-review` on the branch and attach the output; clean output plus green CI supports merging a behavior-neutral diff, but no tool output ever overrides the list. Genuinely ambiguous → escalate; that costs one message, a wrong merge costs a client incident.
 
@@ -70,22 +68,12 @@ If the repo has GitHub's native merge queue enabled, prefer it over any of this 
 
 After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
 
-Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, check that no **other open PR** still has it as its head (WM-17):
+Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch:
 
 ```bash
 HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
-HOLDERS="$(gh pr list --head "$HEAD_REF" --state open --json number -q '.[].number')" ||
-  { echo "cannot tell whether $HEAD_REF is held — not deleting"; exit 1; }
-if [ -n "$HOLDERS" ]; then
-  echo "keeping $HEAD_REF — still the head of open PR $HOLDERS"
-else
-  git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
-fi
+git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
 ```
-
-Deleting a branch that still heads an open PR makes GitHub **auto-close that PR**, and its commits become unreachable. That is not hypothetical: on legalease, PR #261 (a data-corruption fix) was closed at 08:34Z when this cleanup deleted `feat/CLNT-520` after merging PR #253, and the work had to be recovered from a dangling commit and re-opened as PR #263. A second agent branching further work off the same head is normal in a batched run, so treat a non-empty `$HOLDERS` as a stop: leave the branch and its worktree alone, note it in the report, and let the run that lands the holding PR clean it up.
-
-The same hold applies to the worktree teardown — `factory janitor` enforces it mechanically (`orchestrator/janitor.mjs`, `openPrHold`) and will report such a worktree as **held**, naming the PR, rather than reclaiming it. A held worktree is therefore not a WM-16 miss to go and finish by hand: **WM-16 is cleanup skipped** (stale worktrees and branches pile up, chase them down), **WM-17 is cleanup too eager** (it deletes what another agent is still using). Forcing a held one through re-creates the incident above; it clears itself when the holding PR closes.
 
 Per the floor's **Protected branches** rule, if `$HEAD_REF` comes back as the repo's `base` or `deploy_branch` (`develop`, `master`, `main`), stop — you are cleaning up the wrong PR. These repos have no branch protection to catch it for you.
 

@@ -65,9 +65,9 @@ jobs:
   #
   #   triage  ->  dispatch  ->  merge
   #
-  # Only bj29 is targeted today: it is the only repo authorized for automated
-  # dispatch. coach-wattz has lifecycle scripts (CW-363) and can be janitored
-  # safely, but remains report-only until dispatch is explicitly authorized.
+  # Only bj29 is targeted today: it is the one repo satisfying PC-15
+  # (industrialized worktrees), which is what makes concurrent agents safe.
+  # coach-wattz and legalease join the --repo list when CW-363/CLNT-609 land.
   #
   # WHY THE SHORT CADENCES: every stage has a `gate_command` — one cheap Linear
   # query that exits 0 when there is work and 1 when there isn't. Polling is

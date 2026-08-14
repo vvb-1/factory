@@ -11,15 +11,6 @@ concurrency:
   # produce a base-CI failure that belongs to neither.
   max_concurrent_merges: 1
 
-actions_cache:
-  # GitHub's cache API reports decimal bytes. The initial 73 GB quota is
-  # derived from the 2026-08 Actions alert (65.67 GB shown as 90% used); update
-  # it immediately if GitHub billing displays a different included allowance.
-  organization: watt-mind
-  included_gb: 73
-  # This command exits non-zero at the warning threshold, before billing risk.
-  warning_percent: 60
-
 budget:
   # AUTH IS THE SUBSCRIPTION (claude.ai OAuth), not the API. run-agent.sh unsets
   # ANTHROPIC_API_KEY unless --use-api is passed, because with it set every run

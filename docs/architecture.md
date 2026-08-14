@@ -142,7 +142,7 @@ The real constraint is the **usage window**, which nothing here can observe. Per
 | Stage | Model | Why |
 | :--- | :--- | :--- |
 | triage | sonnet | structured extraction guided by a detailed skill |
-| ticket (implementation) | sonnet | was opus, until 54 ticket runs in one night cost ~$223 of ~$381 notional — a fifth of a weekly allowance for the step that is cheap to implement and expensive to review. `tick.mjs` reads the model from `factory-ticket.md`'s frontmatter, so this is one line to reverse |
+| ticket (implementation) | **opus** | the code is the product |
 | merge | **opus** | review catches what tests don't; last gate before `develop` auto-deploys |
 | audit | sonnet | mechanical checklist |
 | factory-ux-critic | sonnet on Claude; parent model elsewhere | exercises the app and reports |
@@ -166,15 +166,15 @@ The plugin is a convenience layer, not the safety floor. It reaches Claude Code 
 | Crashed agent holds a ticket | Reaper is not on a timer (§2.7) | `tick.mjs` un-claims its own failed runs (back to Todo, with a comment); the reaper covers crashes tick can't see — run it by hand |
 | Agents indistinguishable from the human in Linear | Shared API key | OPS-40 — the dispatcher is the natural place to inject per-agent keys |
 | Orphaned worktrees | Merge stage sometimes skipped | `janitor.mjs`, hourly gate |
-| Stale spec against moved code | Runner fast-forwards only a clean tree — the main checkout routinely holds uncommitted human work | Tells the agent in its prompt that the checkout is unreliable evidence and to read from `origin/<base>`; rebasing under someone is worse |
+| Stale spec against moved code | Runner fetches but never pulls — the main checkout holds uncommitted human work | Warns with commits-behind; rebasing under someone is worse |
 | Triage can still write to the repo | `Bash` must stay available for exploration | Edit/Write/NotebookEdit disabled; dispatch works in worktrees instead |
 
 ---
 
 ## 4. What is deliberately not built
 
-- **Dispatch into repos without worktree scripts** — legalease (`CLNT-609`) and cashsaas (`CLNT-791`) have since landed theirs and joined bj29 and wm-home as dispatch targets; coach-wattz, watts-mobile, proxies, hdkiller, eslint-config and this repo remain `report_only` entries in `config/repos.yaml`. Inventing ports for tooling that does not exist is how two agents share a database.
-- **A shared worktree library** — six repos now ship worktree lifecycle scripts of their own, so the variation is finally visible; nothing has yet forced the extraction, and getting the abstraction wrong loses the port and database isolation the scripts exist for.
+- **`config/repos.yaml` for unwired repos** — coach-wattz, legalease and cashsaas are `report_only` until `CW-363`/`CLNT-609` land their worktree scripts. Inventing ports for tooling that does not exist is how two agents share a database.
+- **A shared worktree library** — bj29 is one implementation. Extract after the third, when the real variation across Wasp/Prisma/Postgres, pnpm/Nuxt/Prisma and Django/SQLite is visible.
 - **`evals/run.mjs`** — cases are written first on purpose; they specify what a skill is for.
 - **Cross-repo parallelism** — `--repo a,b` runs sequentially. Concurrent sessions across repos contend for one machine and one usage window.
 
@@ -182,7 +182,6 @@ The plugin is a convenience layer, not the safety floor. It reaches Claude Code 
 
 ## 5. Related
 
-- [`event-runtime.md`](event-runtime.md) — the isolated, event-driven runtime for structured one-off agents on generic workspaces; implemented and watched, with [`event-runtime-workers.md`](event-runtime-workers.md), [`event-runtime-schedules.md`](event-runtime-schedules.md) and [`event-runtime-webui.md`](event-runtime-webui.md) covering placement, clock events and the web control plane
 - [`README.md`](../README.md) — how to run it
 - [`SETUP.md`](../SETUP.md) — first-time setup and known gaps
 - [linear.md](file:///Users/hdkiller/Develop/hdkiller/docs/orgs/linear.md) — the execution protocol (source of truth)
