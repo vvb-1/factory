@@ -4,8 +4,8 @@ import { goSequence } from "./goSequence";
 /** A stepper over the real nav suffixes, with a clock the test drives. */
 function chord(targets = ["g", "o", "e", "p", "r", "t", "w"]) {
   let now = 1_000;
-  const press = goSequence((k) => targets.includes(k), () => now);
-  return { press, at: (t: number) => (now = t) };
+  const seq = goSequence((k) => targets.includes(k), () => now);
+  return { press: seq.press, armed: seq.armed, at: (t: number) => (now = t) };
 }
 
 describe("goSequence", () => {
@@ -52,6 +52,45 @@ describe("goSequence", () => {
     c.press("g");
     expect(c.press("x")).toBe(false);
     expect(c.press("w")).toBe(false);
+  });
+
+  test("nothing is armed before the first key", () => {
+    expect(chord().armed()).toBe(false);
+  });
+
+  test("a bare g reads as armed for the whole window and not past it", () => {
+    const c = chord();
+    c.press("g");
+    expect(c.armed()).toBe(true);
+    c.at(1_799);
+    expect(c.armed()).toBe(true);
+    c.at(1_800);
+    expect(c.armed()).toBe(false);
+  });
+
+  test("a resolved chord is no longer armed", () => {
+    for (const suffix of ["g", "o", "w"]) {
+      const c = chord();
+      c.press("g");
+      expect(c.press(suffix)).toBe(true);
+      expect(c.armed()).toBe(false);
+    }
+  });
+
+  test("a key that breaks the chord clears the armed state", () => {
+    const c = chord();
+    c.press("g");
+    c.press("x");
+    expect(c.armed()).toBe(false);
+  });
+
+  test("a lapsed g re-arms for a fresh window", () => {
+    const c = chord();
+    c.press("g");
+    c.at(2_000);
+    expect(c.armed()).toBe(false);
+    c.press("g");
+    expect(c.armed()).toBe(true);
   });
 
   test("with no Graph target, the second g re-arms instead of matching", () => {

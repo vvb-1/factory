@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { goPrefix, goSequence } from "../goSequence";
+import { GO_CHORD_MS, goPrefix, goSequence } from "../goSequence";
 import { keyGuard, modal } from "../hooks";
 import { useContextActions } from "../palette";
 
@@ -280,10 +280,21 @@ export function CommandPalette({
   );
 }
 
-/** g-then-letter navigation sequences (spec §5): g g, g o, g p, g r, g e. */
-export function useGoSequences(map: Record<string, () => void>) {
+/**
+ * g-then-letter navigation sequences (spec §5): g g, g o, g p, g r, g e.
+ *
+ * Returns whether a `g` is currently waiting for its suffix, so the caller can
+ * show that the chord is armed — without it, a `g` plus any hesitation looks
+ * like a dropped keystroke, and the suffix that follows a lapsed window fires
+ * as a bare list verb instead.
+ */
+export function useGoSequences(map: Record<string, () => void>): boolean {
+  const [armed, setArmed] = useState(false);
   useEffect(() => {
-    const press = goSequence((key) => key in map);
+    const chord = goSequence((key) => key in map);
+    // The window closes on its own, with nothing to press: the only way the
+    // affordance can follow it is a timer of the same length.
+    let lapse: ReturnType<typeof setTimeout> | undefined;
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       // A held `g` auto-repeats: without this, resting on the key would arm
@@ -291,11 +302,22 @@ export function useGoSequences(map: Record<string, () => void>) {
       if (e.repeat) return;
       // Arm the shared flag so list verbs (o, w, …) stand down (goSequence.ts).
       if (e.key === "g") goPrefix.armedAt = Date.now();
-      if (!press(e.key)) return;
+      const fired = chord.press(e.key);
+      clearTimeout(lapse);
+      setArmed(chord.armed());
+      if (chord.armed()) lapse = setTimeout(() => setArmed(false), GO_CHORD_MS);
+      if (!fired) return;
       e.preventDefault();
       map[e.key]();
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      clearTimeout(lapse);
+      // This listener carried the chord; a remount mid-window would otherwise
+      // leave the indicator on with nothing left to resolve it.
+      setArmed(false);
+    };
   }, [map]);
+  return armed;
 }

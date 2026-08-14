@@ -205,7 +205,7 @@ export function App() {
         : env.name
       : "…";
 
-  useGoSequences(
+  const goArmed = useGoSequences(
     useMemo(
       () => Object.fromEntries(NAV.map((n) => [n.go, () => navigate(n.key)])),
       [navigate],
@@ -416,8 +416,12 @@ export function App() {
           </div>
           <div className="mt-1.5 text-(--text-faint)">
             <span className="mono">⌘K</span> commands · <span className="mono">g</span>+
-            <span className="mono">o/e/p/r/t/w/g</span> · <span className="mono">/</span> filter ·{" "}
-            <span className="mono">i</span> inject · <span className="mono">?</span> keys
+            {/* Read off NAV, not typed out: hand-listed it had already lost `f`
+                (Projects), so the footer promised a shorter chord set than the
+                pill and the `?` list. */}
+            <span className="mono">{NAV.map((n) => n.go).join("/")}</span> ·{" "}
+            <span className="mono">/</span> filter · <span className="mono">i</span> inject ·{" "}
+            <span className="mono">?</span> keys
           </div>
           {/* Named, not just toggled: "contrast" is the accessibility theme, and
               an operator who lands in it by accident needs to read where they
@@ -589,7 +593,57 @@ export function App() {
         />
       )}
       {helpOpen && <ShortcutsDialog onClose={() => setHelpOpen(false)} />}
+      <GoPrefixHint armed={goArmed} />
       <ToastContainer />
+    </div>
+  );
+}
+
+/**
+ * The armed `g` prefix, on screen for as long as the chord window is open.
+ * Without it a `g` plus any hesitation reads as a dropped keystroke, and the
+ * suffix pressed after the window lapsed fires as a bare list verb instead.
+ *
+ * `fixed` and `pointer-events-none` on purpose: the indicator appears mid-key
+ * and must not reflow the nav/list/detail layout under it, or reading the row
+ * it is about to leave becomes impossible. The region itself stays mounted
+ * while empty — a screen reader only announces nodes inserted into a live
+ * region that already existed (see ToastContainer).
+ */
+function GoPrefixHint({ armed }: { armed: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed bottom-4 left-1/2 z-30 -translate-x-1/2"
+    >
+      {armed && (
+        <>
+          <span className="sr-only">Navigation prefix g armed — press a second key</span>
+          {/* The legend is the point for a sighted operator and noise read
+              aloud: the sentence above says the same thing in one breath. */}
+          <div
+            aria-hidden="true"
+            className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-center gap-x-2.5 gap-y-1 rounded-full border border-(--border-strong) bg-(--surface-2) px-3 py-1.5 text-[11px] shadow-lg"
+          >
+            <span
+              className="mono rounded px-1.5 font-semibold"
+              style={{
+                color: "var(--accent)",
+                background: "color-mix(in oklch, var(--accent) 16%, transparent)",
+              }}
+            >
+              g
+            </span>
+            <span className="text-(--text-dim)">then</span>
+            {NAV.map((n) => (
+              <span key={n.key} className="whitespace-nowrap text-(--text-faint)">
+                <span className="mono text-(--text)">{n.go}</span> {n.label}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
