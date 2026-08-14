@@ -6,6 +6,7 @@ import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
+import { PROPOSAL_FACETS, matchesFilterQuery, parseFilterQuery, proposalRunState } from "../filterQuery";
 import { ScopeCaption } from "../components/ContextTabs";
 import { SpecDiff } from "../components/SpecDiff";
 import {
@@ -107,10 +108,9 @@ export function Proposals({
     () => new Map((runsQuery.data?.runs ?? []).map((r) => [r.runId, r.state])),
     [runsQuery.data],
   );
-  const staleState = (p: Proposal) => {
-    const state = p.runId ? runStates.get(p.runId) : undefined;
-    return state && state !== "PROPOSED" ? state : null;
-  };
+  // Shared with the `is:stale` facet, so the chip and the red row wash can never
+  // disagree about which open proposals are already dead.
+  const staleState = (p: Proposal) => proposalRunState(p, runStates);
 
   const [filter, setFilter] = useState("");
   const [expiredOnly, setExpiredOnly] = useState(false);
@@ -128,16 +128,13 @@ export function Proposals({
     context.kind === "repo"
       ? scoped.filter((p) => p.expired).length
       : (statusQ.data?.proposals.expired ?? 0);
+  const parsed = useMemo(() => parseFilterQuery(filter, PROPOSAL_FACETS), [filter]);
   const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
     return scoped.filter((p) => {
       if (expiredFilter && !p.expired) return false;
-      if (!q) return true;
-      return [p.id, p.agent, p.decision, p.status, p.eventId, p.reason].some((v) =>
-        (v ?? "").toLowerCase().includes(q),
-      );
+      return matchesFilterQuery(p, parsed, PROPOSAL_FACETS, { runStates });
     });
-  }, [scoped, filter, expiredFilter]);
+  }, [scoped, parsed, expiredFilter, runStates]);
 
   // What the list would show without the text filter. An empty list under the
   // expired chip has two causes and needs two messages: no expired opens exist
@@ -335,12 +332,6 @@ export function Proposals({
               );
             })}
           </div>
-          <FilterInput
-            value={filter}
-            onChange={setFilter}
-            placeholder="Filter agent, id, origin…"
-            label="Filter proposals"
-          />
           {tab === "open" && (
             <button
               type="button"
@@ -360,6 +351,16 @@ export function Proposals({
               )}
             </button>
           )}
+          {/* Last in the row: the token chips are a full-width item, so anything
+              after the filter box would be pushed onto a third line the moment
+              a chip appears. */}
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            placeholder="agent:… is:stale is:expired"
+            label="Filter proposals"
+            query={parsed}
+          />
         </div>
           </>
         }

@@ -7,6 +7,7 @@ import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
 import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
+import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import type { Attempt, ArtifactRef, RunState } from "../types";
 import {
   Ago,
@@ -353,15 +354,17 @@ export function Runs({
     () => (!fetchAll || tab === "ALL" ? scoped : scoped.filter((r) => r.state === tab)),
     [fetchAll, scoped, tab],
   );
-  const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return byTab;
-    return byTab.filter((r) =>
-      [r.runId, r.state, r.agent, r.adapter, r.reasonCode, r.eventId].some((v) =>
-        (v ?? "").toLowerCase().includes(q),
-      ),
-    );
-  }, [byTab, filter]);
+  // `is:stale` is the doctor's projection, not a guess this view makes: a run
+  // held by a worker whose heartbeat has gone (lib/workers.mjs stalledWorkers).
+  const staleRuns = useMemo(
+    () => new Set((statusQ.data?.anomalies.stalledWorkers ?? []).map((w) => w.runId)),
+    [statusQ.data],
+  );
+  const parsed = useMemo(() => parseFilterQuery(filter, RUN_FACETS), [filter]);
+  const visible = useMemo(
+    () => byTab.filter((r) => matchesFilterQuery(r, parsed, RUN_FACETS, { staleRuns })),
+    [byTab, parsed, staleRuns],
+  );
 
   const selectedId = focusRunId;
   const selectedIndex = useMemo(() => visible.findIndex((r) => r.runId === selectedId), [visible, selectedId]);
@@ -521,7 +524,9 @@ export function Runs({
           <>
         <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
 
-        <div className="mb-3 flex items-center gap-2">
+        {/* `flex-wrap`: the token chips are a full-width item, so they take
+            their own line under the tabs and the box instead of squeezing them. */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label="Run state">
             {STATE_TABS.map((t) => {
               const byState = statusQ.data?.runs.byState ?? {};
@@ -552,8 +557,9 @@ export function Runs({
           <FilterInput
             value={filter}
             onChange={setFilter}
-            placeholder="Filter agent, id, origin…"
+            placeholder="agent:… state:… is:stale"
             label="Filter runs"
+            query={parsed}
           />
         </div>
           </>
