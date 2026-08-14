@@ -8,11 +8,28 @@
  * so identical bytes are stored once and a result row never references a file
  * that no longer exists.
  */
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HEX64 = /^[0-9a-f]{64}$/;
+
+/** Compute sha256 hex digest of a file on disk. */
+export function hashFile(filePath) {
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
 
 /** Resolve a store path from a content hash; malformed hashes fail closed. */
 export function artifactPath(storeRoot, sha256hex) {
@@ -26,6 +43,10 @@ export function artifactPath(storeRoot, sha256hex) {
  * run BEFORE the workspace is destroyed and before the result row commits —
  * an orphaned store file from a failed transaction is harmless (content-
  * addressed, re-usable); a committed row pointing at a dead file is not.
+ *
+ * Writes are atomic via a temporary file in the store directory and subsequent
+ * rename, and source/destination hashes are verified to prevent corrupted or
+ * truncated artifacts from landing in the store (OPS-439).
  */
 export function storeCollected({ entries, storeRoot }) {
   if (!entries?.length) return entries ?? [];
@@ -40,7 +61,32 @@ export function storeCollected({ entries, storeRoot }) {
     if (stat.isSymbolicLink()) {
       throw new Error(`cannot store symlinked artifact: ${src}`);
     }
-    if (!existsSync(dest)) copyFileSync(src, dest);
+    const srcHash = hashFile(src);
+    if (srcHash !== entry.sha256) {
+      throw new Error(`artifact source hash mismatch: expected ${entry.sha256}, got ${srcHash}`);
+    }
+    if (existsSync(dest)) {
+      const destHash = hashFile(dest);
+      if (destHash === entry.sha256) {
+        return { ...entry, uri: `file://${dest}`, sizeBytes: statSync(dest).size };
+      }
+      rmSync(dest, { force: true });
+    }
+
+    const tmpName = `${entry.sha256}.tmp.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}`;
+    const tmpPath = path.join(storeRoot, tmpName);
+    try {
+      copyFileSync(src, tmpPath);
+      const tmpHash = hashFile(tmpPath);
+      if (tmpHash !== entry.sha256) {
+        throw new Error(`artifact store hash mismatch: expected ${entry.sha256}, got ${tmpHash}`);
+      }
+      renameSync(tmpPath, dest);
+    } finally {
+      if (existsSync(tmpPath)) {
+        rmSync(tmpPath, { force: true });
+      }
+    }
     return { ...entry, uri: `file://${dest}`, sizeBytes: statSync(dest).size };
   });
 }
@@ -60,10 +106,18 @@ export function findArtifact(storeRoot, sha256hex) {
  * and the agent reads a file. There is deliberately no way for an agent to
  * ask the store for something it did not declare — that would make the run's
  * inputHash a lie about what it actually read.
+ *
+ * Stored bytes are re-verified against the declared hash upon materialization;
+ * corrupt entries fail loudly and are purged from the store (OPS-439).
  */
 export function materializeArtifact({ storeRoot, sha256hex, workspaceDir, as }) {
   const found = findArtifact(storeRoot, sha256hex);
   if (!found) throw new Error(`artifact ${sha256hex} is not in the store`);
+  const actualHash = hashFile(found.file);
+  if (actualHash !== sha256hex) {
+    rmSync(found.file, { force: true });
+    throw new Error(`corrupt artifact ${sha256hex} in store (actual hash was ${actualHash}): removed corrupt entry`);
+  }
   if (typeof as !== "string" || !as || path.isAbsolute(as)) {
     throw new Error(`artifact target "${as}" must be a relative filename`);
   }
