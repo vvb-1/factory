@@ -66,11 +66,15 @@ export function ContextTabs({
     activeTab()?.scrollIntoView({ inline: "nearest", block: "nearest" });
   }, [activeId]);
 
-  // A closed tab takes its × button — and the focus — with it. Without this,
-  // focus falls to <body> and the next Tab restarts from the top of the page.
+  // A closed tab takes its × button with it. Chromium focuses the button on
+  // click, so unmount drops focus to <body> and the next Tab restarts at the
+  // top of the page. Safari/Firefox leave focus where it was (a list row, a
+  // filter); only recover when it was actually lost.
   const [closes, setCloses] = useState(0);
   useEffect(() => {
-    if (closes) activeTab()?.focus();
+    if (!closes) return;
+    const focused = document.activeElement;
+    if (focused == null || focused === document.body) activeTab()?.focus();
   }, [closes]);
 
   useEffect(() => {
