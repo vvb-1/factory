@@ -11,6 +11,9 @@ const SUPPORTED = new Set([
   "minimum", "maximum", "description", "title", "$schema",
 ]);
 
+const hasOwn = (obj, key) =>
+  obj !== null && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key);
+
 /**
  * @returns {{ valid: boolean, errors: string[] }}
  */
@@ -49,7 +52,7 @@ function check(schema, value, path, errors) {
 
   const actual = typeOf(value);
 
-  if (schema.type !== undefined) {
+  if (hasOwn(schema, "type") && schema.type !== undefined) {
     const declared = Array.isArray(schema.type) ? schema.type : [schema.type];
     if (!declared.some((t) => matchesType(t, actual))) {
       errors.push(`${path}: expected type ${declared.join("|")}, got ${actual}`);
@@ -57,61 +60,67 @@ function check(schema, value, path, errors) {
     }
   }
 
-  if (schema.const !== undefined && JSON.stringify(value) !== JSON.stringify(schema.const)) {
+  if (hasOwn(schema, "const") && JSON.stringify(value) !== JSON.stringify(schema.const)) {
     errors.push(`${path}: expected const ${JSON.stringify(schema.const)}`);
   }
-  if (schema.enum !== undefined && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) {
+  if (hasOwn(schema, "enum") && Array.isArray(schema.enum) && !schema.enum.some((e) => JSON.stringify(e) === JSON.stringify(value))) {
     errors.push(`${path}: value not in enum ${JSON.stringify(schema.enum)}`);
   }
 
   if (actual === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength) {
+    if (hasOwn(schema, "minLength") && typeof schema.minLength === "number" && value.length < schema.minLength) {
       errors.push(`${path}: shorter than minLength ${schema.minLength}`);
     }
-    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+    if (hasOwn(schema, "maxLength") && typeof schema.maxLength === "number" && value.length > schema.maxLength) {
       errors.push(`${path}: longer than maxLength ${schema.maxLength}`);
     }
-    if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) {
+    if (hasOwn(schema, "pattern") && typeof schema.pattern === "string" && !new RegExp(schema.pattern).test(value)) {
       errors.push(`${path}: does not match pattern ${schema.pattern}`);
     }
   }
 
   if (actual === "integer" || actual === "number") {
-    if (schema.minimum !== undefined && value < schema.minimum) {
+    if (hasOwn(schema, "minimum") && typeof schema.minimum === "number" && value < schema.minimum) {
       errors.push(`${path}: below minimum ${schema.minimum}`);
     }
-    if (schema.maximum !== undefined && value > schema.maximum) {
+    if (hasOwn(schema, "maximum") && typeof schema.maximum === "number" && value > schema.maximum) {
       errors.push(`${path}: above maximum ${schema.maximum}`);
     }
   }
 
   if (actual === "array") {
-    if (schema.minItems !== undefined && value.length < schema.minItems) {
+    if (hasOwn(schema, "minItems") && typeof schema.minItems === "number" && value.length < schema.minItems) {
       errors.push(`${path}: fewer than minItems ${schema.minItems}`);
     }
-    if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+    if (hasOwn(schema, "maxItems") && typeof schema.maxItems === "number" && value.length > schema.maxItems) {
       errors.push(`${path}: more than maxItems ${schema.maxItems}`);
     }
-    if (schema.items !== undefined) {
+    if (hasOwn(schema, "items")) {
       value.forEach((item, i) => check(schema.items, item, `${path}[${i}]`, errors));
     }
   }
 
   if (actual === "object") {
-    for (const key of schema.required ?? []) {
-      if (!(key in value)) errors.push(`${path}: missing required property "${key}"`);
-    }
-    const properties = schema.properties ?? {};
-    for (const [key, propSchema] of Object.entries(properties)) {
-      if (key in value) check(propSchema, value[key], `${path}.${key}`, errors);
-    }
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(value)) {
-        if (!(key in properties)) errors.push(`${path}: unknown property "${key}"`);
+    if (hasOwn(schema, "required") && Array.isArray(schema.required)) {
+      for (const key of schema.required) {
+        if (!hasOwn(value, key)) errors.push(`${path}: missing required property "${key}"`);
       }
-    } else if (typeof schema.additionalProperties === "object") {
-      for (const key of Object.keys(value)) {
-        if (!(key in properties)) check(schema.additionalProperties, value[key], `${path}.${key}`, errors);
+    }
+    const properties = hasOwn(schema, "properties") && schema.properties && typeof schema.properties === "object"
+      ? schema.properties
+      : {};
+    for (const [key, propSchema] of Object.entries(properties)) {
+      if (hasOwn(value, key)) check(propSchema, value[key], `${path}.${key}`, errors);
+    }
+    if (hasOwn(schema, "additionalProperties")) {
+      if (schema.additionalProperties === false) {
+        for (const key of Object.keys(value)) {
+          if (!hasOwn(properties, key)) errors.push(`${path}: unknown property "${key}"`);
+        }
+      } else if (typeof schema.additionalProperties === "object" && schema.additionalProperties !== null) {
+        for (const key of Object.keys(value)) {
+          if (!hasOwn(properties, key)) check(schema.additionalProperties, value[key], `${path}.${key}`, errors);
+        }
       }
     }
   }
