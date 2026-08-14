@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, artifactUrl } from "../api";
-import { hashPath } from "../hash";
+import { hashPath, hashProject, withProject } from "../hash";
 import { dur } from "../heartbeat";
 import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
 import {
@@ -277,7 +277,7 @@ export function ActorRef({ actor, className }: { actor: string; className?: stri
   return (
     <JumpLink
       onClick={() => {
-        window.location.hash = `#/${hashPath("workers", actor)}`;
+        window.location.hash = `#/${withProject(hashPath("workers", actor), hashProject(window.location.hash))}`;
       }}
       title={actor}
       className={className}
@@ -883,16 +883,29 @@ export function Runs({
         <DetailPane
           widthClass="w-[460px]"
           title={
-            <span className="flex min-w-0 items-center gap-2">
-              <StateBadge state={sel.state} />
-              <JumpLink
-                onClick={() => onOpenFull(sel.runId)}
-                title={`Open ${sel.runId}`}
-                className="truncate"
+            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal">
+              <button
+                type="button"
+                onClick={() => onSelectRun(null)}
+                className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
+                title="Back to runs list"
               >
-                {shortId(sel.runId)}
-              </JumpLink>
-            </span>
+                Runs
+              </button>
+              <span className="text-(--text-faint)" aria-hidden="true">
+                /
+              </span>
+              <span className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)" aria-current="page">
+                <StateBadge state={sel.state} />
+                <JumpLink
+                  onClick={() => onOpenFull(sel.runId)}
+                  title={`Open ${sel.runId}`}
+                  className="truncate mono"
+                >
+                  {shortId(sel.runId)}
+                </JumpLink>
+              </span>
+            </nav>
           }
           actions={
             <>
