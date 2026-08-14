@@ -56,7 +56,7 @@ So:
 
 1. Take the PRs you classified MERGE and read each one's changed files (`gh pr diff <PR> --name-only`).
 2. Form a batch of PRs whose file sets are **pairwise disjoint**, up to **8** (matches the repo's dispatch concurrency cap — batching should be able to clear what one dispatch cycle produces). Any PR sharing a file with one already in the batch waits for the next batch.
-3. Merge the batch back to back, without waiting for base CI between them.
+3. Merge the batch back to back, without waiting for base CI between them. Immediately before executing `gh pr merge` on each PR, re-verify that the PR does not carry the `escalated` label (`gh pr view <PR> --json labels -q '.labels[].name'`). GitHub status checks do not re-run when labels change, so a passing check rollup can mask an escalation applied after CI settled. If the `escalated` label is present (and `$ARGUMENTS` does not contain `--include-escalated`), abort the merge immediately.
 4. Then wait **once** for base CI on the batch (`gh run watch <run> --exit-status`), plus the smoke check where the repo has one.
 5. Green: move every ticket in the batch to `Done` and clean up. Red: you have at most 5 suspects and their file sets are disjoint, so the failing job names the culprit. Revert that one merge (`git revert -m 1 <merge-sha>`, push, re-verify), keep the rest, and report what you reverted and why.
 
