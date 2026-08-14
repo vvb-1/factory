@@ -36,6 +36,144 @@ import {
 
 const REQUIRED = ["schemaVersion", "eventId", "type", "source", "occurredAt"];
 
+export const INJECT_DRAFT_KEY = "factory.injectDraft";
+export const INJECT_RECENT_STORAGE_KEY = "factory.injectRecent";
+export const MAX_RECENT_EVENTS = 5;
+
+export interface InjectDraft {
+  selected: string | null;
+  tab: EditorTab;
+  text: string;
+  formBase: Record<string, unknown>;
+  formPayload: Record<string, unknown>;
+  subJson: Record<string, string>;
+}
+
+export interface RecentAdmittedEvent {
+  eventId: string;
+  type: string;
+  occurredAt?: string;
+  admittedAt: number;
+  envelope: Record<string, unknown>;
+}
+
+function getSessionStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" && window.sessionStorage ? window.sessionStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function getLocalStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+export function loadDraft(): InjectDraft | null {
+  try {
+    const storage = getSessionStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(INJECT_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return {
+        selected: typeof parsed.selected === "string" ? parsed.selected : null,
+        tab: parsed.tab === "form" ? "form" : "json",
+        text: typeof parsed.text === "string" ? parsed.text : "",
+        formBase: isPlainObject(parsed.formBase) ? parsed.formBase : {},
+        formPayload: isPlainObject(parsed.formPayload) ? parsed.formPayload : {},
+        subJson: isPlainObject(parsed.subJson) ? parsed.subJson : {},
+      };
+    }
+  } catch {}
+  return null;
+}
+
+export function saveDraft(draft: InjectDraft | null) {
+  try {
+    const storage = getSessionStorage();
+    if (!storage) return;
+    if (draft === null) {
+      storage.removeItem(INJECT_DRAFT_KEY);
+    } else {
+      storage.setItem(INJECT_DRAFT_KEY, JSON.stringify(draft));
+    }
+  } catch {}
+}
+
+export function clearDraft() {
+  saveDraft(null);
+}
+
+export function loadRecentEvents(): RecentAdmittedEvent[] {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) return [];
+    const raw = storage.getItem(INJECT_RECENT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is RecentAdmittedEvent =>
+        !!item &&
+        typeof item === "object" &&
+        typeof item.type === "string" &&
+        isPlainObject(item.envelope),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecentEvent(envelope: Record<string, unknown>, eventId: string): RecentAdmittedEvent[] {
+  try {
+    const storage = getLocalStorage();
+    const prev = loadRecentEvents();
+    const type = typeof envelope.type === "string" ? envelope.type : "";
+    const newEntry: RecentAdmittedEvent = {
+      eventId,
+      type,
+      occurredAt: typeof envelope.occurredAt === "string" ? envelope.occurredAt : undefined,
+      admittedAt: Date.now(),
+      envelope: { ...envelope, eventId },
+    };
+    const next = [
+      newEntry,
+      ...prev.filter((p) => p.eventId !== eventId),
+    ].slice(0, MAX_RECENT_EVENTS);
+    if (storage) {
+      storage.setItem(INJECT_RECENT_STORAGE_KEY, JSON.stringify(next));
+    }
+    return next;
+  } catch {
+    return [];
+  }
+}
+
+export function clearRecentEvents() {
+  try {
+    const storage = getLocalStorage();
+    if (storage) {
+      storage.removeItem(INJECT_RECENT_STORAGE_KEY);
+    }
+  } catch {}
+}
+
+function summarizePayload(env: Record<string, unknown> | undefined): string {
+  if (!env || !isPlainObject(env.payload)) return "no payload";
+  const payload = env.payload as Record<string, unknown>;
+  const entries = Object.entries(payload).filter(([, v]) => v !== undefined && v !== "");
+  if (entries.length === 0) return "empty payload";
+  if (typeof payload.repo === "string") return `repo: ${payload.repo}`;
+  if (typeof payload.host === "string") return `host: ${payload.host}`;
+  return entries.map(([k]) => k).slice(0, 3).join(", ") + (entries.length > 3 ? "…" : "");
+}
+
 /** Blank slate for an unregistered/hand-written envelope (the escape hatch). */
 function blankEnvelope(nowMs: number) {
   const id = triggerId(nowMs);
@@ -83,12 +221,13 @@ type EditorTab = "form" | "json";
 
 /**
  * Inject dialog (webui spec §4.4, templates per OPS-214, confirm per OPS-230,
- * format OPS-361, 2-column sidebar OPS-363, schema-driven Form view WM-76).
+ * format OPS-361, 2-column sidebar OPS-363, schema-driven Form view WM-76,
+ * autosave & recent history OPS-507).
  *
- * Left sidebar lists registered templates with instant search. The right side
- * has two tabs: a Form view rendered from the selected event type's input
- * schema (payload-only; the envelope is generated exactly as templates do) and
- * the raw-JSON full-envelope escape hatch. Both validate the payload with the
+ * Left sidebar lists registered templates and recent history with instant search.
+ * The right side has two tabs: a Form view rendered from the selected event type's
+ * input schema (payload-only; the envelope is generated exactly as templates do)
+ * and the raw-JSON full-envelope escape hatch. Both validate the payload with the
  * ported fail-closed validator (lib/schema.ts); invalid payloads warn and need
  * an explicit acknowledgement, but are never hard-blocked — the runtime
  * deliberately admits them and parks them human_needed.
@@ -108,14 +247,26 @@ export function InjectDialog({
   const repoItems = reposQ.data?.repos ?? [];
 
   const openedAt = useMemo(() => Date.now(), []);
+  const initialDraft = useMemo(() => (initialEnvelope ? null : loadDraft()), [initialEnvelope]);
+  const [recentEvents, setRecentEvents] = useState<RecentAdmittedEvent[]>(() => loadRecentEvents());
+  const submittedRef = useRef(false);
+
   const templates = useMemo(
     () => (registry.data ? buildTemplates(registry.data, openedAt) : []),
     [registry.data, openedAt],
   );
 
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<string | null>(initialEnvelope ? "__given__" : null);
-  const [text, setText] = useState(() => pretty(initialEnvelope ?? blankEnvelope(openedAt)));
+  const [selected, setSelected] = useState<string | null>(() => {
+    if (initialEnvelope) return "__given__";
+    if (initialDraft?.selected !== undefined) return initialDraft.selected;
+    return null;
+  });
+  const [text, setText] = useState<string>(() => {
+    if (initialEnvelope) return pretty(initialEnvelope);
+    if (initialDraft?.text) return initialDraft.text;
+    return pretty(blankEnvelope(openedAt));
+  });
   const [clientError, setClientError] = useState<string | null>(null);
   const [unregisteredAck, setUnregisteredAck] = useState(false);
   const [schemaAck, setSchemaAck] = useState(false);
@@ -126,12 +277,53 @@ export function InjectDialog({
   // exactly as templates do); the form edits payload only. Nested object /
   // array-of-object fields keep their raw text in subJson (a per-field JSON
   // sub-editor); formPayload holds their last successfully parsed value.
-  const [tab, setTab] = useState<EditorTab>("json");
-  const [formBase, setFormBase] = useState<Record<string, unknown>>({});
-  const [formPayload, setFormPayload] = useState<Record<string, unknown>>({});
-  const [subJson, setSubJson] = useState<Record<string, string>>({});
+  const [tab, setTab] = useState<EditorTab>(() => {
+    if (initialEnvelope) return "json";
+    if (initialDraft?.tab) return initialDraft.tab;
+    return "json";
+  });
+  const [formBase, setFormBase] = useState<Record<string, unknown>>(() => {
+    if (initialDraft?.formBase) return initialDraft.formBase;
+    return {};
+  });
+  const [formPayload, setFormPayload] = useState<Record<string, unknown>>(() => {
+    if (initialDraft?.formPayload) return initialDraft.formPayload;
+    return {};
+  });
+  const [subJson, setSubJson] = useState<Record<string, string>>(() => {
+    if (initialDraft?.subJson) return initialDraft.subJson;
+    return {};
+  });
   const [tabNotice, setTabNotice] = useState<string | null>(null);
   const fieldIdBase = useId();
+
+  // Autosave draft to sessionStorage (OPS-507)
+  useEffect(() => {
+    if (initialEnvelope || submittedRef.current) return;
+    saveDraft({
+      selected,
+      tab,
+      text,
+      formBase,
+      formPayload,
+      subJson,
+    });
+  }, [selected, tab, text, formBase, formPayload, subJson, initialEnvelope]);
+
+  const filteredRecent = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return recentEvents;
+    return recentEvents.filter((r) => {
+      if (r.type.toLowerCase().includes(q)) return true;
+      if (r.eventId.toLowerCase().includes(q)) return true;
+      if (r.envelope && isPlainObject(r.envelope.payload)) {
+        try {
+          if (JSON.stringify(r.envelope.payload).toLowerCase().includes(q)) return true;
+        } catch {}
+      }
+      return false;
+    });
+  }, [recentEvents, search]);
 
   const filteredTemplates = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -154,6 +346,12 @@ export function InjectDialog({
         data.duplicate ? "info" : "ok",
       );
       const source = typeof envelope.source === "string" ? envelope.source : "web-trigger";
+      if (!data.duplicate) {
+        const updated = saveRecentEvent(envelope, data.eventId);
+        setRecentEvents(updated);
+      }
+      submittedRef.current = true;
+      clearDraft();
       onAdmitted?.(source, data.eventId);
     },
   });
@@ -197,6 +395,26 @@ export function InjectDialog({
     inject.reset();
   }
 
+  function chooseRecent(item: RecentAdmittedEvent) {
+    const recentId = `__recent_${item.eventId}__`;
+    setSelected(recentId);
+    const nowMs = Date.now();
+    const env: Record<string, unknown> = {
+      ...item.envelope,
+      eventId: triggerId(nowMs),
+      occurredAt: new Date(nowMs).toISOString(),
+      correlationId: triggerId(nowMs),
+    };
+    setText(pretty(env));
+    const type = typeof env.type === "string" ? env.type : "";
+    const fields = schemaFields(schemaFor(type));
+    initFormFromEnvelope(env, fields);
+    setTab(fields ? "form" : "json");
+    setTabNotice(null);
+    resetAcks();
+    inject.reset();
+  }
+
   function applySelection(next: string | null) {
     if (next === checkedId) return;
     if (next === null) {
@@ -217,6 +435,14 @@ export function InjectDialog({
       inject.reset();
       return;
     }
+    if (next.startsWith("__recent_")) {
+      const eventId = next.slice("__recent_".length, -2);
+      const item = recentEvents.find((x) => x.eventId === eventId) ?? filteredRecent.find((x) => x.eventId === eventId);
+      if (item) {
+        chooseRecent(item);
+        return;
+      }
+    }
     const t = templates.find((x) => x.eventType === next);
     if (t) choose(t);
   }
@@ -224,6 +450,7 @@ export function InjectDialog({
   function templateIds(): Array<string | null> {
     return [
       ...(initialEnvelope ? ["__given__"] : []),
+      ...filteredRecent.map((r) => `__recent_${r.eventId}__`),
       ...filteredTemplates.map((t) => t.eventType),
       null,
     ];
@@ -751,29 +978,73 @@ export function InjectDialog({
               </button>
             )}
 
-            {filteredTemplates.map((t) => (
-              <button
-                key={t.eventType}
-                type="button"
-                {...radioA11y(t.eventType)}
-                onClick={() => applySelection(t.eventType)}
-                className={`w-full rounded-md border p-2 text-left transition-colors ${
-                  checkedId === t.eventType
-                    ? "border-(--accent) bg-(--surface-3) text-(--text)"
-                    : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
-                }`}
-              >
-                <div className="mono font-medium text-[12px] truncate">{t.eventType}</div>
-                <div className="mt-0.5 flex items-center justify-between text-[11px] text-(--text-faint)">
-                  <span className="truncate">{t.agent}</span>
-                  <span className="ml-1 shrink-0 opacity-75">{t.summary || "no params"}</span>
+            {filteredRecent.length > 0 && (
+              <div className="pt-1 pb-1">
+                <div className="px-1 text-[10px] font-semibold uppercase tracking-wider text-(--text-faint)">
+                  Recent
                 </div>
-              </button>
-            ))}
+                <div className="mt-1 space-y-1">
+                  {filteredRecent.map((r) => {
+                    const id = `__recent_${r.eventId}__`;
+                    const summary = summarizePayload(r.envelope);
+                    return (
+                      <button
+                        key={r.eventId || id}
+                        type="button"
+                        {...radioA11y(id)}
+                        onClick={() => applySelection(id)}
+                        className={`w-full rounded-md border p-2 text-left transition-colors ${
+                          checkedId === id
+                            ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                            : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
+                        }`}
+                      >
+                        <div className="mono font-medium text-[12px] truncate">{r.type || "untyped event"}</div>
+                        <div className="mt-0.5 flex items-center justify-between text-[11px] text-(--text-faint)">
+                          <span className="truncate">recent</span>
+                          <span className="ml-1 shrink-0 opacity-75">{summary}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-            {filteredTemplates.length === 0 && search && (
+            {filteredTemplates.length > 0 && (
+              <div className={filteredRecent.length > 0 ? "pt-1" : ""}>
+                {filteredRecent.length > 0 && (
+                  <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-(--text-faint)">
+                    Templates
+                  </div>
+                )}
+                <div className="space-y-1">
+                  {filteredTemplates.map((t) => (
+                    <button
+                      key={t.eventType}
+                      type="button"
+                      {...radioA11y(t.eventType)}
+                      onClick={() => applySelection(t.eventType)}
+                      className={`w-full rounded-md border p-2 text-left transition-colors ${
+                        checkedId === t.eventType
+                          ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                          : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
+                      }`}
+                    >
+                      <div className="mono font-medium text-[12px] truncate">{t.eventType}</div>
+                      <div className="mt-0.5 flex items-center justify-between text-[11px] text-(--text-faint)">
+                        <span className="truncate">{t.agent}</span>
+                        <span className="ml-1 shrink-0 opacity-75">{t.summary || "no params"}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {filteredTemplates.length === 0 && filteredRecent.length === 0 && search && (
               <div className="py-3 text-center text-[12px] text-(--text-faint)">
-                No templates matching &quot;{search}&quot;
+                No templates or recent payloads matching &quot;{search}&quot;
               </div>
             )}
 
