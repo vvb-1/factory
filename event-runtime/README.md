@@ -225,6 +225,16 @@ run approved last (it occupies the single worker until the 600 s spec timeout,
 then TIMED_OUT — or cancel it from the UI). The seed refuses to run against a
 real-adapter runtime.
 
+Some of those rows additionally carry a real `config/repos.yaml` name so the
+project tabs are not empty on a fresh worktree. The tag is appended after the
+mode — `repos[0]` is still what selects the fake adapter's behaviour. The
+tagged fixtures are the completed `ok` run, the rejected proposal, the open
+approvable proposal, and the `hang` run; `refuse`, `crash`,
+`invalid-artifact`, and the `human_needed` proposal stay untagged because a
+tab that matches every row proves nothing about filtering. Names come from
+the reader's own registry, not a hardcoded pair; a checkout without one
+seeds the full set untagged and logs `project tags: none`.
+
 `event-runtime/demo/verify.mjs --port <api>` asserts the whole fixture via
 the API — the e2e smoke. `worktree-up.sh` runs it before reporting ready, so
 "ready" means a browser test or styling session can rely on every state
