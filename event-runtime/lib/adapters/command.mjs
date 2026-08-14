@@ -44,10 +44,24 @@ export function resolveTemplate(template, input) {
   );
 }
 
+function killProcessGroup(child, signal = "SIGTERM") {
+  const pid = child?.pid;
+  if (!pid) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // already terminated
+    }
+  }
+}
+
 /**
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-export async function execute({ spec, def, workspaceDir, timeoutMs }) {
+export async function execute({ spec, def, workspaceDir, timeoutMs, abortSignal, signal }) {
   if (!Array.isArray(def.command) || def.command.length === 0) {
     throw new Error(`definition ${def.ref} has no command template — not a command-adapter agent`);
   }
@@ -58,6 +72,7 @@ export async function execute({ spec, def, workspaceDir, timeoutMs }) {
       cwd: workspaceDir,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     let output = "";
@@ -76,23 +91,39 @@ export async function execute({ spec, def, workspaceDir, timeoutMs }) {
     child.stderr.on("data", collect);
 
     let timedOut = false;
-    let killTimer;
+    let killTimer = null;
     const termTimer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
-      killTimer.unref?.();
+      killProcessGroup(child, "SIGTERM");
+      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
     }, timeoutMs);
+
+    const onAbort = () => {
+      killProcessGroup(child, "SIGTERM");
+      if (!killTimer) {
+        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
+      }
+    };
+    const abortSig = abortSignal ?? signal;
+    if (abortSig) {
+      if (abortSig.aborted) {
+        onAbort();
+      } else {
+        abortSig.addEventListener("abort", onAbort, { once: true });
+      }
+    }
 
     child.on("error", (err) => {
       clearTimeout(termTimer);
-      clearTimeout(killTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (abortSig) abortSig.removeEventListener?.("abort", onAbort);
       reject(err);
     });
 
     child.on("close", (exitCode) => {
       clearTimeout(termTimer);
-      clearTimeout(killTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (abortSig) abortSig.removeEventListener?.("abort", onAbort);
       if (exitCode === 0 && !timedOut) {
         const write = () => {
           const captured = def.captureStdout

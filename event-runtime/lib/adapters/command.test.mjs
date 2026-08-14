@@ -104,6 +104,67 @@ describe("execute", () => {
     expect(result.artifact.command).toEqual(["test", "-f", REAPER_SCRIPT]);
     expect(result.artifact.command.join(" ")).not.toContain("/tmp/pwn");
   });
+
+  test("timeout kills the whole process group, leaving no orphaned grandchildren (OPS-411)", async () => {
+    const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
+    // sh spawns background sleep and writes its pid, then waits
+    const script = `sh -c 'sleep 30 & echo $! > "${pidFile}"; wait'`;
+    const outcome = await execute({
+      spec: spec({}),
+      def: def(["sh", "-c", script]),
+      workspaceDir,
+      timeoutMs: 200,
+    });
+    expect(outcome.timedOut).toBe(true);
+
+    // Give the kernel a brief moment to finish reaping signals
+    await new Promise((r) => setTimeout(r, 100));
+
+    if (existsSync(pidFile)) {
+      const grandchildPid = parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+      let alive = true;
+      try {
+        process.kill(grandchildPid, 0);
+      } catch {
+        alive = false;
+      }
+      expect(alive).toBe(false);
+    }
+  }, 10_000);
+
+  test("abortSignal terminates process group immediately (OPS-411)", async () => {
+    const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild_abort.pid");
+    const script = `sh -c 'sleep 30 & echo $! > "${pidFile}"; wait'`;
+    const ac = new AbortController();
+
+    const runPromise = execute({
+      spec: spec({}),
+      def: def(["sh", "-c", script]),
+      workspaceDir,
+      timeoutMs: 10_000,
+      abortSignal: ac.signal,
+    });
+
+    // Abort after 200ms
+    setTimeout(() => ac.abort(), 200);
+
+    const outcome = await runPromise;
+    expect(outcome.timedOut).toBe(false);
+
+    await new Promise((r) => setTimeout(r, 100));
+    if (existsSync(pidFile)) {
+      const grandchildPid = parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+      let alive = true;
+      try {
+        process.kill(grandchildPid, 0);
+      } catch {
+        alive = false;
+      }
+      expect(alive).toBe(false);
+    }
+  }, 10_000);
 });
 
 /**

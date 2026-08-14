@@ -195,7 +195,7 @@ describe("worker", () => {
 
   test("fencing: a stale claim can never publish over a newer attempt", async () => {
     const db = openDb(":memory:");
-    const spec = queueRun(db, makeSpec());
+    const spec = queueRun(db, makeSpec({ maxAttempts: 2 }));
     linkEvent(db, spec.runId);
     const o = opts();
 
@@ -345,8 +345,106 @@ describe("worker", () => {
     expect(runState(db, spec.runId)).toBe("QUEUED");
   });
 
+  test("adapter exception: FAILED/adapter_error, workspace destroyed, not wedged in RUNNING (OPS-405)", async () => {
+    const db = openDb(":memory:");
+    const throwingAdapter = {
+      execute: async () => {
+        throw new Error("simulated adapter explosion");
+      },
+    };
+    const throwingAdapters = { throwing: throwingAdapter };
+    const spec = queueRun(db, makeSpec({ adapter: "throwing", maxAttempts: 1, workspace: { type: "ephemeral", retainOnFailure: false } }));
+    const o = opts();
+
+    const summary = await runOnce(db, registry, throwingAdapters, o);
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("adapter_error");
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.terminal_state).toBe("FAILED");
+    expect(attempt.reason_code).toBe("adapter_error");
+    expect(attempt.finished_at).toBeTruthy();
+  });
+
+  test("adapter exception with retries: auto re-QUEUED, workspace cleaned (OPS-405)", async () => {
+    const db = openDb(":memory:");
+    const throwingAdapter = {
+      execute: async () => {
+        throw new Error("simulated adapter explosion");
+      },
+    };
+    const throwingAdapters = { throwing: throwingAdapter };
+    const spec = queueRun(db, makeSpec({ adapter: "throwing", maxAttempts: 2, workspace: { type: "ephemeral", retainOnFailure: false } }));
+    const o = opts();
+
+    const summary = await runOnce(db, registry, throwingAdapters, o);
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("adapter_error");
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+  });
+
+  test("reapExpiredLeases dead-letters when maxAttempts is reached (OPS-405)", () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(db, makeSpec({ maxAttempts: 1 }));
+    const o = opts();
+    const claim = claimNext(db, o);
+    expect(runState(db, spec.runId)).toBe("LEASED");
+
+    const afterExpiry = T0 + (spec.timeoutSeconds + 120) * 1000 + 1;
+    expect(reapExpiredLeases(db, { now: afterExpiry, policyVersion: "test" })).toBe(1);
+    expect(runState(db, spec.runId)).toBe("FAILED");
+
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.terminal_state).toBe("FAILED");
+    expect(attempt.reason_code).toBe("lease_expired");
+    // Does not re-queue again
+    expect(reapExpiredLeases(db, { now: afterExpiry + 1000, policyVersion: "test" })).toBe(0);
+    expect(claimNext(db, opts())).toBeNull();
+  });
+
+  test("cancelRun on a RUNNING attempt aborts adapter immediately and records attempt (OPS-417)", async () => {
+    const db = openDb(":memory:");
+    let aborted = false;
+    const longRunningAdapter = {
+      execute: ({ abortSignal }) => {
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => resolve({ exitCode: 0, timedOut: false }), 5000);
+          abortSignal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            aborted = true;
+            resolve({ exitCode: null, timedOut: false });
+          });
+        });
+      },
+    };
+    const customAdapters = { long: longRunningAdapter };
+    const spec = queueRun(db, makeSpec({ adapter: "long", timeoutSeconds: 30 }));
+    const o = opts();
+
+    const claim = claimNext(db, o);
+    const execPromise = executeClaimed(db, registry, customAdapters, claim, o);
+
+    // Cancel while RUNNING
+    expect(runState(db, spec.runId)).toBe("RUNNING");
+    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+
+    const summary = await execPromise;
+    expect(summary.cancelled).toBe(true);
+    expect(aborted).toBe(true);
+    expect(runState(db, spec.runId)).toBe("CANCELLED");
+
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.terminal_state).toBe("CANCELLED");
+    expect(attempt.reason_code).toBe("cancelled");
+    expect(attempt.finished_at).toBeTruthy();
+    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+  });
+
   test("runOnce returns null when nothing is QUEUED", async () => {
     const db = openDb(":memory:");
     expect(await runOnce(db, registry, adapters, opts())).toBeNull();
   });
 });
+
