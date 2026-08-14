@@ -6,11 +6,12 @@ import { dur } from "../heartbeat";
 import { useListKeys, useNow, useTabKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
+import { readPinnedRuns, savePinnedRuns } from "../components/ContextTabs";
 import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
 import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
-import type { Attempt, ArtifactRef, RunState } from "../types";
+import type { Attempt, ArtifactRef, RunListItem, RunState } from "../types";
 import {
   Ago,
   Button,
@@ -95,57 +96,34 @@ function BudgetClock({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }
   const budget = `${timeoutSeconds}s budget`;
   if (c.kind === "off")
     return (
-      <span className="text-(--text-faint)" title={`The ${budget} starts when a worker starts the agent; this attempt is only leased so far.`}>
+      <span className="text-(--text-faint)" title={`${budget}, not started`}>
         {budget}, not started
       </span>
     );
   const hue = budgetHue(c, timeoutSeconds);
   if (c.kind === "spent")
     return (
-      <span
-        style={{ color: hue }}
-        title={`The ${budget} is spent — the worker stops the agent and records TIMED_OUT. A run still sitting here has lost its worker, and the lease is what takes it back.`}
-      >
+      <span style={{ color: hue }} title="budget spent">
         budget spent
       </span>
     );
   return (
-    <span
-      style={{ color: hue }}
-      title={`TIMED_OUT in ${dur(c.leftMs)} unless the agent finishes first — the ${budget}, measured from when the attempt started.`}
-    >
+    <span style={{ color: hue }} title={`timeout in ${dur(c.leftMs)}`}>
       timeout in {dur(c.leftMs)}
     </span>
   );
 }
 
-/**
- * How long until the runtime takes the run back. While the budget still has
- * room the lease is grace nobody needs to watch, so it only goes loud once the
- * budget is spent — the case where the worker is gone and the reaper is the
- * only thing left that will move this run.
- */
 function LeaseClock({ c, urgent }: { c: Clock; urgent: boolean }) {
-  if (c.kind === "off")
-    return (
-      <span title="This attempt records no lease, so nothing expires and the reaper will not take the run back.">
-        no lease
-      </span>
-    );
+  if (c.kind === "off") return <span title="no lease">no lease</span>;
   if (c.kind === "spent")
     return (
-      <span
-        style={{ color: "var(--hue-err)" }}
-        title="The lease has run out — the reaper re-queues this run on its next sweep, and the state badge catches up then."
-      >
+      <span style={{ color: "var(--hue-err)" }} title="reap due">
         reap due
       </span>
     );
   return (
-    <span
-      style={urgent ? { color: "var(--hue-warn)" } : undefined}
-      title={`Unless the attempt finishes first, the reaper re-queues this run in ${dur(c.leftMs)}. Leases are not renewed.`}
-    >
+    <span style={urgent ? { color: "var(--hue-warn)" } : undefined} title={`reaped in ${dur(c.leftMs)}`}>
       reaped in {dur(c.leftMs)}
     </span>
   );
@@ -168,36 +146,33 @@ function BudgetMeter({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }
   );
 }
 
-function rowWash(state: string): string {
-  if (state === "FAILED" || state === "TIMED_OUT") return "row-wash-err";
-  if (state === "REFUSED") return "row-wash-warn";
-  return "";
+function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
+  const { startedAt, leaseExpiresAt, timeoutSeconds = 0 } = r as { startedAt?: string | null; leaseExpiresAt?: string | null; timeoutSeconds?: number };
+  const t = startedAt && timeoutSeconds > 0 ? clockTo(startedAt, timeoutSeconds * 1000, now) : null;
+  const l = leaseExpiresAt ? clockTo(leaseExpiresAt, 0, now) : null;
+  const hasT = t && t.kind !== "off";
+  const hasL = l && l.kind !== "off";
+  if (!hasT && !hasL) return null;
+  return (
+    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] tabular-nums text-(--text-faint)">
+      {hasT && <BudgetClock c={t} timeoutSeconds={timeoutSeconds} />}
+      {hasT && hasL && <span>·</span>}
+      {hasL && <LeaseClock c={l} urgent={t?.kind === "spent"} />}
+    </div>
+  );
 }
 
-/**
- * A worker id is minted as `worker_<pid>_<rand>` (lib/ids.mjs); every other
- * actor the runtime records is a bare word — `operator`, `planner`, `reaper`,
- * or the `worker` fallback for an attempt whose owner was lost. Only the
- * prefixed form addresses a row in the fleet, so only it becomes a jump.
- */
-const isWorkerId = (actor: string): boolean => /^worker_.+/.test(actor);
+const rowWash = (s: string) =>
+  s === "FAILED" || s === "TIMED_OUT" ? "row-wash-err" : s === "REFUSED" ? "row-wash-warn" : "";
 
-/** Workers owns `#/workers/:id`; this view is a way in, not a second router. */
-const openWorker = (workerId: string) => {
-  window.location.hash = `#/${hashPath("workers", workerId)}`;
-};
-
-/**
- * Who did this — the lease owner of an attempt, or the actor on a lifecycle
- * row. A worker id is a process you can go look at; an operator or a planner
- * is not, and pretending otherwise would be a link to nowhere.
- */
 export function ActorRef({ actor, className }: { actor: string; className?: string }) {
-  if (!isWorkerId(actor)) return <>{actor}</>;
+  if (!/^worker_.+/.test(actor)) return <>{actor}</>;
   return (
     <JumpLink
-      onClick={() => openWorker(actor)}
-      title={`Which process was this? Open ${actor} in Workers`}
+      onClick={() => {
+        window.location.hash = `#/${hashPath("workers", actor)}`;
+      }}
+      title={actor}
       className={className}
     >
       {actor}
@@ -205,20 +180,8 @@ export function ActorRef({ actor, className }: { actor: string; className?: stri
   );
 }
 
-function isTextArtifact(kind: string) {
-  const k = kind.toLowerCase();
-  return (
-    k === "transcript" ||
-    k === "diff" ||
-    k === "report" ||
-    k === "evidence" ||
-    k.endsWith(".txt") ||
-    k.endsWith(".json") ||
-    k.endsWith(".jsonl") ||
-    k.endsWith(".md") ||
-    k.endsWith(".log")
-  );
-}
+const isTextArtifact = (k: string) =>
+  /^(transcript|diff|report|evidence)$/i.test(k) || /\.(txt|json|jsonl|md|log)$/i.test(k);
 
 function ArtifactRow({ a }: { a: ArtifactRef }) {
   const [open, setOpen] = useState(false);
@@ -528,28 +491,39 @@ export function Runs({
       : null;
   const clocks = d && current ? deadlinesOf(current, d.run.spec.timeoutSeconds, now) : null;
 
+  const pinRun = (id: string) => {
+    const cur = readPinnedRuns();
+    if (!cur.includes(id)) {
+      savePinnedRuns([...cur, id]);
+      notify(`Pinned ${id}`, "ok");
+    } else {
+      notify("Already pinned", "info");
+    }
+  };
+
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
     if (!sel) {
       setContextActions([]);
     } else {
       const copy = [
-        { label: `Open ${sel.runId} full view`, hint: "o", run: () => onOpenFull(sel.runId) },
-        { label: `Copy ${sel.runId}`, hint: "c", run: () => copyText(sel.runId, "run id") },
-        { label: "Copy link to this run", run: copyLink },
+        { label: "Open in tab", run: () => pinRun(sel.runId) },
+        { label: "Open full view", hint: "o", run: () => onOpenFull(sel.runId) },
+        { label: "Copy run id", hint: "c", run: () => copyText(sel.runId, "run id") },
+        { label: "Copy link", run: copyLink },
       ];
       if (!d || !connected) {
         setContextActions(copy);
       } else {
         setContextActions([
           ...(isCancellable(d.run.state)
-            ? [{ label: `Cancel ${d.run.runId}…`, hint: "x", run: () => setConfirm("cancel") }]
+            ? [{ label: "Cancel run…", hint: "x", run: () => setConfirm("cancel") }]
             : []),
           ...(d.run.state === "FAILED"
             ? [
                 attemptsExhausted
-                  ? { label: `Force retry ${d.run.runId}…`, run: () => setConfirm("force-retry") }
-                  : { label: `Retry ${d.run.runId}`, run: () => retry.mutate({ id: d.run.runId, force: false }) },
+                  ? { label: "Force retry run…", run: () => setConfirm("force-retry") }
+                  : { label: "Retry run", run: () => retry.mutate({ id: d.run.runId, force: false }) },
               ]
             : []),
           ...copy,
@@ -612,14 +586,11 @@ export function Runs({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Run</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">State</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Adapter</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Attempts</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Updated</th>
+              {["Run", "State", "Agent", "Adapter", "Attempts", "Reason", "Origin", "Updated"].map((h) => (
+                <th key={h} className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -633,11 +604,12 @@ export function Runs({
                 <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5">{r.runId}</td>
                 <td className="border-b border-(--border) px-3 py-1.5">
                   <StateBadge state={r.state} />
+                  {IN_FLIGHT.includes(r.state) && <RowDeadlines r={r} now={now} />}
                 </td>
                 <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">
                   <JumpLink
                     onClick={() => onJumpAgent(r.agent)}
-                    title={`What is ${r.agent}? Open in Agents`}
+                    title={`Open ${r.agent} in Agents`}
                   >
                     {r.agent}
                   </JumpLink>
@@ -673,10 +645,10 @@ export function Runs({
                   context.kind === "inflight"
                     ? "No runs in flight."
                     : context.kind === "repo"
-                      ? `No runs naming ${context.name}.`
+                      ? `No runs for ${context.name}.`
                       : tab === "ALL"
                         ? "No runs."
-                        : `No runs in ${tab}.`
+                        : `No ${tab} runs.`
                 }
               />
             )}
@@ -692,7 +664,7 @@ export function Runs({
               <StateBadge state={sel.state} />
               <JumpLink
                 onClick={() => onOpenFull(sel.runId)}
-                title={`Open ${sel.runId} full view`}
+                title={`Open ${sel.runId}`}
                 className="truncate"
               >
                 {sel.runId}
@@ -701,6 +673,7 @@ export function Runs({
           }
           actions={
             <>
+              <Button onClick={() => pinRun(sel.runId)}>Open in tab</Button>
               <Button onClick={() => onOpenFull(sel.runId)}>
                 Expand <span className="mono ml-1 opacity-70">o</span>
               </Button>
@@ -727,7 +700,7 @@ export function Runs({
               v={
                 <JumpLink
                   onClick={() => onJumpAgent(d.run.spec.agent)}
-                  title={`What is ${d.run.spec.agent}? Open in Agents`}
+                  title={`Open ${d.run.spec.agent} in Agents`}
                 >
                   {d.run.spec.agent}
                 </JumpLink>
@@ -794,8 +767,7 @@ export function Runs({
                   <LeaseClock c={clocks.lease} urgent={clocks.timeout.kind === "spent"} />
                 </div>
                 <div className="mt-2 text-[11px] text-(--text-faint)">
-                  The lease outlasts the budget by a fixed grace and is never renewed: the worker is meant to stop
-                  the agent first, and the reaper only takes the run back when the worker itself is gone.
+                  The lease outlasts the budget by a fixed grace and is never renewed.
                 </div>
               </div>
             </Section>
@@ -934,8 +906,8 @@ export function Runs({
         <Dialog title={`Cancel ${d.run.runId}?`} onClose={() => setConfirm(null)}>
           <div className="mb-3 text-[12px] text-(--text-dim)">
             {d.run.state === "RUNNING"
-              ? "The running attempt is stopped with TERM, then KILL, and terminates as cancelled."
-              : "The run is cancelled before execution; the operator is recorded as actor."}
+              ? "Running attempt is stopped with TERM/KILL and cancelled."
+              : "Run is cancelled before execution."}
           </div>
           <VerbError error={cancel.error} />
           <input
@@ -958,11 +930,9 @@ export function Runs({
       )}
 
       {confirm === "force-retry" && d && (
-        <Dialog title="Retry past the attempt budget?" onClose={() => setConfirm(null)}>
+        <Dialog title="Retry past attempt budget?" onClose={() => setConfirm(null)}>
           <div className="mb-3 text-[12px] text-(--text-dim)">
-            This run has used {d.run.attempts}/{d.run.spec.maxAttempts} attempts. Forcing a retry
-            overrides the declared budget and is recorded in the audit trail as an explicit operator
-            override.
+            Used {d.run.attempts}/{d.run.spec.maxAttempts} attempts. Forcing retry is recorded as an operator override.
           </div>
           <VerbError error={retry.error} />
           <div className="mt-3 flex justify-end gap-2">
