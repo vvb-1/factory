@@ -22,7 +22,7 @@ import * as command from "./lib/adapters/command.mjs";
 import * as fake from "./lib/adapters/fake.mjs";
 import { apiClient } from "./lib/client.mjs";
 import {
-  API_HOST, DEFAULT_PORT, dbPath, ensureHome, environmentName, policyVersion, runtimeHome, workspacesRoot,
+  API_HOST, DEFAULT_PORT, artifactsRoot, dbPath, ensureHome, environmentName, policyVersion, runtimeHome, workspacesRoot,
 } from "./lib/config.mjs";
 import { openDb } from "./lib/db.mjs";
 import { newWorkerId } from "./lib/ids.mjs";
@@ -95,6 +95,110 @@ async function withClient(fn) {
     }
     fail(err.message);
   }
+}
+
+// Artifact GC interval. Unreferenced bytes older than a week are pruned, but
+// the serve loop only *attempts* that pass once an hour so a large store
+// cannot hitch every 1s tick.
+export const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+export const TICK_SUBSYSTEMS = ["tick emit", "plan", "auto-approve", "outbox", "GC", "chains"];
+
+/**
+ * One serve-loop pass (OPS-412). Each named subsystem is caught on its own
+ * so a throw in GC cannot skip chain resolution — or any other step.
+ *
+ * `subsystems` may replace a step by the names in TICK_SUBSYSTEMS; tests use
+ * that to prove isolation. `storeRoot` defaults to `artifactsRoot()`.
+ *
+ * @returns {{ lastPrune: number }}
+ */
+export async function tick({
+  db,
+  registry,
+  now = Date.now(),
+  policyVersion: pv,
+  adapterOverride,
+  withWorker = false,
+  adapters,
+  owner,
+  lastPrune = 0,
+  pruneIntervalMs = PRUNE_INTERVAL_MS,
+  storeRoot,
+  log: logLine = log,
+  announceProposals = () => {},
+  announceTransitions = () => {},
+  subsystems = {},
+} = {}) {
+  const runStep = async (name, fn) => {
+    try {
+      await (subsystems[name] ?? fn)();
+    } catch (err) {
+      logLine(`tick ${name}: ${err.message}`);
+    }
+  };
+
+  await runStep("tick emit", () => {
+    const ticks = emitDueTicks(db, registry, { now });
+    for (const t of ticks.emitted) {
+      logLine(`tick ${t.loop} @ ${t.slot}${t.skipped > 0 ? ` (stands for ${t.skipped} skipped slot(s))` : ""}`);
+    }
+    for (const err of ticks.errors) logLine(`schedule error: ${err}`);
+  });
+
+  await runStep("plan", () => {
+    planAdmittedEvents(db, registry, { now, policyVersion: pv, adapterOverride });
+  });
+
+  await runStep("auto-approve", () => {
+    const auto = autoApproveScheduled(db, registry, approveProposal, { now, policyVersion: pv });
+    for (const a of auto.approved) logLine(`schedule approved ${a.loop} → run ${a.runId} (actor: schedule)`);
+    for (const err of auto.errors) logLine(`schedule approval error: ${err}`);
+  });
+
+  await runStep("announce", () => {
+    announceProposals();
+    announceTransitions();
+  });
+
+  await runStep("reap", () => {
+    reapExpiredLeases(db, { now, policyVersion: pv });
+  });
+
+  if (withWorker) {
+    await runStep("worker", async () => {
+      await runOnce(db, registry, adapters, {
+        workspacesRoot: workspacesRoot(), owner, now, policyVersion: pv,
+      });
+    });
+  }
+
+  await runStep("announce-after", () => {
+    announceTransitions();
+  });
+
+  await runStep("outbox", () => {
+    publishOutbox(db, {
+      sink: (e) => logLine(`result event ${e.type} (${e.eventId}) artifact ${e.payload?.artifactHash ?? "-"}`),
+      now,
+    });
+  });
+
+  let nextPrune = lastPrune;
+  await runStep("GC", () => {
+    if (now - lastPrune <= pruneIntervalMs) return;
+    const pruned = pruneArtifacts(db, storeRoot ?? artifactsRoot(), { now });
+    nextPrune = now;
+    if (pruned.deleted > 0) logLine(`artifacts: pruned ${pruned.deleted} orphan(s), freed ${pruned.freedBytes}B`);
+  });
+
+  await runStep("chains", () => {
+    const chains = resolveChains(db, registry, { now });
+    if (chains.emitted > 0) logLine(`chain: emitted ${chains.emitted} follow-up event(s) — planning`);
+    for (const err of chains.errors) logLine(`chain error: ${err}`);
+  });
+
+  return { lastPrune: nextPrune };
 }
 
 // ---------------------------------------------------------------------------
@@ -184,55 +288,24 @@ async function serve(args) {
 
   let lastPrune = Date.now();
   let busy = false;
-  async function tick() {
+  async function loopTick() {
     if (busy) return; // never overlap: planning and (optional) execution share this tick
     busy = true;
     try {
-      const nowMs = Date.now();
-      // Scheduled loops (OPS-381): a tick is an event, admitted through the
-      // same intake as a webhook. The eventId is the slot, so restarting
-      // serve mid-interval cannot double-fire.
-      const ticks = emitDueTicks(db, registry, { now: nowMs });
-      for (const t of ticks.emitted) {
-        log(`tick ${t.loop} @ ${t.slot}${t.skipped > 0 ? ` (stands for ${t.skipped} skipped slot(s))` : ""}`);
-      }
-      for (const err of ticks.errors) log(`schedule error: ${err}`);
-
-      planAdmittedEvents(db, registry, { now: nowMs, policyVersion: pv, adapterOverride });
-
-      // Earned automation (§6): only loops that declare approval "auto", and
-      // always recorded with the scheduler as actor.
-      const auto = autoApproveScheduled(db, registry, approveProposal, { now: nowMs, policyVersion: pv });
-      for (const a of auto.approved) log(`schedule approved ${a.loop} → run ${a.runId} (actor: schedule)`);
-      for (const err of auto.errors) log(`schedule approval error: ${err}`);
-      announceProposals();
-      announceTransitions();
-      reapExpiredLeases(db, { now: nowMs, policyVersion: pv });
-      if (withWorker) {
-        await runOnce(db, registry, adapters, {
-          workspacesRoot: workspacesRoot(), owner, now: Date.now(), policyVersion: pv,
-        });
-      }
-      announceTransitions();
-      // Watched-mode outbox sink (§15): display the result event, stamp it published.
-      publishOutbox(db, {
-        sink: (e) => log(`result event ${e.type} (${e.eventId}) artifact ${e.payload?.artifactHash ?? "-"}`),
-        now: Date.now(),
+      const result = await tick({
+        db,
+        registry,
+        policyVersion: pv,
+        adapterOverride,
+        withWorker,
+        adapters,
+        owner,
+        lastPrune,
+        log,
+        announceProposals,
+        announceTransitions,
       });
-      // Discovered chains (OPS-223): a completed run with a registered
-      // recommendation edge emits an internal event through the same intake;
-      // the next planning pass proposes the follow-up, watched like anything.
-      // Artifact GC (OPS-372): unreferenced bytes older than the window go;
-      // anything an accepted result points at is never touched, because a
-      // receipt aiming at a deleted file turns the audit trail into a lie.
-      if (Date.now() - lastPrune > 60 * 60 * 1000) {
-        lastPrune = Date.now();
-        const pruned = pruneArtifacts(db, artifactsRoot(), { now: Date.now() });
-        if (pruned.deleted > 0) log(`artifacts: pruned ${pruned.deleted} orphan(s), freed ${pruned.freedBytes}B`);
-      }
-      const chains = resolveChains(db, registry, { now: Date.now() });
-      if (chains.emitted > 0) log(`chain: emitted ${chains.emitted} follow-up event(s) — planning`);
-      for (const err of chains.errors) log(`chain error: ${err}`);
+      lastPrune = result.lastPrune;
     } catch (err) {
       log(`tick error: ${err.message}`);
     } finally {
@@ -245,7 +318,7 @@ async function serve(args) {
     db, registry, policyVersion: pv, port, env,
     onEvent: (kind) => {
       log(`event ${kind} — planning`);
-      tick();
+      loopTick();
     },
   });
   server.on("listening", () => {
@@ -267,7 +340,7 @@ async function serve(args) {
   let timer = null;
   server.on("listening", () => {
     announceProposals();
-    timer = setInterval(tick, 1000);
+    timer = setInterval(loopTick, 1000);
   });
 
   // SIGTERM is what `bun --watch` sends on reload; without a close the next
@@ -745,4 +818,6 @@ async function main() {
   }
 }
 
-await main();
+if (import.meta.main || process.argv[1]?.endsWith("cli.mjs")) {
+  await main();
+}
