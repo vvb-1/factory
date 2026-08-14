@@ -4,20 +4,33 @@
   "required": ["repo", "plan"],
   "additionalProperties": false,
   "properties": {
-    "repo": { "type": "string", "minLength": 1 },
+    "repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short repo name as configured in config/repos.yaml — not the GitHub owner/name slug"
+    },
     "plan": {
       "type": "array",
       "minItems": 1,
+      "description": "Approved per-issue actions from the triage-scan proposal, applied in order",
       "items": {
         "type": "object",
         "required": ["issueId", "action"],
         "additionalProperties": false,
         "properties": {
-          "issueId": { "type": "string", "pattern": "^[A-Z]+-[0-9]+$" },
-          "action": {
-            "enum": ["label-agent-ready", "move-to-todo", "needs-detail", "mark-duplicate", "needs-human"]
+          "issueId": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]+$",
+            "description": "Linear issue identifier (e.g. WM-76)"
           },
-          "reason": { "type": "string" }
+          "action": {
+            "enum": ["label-agent-ready", "move-to-todo", "needs-detail", "mark-duplicate", "needs-human"],
+            "description": "Triage action to apply to the issue"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-line justification for the action, kept for the audit trail"
+          }
         }
       }
     }

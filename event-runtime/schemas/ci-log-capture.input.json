@@ -4,7 +4,14 @@
   "required": ["repo", "runId"],
   "additionalProperties": false,
   "properties": {
-    "repo": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
-    "runId": { "type": ["string", "integer"] }
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "description": "GitHub repository slug (owner/name) the failed run belongs to — not the config/repos.yaml short name"
+    },
+    "runId": {
+      "type": ["string", "integer"],
+      "description": "GitHub Actions run id whose failed-job logs to capture (number, or numeric string as gh prints it)"
+    }
   }
 }
