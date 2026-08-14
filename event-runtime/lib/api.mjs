@@ -18,13 +18,13 @@ import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, we
 import { admitEvent, verifyWebhook } from "./intake.mjs";
 import { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
-import { requeueEvent } from "./planner.mjs";
+import { planEvent, requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
 import { loadRepos, RepoError, reposRoot, reposView } from "./repos.mjs";
 import { traceOf } from "./trace.mjs";
 import { cancelRun, retryRun } from "./worker.mjs";
 import { storeStats } from "./artifacts.mjs";
-import { scheduleView } from "./schedules.mjs";
+import { parseCadence, scheduleView } from "./schedules.mjs";
 import { listWorkers, stalledWorkers } from "./workers.mjs";
 
 /**
@@ -576,6 +576,71 @@ export function createApi({
 
       if (route === "GET /schedules") {
         return send(res, 200, { schedules: scheduleView(db, registry, { now: nowMs }) });
+      }
+
+      // Ad-hoc loop trigger (OPS-401): distinct from slot ticks (source="operator",
+      // unique manual:<loop>:<now> ID, watched approval, never advances lastSlot).
+      const schedulePost = url.pathname.match(/^\/schedules\/([^/]+)\/(run|trigger)$/);
+      if (req.method === "POST" && schedulePost) {
+        const loop = decodeURIComponent(schedulePost[1]);
+        const schedule = registry.schedules?.[loop];
+        if (!schedule) {
+          return send(res, 404, {
+            error: `unknown schedule "${loop}"`,
+            schedules: Object.keys(registry.schedules ?? {}),
+          });
+        }
+        let cadenceSeconds;
+        try {
+          cadenceSeconds = parseCadence(schedule.every);
+        } catch {
+          // Cadence might have parse error in bad config
+        }
+        const isoNow = new Date(nowMs).toISOString();
+        let eventId = `manual:${loop}:${isoNow}`;
+        let seq = 0;
+        while (db.query(`SELECT 1 FROM events WHERE source = ? AND event_id = ?`).get(ACTOR, eventId)) {
+          seq += 1;
+          eventId = `manual:${loop}:${isoNow}:${seq}`;
+        }
+        const envelope = {
+          schemaVersion: "factory.event/v1",
+          eventId,
+          type: schedule.eventType,
+          source: ACTOR,
+          subject: loop,
+          occurredAt: isoNow,
+          correlationId: eventId,
+          causationId: null,
+          payload: {
+            loop,
+            slot: isoNow,
+            ...(cadenceSeconds ? { cadenceSeconds } : {}),
+            skippedSlots: 0,
+          },
+        };
+        const outcome = admitEvent(db, registry, envelope, { now: nowMs });
+        if (!outcome.admitted && !outcome.duplicate) {
+          return send(res, 422, { errors: outcome.errors });
+        }
+        if (outcome.admitted) onEvent("admitted");
+        const plan = planEvent(
+          db,
+          registry,
+          { source: ACTOR, eventId },
+          { now: nowMs, policyVersion },
+        );
+        return send(res, 200, {
+          admitted: outcome.admitted,
+          duplicate: outcome.duplicate,
+          eventId,
+          proposalId: plan.proposal?.id ?? null,
+          runId: plan.runId ?? null,
+          decision: plan.decision,
+          reason: plan.reason ?? null,
+          disabled: !schedule.enabled,
+          loop,
+        });
       }
 
       if (route === "GET /workers") {
