@@ -477,7 +477,15 @@ export function isLoopbackHost(hostHeader) {
     host = raw.split(":")[0];
   }
   const lower = host.toLowerCase();
-  return lower === "127.0.0.1" || lower === "localhost" || lower === "::1";
+  return (
+    lower === "127.0.0.1" ||
+    lower.startsWith("127.") ||
+    lower === "localhost" ||
+    lower.endsWith(".localhost") ||
+    lower === "0.0.0.0" ||
+    lower === "::1" ||
+    lower.endsWith(".local")
+  );
 }
 
 /**
@@ -489,7 +497,15 @@ export function isLoopbackOrigin(originHeader) {
   try {
     const url = new URL(originHeader);
     const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+    return (
+      host === "127.0.0.1" ||
+      host.startsWith("127.") ||
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "0.0.0.0" ||
+      host === "::1" ||
+      host.endsWith(".local")
+    );
   } catch {
     return false;
   }

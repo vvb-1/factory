@@ -913,8 +913,12 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
   test("isLoopbackHost accepts loopback variants and rejects remote/malformed hosts", () => {
     expect(isLoopbackHost("127.0.0.1")).toBe(true);
     expect(isLoopbackHost("127.0.0.1:7381")).toBe(true);
+    expect(isLoopbackHost("127.0.0.2:7381")).toBe(true);
+    expect(isLoopbackHost("0.0.0.0:7381")).toBe(true);
     expect(isLoopbackHost("localhost")).toBe(true);
     expect(isLoopbackHost("localhost:7381")).toBe(true);
+    expect(isLoopbackHost("app.localhost:7381")).toBe(true);
+    expect(isLoopbackHost("my-mac.local:7381")).toBe(true);
     expect(isLoopbackHost("[::1]")).toBe(true);
     expect(isLoopbackHost("[::1]:7381")).toBe(true);
 
@@ -929,8 +933,12 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
   test("isLoopbackOrigin accepts loopback origins and rejects foreign/malformed origins", () => {
     expect(isLoopbackOrigin("http://127.0.0.1:7382")).toBe(true);
     expect(isLoopbackOrigin("http://127.0.0.1")).toBe(true);
+    expect(isLoopbackOrigin("http://127.0.0.2:7382")).toBe(true);
+    expect(isLoopbackOrigin("http://0.0.0.0:7382")).toBe(true);
     expect(isLoopbackOrigin("http://localhost:7382")).toBe(true);
     expect(isLoopbackOrigin("http://localhost")).toBe(true);
+    expect(isLoopbackOrigin("http://app.localhost:7382")).toBe(true);
+    expect(isLoopbackOrigin("http://my-mac.local:7382")).toBe(true);
     expect(isLoopbackOrigin("http://[::1]:7382")).toBe(true);
 
     expect(isLoopbackOrigin("http://evil.com")).toBe(false);
