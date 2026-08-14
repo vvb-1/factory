@@ -62,9 +62,11 @@ describe("RunDetailBlocks field tiering (WM-129)", () => {
     expect(internals).toBeTruthy();
     expect(internals!.open).toBe(false);
     // The demoted rows live inside that disclosure, not on the glance tier.
+    // Scoped to the disclosure: labels like `workspace` also appear on the
+    // attempt cards, so a document-wide query would match more than one.
     for (const key of ["idempotencyKey", "specHash", "inputHash", "workspace", "promptVersion", "policyVersion"]) {
-      const row = r.getByText(key);
-      expect(internals!.contains(row)).toBe(true);
+      const labels = Array.from(internals!.querySelectorAll("span")).filter((s) => s.textContent === key);
+      expect(labels.length).toBe(1);
     }
     // The RunSpec ground truth stays, collapsed.
     const spec = details.find((el) => el.textContent?.includes("immutable RunSpec"));

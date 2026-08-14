@@ -487,7 +487,7 @@ export function Overview({
       )}
 
       <div className="grid gap-x-5 xl:grid-cols-2">
-        <Section title={`Activity · latest ${Math.min(feed.entries.length, FEED_CAP)}`}>
+        <Section title={`Activity · latest ${Math.min(feed.entries.length, FEED_CAP)}`} card={false}>
           {feed.entries.length === 0 ? (
             <div className="text-(--text-faint)">
               {feed.isPending
@@ -529,7 +529,7 @@ export function Overview({
           )}
         </Section>
 
-        <Section title="Outbox — published results">
+        <Section title="Outbox — published results" card={false}>
           <div id="outbox">
           {(outbox.data?.outbox ?? []).length === 0 ? (
             <div className="text-(--text-faint)">

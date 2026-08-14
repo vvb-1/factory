@@ -12,6 +12,7 @@ import {
   JumpLink,
   KV,
   Section,
+  STATE_HUES,
   StateBadge,
   VerbError,
   copyText,
@@ -411,7 +412,7 @@ export function RunDetailBlocks({
           answer to a budget about to be spent on a hung agent. */}
       {current && clocks && (
         <Section title="Deadlines">
-          <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums" aria-live="off">
+          <div className="py-1 tabular-nums" aria-live="off">
             <div className="flex items-baseline justify-between gap-4">
               <span className="text-(--text-faint)">
                 attempt #{current.attempt}{" "}
@@ -465,62 +466,108 @@ export function RunDetailBlocks({
       <VerbError error={verbError} />
 
       <Section title="Lifecycle">
-        <div className="rounded-md border border-(--border) px-3 py-1">
-          {d.lifecycle.map((e) => (
-            <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-              <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.at}>
-                {new Date(e.at).toLocaleTimeString([], { hour12: false })}
-              </span>
-              <span className="shrink-0">
-                {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
-              </span>
-              <span className="truncate text-(--text-faint)">
-                <ActorRef actor={e.actor} className="text-[13px]" />
-                {e.reason ? ` · ${e.reason}` : ""}
-              </span>
-            </div>
-          ))}
-        </div>
+        <ol className="m-0 list-none p-0">
+          {d.lifecycle.map((e, i) => {
+            const prev = i > 0 ? d.lifecycle[i - 1] : null;
+            // The lifecycle is a chain, so `from` is the previous row's `to` and
+            // printing it on every line was pure redundancy — and, since state
+            // names differ in length, it pushed each badge to a different x and
+            // made the column look ragged. Only an actual break in the chain is
+            // worth spelling out (WM-136).
+            const jumped = prev != null && e.from_state !== prev.to_state;
+            const hue = STATE_HUES[e.to_state] ?? "var(--hue-idle)";
+            const time = new Date(e.at).toLocaleTimeString([], { hour12: false });
+            return (
+              <li key={e.seq} className="flex gap-2.5 py-1">
+                <span className="mono w-[52px] shrink-0 pt-0.5 text-[11px] tabular-nums text-(--text-faint)" title={e.at}>
+                  {/* A burst of transitions shares one second; repeating it reads as noise. */}
+                  {prev && time === new Date(prev.at).toLocaleTimeString([], { hour12: false }) ? "" : time}
+                </span>
+                {/* Rail: a dot per transition, joined to the next one. */}
+                <span className="relative flex w-2 shrink-0 justify-center" aria-hidden="true">
+                  {i < d.lifecycle.length - 1 && (
+                    <span className="absolute top-2.5 bottom-[-4px] w-px bg-(--border)" />
+                  )}
+                  <span className="relative mt-[7px] size-1.5 shrink-0 rounded-full" style={{ background: hue }} />
+                </span>
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                  {jumped && (
+                    <span className="text-[11px] text-(--text-faint)">{e.from_state ?? "·"} →</span>
+                  )}
+                  <StateBadge state={e.to_state} />
+                  <span className="min-w-0 truncate text-[11.5px] text-(--text-faint)" title={e.actor}>
+                    <ActorRef actor={e.actor} className="text-[11.5px]" />
+                    {e.reason ? ` · ${e.reason}` : ""}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ol>
       </Section>
 
       {afterLifecycle}
 
       {d.attempts.length > 0 && (
-        <Section title="Attempts">
+        <Section title="Attempts" card={false}>
           {d.attempts.map((a) => (
-            <div key={a.attempt} className="mb-1 rounded-md border border-(--border) px-3 py-1.5">
-              <div className="flex justify-between">
-                <span>#{a.attempt}</span>
-                <span className="text-(--text-dim)">{a.terminal_state ?? "in flight"}</span>
+            <div key={a.attempt} className="mb-1.5 rounded-md border border-(--border) bg-(--surface-0) px-3 py-2 last:mb-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="mono text-[12px] font-medium text-(--text)">#{a.attempt}</span>
+                {a.terminal_state ? (
+                  <StateBadge state={a.terminal_state} />
+                ) : (
+                  <span className="text-[11px] text-(--text-faint)">in flight</span>
+                )}
               </div>
-              <div className="mono truncate text-[11px] text-(--text-faint)">
-                {a.reason_code ?? ""} {a.workspace_path ?? ""}
-              </div>
-              <div className="flex items-baseline gap-1.5 truncate text-[11px] text-(--text-faint)">
-                <span>owner</span>
-                {a.lease_owner ? <ActorRef actor={a.lease_owner} /> : <span className="mono">unclaimed</span>}
-              </div>
-              {(a.started_at || a.finished_at) && (
-                <div className="mt-1 flex gap-3 text-[11px] text-(--text-faint)">
-                  {a.started_at && (
-                    <span>
-                      started <Ago iso={a.started_at} now={now} />
-                    </span>
-                  )}
-                  {a.finished_at && (
-                    <span>
-                      finished <Ago iso={a.finished_at} now={now} />
-                    </span>
-                  )}
+              {a.reason_code && (
+                <div className="mono mt-1 truncate text-[11px] text-(--hue-err)" title={a.reason_code}>
+                  {a.reason_code}
                 </div>
               )}
+              {/* Label/value pairs at the panel's rhythm — the fields used to run
+                  together on one faint line where the workspace path pushed the
+                  owner off the edge (WM-136). */}
+              <div className="mt-1.5 grid grid-cols-[minmax(0,4.5rem)_minmax(0,1fr)] items-baseline gap-x-3 gap-y-0.5 text-[11px] text-(--text-faint)">
+                <span>owner</span>
+                <span className="min-w-0 truncate" title={a.lease_owner ?? "unclaimed"}>
+                  {a.lease_owner ? <ActorRef actor={a.lease_owner} /> : <span className="mono">unclaimed</span>}
+                </span>
+                {a.workspace_path && (
+                  <>
+                    <span>workspace</span>
+                    <span className="mono min-w-0 truncate" title={a.workspace_path}>
+                      {a.workspace_path}
+                    </span>
+                  </>
+                )}
+                {a.started_at && (
+                  <>
+                    <span>started</span>
+                    <span className="min-w-0 truncate">
+                      <Ago iso={a.started_at} now={now} />
+                    </span>
+                  </>
+                )}
+                {a.finished_at && (
+                  <>
+                    <span>finished</span>
+                    <span className="min-w-0 truncate">
+                      <Ago iso={a.finished_at} now={now} />
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </Section>
       )}
 
       {d.result && (
-        <Section title={`Result · ${d.result.terminalState}${d.result.reasonCode ? ` · ${d.result.reasonCode}` : ""}`}>
+        <Section
+          id="run-result"
+          title={`Result · ${d.result.terminalState}${d.result.reasonCode ? ` · ${d.result.reasonCode}` : ""}`}
+        >
           {d.result.artifact !== undefined ? (
             <Disclosure label="artifact" defaultOpen>
               <JsonBlock value={d.result.artifact} />
@@ -543,7 +590,7 @@ export function RunDetailBlocks({
           {(d.result.artifacts ?? []).length === 0 ? (
             <div className="text-(--text-faint)">No stored artifacts.</div>
           ) : (
-            <div className="rounded-md border border-(--border) px-3 py-1">
+            <div>
               {(d.result.artifacts ?? []).map((a) => (
                 <ArtifactRow key={a.sha256} a={a} />
               ))}

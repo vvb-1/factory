@@ -190,13 +190,24 @@ export function RunFull({
           <>
           {/* The failure first, full width under the header (WM-93) — renders nothing for other states. */}
           <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} className="mx-6 mt-6 mb-0" />
-          <div className="flex flex-col gap-8 p-6 xl:flex-row">
+          {/* items-start: a stretched flex child is full-height, which silently defeats the sidebar's sticky. */}
+          <div className="flex flex-col gap-8 p-6 xl:flex-row xl:items-start xl:pr-4">
             {/* Main column: the trace, at a readable measure — the point of the page. */}
             <main className="min-w-0 flex-1 xl:max-w-[900px]">
               <RunTrace key={runId} runId={runId} state={d.run.state} variant="full" />
             </main>
 
-            <aside className="w-full shrink-0 xl:w-[400px]">
+            {/* Anchored to the right edge at the side panel's width, so
+                toggling panel ↔ full page reads as the left region swapping
+                rather than the whole layout reflowing; `ml-auto` parks the
+                slack left of the sidebar, since the trace column caps at its
+                readable measure and would otherwise leave it floating. Its
+                own scroll keeps the Deadlines clock and run vitals on screen
+                through a long trace, matching the panel. The height leaves
+                enough slack that the page itself never scrolls at xl, so no
+                outer scrollbar gutter pushes the sidebar off the edge and it
+                lands on the panel's exact right margin (WM-136). */}
+            <aside className="w-full shrink-0 xl:sticky xl:top-0 xl:ml-auto xl:max-h-[calc(100dvh-11rem)] xl:w-[428px] xl:overflow-y-auto">
               <RunDetailBlocks
                 d={d}
                 now={now}
