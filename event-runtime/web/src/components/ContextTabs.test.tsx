@@ -1,6 +1,6 @@
 import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { RepoItem } from "../types";
 import { ContextTabs } from "./ContextTabs";
 
@@ -52,5 +52,62 @@ describe("ContextTabs", () => {
 
     const closeBtn = r.getByRole("button", { name: "Close factory" });
     expect(closeBtn.getAttribute("tabindex")).toBe("-1");
+  });
+
+  test("focuses the remaining active context button after closing a tab when activeElement is body (Chromium recovery)", () => {
+    let open = ["factory", "client"];
+    const r = render(
+      <ContextTabs
+        repos={[repo("factory"), repo("client")]}
+        reposError={false}
+        openRepos={open}
+        active={{ kind: "repo", name: "client" }}
+        onSelect={() => {}}
+        onOpen={() => {}}
+        onClose={(name) => {
+          open = open.filter((n) => n !== name);
+        }}
+      />,
+    );
+
+    document.body.focus();
+    expect(document.activeElement).toBe(document.body);
+
+    const closeBtn = r.getByRole("button", { name: "Close factory" });
+    act(() => {
+      fireEvent.click(closeBtn);
+      document.body.focus();
+    });
+
+    const activeBtn = r.getByRole("button", { name: "client" });
+    expect(document.activeElement).toBe(activeBtn);
+  });
+
+  test("preserves focus on another element after closing a tab (Safari/Firefox focus retention)", () => {
+    const { getByTestId, getByRole } = render(
+      <div>
+        <input data-testid="filter-input" />
+        <ContextTabs
+          repos={[repo("factory")]}
+          reposError={false}
+          openRepos={["factory"]}
+          active={{ kind: "all" }}
+          onSelect={() => {}}
+          onOpen={() => {}}
+          onClose={() => {}}
+        />
+      </div>,
+    );
+
+    const input = getByTestId("filter-input");
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    const closeBtn = getByRole("button", { name: "Close factory" });
+    act(() => {
+      closeBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(document.activeElement).toBe(input);
   });
 });
