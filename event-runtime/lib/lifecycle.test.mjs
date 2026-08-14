@@ -93,4 +93,29 @@ describe("lifecycle", () => {
     const distinct = resolveIdempotency(db, { idempotencyKey: "remed-key-1", correlationId: "alert-002" });
     expect(distinct).toBeNull();
   });
+
+  test("lifecycle timestamps are monotonic and distinct across states when clock advances", () => {
+    const db = openDb(":memory:");
+    let t = 1000000;
+    const clock = () => (t += 1000);
+    const runId = `run_clock_${Math.random().toString(36).slice(2)}`;
+    createRun(db, {
+      runId,
+      idempotencyKey: `key-${runId}`,
+      spec: {},
+      specJson: "{}",
+      specHash: "sha256:0",
+      actor: "test",
+      policyVersion: "test",
+      now: clock,
+    });
+    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+      transition(db, { runId, to, actor: "test", now: clock });
+    }
+    const journal = lifecycleOf(db, runId);
+    const timestamps = journal.map((e) => Date.parse(e.at));
+    for (let i = 1; i < timestamps.length; i += 1) {
+      expect(timestamps[i]).toBeGreaterThan(timestamps[i - 1]);
+    }
+  });
 });
