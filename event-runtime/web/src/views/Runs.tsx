@@ -9,11 +9,12 @@ import {
   cycleColumnSort,
   flattenSections,
   grouped,
+  sortRows,
   toggleCollapsed,
   visibleColumns,
   type DisplayConfig,
 } from "../displayOptions";
-import { DisplayOptions } from "../components/DisplayOptions";
+import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
 import { readPinnedRuns, savePinnedRuns } from "../components/ContextTabs";
@@ -669,6 +670,13 @@ export function Runs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.runId, d?.run.runId, d?.run.state, attemptsExhausted, connected]);
 
+  const handleExport = () => {
+    const sorted = sortRows(visible, displayConfig, display);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportJson(`runs-export-${dateStr}.json`, sorted);
+    notify(`Exported ${sorted.length} run${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+  };
+
   return (
     <div className="flex h-full min-w-0">
       <ListPane
@@ -709,7 +717,12 @@ export function Runs({
             })}
           </div>
           <span className="ml-auto">
-            <DisplayOptions config={displayConfig} state={display} onChange={setDisplay} />
+            <DisplayOptions
+              config={displayConfig}
+              state={display}
+              onChange={setDisplay}
+              onExport={visible.length > 0 ? handleExport : undefined}
+            />
           </span>
           <FilterInput
             value={filter}

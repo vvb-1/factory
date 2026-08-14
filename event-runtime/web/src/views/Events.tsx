@@ -8,11 +8,12 @@ import {
   cycleColumnSort,
   flattenSections,
   grouped,
+  sortRows,
   toggleCollapsed,
   visibleColumns,
   type DisplayConfig,
 } from "../displayOptions";
-import { DisplayOptions } from "../components/DisplayOptions";
+import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import { ScopeCaption } from "../components/ContextTabs";
 import type { AdmittedEvent, EventFocus } from "../types";
@@ -439,6 +440,13 @@ export function Events({
         ? allCount
         : (eventCounts[t] ?? 0);
 
+  const handleExport = () => {
+    const sorted = sortRows(visible, displayConfig, display);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportJson(`events-export-${dateStr}.json`, sorted);
+    notify(`Exported ${sorted.length} event${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+  };
+
   return (
     <div className="flex h-full min-w-0">
       <ListPane
@@ -514,7 +522,12 @@ export function Events({
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="ml-auto">
-            <DisplayOptions config={displayConfig} state={display} onChange={setDisplay} />
+            <DisplayOptions
+              config={displayConfig}
+              state={display}
+              onChange={setDisplay}
+              onExport={visible.length > 0 ? handleExport : undefined}
+            />
           </span>
           {/* Last in the row: the token chips are a full-width item, so anything
               after the filter box would be pushed onto a third line the moment
