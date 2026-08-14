@@ -1,0 +1,8 @@
+node_modules/
+.factory/
+dist/
+event-runtime/web/dist/
+graphify-out/
+bun.lock
+*.log
+desc-*.md

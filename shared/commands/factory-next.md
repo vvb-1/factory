@@ -1,6 +1,7 @@
 ---
 description: Recommend and optionally run the next factory stage for this repo
-argument-hint: [optional: repo name, --apply, --orchestrated, --include-sweep, --harness pi]
+argument-hint:
+  [optional: repo name, --apply, --orchestrated, --include-sweep, --harness pi]
 model: sonnet
 ---
 
@@ -59,12 +60,12 @@ factory state record --type friction --repo <repo> --issues "OPS-123"
 
 ## Priority (for transparency — the script encodes this)
 
-1. Held tickets with replies → triage  
-2. Open mergeable PRs on GitHub → merge  
-3. Free dispatch slots + startable tickets → work (or `tick.mjs` when orchestrated)  
-4. Triage / Todo-not-ready backlog → triage  
-5. Orphaned claims → reconcile (alternate)  
-6. Holds without answers → digest / unblock (alternate)  
-7. Main loop idle + `--include-sweep` → sweep  
+1. Held tickets with replies → triage
+2. Open mergeable PRs on GitHub → merge
+3. Free dispatch slots + startable tickets → work (or `tick.mjs` when orchestrated)
+4. Triage / Todo-not-ready backlog → triage
+5. Orphaned claims → reconcile (alternate)
+6. Holds without answers → digest / unblock (alternate)
+7. Main loop idle + `--include-sweep` → sweep
 
 Retro, ship, audit, and friction capture are **not** auto-selected — run those on cadence or explicitly.
