@@ -301,9 +301,40 @@ describe("planning a tick (§5, §6)", () => {
     planAdmittedEvents(d, registry, { policyVersion: PV });
     expect(d.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
   });
+
+  test("unapproved first proposal does not silence subsequent slots on watched loop (OPS-436)", async () => {
+    const d = db();
+    const registry = withLoop({ approval: "watched" });
+
+    // First slot arrives and is planned into an open proposal (PROPOSED run)
+    emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+
+    const props1 = openProposals(d, {}).filter((p) => p.spec?.agent === "reaper@1");
+    expect(props1).toHaveLength(1);
+    expect(props1[0].status).toBe("open");
+
+    // Operator never approves it. Next slot arrives.
+    emitDueTicks(d, registry, { now: at("2026-08-13T22:00:00Z") });
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+
+    // Both proposals exist and are open / proposed — NOT silenced into a NOOP!
+    const props2 = openProposals(d, {}).filter((p) => p.spec?.agent === "reaper@1");
+    expect(props2).toHaveLength(2);
+    expect(d.query(`SELECT COUNT(*) AS n FROM runs WHERE state = 'PROPOSED'`).get().n).toBe(2);
+    expect(d.query(`SELECT COUNT(*) AS n FROM proposals WHERE decision = 'noop'`).get().n).toBe(0);
+  });
 });
 
 describe("scheduleView (§9)", () => {
+  const adapters = { command: fake, claude: fake };
+  const workerOpts = () => ({
+    workspacesRoot: mkdtempSync(path.join(os.tmpdir(), "evrt-sched-ws-")),
+    artifactStore: mkdtempSync(path.join(os.tmpdir(), "evrt-sched-store-")),
+    owner: "w",
+    policyVersion: PV,
+  });
+
   test("reports cadence, last fire, next due — and a stopped clock", () => {
     const d = db();
     const registry = withLoop();
@@ -318,6 +349,36 @@ describe("scheduleView (§9)", () => {
     const later = scheduleView(d, registry, { now: at("2026-08-14T02:00:00Z") })[0];
     expect(later.stopped).toBe(true);
     expect(later.intervalsLate).toBe(5);
+  });
+
+  test("distinguishes ticking from running and flags neverCompleted loops (OPS-436)", async () => {
+    const d = db();
+    const registry = withLoop({ approval: "auto" });
+
+    // Before ticking: no slots, not neverCompleted
+    expect(scheduleView(d, registry, { now: at("2026-08-13T21:00:00Z") })[0]).toMatchObject({
+      lastSlot: null,
+      lastCompletedSlot: null,
+      neverCompleted: false,
+    });
+
+    // Ticked and planned: lastSlot exists, but neverCompleted is true because run hasn't completed
+    emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+    autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV });
+
+    const ticking = scheduleView(d, registry, { now: at("2026-08-13T21:10:00Z") })[0];
+    expect(ticking.lastSlot).toBe("2026-08-13T21:00:00.000Z");
+    expect(ticking.lastCompletedSlot).toBeNull();
+    expect(ticking.neverCompleted).toBe(true);
+
+    // Run completes
+    await runOnce(d, registry, adapters, workerOpts());
+
+    const running = scheduleView(d, registry, { now: at("2026-08-13T21:20:00Z") })[0];
+    expect(running.lastSlot).toBe("2026-08-13T21:00:00.000Z");
+    expect(running.lastCompletedSlot).toBe("2026-08-13T21:00:00.000Z");
+    expect(running.neverCompleted).toBe(false);
   });
 
   test("a disabled loop is never reported stopped", () => {

@@ -145,16 +145,30 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
   return { emitted, errors };
 }
 
-/** Is a run for this loop's agent still in flight? (§5 singleton) */
+/** Is a run for this loop's agent still in flight? (§5 singleton; OPS-436 excludes PROPOSED) */
 export function loopInFlight(db, agentRef) {
   const row = db
     .query(
       `SELECT COUNT(*) AS n FROM runs
-       WHERE state NOT IN ('COMPLETED','REFUSED','FAILED','TIMED_OUT','CANCELLED')
+       WHERE state NOT IN ('PROPOSED','COMPLETED','REFUSED','FAILED','TIMED_OUT','CANCELLED')
          AND json_extract(spec_json, '$.agent') = ?`,
     )
     .get(agentRef);
   return row.n > 0;
+}
+
+/** The newest slot that successfully completed for a loop, or null if never completed (OPS-436). */
+export function lastCompletedSlot(db, loop) {
+  const row = db
+    .query(
+      `SELECT e.event_id FROM runs r
+       JOIN proposals p ON p.run_id = r.run_id
+       JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
+       WHERE e.source = ? AND (e.type = ? OR e.subject = ?) AND r.state = 'COMPLETED'
+       ORDER BY e.event_id DESC LIMIT 1`,
+    )
+    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`, loop);
+  return row ? row.event_id.slice(`clock:${loop}:`.length) : null;
 }
 
 /**
@@ -171,7 +185,8 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
     } catch (err) {
       error = err.message;
     }
-    const lastSlot = lastAdmittedSlot(db, loop);
+    const lastSlot = lastAdmittedSlot(db, loop, { now });
+    const lastCompleted = lastCompletedSlot(db, loop);
     const nextDue =
       cadenceSeconds && lastSlot
         ? new Date(Date.parse(lastSlot) + cadenceSeconds * 1000).toISOString()
@@ -182,6 +197,7 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
       cadenceSeconds && lastSlot
         ? Math.floor((now - Date.parse(lastSlot)) / (cadenceSeconds * 1000))
         : null;
+    const neverCompleted = Boolean(schedule.enabled) && lastSlot !== null && lastCompleted === null;
     return {
       loop,
       every: schedule.every,
@@ -192,6 +208,8 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
       singleton: schedule.singleton !== false,
       enabled: Boolean(schedule.enabled),
       lastSlot,
+      lastCompletedSlot: lastCompleted,
+      neverCompleted,
       nextDue,
       intervalsLate,
       // Enabled, has fired before, and more than two intervals have passed:
