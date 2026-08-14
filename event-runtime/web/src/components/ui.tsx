@@ -1,6 +1,14 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { modal, useNow } from "../hooks";
 import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
+import {
+  type FilterChipToken,
+  type FilterQuery,
+  chipHelp,
+  chipLabel,
+  filterHint,
+  removeFilterToken,
+} from "../filterQuery";
 
 /** One fixed hue map for the closed §8 lifecycle — identical in every view. */
 export const STATE_HUES: Record<string, string> = {
@@ -51,42 +59,164 @@ export function copyLink() {
   copyText(window.location.href, "link");
 }
 
+/**
+ * One active token, as a dismissible chip (UX doc Proposal 4). The whole chip
+ * is the remove target: a token is one word in the query box, so there is
+ * nothing else to click it for, and one tab stop per token keeps the bar
+ * traversable when a query has four of them.
+ */
+function FilterToken({
+  token,
+  query,
+  onRemove,
+}: {
+  token: FilterChipToken;
+  query: FilterQuery;
+  onRemove: () => void;
+}) {
+  const label = chipLabel(token);
+  const help = chipHelp(token, query);
+  return (
+    <button
+      type="button"
+      onClick={onRemove}
+      title={help}
+      aria-label={`Remove ${label}. ${help}`}
+      className={`group inline-flex cursor-pointer items-center gap-1 rounded-md border bg-(--surface-2) px-1.5 py-0.5 text-[11px] hover:bg-(--surface-3) ${
+        token.supported
+          ? "border-(--border) hover:border-(--border-strong)"
+          : "border-dashed text-(--hue-warn)"
+      }`}
+    >
+      <span className={`mono ${token.supported ? "" : "line-through"}`}>{label}</span>
+      <span aria-hidden className="text-(--text-faint) group-hover:text-(--text)">
+        ×
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The list filter box. Pass `query` (parsed by the view, which is the only
+ * thing that knows its own facets) to get the keyed syntax: the text stays
+ * authoritative and the chips are what it parsed to, so editing the box and
+ * dismissing a chip can never disagree about the current filter.
+ */
 export function FilterInput({
   value,
   onChange,
   placeholder,
   label,
+  query,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   label: string;
+  query?: FilterQuery;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const hintId = useId();
+  const [hint, setHint] = useState(false);
+  const chips = query?.chips ?? [];
+  const hintText = query ? filterHint(query) : "";
+  // Dismissal rewrites the query text, so focus returns to the box: the next
+  // keystroke — or Esc — lands where the operator thinks it is.
+  const rewrite = (next: string) => {
+    onChange(next);
+    inputRef.current?.focus();
+  };
   return (
-    <span className="relative inline-flex w-56 shrink-0">
-      <input
-        data-view-filter
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Escape") return;
-          e.preventDefault();
-          if (value) onChange("");
-          else e.currentTarget.blur();
-        }}
-        placeholder={placeholder}
-        aria-label={label}
-        className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 pr-7 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
-      />
-      {!value && (
-        <kbd
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 rounded border border-(--border) px-1 font-sans text-[10px] text-(--text-faint)"
+    <>
+      <span className="relative inline-flex w-56 shrink-0">
+        <input
+          ref={inputRef}
+          data-view-filter
+          value={value}
+          title={hintText || undefined}
+          aria-describedby={query ? hintId : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setHint(true)}
+          onBlur={() => setHint(false)}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            if (value) onChange("");
+            else e.currentTarget.blur();
+          }}
+          placeholder={placeholder}
+          aria-label={label}
+          className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 pr-7 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
+        />
+        {!value && (
+          <kbd
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 rounded border border-(--border) px-1 font-sans text-[10px] text-(--text-faint)"
+          >
+            /
+          </kbd>
+        )}
+        {/* Syntax on `/`, not on hover — the operators who need it reached
+            this box with a keystroke. It floats over the table rather than
+            taking a row, so focusing the filter never moves the rows. Right-
+            aligned and wider than the box: Runs parks the input at the far
+            end of the tab row, and a box-width column of wrapping text is
+            unreadable. */}
+        {query && (
+          <span
+            id={hintId}
+            role="tooltip"
+            className={
+              hint && !value
+                ? "absolute top-full right-0 z-20 mt-1 w-72 rounded-md border border-(--border-strong) bg-(--surface-2) px-2 py-1 text-[11px] text-(--text-faint)"
+                : "sr-only"
+            }
+          >
+            {hintText}
+          </span>
+        )}
+      </span>
+      {query && chips.length > 0 && (
+        <div
+          role="group"
+          aria-label={`${label} tokens`}
+          // A focused chip is a button, and `keyGuard` (hooks.ts) only stands
+          // the global list verbs down inside a text field — so Enter here
+          // would open the selected row instead of dismissing the chip, and `x`
+          // would open a cancel dialog. Contain those. Esc is the one list
+          // verb that belongs here too, but list Esc deselects first: from
+          // the chip bar it must clear the query, same as from the box.
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              rewrite("");
+              return;
+            }
+            e.stopPropagation();
+          }}
+          className="flex basis-full flex-wrap items-center gap-1.5"
         >
-          /
-        </kbd>
+          {chips.map((token) => (
+            <FilterToken
+              key={`${token.start}-${token.raw}`}
+              token={token}
+              query={query}
+              onRemove={() => rewrite(removeFilterToken(value, token))}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={() => rewrite("")}
+            title="Clear query (Esc)"
+            aria-label="Clear query"
+            className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
+          >
+            clear
+          </button>
+        </div>
       )}
-    </span>
+    </>
   );
 }
 

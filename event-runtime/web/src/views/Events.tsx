@@ -8,6 +8,7 @@ import { ScopeCaption } from "../components/ContextTabs";
 import type { AdmittedEvent, EventFocus } from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
+import { EVENT_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import {
   Ago,
   Button,
@@ -118,21 +119,15 @@ export function Events({
   const types = useMemo(() => [...new Set(scoped.map((e) => e.type))].sort(), [scoped]);
   const sources = useMemo(() => [...new Set(scoped.map((e) => e.source))].sort(), [scoped]);
 
+  const parsed = useMemo(() => parseFilterQuery(filter, EVENT_FACETS), [filter]);
   const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
     return scoped.filter((e) => {
       if (fetchAll && tab !== "all" && e.status !== tab) return false;
       if (typeFilter && e.type !== typeFilter) return false;
       if (sourceFilter && e.source !== sourceFilter) return false;
-      if (!q) return true;
-      return (
-        e.eventId.toLowerCase().includes(q) ||
-        e.source.toLowerCase().includes(q) ||
-        e.type.toLowerCase().includes(q) ||
-        (e.subject ?? "").toLowerCase().includes(q)
-      );
+      return matchesFilterQuery(e, parsed, EVENT_FACETS, undefined);
     });
-  }, [scoped, filter, typeFilter, sourceFilter, fetchAll, tab]);
+  }, [scoped, parsed, typeFilter, sourceFilter, fetchAll, tab]);
 
   const selectedKey =
     focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
@@ -329,13 +324,11 @@ export function Events({
           })}
         </div>
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <FilterInput
-            value={filter}
-            onChange={setFilter}
-            placeholder="Filter type, source, id…"
-            label="Filter events"
-          />
+        {/* Type / source facets get their own line, above the query box: the
+            token chips below the box are full-width, so a facet chip beside it
+            would jump a line the moment a token appeared. */}
+        {(types.length > 1 || sources.length > 1) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           {types.length > 1 &&
             types.map((t) => (
               <button
@@ -372,6 +365,17 @@ export function Events({
                 {s}
               </button>
             ))}
+        </div>
+        )}
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <FilterInput
+            value={filter}
+            onChange={setFilter}
+            placeholder="source:… type:… is:stale"
+            label="Filter events"
+            query={parsed}
+          />
         </div>
           </>
         }
