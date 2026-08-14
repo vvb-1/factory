@@ -114,6 +114,17 @@ repos:
     verify: npm run typecheck && npm run lint && npm run format:check
     smoke_workflow: smoke-prod.yml
     smoke_url: https://watt-mind.com
+    escalate_paths:
+      - schema.prisma
+      - migrations/**
+      - src/auth/**
+      - src/admin/**
+      - main.wasp
+      - Dockerfile
+      - Dockerfile.web
+      - docker-compose.yml
+      - nginx.conf
+      - .github/workflows/**
 
   - name: coach-wattz
     path: ~/Develop/coach-wattz

@@ -16,6 +16,54 @@ const repos = Bun.YAML.parse(
   readFileSync(new URL("../config/repos.yaml", import.meta.url), "utf8"),
 ).repos;
 const cashsaasGlobs = repos.find((repo) => repo.name === "cashsaas")?.escalate_paths;
+const wmHomeGlobs = repos.find((repo) => repo.name === "wm-home")?.escalate_paths;
+
+test("wm-home config protects its schema, auth, admin, and deployment boundaries", () => {
+  expect(wmHomeGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "schema.prisma",
+      "migrations/20260519140000_init/migration.sql",
+      "src/auth/email.ts",
+      "src/admin/operations.ts",
+      "main.wasp",
+      "Dockerfile",
+      "Dockerfile.web",
+      "docker-compose.yml",
+      "nginx.conf",
+      ".github/workflows/deploy.yml",
+    ],
+    wmHomeGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "schema.prisma",
+    "migrations/20260519140000_init/migration.sql",
+    "src/auth/email.ts",
+    "src/admin/operations.ts",
+    "main.wasp",
+    "Dockerfile",
+    "Dockerfile.web",
+    "docker-compose.yml",
+    "nginx.conf",
+    ".github/workflows/deploy.yml",
+  ]);
+});
+
+test("wm-home config leaves ordinary landing page and docs changes unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "src/LandingPage.tsx",
+        "src/components/Header.tsx",
+        "README.md",
+        "docs/setup.md",
+      ],
+      wmHomeGlobs,
+    ),
+  ).toEqual([]);
+});
 
 test("cashsaas config protects its destructive, deployment, credential, and auth boundaries", () => {
   expect(cashsaasGlobs).toBeDefined();
