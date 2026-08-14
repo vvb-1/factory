@@ -37,6 +37,8 @@ export function slotFor(nowMs, cadenceSeconds) {
 
 export const tickEventId = (loop, slot) => `clock:${loop}:${slot}`;
 
+export const DEFAULT_MAX_CATCH_UP = 24;
+
 /**
  * Which slots to fire, given the last one already admitted (§4 catch-up).
  *
@@ -45,34 +47,49 @@ export const tickEventId = (loop, slot) => `clock:${loop}:${slot}`;
  * while still reporting how many slots it stands for, so a six-hour gap
  * reads as a decision rather than as silence.
  *
+ * Under `all`, at most `maxCatchUp` newest slots are returned in order (default
+ * 24), and any older missed slots are reported in `skipped` (OPS-452).
+ *
  * @returns {{ slots: string[], skipped: number }}
  */
-export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none" }) {
+export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none", maxCatchUp = DEFAULT_MAX_CATCH_UP }) {
   const current = slotFor(nowMs, cadenceSeconds);
   if (!lastSlot) return { slots: [current], skipped: 0 };
   if (Date.parse(lastSlot) >= Date.parse(current)) return { slots: [], skipped: 0 };
 
   const period = cadenceSeconds * 1000;
-  const missed = [];
-  for (let t = Date.parse(lastSlot) + period; t <= Date.parse(current); t += period) {
-    missed.push(new Date(t).toISOString());
+  const totalMissed = Math.round((Date.parse(current) - Date.parse(lastSlot)) / period);
+  if (totalMissed <= 0) return { slots: [], skipped: 0 };
+
+  if (catchUp === "all") {
+    const cap = Math.max(1, maxCatchUp ?? DEFAULT_MAX_CATCH_UP);
+    const count = Math.min(totalMissed, cap);
+    const skipped = totalMissed - count;
+    const slots = [];
+    const startT = Date.parse(current) - (count - 1) * period;
+    for (let t = startT; t <= Date.parse(current); t += period) {
+      slots.push(new Date(t).toISOString());
+    }
+    return { slots, skipped };
   }
-  if (catchUp === "all") return { slots: missed, skipped: 0 };
+
   // "none" and "last" both fire exactly one tick here; they differ only in
   // which slot it claims to be, and therefore in what a replay would mean.
-  const slots = [catchUp === "last" ? missed[missed.length - 1] : current];
-  return { slots, skipped: Math.max(0, missed.length - 1) };
+  const slots = [current];
+  return { slots, skipped: Math.max(0, totalMissed - 1) };
 }
 
-/** The newest slot already admitted for a loop, or null if it never fired. */
-export function lastAdmittedSlot(db, loop) {
+/** The newest slot already admitted for a loop at or before now, or null if it never fired (OPS-437). */
+export function lastAdmittedSlot(db, loop, { now = Date.now() } = {}) {
+  const nowMs = typeof now === "number" ? now : (typeof now === "string" ? Date.parse(now) : Date.now());
+  const maxEventId = tickEventId(loop, new Date(nowMs).toISOString());
   const row = db
     .query(
       `SELECT event_id FROM events
-       WHERE source = ? AND type = ?
+       WHERE source = ? AND type = ? AND event_id <= ?
        ORDER BY event_id DESC LIMIT 1`,
     )
-    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`);
+    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`, maxEventId);
   // eventId is clock:<loop>:<ISO slot>; ISO sorts lexicographically, so the
   // newest row is the newest slot without parsing every payload.
   return row ? row.event_id.slice(`clock:${loop}:`.length) : null;
@@ -93,10 +110,11 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
     try {
       const cadenceSeconds = parseCadence(schedule.every);
       const { slots, skipped } = dueSlots({
-        lastSlot: lastAdmittedSlot(db, loop),
+        lastSlot: lastAdmittedSlot(db, loop, { now }),
         nowMs: now,
         cadenceSeconds,
         catchUp: schedule.catchUp,
+        maxCatchUp: schedule.maxCatchUp,
       });
       for (const slot of slots) {
         const outcome = admitEvent(
@@ -127,16 +145,30 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
   return { emitted, errors };
 }
 
-/** Is a run for this loop's agent still in flight? (§5 singleton) */
+/** Is a run for this loop's agent still in flight? (§5 singleton; OPS-436 excludes PROPOSED) */
 export function loopInFlight(db, agentRef) {
   const row = db
     .query(
       `SELECT COUNT(*) AS n FROM runs
-       WHERE state NOT IN ('COMPLETED','REFUSED','FAILED','TIMED_OUT','CANCELLED')
+       WHERE state NOT IN ('PROPOSED','COMPLETED','REFUSED','FAILED','TIMED_OUT','CANCELLED')
          AND json_extract(spec_json, '$.agent') = ?`,
     )
     .get(agentRef);
   return row.n > 0;
+}
+
+/** The newest slot that successfully completed for a loop, or null if never completed (OPS-436). */
+export function lastCompletedSlot(db, loop) {
+  const row = db
+    .query(
+      `SELECT e.event_id FROM runs r
+       JOIN proposals p ON p.run_id = r.run_id
+       JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
+       WHERE e.source = ? AND (e.type = ? OR e.subject = ?) AND r.state = 'COMPLETED'
+       ORDER BY e.event_id DESC LIMIT 1`,
+    )
+    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`, loop);
+  return row ? row.event_id.slice(`clock:${loop}:`.length) : null;
 }
 
 /**
@@ -153,7 +185,8 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
     } catch (err) {
       error = err.message;
     }
-    const lastSlot = lastAdmittedSlot(db, loop);
+    const lastSlot = lastAdmittedSlot(db, loop, { now });
+    const lastCompleted = lastCompletedSlot(db, loop);
     const nextDue =
       cadenceSeconds && lastSlot
         ? new Date(Date.parse(lastSlot) + cadenceSeconds * 1000).toISOString()
@@ -164,6 +197,7 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
       cadenceSeconds && lastSlot
         ? Math.floor((now - Date.parse(lastSlot)) / (cadenceSeconds * 1000))
         : null;
+    const neverCompleted = Boolean(schedule.enabled) && lastSlot !== null && lastCompleted === null;
     return {
       loop,
       every: schedule.every,
@@ -174,6 +208,8 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
       singleton: schedule.singleton !== false,
       enabled: Boolean(schedule.enabled),
       lastSlot,
+      lastCompletedSlot: lastCompleted,
+      neverCompleted,
       nextDue,
       intervalsLate,
       // Enabled, has fired before, and more than two intervals have passed:

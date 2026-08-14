@@ -187,9 +187,12 @@ export async function tick({
   let nextPrune = lastPrune;
   await runStep("GC", () => {
     if (now - lastPrune <= pruneIntervalMs) return;
-    const pruned = pruneArtifacts(db, storeRoot ?? artifactsRoot(), { now });
-    nextPrune = now;
-    if (pruned.deleted > 0) logLine(`artifacts: pruned ${pruned.deleted} orphan(s), freed ${pruned.freedBytes}B`);
+    try {
+      const pruned = pruneArtifacts(db, storeRoot ?? artifactsRoot(), { now });
+      if (pruned.deleted > 0) logLine(`artifacts: pruned ${pruned.deleted} orphan(s), freed ${pruned.freedBytes}B`);
+    } finally {
+      nextPrune = now;
+    }
   });
 
   await runStep("chains", () => {

@@ -112,6 +112,38 @@ describe("dueSlots — catch-up policy (§4)", () => {
     ]);
     expect(outcome.skipped).toBe(0);
   });
+
+  test("all: large downtime gap caps at maxCatchUp (default 24) and reports skipped older slots (OPS-452)", () => {
+    // 30 days downtime on a 60s loop = 30 * 24 * 60 = 43,200 intervals
+    const sixtySec = 60;
+    const monthAgo = at("2026-07-15T04:00:00Z");
+    const outcome = dueSlots({
+      lastSlot: new Date(monthAgo).toISOString(),
+      nowMs: now, // 2026-08-14T04:30:00Z -> slot is 2026-08-14T04:30:00.000Z
+      cadenceSeconds: sixtySec,
+      catchUp: "all",
+    });
+    expect(outcome.slots).toHaveLength(24);
+    // last slot is the current slot
+    expect(outcome.slots[outcome.slots.length - 1]).toBe("2026-08-14T04:30:00.000Z");
+    // slots are strictly in chronological order
+    for (let i = 1; i < outcome.slots.length; i++) {
+      expect(Date.parse(outcome.slots[i])).toBeGreaterThan(Date.parse(outcome.slots[i - 1]));
+    }
+    // Total intervals: (nowMs slot - monthAgo) / 60s = 43230 intervals -> skipped = 43230 - 24 = 43206
+    expect(outcome.skipped).toBe(43206);
+
+    // Custom maxCatchUp configuration
+    const custom = dueSlots({
+      lastSlot: new Date(monthAgo).toISOString(),
+      nowMs: now,
+      cadenceSeconds: sixtySec,
+      catchUp: "all",
+      maxCatchUp: 5,
+    });
+    expect(custom.slots).toHaveLength(5);
+    expect(custom.skipped).toBe(43230 - 5);
+  });
 });
 
 describe("emitDueTicks (§3)", () => {
@@ -159,6 +191,39 @@ describe("emitDueTicks (§3)", () => {
     emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
     emitDueTicks(d, registry, { now: at("2026-08-13T22:00:00Z") });
     expect(lastAdmittedSlot(d, "reaper")).toBe("2026-08-13T22:00:00.000Z");
+  });
+
+  test("a future-dated schedule row does not halt due-slot emission (OPS-437)", () => {
+    const d = db();
+    const registry = withLoop();
+    // Directly insert a rogue future-dated event row (e.g. year 9999)
+    d.query(
+      `INSERT INTO events
+         (source, event_id, type, subject, occurred_at, received_at,
+          correlation_id, causation_id, envelope_json, payload_hash, status, admitted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?)`,
+    ).run(
+      "schedule",
+      "clock:reaper:9999-01-01T00:00:00.000Z",
+      "clock.tick.reaper",
+      "reaper",
+      "9999-01-01T00:00:00.000Z",
+      "2026-08-13T21:00:00.000Z",
+      null,
+      null,
+      JSON.stringify({}),
+      "sha256:fake",
+      "2026-08-13T21:00:00.000Z",
+    );
+
+    const now = at("2026-08-13T21:00:00Z");
+    // lastAdmittedSlot bounded by now ignores the future-dated row
+    expect(lastAdmittedSlot(d, "reaper", { now })).toBeNull();
+
+    // emitDueTicks fires normally for the current slot
+    const ticks = emitDueTicks(d, registry, { now });
+    expect(ticks.emitted).toHaveLength(1);
+    expect(ticks.emitted[0].slot).toBe("2026-08-13T21:00:00.000Z");
   });
 });
 
@@ -236,9 +301,40 @@ describe("planning a tick (§5, §6)", () => {
     planAdmittedEvents(d, registry, { policyVersion: PV });
     expect(d.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
   });
+
+  test("unapproved first proposal does not silence subsequent slots on watched loop (OPS-436)", async () => {
+    const d = db();
+    const registry = withLoop({ approval: "watched" });
+
+    // First slot arrives and is planned into an open proposal (PROPOSED run)
+    emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+
+    const props1 = openProposals(d, {}).filter((p) => p.spec?.agent === "reaper@1");
+    expect(props1).toHaveLength(1);
+    expect(props1[0].status).toBe("open");
+
+    // Operator never approves it. Next slot arrives.
+    emitDueTicks(d, registry, { now: at("2026-08-13T22:00:00Z") });
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+
+    // Both proposals exist and are open / proposed — NOT silenced into a NOOP!
+    const props2 = openProposals(d, {}).filter((p) => p.spec?.agent === "reaper@1");
+    expect(props2).toHaveLength(2);
+    expect(d.query(`SELECT COUNT(*) AS n FROM runs WHERE state = 'PROPOSED'`).get().n).toBe(2);
+    expect(d.query(`SELECT COUNT(*) AS n FROM proposals WHERE decision = 'noop'`).get().n).toBe(0);
+  });
 });
 
 describe("scheduleView (§9)", () => {
+  const adapters = { command: fake, claude: fake };
+  const workerOpts = () => ({
+    workspacesRoot: mkdtempSync(path.join(os.tmpdir(), "evrt-sched-ws-")),
+    artifactStore: mkdtempSync(path.join(os.tmpdir(), "evrt-sched-store-")),
+    owner: "w",
+    policyVersion: PV,
+  });
+
   test("reports cadence, last fire, next due — and a stopped clock", () => {
     const d = db();
     const registry = withLoop();
@@ -253,6 +349,36 @@ describe("scheduleView (§9)", () => {
     const later = scheduleView(d, registry, { now: at("2026-08-14T02:00:00Z") })[0];
     expect(later.stopped).toBe(true);
     expect(later.intervalsLate).toBe(5);
+  });
+
+  test("distinguishes ticking from running and flags neverCompleted loops (OPS-436)", async () => {
+    const d = db();
+    const registry = withLoop({ approval: "auto" });
+
+    // Before ticking: no slots, not neverCompleted
+    expect(scheduleView(d, registry, { now: at("2026-08-13T21:00:00Z") })[0]).toMatchObject({
+      lastSlot: null,
+      lastCompletedSlot: null,
+      neverCompleted: false,
+    });
+
+    // Ticked and planned: lastSlot exists, but neverCompleted is true because run hasn't completed
+    emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+    autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV });
+
+    const ticking = scheduleView(d, registry, { now: at("2026-08-13T21:10:00Z") })[0];
+    expect(ticking.lastSlot).toBe("2026-08-13T21:00:00.000Z");
+    expect(ticking.lastCompletedSlot).toBeNull();
+    expect(ticking.neverCompleted).toBe(true);
+
+    // Run completes
+    await runOnce(d, registry, adapters, workerOpts());
+
+    const running = scheduleView(d, registry, { now: at("2026-08-13T21:20:00Z") })[0];
+    expect(running.lastSlot).toBe("2026-08-13T21:00:00.000Z");
+    expect(running.lastCompletedSlot).toBe("2026-08-13T21:00:00.000Z");
+    expect(running.neverCompleted).toBe(false);
   });
 
   test("a disabled loop is never reported stopped", () => {
