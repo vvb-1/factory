@@ -528,7 +528,7 @@ export function Projects({
               </div>
             </Section>
 
-            <Section title="Worktree Janitor & Maintenance (OPS-362)">
+            <Section title="Worktree Janitor & Maintenance (OPS-362)" card={false}>
               <div className="rounded-md border border-(--border) bg-(--surface-0) p-3">
                 <div className="text-[12px] text-(--text-dim)">
                   Janitor inspects worktrees in <code className="mono">{sel.worktreeRoot ?? "repo worktrees"}</code>,

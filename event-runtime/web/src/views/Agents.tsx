@@ -217,7 +217,7 @@ export function Agents({
           </Section>
 
           {sel.command && (
-            <Section title="Command argv">
+            <Section title="Command argv" card={false}>
               <div className="mb-1.5 flex justify-end">
                 <Button onClick={() => copyText(sel.command!.join(" "), "command")}>Copy command</Button>
               </div>
@@ -228,12 +228,13 @@ export function Agents({
           {sel.actionRegistry && (
             <Section
               title={`Action registry${sel.hosts && sel.hosts.length > 0 ? ` · hosts ${sel.hosts.join(", ")}` : ""}`}
+              card={false}
             >
               <JsonBlock value={sel.actionRegistry} />
             </Section>
           )}
 
-          <Section title={`Prompt · ${sel.promptFile}`}>
+          <Section title={`Prompt · ${sel.promptFile}`} card={false}>
             <div className="mb-1.5 flex justify-end">
               <Button onClick={() => copyText(sel.prompt, "prompt")}>Copy prompt</Button>
             </div>
@@ -262,7 +263,7 @@ export function Agents({
             ))}
           </Section>
 
-          <Section title="Event routing">
+          <Section title="Event routing" card={false}>
             {sel.eventTypes.length === 0 ? (
               <div className="text-(--text-faint)">No event types route to this agent.</div>
             ) : (

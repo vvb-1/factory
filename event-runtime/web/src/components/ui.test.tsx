@@ -1,7 +1,7 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, notify, shortId, ToastContainer } from "./ui";
+import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, KV, notify, Section, shortId, StateBadge, ToastContainer } from "./ui";
 import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 
 function stackOf(r: ReturnType<typeof render>): HTMLElement {
@@ -316,3 +316,96 @@ describe("FilterInput autocomplete (OPS-506)", () => {
   });
 });
 
+
+describe("KV mono discipline (WM-136)", () => {
+  test("renders identifier-ish values in mono and prose values in the UI font", () => {
+    const r = render(
+      <>
+        <KV k="agent" v="dispatch@1" />
+        <KV k="workspace" v="/Users/x/.factory/event-runtime" />
+        <KV k="placement" v="any worker" />
+      </>,
+    );
+    expect(classes(r.getByTitle("dispatch@1"))).toContain("mono");
+    expect(classes(r.getByTitle("/Users/x/.factory/event-runtime"))).toContain("mono");
+    // "any worker" is language, not an identifier — character alignment buys nothing.
+    expect(classes(r.getByTitle("any worker"))).not.toContain("mono");
+  });
+
+  test("honours an explicit mono override in both directions", () => {
+    const r = render(
+      <>
+        <KV k="forced" v="two words" mono />
+        <KV k="unforced" v="single-token" mono={false} />
+      </>,
+    );
+    expect(classes(r.getByTitle("two words"))).toContain("mono");
+    expect(classes(r.getByTitle("single-token"))).not.toContain("mono");
+  });
+
+  test("keeps copy-on-click and the full-value tooltip on truncated values", () => {
+    const r = render(<KV k="specHash" v="sha256:abcdef" />);
+    const value = r.getByTitle("sha256:abcdef");
+    expect(value.tagName).toBe("BUTTON");
+    expect(classes(value)).toContain("truncate");
+  });
+});
+
+describe("Section cards and collapse persistence (WM-136)", () => {
+  beforeEach(() => localStorage.clear());
+
+  test("wraps rows in a card by default and skips it when card is false", () => {
+    const carded = render(<Section title="Run"><KV k="agent" v="a@1" /></Section>);
+    expect(carded.container.querySelector(".rounded-md")).toBeTruthy();
+    cleanup();
+    const bare = render(<Section title="Heartbeat" card={false}><KV k="agent" v="a@1" /></Section>);
+    expect(bare.container.querySelector(".rounded-md")).toBeNull();
+  });
+
+  test("collapses on click, hides its rows, and persists the choice", () => {
+    const r = render(<Section title="Lifecycle"><KV k="agent" v="a@1" /></Section>);
+    expect(r.queryByText("agent")).toBeTruthy();
+    fireEvent.click(r.getByRole("button", { expanded: true }));
+    expect(r.queryByText("agent")).toBeNull();
+    expect(JSON.parse(localStorage.getItem("evrt-sections-collapsed")!)).toContain("Lifecycle");
+    // A remount reads the persisted choice back.
+    cleanup();
+    const again = render(<Section title="Lifecycle"><KV k="agent" v="a@1" /></Section>);
+    expect(again.queryByText("agent")).toBeNull();
+  });
+
+  test("a toggle does not stomp a sibling section's persisted collapse", () => {
+    localStorage.setItem("evrt-sections-collapsed", JSON.stringify(["Receipt"]));
+    const r = render(
+      <>
+        <Section title="Run"><KV k="agent" v="a@1" /></Section>
+        <Section title="Receipt"><KV k="hash" v="abc" /></Section>
+      </>,
+    );
+    fireEvent.click(r.getByRole("button", { expanded: true, name: /Run/ }));
+    const stored = JSON.parse(localStorage.getItem("evrt-sections-collapsed")!);
+    expect(stored).toContain("Run");
+    expect(stored).toContain("Receipt");
+  });
+
+  test("keys persistence on id so a title carrying live data stays stable", () => {
+    const r = render(<Section id="run-result" title="Result · COMPLETED · ok"><KV k="a" v="b" /></Section>);
+    fireEvent.click(r.getByRole("button", { expanded: true }));
+    expect(JSON.parse(localStorage.getItem("evrt-sections-collapsed")!)).toEqual(["run-result"]);
+    cleanup();
+    // Same section, different terminal state in the title — still collapsed.
+    const again = render(<Section id="run-result" title="Result · FAILED · agent_exit_1"><KV k="a" v="b" /></Section>);
+    expect(again.queryByText("a")).toBeNull();
+  });
+});
+
+describe("StateBadge dot suppression (WM-136)", () => {
+  test("renders its own dot by default and omits it when dot={false}", () => {
+    const withDot = render(<StateBadge state="RUNNING" />);
+    expect(withDot.container.querySelector(".rounded-full")).toBeTruthy();
+    cleanup();
+    const bare = render(<StateBadge state="RUNNING" dot={false} />);
+    expect(bare.container.querySelector(".rounded-full")).toBeNull();
+    expect(bare.getByText("RUNNING")).toBeTruthy();
+  });
+});

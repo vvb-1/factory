@@ -545,7 +545,7 @@ export function Workers({
             </div>
           )}
 
-          <Section title="Heartbeat">
+          <Section title="Heartbeat" card={false}>
             <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-(--text-faint)">
@@ -592,7 +592,7 @@ export function Workers({
             {sel.stoppedAt && <KV k="stoppedAt" v={<Ago iso={sel.stoppedAt} now={now} />} />}
           </Section>
 
-          <Section title="Adapters">
+          <Section title="Adapters" card={false}>
             {sel.adapters.length === 0 ? (
               <div className="text-(--text-faint)">No adapters declared — this worker claims nothing.</div>
             ) : (
@@ -606,7 +606,7 @@ export function Workers({
             )}
           </Section>
 
-          <Section title="Labels">
+          <Section title="Labels" card={false}>
             <div className="mb-1.5 text-[11px] text-(--text-faint)">
               Placement labels the worker declared at registration — what a run&apos;s placement
               constraints are matched against.

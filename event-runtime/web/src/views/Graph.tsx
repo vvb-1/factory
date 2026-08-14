@@ -483,7 +483,7 @@ export function Graph({
                 )}
               </Section>
               {selected.proposal.spec && (
-                <Section title="Run spec">
+                <Section title="Run spec" card={false}>
                   <JsonBlock value={selected.proposal.spec} />
                 </Section>
               )}
@@ -531,16 +531,16 @@ export function Graph({
                 )}
               </Section>
               {agentDef.command && (
-                <Section title="Closed command template">
+                <Section title="Closed command template" card={false}>
                   <JsonBlock value={agentDef.command} />
                 </Section>
               )}
               {agentDef.actionRegistry && (
-                <Section title={`Closed action registry · hosts ${agentDef.hosts?.join(", ")}`}>
+                <Section title={`Closed action registry · hosts ${agentDef.hosts?.join(", ")}`} card={false}>
                   <JsonBlock value={agentDef.actionRegistry} />
                 </Section>
               )}
-              <Section title="Prompt">
+              <Section title="Prompt" card={false}>
                 <pre className="mono max-h-64 overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 whitespace-pre-wrap">
                   {agentDef.prompt}
                 </pre>

@@ -862,7 +862,7 @@ export function Proposals({
             const prev = (runsQuery.data?.runs ?? []).find((r) => r.agent === sel.agent && r.state === "COMPLETED");
 
             return (
-              <Section title="Summary Safety Card & Blast Radius Radar">
+              <Section title="Summary Safety Card & Blast Radius Radar" card={false}>
                 <div className="mb-3 rounded-md border border-(--border) bg-(--surface-0) p-3 text-[12px]">
                   <div className="mb-2 flex items-center justify-between border-b border-(--border) pb-2">
                     <div className="flex gap-2">

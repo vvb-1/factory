@@ -590,9 +590,14 @@ export function GroupHeaderRow({
 export function StateBadge({
   state,
   hues = STATE_HUES,
+  dot = true,
 }: {
   state: string;
   hues?: Record<string, string>;
+  /** Off wherever the caller already draws its own dot for this state (the
+   *  Lifecycle timeline's rail beads) — two dots for one state read as a
+   *  mistake, not emphasis (WM-136). */
+  dot?: boolean;
 }) {
   const hue = hues[state] ?? "var(--hue-idle)";
   return (
@@ -600,7 +605,7 @@ export function StateBadge({
       className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium"
       style={{ color: hue, background: `color-mix(in oklch, ${hue} 12%, transparent)` }}
     >
-      <span className="size-1.5 rounded-full" style={{ background: hue }} />
+      {dot && <span className="size-1.5 rounded-full" style={{ background: hue }} />}
       {state}
     </span>
   );
@@ -907,23 +912,121 @@ export function Disclosure({
   );
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+const SECTIONS_KEY = "evrt-sections-collapsed";
+
+/** Collapsed section ids, shared by every Section on the page (WM-136). */
+function loadCollapsedSections(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
+  } catch {
+    // Private mode / stale value: sections simply start expanded.
+    return [];
+  }
+}
+
+/**
+ * Read-modify-write against storage rather than against a cached copy — every
+ * Section on the page shares this one key, so a toggle must not stomp the
+ * collapse state of its siblings mounted at the same time.
+ */
+function saveCollapsedSection(id: string, collapsed: boolean): void {
+  try {
+    const next = new Set(loadCollapsedSections());
+    if (collapsed) next.add(id);
+    else next.delete(id);
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify([...next]));
+  } catch {
+    // Quota / private mode: collapse still works, it just does not persist.
+  }
+}
+
+/**
+ * A titled group of detail rows, rendered as one card (WM-136). The card
+ * boundary is what separates concerns, so rows inside it carry no dividers of
+ * their own — a hairline under every row read as a ledger dump rather than a
+ * panel. Collapsing persists across reloads, keyed by `id` (pass one whenever
+ * the title interpolates live data, or the key changes with the run).
+ *
+ * `card={false}` is for sections whose children already draw their own
+ * bordered containers — nesting a card inside a card doubles the border.
+ */
+export function Section({
+  title,
+  id,
+  children,
+  card = true,
+  collapsible = true,
+}: {
+  title: string;
+  id?: string;
+  children: ReactNode;
+  card?: boolean;
+  collapsible?: boolean;
+}) {
+  const key = id ?? title;
+  const [collapsed, setCollapsed] = useState(() => collapsible && loadCollapsedSections().includes(key));
+  const toggle = () =>
+    setCollapsed((prev) => {
+      const next = !prev;
+      saveCollapsedSection(key, next);
+      return next;
+    });
+
+  const heading = (
+    <span className="text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">{title}</span>
+  );
+
   return (
     <div className="mb-5">
-      <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-        {title}
-      </div>
-      {children}
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={!collapsed}
+          className="mb-1.5 flex w-full cursor-pointer items-center gap-1.5 text-left hover:text-(--text-dim)"
+        >
+          <span
+            aria-hidden="true"
+            className={`text-[9px] text-(--text-faint) transition-transform ${collapsed ? "" : "rotate-90"}`}
+          >
+            ▶
+          </span>
+          {heading}
+        </button>
+      ) : (
+        <div className="mb-1.5">{heading}</div>
+      )}
+      {!collapsed &&
+        (card ? (
+          <div className="rounded-md border border-(--border) bg-(--surface-0) px-3 py-1.5">{children}</div>
+        ) : (
+          children
+        ))}
     </div>
   );
 }
 
-export function KV({ k, v }: { k: string; v: ReactNode }) {
+/**
+ * Monospace is for identifiers, not for prose. A string value with whitespace
+ * in it reads as language ("any worker", "not started"); everything else is an
+ * id, hash, ref, or path where character alignment actually helps. ReactNode
+ * values opt themselves in — `JumpLink` carries mono, `Ago` does not.
+ */
+const looksLikeIdentifier = (text: string) => !/\s/.test(text);
+
+export function KV({ k, v, mono }: { k: string; v: ReactNode; mono?: boolean }) {
   const text = typeof v === "string" ? v : null;
   const copyable = !!text && text !== "-";
+  const isMono = mono ?? (text !== null && looksLikeIdentifier(text));
+  // Fixed label column with the value left-aligned beside it: right-aligning
+  // values left a ragged edge (`1/1` next to `multi-dispatch-WM-127`) that the
+  // eye had to re-find on every row (WM-136).
   return (
-    <div className="flex justify-between gap-4 border-b border-(--border) py-1 last:border-0">
-      <span className="text-(--text-faint)">{k}</span>
+    <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] items-baseline gap-3 py-[3px]">
+      <span className="truncate text-(--text-faint)" title={k}>
+        {k}
+      </span>
       {copyable ? (
         <button
           type="button"
@@ -931,12 +1034,15 @@ export function KV({ k, v }: { k: string; v: ReactNode }) {
           // full string is readable without copying (WM-129 critique).
           title={text}
           onClick={() => copyText(text, k)}
-          className="mono max-w-[70%] truncate text-right text-(--text-dim) hover:text-(--accent)"
+          className={`truncate text-left text-(--text-dim) hover:text-(--accent) ${isMono ? "mono" : ""}`}
         >
           {text}
         </button>
       ) : (
-        <span className="mono truncate text-(--text-dim)" title={text ?? undefined}>
+        <span
+          className={`truncate text-left text-(--text-dim) ${isMono ? "mono" : ""}`}
+          title={text ?? undefined}
+        >
           {v ?? "-"}
         </span>
       )}
