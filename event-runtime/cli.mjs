@@ -14,8 +14,9 @@
  * runtime state.
  */
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
+import path from "node:path";
 import * as actions from "./lib/adapters/actions.mjs";
 import * as claude from "./lib/adapters/claude.mjs";
 import * as command from "./lib/adapters/command.mjs";
@@ -34,7 +35,8 @@ import { planAdmittedEvents } from "./lib/planner.mjs";
 import { loadRegistry, updatePins } from "./lib/registry.mjs";
 import { approveProposal } from "./lib/proposals.mjs";
 import { startApi } from "./lib/api.mjs";
-import { claimNext, executeClaimed, reapExpiredLeases, runOnce } from "./lib/worker.mjs";
+import { claimNext, executeClaimed, runOnce } from "./lib/worker.mjs";
+import { reapExpiredLeases } from "./lib/reaper.mjs";
 import { deregisterWorker, heartbeat, registerWorker } from "./lib/workers.mjs";
 
 const USAGE = `event-runtime — watched event → agent runtime (docs/event-runtime.md)
@@ -52,6 +54,7 @@ usage: bun event-runtime/cli.mjs <command>
                                  worker process: claim, execute, verify, and publish
                                  runs from the database
   status                         events, proposals, runs, anomalies
+  doctor                         system health check: anomaly report (exits non-zero on anomalies)
   events [status]                admitted events, optionally filtered by status
   ps [state]                     running event processes/runs (default: RUNNING or LEASED)
   runs [state]                   runs (optionally filtered by state)
@@ -212,6 +215,58 @@ export async function tick({
 // serve — the runtime itself (§3: explicit foreground start, one worker)
 // ---------------------------------------------------------------------------
 
+export function isProcessAlive(pid) {
+  if (!pid || typeof pid !== "number" || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+
+export function serveLockPath(home = runtimeHome()) {
+  return path.join(home, "serve.pid");
+}
+
+export function acquireServeLock(home = runtimeHome(), port = DEFAULT_PORT) {
+  const lockFile = serveLockPath(home);
+  if (existsSync(lockFile)) {
+    try {
+      const content = JSON.parse(readFileSync(lockFile, "utf8"));
+      const ownerPid = Number(content.pid);
+      if (ownerPid && ownerPid !== process.pid && isProcessAlive(ownerPid)) {
+        throw new Error(
+          `runtime home "${home}" is already locked by PID ${ownerPid} (port ${content.port ?? "unknown"})`,
+        );
+      }
+    } catch (err) {
+      if (err.message.includes("is already locked by PID")) throw err;
+      // Stale or corrupt lock file — will be overwritten
+    }
+  }
+  writeFileSync(
+    lockFile,
+    JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }),
+    "utf8",
+  );
+  return { lockFile, pid: process.pid, port };
+}
+
+export function releaseServeLock(home = runtimeHome()) {
+  const lockFile = serveLockPath(home);
+  try {
+    if (existsSync(lockFile)) {
+      const content = JSON.parse(readFileSync(lockFile, "utf8"));
+      if (Number(content.pid) === process.pid) {
+        rmSync(lockFile, { force: true });
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function underBunWatch() {
   return process.execArgv.includes("--watch") || process.execArgv.includes("--hot");
 }
@@ -245,8 +300,12 @@ function watchServe(args) {
 async function serve(args) {
   if (args.includes("--watch") && !underBunWatch()) return watchServe(args);
 
-  const port = flagValue(args, "--port") ? Number(flagValue(args, "--port")) : DEFAULT_PORT;
-  if (!Number.isInteger(port) || port < 0) fail(`serve: invalid --port ${flagValue(args, "--port")}`);
+  const portFlag = flagValue(args, "--port");
+  const rawPort = portFlag ?? process.env.FACTORY_EVENT_PORT ?? "7381";
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    fail(`serve: invalid port "${rawPort}" (must be integer 1-65535)`);
+  }
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
   const adapters = { actions, claude, command, fake };
   if (adapterOverride && !adapters[adapterOverride]) {
@@ -254,6 +313,13 @@ async function serve(args) {
   }
 
   ensureHome();
+  const home = runtimeHome();
+  try {
+    acquireServeLock(home, port);
+  } catch (err) {
+    fail(`serve: ${err.message}`);
+  }
+
   const db = openDb();
   const registry = loadRegistry();
   const pv = policyVersion();
@@ -331,13 +397,19 @@ async function serve(args) {
   server.on("listening", () => {
     log(`environment "${env.name}" — control API on http://${API_HOST}:${port} (db ${dbPath()}, policy ${pv})`);
     if (adapterOverride) log(`adapter override: all new run specs use "${adapterOverride}"`);
+    if (!process.env.FACTORY_EVENT_SECRET) {
+      log("webhook intake: disabled (FACTORY_EVENT_SECRET is unset; webhooks will be rejected with 401)");
+    }
     log(
       withWorker
         ? "worker: in-process (--with-worker) — restarting serve interrupts running agents"
         : "worker: none in this process — start one with: bun event-runtime/cli.mjs work",
     );
   });
-  server.on("error", (err) => fail(`serve: ${err.message}`));
+  server.on("error", (err) => {
+    releaseServeLock(home);
+    fail(`serve: ${err.message}`);
+  });
 
   // The watched loop starts ONLY once the API actually owns its port. A serve
   // that lost the bind race must die, not keep planning and working the same
@@ -358,11 +430,13 @@ async function serve(args) {
     stopping = true;
     log(`shutting down (${signal})`);
     if (timer) clearInterval(timer);
+    releaseServeLock(home);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref?.();
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("exit", () => releaseServeLock(home));
 }
 
 // ---------------------------------------------------------------------------
@@ -502,7 +576,70 @@ function countLine(label, counts, order = Object.keys(counts)) {
   return `${pad(label, 11)}${parts.join("   ")}`;
 }
 
-async function status(client) {
+export function getAnomalyLines(s) {
+  const a = s?.anomalies ?? {};
+  const anomalyLines = [];
+  for (const id of a.expiredOpenProposals ?? []) anomalyLines.push(`expired open proposal ${id}`);
+  if (a.staleLeases > 0) anomalyLines.push(`stale leases: ${a.staleLeases}`);
+  if (a.unpublishedOutbox > 0) anomalyLines.push(`unpublished outbox rows: ${a.unpublishedOutbox}`);
+  for (const d of a.deadLettered ?? []) anomalyLines.push(`dead-lettered (${d.source}, ${d.eventId}): ${d.lastError}`);
+  for (const amb of a.ambiguousOpenProposals ?? []) {
+    anomalyLines.push(`ambiguous open proposals for run ${amb.runId}: ${amb.count} open proposals exist for one run`);
+  }
+  for (const w of a.stalledWorkers ?? []) {
+    anomalyLines.push(
+      `stalled worker ${w.workerId}${w.host ? ` on ${w.host}` : ""}${w.runId ? ` holding run ${w.runId}` : ""}${w.lastSeen ? ` (last seen ${w.lastSeen})` : ""}`,
+    );
+  }
+  for (const sc of a.stoppedSchedules ?? []) {
+    anomalyLines.push(
+      `stopped schedule ${sc.loop}: ${sc.error ? `error: ${sc.error}` : `${sc.intervalsLate ?? "unknown"} intervals late`}`,
+    );
+  }
+  if (a.noWorkers) anomalyLines.push("no live workers with queued runs");
+  if (a.unreferencedArtifacts > 0) {
+    anomalyLines.push(`unreferenced artifacts: ${a.unreferencedArtifacts}`);
+  } else if (s?.artifacts?.orphans > 0) {
+    anomalyLines.push(`unreferenced artifacts: ${s.artifacts.orphans} (${s.artifacts.orphanBytes ?? 0}B)`);
+  }
+  if (Array.isArray(a.orphanedWorkspaces)) {
+    for (const ws of a.orphanedWorkspaces) anomalyLines.push(`orphaned workspace: ${ws}`);
+  } else if (a.orphanedWorkspaces > 0) {
+    anomalyLines.push(`orphaned workspaces: ${a.orphanedWorkspaces}`);
+  } else if (Array.isArray(a.orphanWorkspaces)) {
+    for (const ws of a.orphanWorkspaces) anomalyLines.push(`orphaned workspace: ${ws}`);
+  } else if (a.orphanWorkspaces > 0) {
+    anomalyLines.push(`orphaned workspaces: ${a.orphanWorkspaces}`);
+  }
+
+  const handledKeys = new Set([
+    "expiredOpenProposals", "staleLeases", "unpublishedOutbox", "deadLettered",
+    "ambiguousOpenProposals", "stalledWorkers", "stoppedSchedules", "noWorkers",
+    "unreferencedArtifacts", "orphanedWorkspaces", "orphanWorkspaces", "orphans", "orphanArtifacts",
+  ]);
+
+  for (const [key, val] of Object.entries(a)) {
+    if (handledKeys.has(key)) continue;
+    if (!val) continue;
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        anomalyLines.push(`${key}: ${typeof item === "object" ? JSON.stringify(item) : item}`);
+      }
+    } else if (typeof val === "number" && val > 0) {
+      anomalyLines.push(`${key}: ${val}`);
+    } else if (typeof val === "boolean" && val) {
+      anomalyLines.push(`${key}`);
+    } else if (typeof val === "string" && val.length > 0) {
+      anomalyLines.push(`${key}: ${val}`);
+    } else if (typeof val === "object" && Object.keys(val).length > 0) {
+      anomalyLines.push(`${key}: ${JSON.stringify(val)}`);
+    }
+  }
+
+  return anomalyLines;
+}
+
+export async function status(client) {
   const s = await client.status();
   if (s.env) {
     console.log(`${pad("env", 11)}${s.env.name}${s.env.adapter ? `   (adapter override: ${s.env.adapter})` : ""}   ${s.env.home}`);
@@ -511,17 +648,17 @@ async function status(client) {
   console.log(countLine("proposals", s.proposals, ["open", "expired"]));
   const states = Object.keys(s.runs.byState);
   console.log(states.length ? countLine("runs", s.runs.byState, states) : `${pad("runs", 11)}none`);
-  const a = s.anomalies;
-  const anomalyLines = [];
-  for (const id of a.expiredOpenProposals) anomalyLines.push(`expired open proposal ${id}`);
-  if (a.staleLeases > 0) anomalyLines.push(`stale leases: ${a.staleLeases}`);
-  if (a.unpublishedOutbox > 0) anomalyLines.push(`unpublished outbox rows: ${a.unpublishedOutbox}`);
-  for (const d of a.deadLettered) anomalyLines.push(`dead-lettered (${d.source}, ${d.eventId}): ${d.lastError}`);
-  for (const amb of a.ambiguousOpenProposals ?? []) {
-    anomalyLines.push(`ambiguous open proposals for run ${amb.runId}: ${amb.count} open proposals exist for one run`);
-  }
+  const anomalyLines = getAnomalyLines(s);
   if (anomalyLines.length === 0) console.log(`${pad("anomalies", 11)}none`);
   else for (const line of anomalyLines) console.log(`${pad("anomalies", 11)}${line}`);
+  return anomalyLines;
+}
+
+export async function doctor(client) {
+  const anomalyLines = await status(client);
+  if (anomalyLines.length > 0) {
+    process.exit(1);
+  }
 }
 
 async function events(client, statusFilter) {
@@ -733,6 +870,9 @@ async function main() {
 
     case "status":
       return withClient(status);
+
+    case "doctor":
+      return withClient(doctor);
 
     case "events":
       return withClient((client) => events(client, args[0]));

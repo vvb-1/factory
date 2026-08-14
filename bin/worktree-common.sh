@@ -114,6 +114,14 @@ listen_tcp_port() { # <pidfile>
   printf '%s' "$port"
 }
 
+port_listening() { # <port>
+  (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null && { exec 3>&- 3<&-; return 0; }
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
 health_json() { # <port>
   curl -sf -m 1 "http://127.0.0.1:$1/health" 2>/dev/null || true
 }
@@ -137,13 +145,18 @@ allocate_api_port() { # <preferred> <expected_home>
   local port="$preferred" i=0 json occupant=""
   [[ "$preferred" =~ ^[0-9]+$ ]] || die "invalid preferred port '$preferred'"
   while [[ $i -lt $PORT_SPAN ]]; do
-    json=$(health_json "$port")
-    occupant=$(health_field "$json" home)
-    if [[ -z "$occupant" || "$occupant" == "$expected" ]]; then
+    if port_listening "$port"; then
+      json=$(health_json "$port")
+      occupant=$(health_field "$json" home)
+      if [[ -n "$occupant" && "$occupant" == "$expected" ]]; then
+        printf '%s' "$port"
+        return 0
+      fi
+      warn "port $port is owned by ${occupant:-unknown process} — trying next"
+    else
       printf '%s' "$port"
       return 0
     fi
-    warn "port $port is owned by $occupant — trying next"
     port=$((port + 2))
     if [[ $port -ge $((PORT_BASE + 2 * PORT_SPAN)) ]]; then
       port=$PORT_BASE
@@ -223,8 +236,8 @@ web_build_hash() { # <web-dir>
 # Prevents concurrent worktree bring-ups from racing on bun's global cache DB.
 locked_bun_install() { # <dir>
   local target_dir="$1"
-  local lock_dir="${HOME}/.factory/locks/bun-install.lock"
-  local max_wait=120
+  local lock_dir="${FACTORY_LOCK_DIR:-$HOME/.factory/locks/bun-install.lock}"
+  local max_wait="${FACTORY_LOCK_MAX_WAIT:-120}"
   local start_time
   start_time=$(date +%s)
 
@@ -235,8 +248,17 @@ locked_bun_install() { # <dir>
       local holder
       holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
       if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-        rm -rf "$lock_dir" 2>/dev/null || true
-        continue
+        local stale_candidate="${lock_dir}.stale.$$.$RANDOM"
+        if mv "$lock_dir" "$stale_candidate" 2>/dev/null; then
+          local stale_holder
+          stale_holder=$(cat "$stale_candidate/pid" 2>/dev/null || true)
+          if [[ -n "$stale_holder" ]] && kill -0 "$stale_holder" 2>/dev/null; then
+            mv "$stale_candidate" "$lock_dir" 2>/dev/null || rm -rf "$stale_candidate"
+          else
+            rm -rf "$stale_candidate"
+          fi
+          continue
+        fi
       fi
     fi
     local now
@@ -252,7 +274,9 @@ locked_bun_install() { # <dir>
   while [[ $attempt -le $max_attempts ]]; do
     out=$(cd "$target_dir" && bun install --frozen-lockfile 2>&1) && code=0 || code=$?
     if [[ $code -eq 0 ]]; then
-      rm -rf "$lock_dir" 2>/dev/null || true
+      if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
+        rm -rf "$lock_dir" 2>/dev/null || true
+      fi
       return 0
     fi
     if [[ "$out" =~ "SQLITE_BUSY" || "$out" =~ "database is locked" ]]; then
@@ -260,12 +284,16 @@ locked_bun_install() { # <dir>
       sleep $(( attempt ))
       attempt=$(( attempt + 1 ))
     else
-      rm -rf "$lock_dir" 2>/dev/null || true
+      if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
+        rm -rf "$lock_dir" 2>/dev/null || true
+      fi
       printf '%s\n' "$out" >&2
       return $code
     fi
   done
-  rm -rf "$lock_dir" 2>/dev/null || true
+  if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
+    rm -rf "$lock_dir" 2>/dev/null || true
+  fi
   printf '%s\n' "$out" >&2
   return $code
 }

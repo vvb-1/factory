@@ -89,6 +89,8 @@ if [[ "$CHECKOUT_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
+command -v bun >/dev/null || die "bun is required (https://bun.sh)"
+
 RUN_DIR="$(run_dir "$WT")"
 HOME_DIR="$(event_home "$WT")"
 mkdir -p "$RUN_DIR"
@@ -104,12 +106,17 @@ else
   if recorded=$(read_ports "$WT"); then
     API_PORT="${recorded%% *}"
     WEB_PORT="${recorded##* }"
-    occupant=$(health_field "$(health_json "$API_PORT")" home)
-    if [[ -n "$occupant" && "$occupant" != "$HOME_DIR" ]]; then
-      if pid_alive "$RUN_DIR/serve.pid"; then
-        die "port $API_PORT is owned by another runtime (env.home=$occupant, this worktree=$HOME_DIR) — refusing to seed"
+    if port_listening "$API_PORT"; then
+      occupant=$(health_field "$(health_json "$API_PORT")" home)
+      if [[ "$occupant" == "$HOME_DIR" ]]; then
+        info "reusing recorded ports $API_PORT / $WEB_PORT"
+        resolved=1
+      else
+        if pid_alive "$RUN_DIR/serve.pid" && [[ -n "$occupant" ]]; then
+          die "port $API_PORT is owned by another runtime (env.home=$occupant, this worktree=$HOME_DIR) — refusing to seed"
+        fi
+        warn "recorded port $API_PORT is owned by ${occupant:-unknown process} — allocating a free port"
       fi
-      warn "recorded port $API_PORT is owned by $occupant — allocating a free port"
     else
       info "reusing recorded ports $API_PORT / $WEB_PORT"
       resolved=1
@@ -138,7 +145,6 @@ else
 fi
 
 # ------------------------------------------------------------ dependencies ---
-command -v bun >/dev/null || die "bun is required (https://bun.sh)"
 info "installing dependencies (bun install, root + web)"
 locked_bun_install "$WT" || die "bun install failed in $WT"
 locked_bun_install "$WT/event-runtime/web" || die "bun install failed in $WT/event-runtime/web"
@@ -171,9 +177,14 @@ fi
 # Last line of defence before bind: if the chosen port already serves a
 # different event home, refuse now (naming both homes) instead of starting a
 # serve that dies at bind and then mistaking the stranger's /health for ours.
-occupant=$(health_field "$(health_json "$API_PORT")" home)
-if [[ -n "$occupant" && "$occupant" != "$HOME_DIR" ]]; then
-  die "port $API_PORT is owned by another runtime (env.home=$occupant, this worktree=$HOME_DIR) — refusing to seed"
+if port_listening "$API_PORT"; then
+  occupant=$(health_field "$(health_json "$API_PORT")" home)
+  if [[ "$occupant" != "$HOME_DIR" ]]; then
+    if ! pid_alive "$RUN_DIR/serve.pid"; then
+      rm -f "$RUN_DIR/ports"
+      die "port $API_PORT is owned by another runtime (env.home=${occupant:-unknown}, this worktree=$HOME_DIR) — refusing to seed"
+    fi
+  fi
 fi
 
 if pid_alive "$RUN_DIR/serve.pid"; then
@@ -198,15 +209,20 @@ for _ in {1..50}; do
   HEALTH_JSON=$(curl -sf -m 1 "http://127.0.0.1:$API_PORT/health" 2>/dev/null) && break
   HEALTH_JSON=""
   if ! pid_alive "$RUN_DIR/serve.pid"; then
+    rm -f "$RUN_DIR/ports"
     die "event runtime died during startup on $API_PORT — see $RUN_DIR/serve.log"
   fi
   sleep 0.1
 done
 if ! pid_alive "$RUN_DIR/serve.pid"; then
+  rm -f "$RUN_DIR/ports"
   die "event runtime died during startup on $API_PORT — see $RUN_DIR/serve.log"
 fi
-[[ -n "$HEALTH_JSON" ]] || HEALTH_JSON=$(curl -sf -m 2 "http://127.0.0.1:$API_PORT/health") \
-  || die "control API never came up on $API_PORT — see $RUN_DIR/serve.log"
+if [[ -z "$HEALTH_JSON" ]]; then
+  rm -f "$RUN_DIR/ports"
+  HEALTH_JSON=$(curl -sf -m 2 "http://127.0.0.1:$API_PORT/health") \
+    || die "control API never came up on $API_PORT — see $RUN_DIR/serve.log"
+fi
 assert_event_home "$HEALTH_JSON" "$HOME_DIR" "$API_PORT"
 assert_event_adapter "$HEALTH_JSON" "$LIVE" "$API_PORT"
 HEALTH_ADAPTER=$(health_field "$HEALTH_JSON" adapter)

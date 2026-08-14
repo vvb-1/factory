@@ -21,54 +21,89 @@ function sh(body, extraEnv = {}) {
   };
 }
 
-test("locked_bun_install executes within lock and clears lock", () => {
-  const testDir = mkdtempSync(path.join(tmpdir(), "locked-bun-test-"));
+function createTempProject() {
+  const dir = mkdtempSync(path.join(tmpdir(), "bun-pkg-"));
+  writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "test-pkg", version: "1.0.0" }));
+  Bun.spawnSync({ cmd: ["bun", "install"], cwd: dir });
+  return dir;
+}
+
+test("locked_bun_install executes real bun install under lock and releases lock", () => {
+  const testDir = createTempProject();
+  const lockDir = path.join(tmpdir(), `test-lock-${Date.now()}-${Math.random()}.lock`);
   try {
-    const r = sh(`
-      locked_bun_install() {
-        local target_dir="$1"
-        local lock_dir="\${HOME}/.factory/locks/test-bun-install.lock"
-        mkdir -p "$(dirname "$lock_dir")"
-        while ! mkdir "$lock_dir" 2>/dev/null; do
-          sleep 0.05
-        done
-        echo $$ > "$lock_dir/pid"
-        printf "installed in %s\n" "$target_dir"
-        rm -rf "$lock_dir" 2>/dev/null || true
-      }
-      locked_bun_install "${testDir}"
-    `);
+    const r = sh(`locked_bun_install "${testDir}"`, { FACTORY_LOCK_DIR: lockDir });
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain(`installed in ${testDir}`);
+    expect(existsSync(lockDir)).toBe(false);
   } finally {
     rmSync(testDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
   }
 });
 
-test("locked_bun_install clears stale lock if pid is dead", () => {
-  const lockDir = path.join(tmpdir(), "test-stale-lock.lock");
+test("locked_bun_install reclaims stale lock with dead PID and succeeds", () => {
+  const testDir = createTempProject();
+  const lockDir = path.join(tmpdir(), `test-stale-lock-${Date.now()}-${Math.random()}.lock`);
   mkdirSync(lockDir, { recursive: true });
-  // Write a non-existent PID (e.g. 999999)
   writeFileSync(path.join(lockDir, "pid"), "999999");
 
-  const r = sh(`
-    lock_dir="${lockDir}"
-    while ! mkdir "$lock_dir" 2>/dev/null; do
-      if [[ -f "$lock_dir/pid" ]]; then
-        holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
-        if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-          rm -rf "$lock_dir" 2>/dev/null || true
-          continue
-        fi
-      fi
-      break
-    done
-    mkdir -p "$lock_dir"
-    echo "reclaimed"
-    rm -rf "$lock_dir"
-  `);
-  expect(r.status).toBe(0);
-  expect(r.stdout).toContain("reclaimed");
+  try {
+    const r = sh(`locked_bun_install "${testDir}"`, { FACTORY_LOCK_DIR: lockDir });
+    expect(r.status).toBe(0);
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("locked_bun_install preserves live locks and times out when lock held", () => {
+  const testDir = createTempProject();
+  const lockDir = path.join(tmpdir(), `test-live-lock-${Date.now()}-${Math.random()}.lock`);
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(path.join(lockDir, "pid"), String(process.pid));
+
+  try {
+    const r = sh(`locked_bun_install "${testDir}"`, {
+      FACTORY_LOCK_DIR: lockDir,
+      FACTORY_LOCK_MAX_WAIT: "1",
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("timed out waiting for bun install lock");
+    expect(existsSync(lockDir)).toBe(true);
+    expect(existsSync(path.join(lockDir, "pid"))).toBe(true);
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("concurrent locked_bun_install invocations serialize without colliding", async () => {
+  const testDir1 = createTempProject();
+  const testDir2 = createTempProject();
+  const lockDir = path.join(tmpdir(), `test-conc-lock-${Date.now()}-${Math.random()}.lock`);
+
+  try {
+    const [p1, p2] = await Promise.all([
+      Bun.spawn(["bash", "-c", `source "${COMMON}"\nlocked_bun_install "${testDir1}"`], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, FACTORY_LOCK_DIR: lockDir },
+      }).exited,
+      Bun.spawn(["bash", "-c", `source "${COMMON}"\nlocked_bun_install "${testDir2}"`], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, FACTORY_LOCK_DIR: lockDir },
+      }).exited,
+    ]);
+    expect(p1).toBe(0);
+    expect(p2).toBe(0);
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    rmSync(testDir1, { recursive: true, force: true });
+    rmSync(testDir2, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
 });
 
 test("worktree-up --checkout-only creates checkout without daemons and worktree-down removes it", () => {

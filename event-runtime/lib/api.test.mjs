@@ -1029,3 +1029,288 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
   });
 });
 
+describe("serve PID lock (OPS-458)", () => {
+  test("acquireServeLock acquires lock in empty runtime home and releaseServeLock removes it", async () => {
+    const { acquireServeLock, releaseServeLock, serveLockPath } = await import("../cli.mjs");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-lock-"));
+    const lock = acquireServeLock(home, 7381);
+    expect(lock.pid).toBe(process.pid);
+    expect(lock.port).toBe(7381);
+
+    const lockFile = serveLockPath(home);
+    const { existsSync, readFileSync } = await import("node:fs");
+    expect(existsSync(lockFile)).toBe(true);
+    const data = JSON.parse(readFileSync(lockFile, "utf8"));
+    expect(data.pid).toBe(process.pid);
+    expect(data.port).toBe(7381);
+
+    releaseServeLock(home);
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  test("acquireServeLock fails when locked by a live process with clear PID and port", async () => {
+    const { acquireServeLock, releaseServeLock, serveLockPath } = await import("../cli.mjs");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-lock-"));
+    const lockFile = serveLockPath(home);
+    const { writeFileSync } = await import("node:fs");
+    const { spawn } = await import("node:child_process");
+
+    // Spawn a dummy process to be a live owner
+    const sleeper = spawn("sleep", ["60"]);
+    try {
+      writeFileSync(
+        lockFile,
+        JSON.stringify({ pid: sleeper.pid, port: 7381, startedAt: new Date().toISOString() }),
+        "utf8",
+      );
+      expect(() => acquireServeLock(home, 7382)).toThrow(/already locked by PID \d+ \(port 7381\)/);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+  });
+
+  test("acquireServeLock reclaims a stale lock from a dead process", async () => {
+    const { acquireServeLock, releaseServeLock, serveLockPath } = await import("../cli.mjs");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-lock-"));
+    const lockFile = serveLockPath(home);
+    const { writeFileSync, readFileSync } = await import("node:fs");
+
+    // Use a PID that does not exist
+    writeFileSync(
+      lockFile,
+      JSON.stringify({ pid: 99999999, port: 7381, startedAt: new Date().toISOString() }),
+      "utf8",
+    );
+    const lock = acquireServeLock(home, 7385);
+    expect(lock.pid).toBe(process.pid);
+    expect(lock.port).toBe(7385);
+    const data = JSON.parse(readFileSync(lockFile, "utf8"));
+    expect(data.pid).toBe(process.pid);
+    expect(data.port).toBe(7385);
+    releaseServeLock(home);
+  });
+
+  test("concurrent duplicate serve on same home fails second instance and releasing first allows next", async () => {
+    const { spawn } = await import("node:child_process");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-lock-cli-"));
+    const port1 = String(59500 + (process.pid % 200));
+    const port2 = String(59700 + (process.pid % 200));
+    const CLI = path.resolve(import.meta.dir, "../cli.mjs");
+
+    const serve1 = spawn("bun", [CLI, "serve", "--port", port1], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let out1 = "";
+    serve1.stdout.on("data", (b) => { out1 += b; });
+    serve1.stderr.on("data", (b) => { out1 += b; });
+
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out1.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    expect(out1).toContain("control API on");
+
+    // Second serve targeting same home should fail immediately
+    const serve2 = spawn("bun", [CLI, "serve", "--port", port2], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out2 = "";
+    serve2.stdout.on("data", (b) => { out2 += b; });
+    serve2.stderr.on("data", (b) => { out2 += b; });
+    const exitCode2 = await new Promise((resolve) => serve2.on("exit", resolve));
+    expect(exitCode2).not.toBe(0);
+    expect(out2).toContain("already locked by PID");
+
+    // Kill serve1
+    serve1.kill("SIGTERM");
+    await new Promise((resolve) => serve1.on("exit", resolve));
+
+    // Now a third serve should succeed
+    const serve3 = spawn("bun", [CLI, "serve", "--port", port2], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out3 = "";
+    serve3.stdout.on("data", (b) => { out3 += b; });
+    serve3.stderr.on("data", (b) => { out3 += b; });
+
+    const deadline3 = Date.now() + 8000;
+    while (Date.now() < deadline3 && !out3.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    try {
+      expect(out3).toContain("control API on");
+    } finally {
+      serve3.kill("SIGTERM");
+      await new Promise((resolve) => serve3.on("exit", resolve));
+    }
+  });
+});
+
+describe("missing FACTORY_EVENT_SECRET visibility and port validation (OPS-457)", () => {
+  test("GET /health reports webhookSecret set vs absent", async () => {
+    const sWithSecret = await makeServer({ secret: "test-secret" });
+    try {
+      const res = await fetch(sWithSecret.url("/health"));
+      const body = await res.json();
+      expect(body.webhookSecret).toBe("set");
+    } finally {
+      sWithSecret.close();
+    }
+
+    const sNoSecret = await makeServer({ secret: null });
+    try {
+      const res = await fetch(sNoSecret.url("/health"));
+      const body = await res.json();
+      expect(body.webhookSecret).toBe("absent");
+    } finally {
+      sNoSecret.close();
+    }
+  });
+
+  test("GET /status includes configuration anomaly when secret is absent or policyVersion is unknown", async () => {
+    const sNoSecret = await makeServer({ secret: null, policyVersion: "git:abc1234" });
+    try {
+      const status = await sNoSecret.client.status();
+      expect(status.anomalies.configuration).toContain("FACTORY_EVENT_SECRET is unset (webhook intake disabled)");
+      expect(status.anomalies.configuration).not.toContain("policyVersion is unknown");
+    } finally {
+      sNoSecret.close();
+    }
+
+    const sUnknownPv = await makeServer({ secret: "test-secret", policyVersion: "unknown" });
+    try {
+      const status = await sUnknownPv.client.status();
+      expect(status.anomalies.configuration).toContain("policyVersion is unknown");
+      expect(status.anomalies.configuration).not.toContain("FACTORY_EVENT_SECRET is unset (webhook intake disabled)");
+    } finally {
+      sUnknownPv.close();
+    }
+
+    const sClean = await makeServer({ secret: "test-secret", policyVersion: "git:abc1234" });
+    try {
+      const status = await sClean.client.status();
+      expect(status.anomalies.configuration).toEqual([]);
+    } finally {
+      sClean.close();
+    }
+  });
+
+  test("serve with invalid non-numeric FACTORY_EVENT_PORT fails loudly", async () => {
+    const { spawn } = await import("node:child_process");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-port-err-"));
+    const CLI = path.resolve(import.meta.dir, "../cli.mjs");
+
+    const child = spawn("bun", [CLI, "serve"], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_PORT: "notanumber" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let errOut = "";
+    child.stderr.on("data", (b) => { errOut += b; });
+    const code = await new Promise((resolve) => child.on("exit", resolve));
+    expect(code).not.toBe(0);
+    expect(errOut).toContain('serve: invalid port "notanumber"');
+  });
+
+  test("serve startup banner warns when FACTORY_EVENT_SECRET is unset", async () => {
+    const { spawn } = await import("node:child_process");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-banner-"));
+    const port = String(59600 + (process.pid % 200));
+    const CLI = path.resolve(import.meta.dir, "../cli.mjs");
+
+    const env = { ...process.env, FACTORY_EVENT_HOME: home };
+    delete env.FACTORY_EVENT_SECRET;
+
+    const child = spawn("bun", [CLI, "serve", "--port", port], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let out = "";
+    child.stdout.on("data", (b) => { out += b; });
+    child.stderr.on("data", (b) => { out += b; });
+
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    try {
+      expect(out).toContain("webhook intake: disabled (FACTORY_EVENT_SECRET is unset");
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+  });
+});
+
+describe("status artifact store stats caching (OPS-456)", () => {
+  test("GET /status caches storeStats across repeated calls within TTL", async () => {
+    let nowMs = 1000000;
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-status-cache-"));
+    const s = await makeServer({
+      env: { name: "test-env", home, adapter: null },
+      now: () => nowMs,
+    });
+    try {
+      // Create an artifact file in the store
+      const storeDir = path.join(home, "artifacts");
+      mkdirSync(storeDir, { recursive: true });
+      const hash1 = "a".repeat(64);
+      writeFileSync(path.join(storeDir, hash1), "hello", "utf8");
+
+      const res1 = await fetch(s.url("/status"));
+      const body1 = await res1.json();
+      expect(body1.artifacts.files).toBe(1);
+      expect(body1.artifacts.at).toBe(new Date(nowMs).toISOString());
+
+      // Add another file in the store while within TTL
+      nowMs += 2000; // 2 seconds later (within 10s TTL)
+      const hash2 = "b".repeat(64);
+      writeFileSync(path.join(storeDir, hash2), "world", "utf8");
+
+      const res2 = await fetch(s.url("/status"));
+      const body2 = await res2.json();
+      // Should still return cached stats from T=1000000 (files: 1, same timestamp)
+      expect(body2.artifacts.files).toBe(1);
+      expect(body2.artifacts.at).toBe(new Date(1000000).toISOString());
+
+      // Advance time past 10s TTL
+      nowMs += 11000;
+      const res3 = await fetch(s.url("/status"));
+      const body3 = await res3.json();
+      // Should now refresh cache and see both files
+      expect(body3.artifacts.files).toBe(2);
+      expect(body3.artifacts.at).toBe(new Date(nowMs).toISOString());
+    } finally {
+      s.close();
+    }
+  });
+
+  test("statusView resolves artifacts root from env.home", async () => {
+    const customHome = mkdtempSync(path.join(os.tmpdir(), "evrt-custom-home-"));
+    const storeDir = path.join(customHome, "artifacts");
+    mkdirSync(storeDir, { recursive: true });
+    const hash = "c".repeat(64);
+    writeFileSync(path.join(storeDir, hash), "custom-home-content", "utf8");
+
+    const s = await makeServer({
+      env: { name: "custom-env", home: customHome, adapter: null },
+    });
+    try {
+      const res = await fetch(s.url("/status"));
+      const body = await res.json();
+      expect(body.artifacts.files).toBe(1);
+      expect(body.artifacts.bytes).toBe(19);
+    } finally {
+      s.close();
+    }
+  });
+});
+
+
+
+
