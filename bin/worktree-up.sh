@@ -252,7 +252,30 @@ if [[ "$SEED" -eq 1 && ( "$FRESH" -eq 1 || "$RESEED" -eq 1 ) ]]; then
   PREFIX="demo"
   [[ "$RESEED" -eq 1 && "$FRESH" -eq 0 ]] && PREFIX="demo-$(date +%s)"
   info "seeding demo data (prefix $PREFIX)"
-  (cd "$WT" && bun event-runtime/demo/seed.mjs --port "$API_PORT" --prefix "$PREFIX") || die "seed failed — see output above"
+  seed_attempt=1
+  max_seed_attempts=5
+  seed_ok=0
+  seed_out=""
+  while [[ $seed_attempt -le $max_seed_attempts ]]; do
+    if seed_out=$(cd "$WT" && bun event-runtime/demo/seed.mjs --port "$API_PORT" --prefix "$PREFIX" 2>&1); then
+      printf '%s\n' "$seed_out"
+      seed_ok=1
+      break
+    fi
+    if [[ "$seed_out" =~ "SQLITE_BUSY" || "$seed_out" =~ "database is locked" || "$seed_out" =~ "locked" || "$seed_out" =~ "internal_error" || "$seed_out" =~ "500" || "$seed_out" =~ "409" ]]; then
+      backoff_delay=$(( 1 << (seed_attempt - 1) ))
+      warn "demo seed hit transient lock/error (attempt $seed_attempt/$max_seed_attempts) — retrying in ${backoff_delay}s"
+      sleep "$backoff_delay"
+      seed_attempt=$(( seed_attempt + 1 ))
+    else
+      printf '%s\n' "$seed_out" >&2
+      die "seed failed — see output above"
+    fi
+  done
+  if [[ "$seed_ok" -ne 1 ]]; then
+    printf '%s\n' "$seed_out" >&2
+    die "seed failed after $max_seed_attempts attempts — see output above"
+  fi
 elif [[ "$SEED" -eq 1 ]]; then
   info "existing database found — not reseeding (use --reseed for a fresh set)"
 else
