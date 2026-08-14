@@ -15,15 +15,24 @@
 import { spawn } from "node:child_process";
 import { createWriteStream, writeFileSync } from "node:fs";
 import path from "node:path";
+import { FACTORY_ROOT } from "../config.mjs";
 
 const KILL_GRACE_MS = 10_000;
 const OUTPUT_TAIL_CHARS = 2_000;
 
-/** Substitute `{field}` placeholders in one argv element from spec.input. */
+/**
+ * Substitute `{field}` placeholders in one argv element.
+ *
+ * Bindings come from spec.input, plus `factoryRoot` injected from config
+ * (same pattern as adapters/actions.mjs). The payload must never supply
+ * factoryRoot — `{"factoryRoot":"/tmp/x"}` would otherwise pick which
+ * script `bun` executes.
+ */
 export function resolveTemplate(template, input) {
+  const context = { ...input, factoryRoot: FACTORY_ROOT };
   return template.map((element) =>
     element.replace(/\{([A-Za-z0-9_]+)\}/g, (_, field) => {
-      const value = input?.[field];
+      const value = context[field];
       if (value === undefined || value === null) {
         throw new Error(`command template references missing input field "${field}"`);
       }
