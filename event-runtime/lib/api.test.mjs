@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import * as fake from "./adapters/fake.mjs";
-import { isLoopbackHost, janitorArgv, repoNamesFromInput, startApi } from "./api.mjs";
+import { isLoopbackHost, isLoopbackOrigin, janitorArgv, repoNamesFromInput, startApi } from "./api.mjs";
 import { apiClient } from "./client.mjs";
 import { openDb } from "./db.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
@@ -926,13 +926,29 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
     expect(isLoopbackHost(undefined)).toBe(false);
   });
 
+  test("isLoopbackOrigin accepts loopback origins and rejects foreign/malformed origins", () => {
+    expect(isLoopbackOrigin("http://127.0.0.1:7382")).toBe(true);
+    expect(isLoopbackOrigin("http://127.0.0.1")).toBe(true);
+    expect(isLoopbackOrigin("http://localhost:7382")).toBe(true);
+    expect(isLoopbackOrigin("http://localhost")).toBe(true);
+    expect(isLoopbackOrigin("http://[::1]:7382")).toBe(true);
+
+    expect(isLoopbackOrigin("http://evil.com")).toBe(false);
+    expect(isLoopbackOrigin("https://evil.com:7382")).toBe(false);
+    expect(isLoopbackOrigin("http://192.168.1.100:7382")).toBe(false);
+    expect(isLoopbackOrigin("")).toBe(false);
+    expect(isLoopbackOrigin(null)).toBe(false);
+    expect(isLoopbackOrigin(undefined)).toBe(false);
+    expect(isLoopbackOrigin("not-a-valid-url")).toBe(false);
+  });
+
   test("rejects request with non-loopback Host header", async () => {
     const res = await rawRequest({ host: "attacker.com", path: "/health" });
     expect(res.status).toBe(403);
     expect(res.json?.error).toBe("invalid_host");
   });
 
-  test("rejects mutating request carrying an Origin header", async () => {
+  test("rejects mutating request carrying a foreign Origin header", async () => {
     const res = await rawRequest({
       method: "POST",
       path: "/replay",
@@ -946,7 +962,7 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
     expect(res.json?.error).toBe("cross_origin_rejected");
   });
 
-  test("rejects janitor apply carrying an Origin header", async () => {
+  test("rejects janitor apply carrying a foreign Origin header", async () => {
     const res = await rawRequest({
       method: "POST",
       path: "/repos/watched/janitor",
@@ -958,6 +974,20 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
     });
     expect(res.status).toBe(403);
     expect(res.json?.error).toBe("cross_origin_rejected");
+  });
+
+  test("allows loopback mutating requests from Web UI Origin header (WM-61)", async () => {
+    const res = await rawRequest({
+      method: "POST",
+      path: "/replay",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://127.0.0.1:7382",
+      },
+      body: JSON.stringify(envelope()),
+    });
+    expect(res.status).toBe(200);
+    expect(res.json?.admitted).toBe(true);
   });
 
   test("allows normal loopback mutating requests without Origin header", async () => {

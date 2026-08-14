@@ -481,6 +481,21 @@ export function isLoopbackHost(hostHeader) {
 }
 
 /**
+ * Loopback origin validation (OPS-408, WM-61): allows loopback origins (e.g. from local Web UI).
+ * Defends against cross-origin CSRF from foreign origins (e.g. evil.com).
+ */
+export function isLoopbackOrigin(originHeader) {
+  if (!originHeader || typeof originHeader !== "string") return false;
+  try {
+    const url = new URL(originHeader);
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build the request handler. Returned directly (rather than only inside a
  * server) so tests can compose it however they like.
  */
@@ -505,14 +520,14 @@ export function createApi({
 
   return async function handle(req, res) {
     try {
-      // Security confinement (OPS-408): loopback Host check & Origin rejection.
+      // Security confinement (OPS-408, WM-61): loopback Host check & cross-origin CSRF protection.
       const hostHeader = req.headers["host"];
       if (!isLoopbackHost(hostHeader)) {
         return send(res, 403, { error: "invalid_host" });
       }
 
-      const isMutating = req.method === "POST" || req.method === "PUT" || req.method === "PATCH" || req.method === "DELETE";
-      if (isMutating && req.headers["origin"]) {
+      const originHeader = req.headers["origin"];
+      if (originHeader && !isLoopbackOrigin(originHeader)) {
         return send(res, 403, { error: "cross_origin_rejected" });
       }
 
