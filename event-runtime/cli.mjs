@@ -14,8 +14,9 @@
  * runtime state.
  */
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
+import path from "node:path";
 import * as actions from "./lib/adapters/actions.mjs";
 import * as claude from "./lib/adapters/claude.mjs";
 import * as command from "./lib/adapters/command.mjs";
@@ -214,6 +215,58 @@ export async function tick({
 // serve — the runtime itself (§3: explicit foreground start, one worker)
 // ---------------------------------------------------------------------------
 
+export function isProcessAlive(pid) {
+  if (!pid || typeof pid !== "number" || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+
+export function serveLockPath(home = runtimeHome()) {
+  return path.join(home, "serve.pid");
+}
+
+export function acquireServeLock(home = runtimeHome(), port = DEFAULT_PORT) {
+  const lockFile = serveLockPath(home);
+  if (existsSync(lockFile)) {
+    try {
+      const content = JSON.parse(readFileSync(lockFile, "utf8"));
+      const ownerPid = Number(content.pid);
+      if (ownerPid && ownerPid !== process.pid && isProcessAlive(ownerPid)) {
+        throw new Error(
+          `runtime home "${home}" is already locked by PID ${ownerPid} (port ${content.port ?? "unknown"})`,
+        );
+      }
+    } catch (err) {
+      if (err.message.includes("is already locked by PID")) throw err;
+      // Stale or corrupt lock file — will be overwritten
+    }
+  }
+  writeFileSync(
+    lockFile,
+    JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }),
+    "utf8",
+  );
+  return { lockFile, pid: process.pid, port };
+}
+
+export function releaseServeLock(home = runtimeHome()) {
+  const lockFile = serveLockPath(home);
+  try {
+    if (existsSync(lockFile)) {
+      const content = JSON.parse(readFileSync(lockFile, "utf8"));
+      if (Number(content.pid) === process.pid) {
+        rmSync(lockFile, { force: true });
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function underBunWatch() {
   return process.execArgv.includes("--watch") || process.execArgv.includes("--hot");
 }
@@ -247,8 +300,12 @@ function watchServe(args) {
 async function serve(args) {
   if (args.includes("--watch") && !underBunWatch()) return watchServe(args);
 
-  const port = flagValue(args, "--port") ? Number(flagValue(args, "--port")) : DEFAULT_PORT;
-  if (!Number.isInteger(port) || port < 0) fail(`serve: invalid --port ${flagValue(args, "--port")}`);
+  const portFlag = flagValue(args, "--port");
+  const rawPort = portFlag ?? process.env.FACTORY_EVENT_PORT ?? "7381";
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    fail(`serve: invalid port "${rawPort}" (must be integer 1-65535)`);
+  }
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
   const adapters = { actions, claude, command, fake };
   if (adapterOverride && !adapters[adapterOverride]) {
@@ -256,6 +313,13 @@ async function serve(args) {
   }
 
   ensureHome();
+  const home = runtimeHome();
+  try {
+    acquireServeLock(home, port);
+  } catch (err) {
+    fail(`serve: ${err.message}`);
+  }
+
   const db = openDb();
   const registry = loadRegistry();
   const pv = policyVersion();
@@ -333,13 +397,19 @@ async function serve(args) {
   server.on("listening", () => {
     log(`environment "${env.name}" — control API on http://${API_HOST}:${port} (db ${dbPath()}, policy ${pv})`);
     if (adapterOverride) log(`adapter override: all new run specs use "${adapterOverride}"`);
+    if (!process.env.FACTORY_EVENT_SECRET) {
+      log("webhook intake: disabled (FACTORY_EVENT_SECRET is unset; webhooks will be rejected with 401)");
+    }
     log(
       withWorker
         ? "worker: in-process (--with-worker) — restarting serve interrupts running agents"
         : "worker: none in this process — start one with: bun event-runtime/cli.mjs work",
     );
   });
-  server.on("error", (err) => fail(`serve: ${err.message}`));
+  server.on("error", (err) => {
+    releaseServeLock(home);
+    fail(`serve: ${err.message}`);
+  });
 
   // The watched loop starts ONLY once the API actually owns its port. A serve
   // that lost the bind race must die, not keep planning and working the same
@@ -360,11 +430,13 @@ async function serve(args) {
     stopping = true;
     log(`shutting down (${signal})`);
     if (timer) clearInterval(timer);
+    releaseServeLock(home);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1000).unref?.();
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("exit", () => releaseServeLock(home));
 }
 
 // ---------------------------------------------------------------------------

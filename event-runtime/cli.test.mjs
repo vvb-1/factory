@@ -309,7 +309,7 @@ describe("cli", () => {
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-doc-healthy-"));
     const port = String(59700 + (process.pid % 100));
     const child = spawn("bun", [CLI, "serve", "--port", port], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_SECRET: "test-secret" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
