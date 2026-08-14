@@ -6,6 +6,8 @@ Review and land the open PRs for this repository. My invoking this command is th
 
 Interpret $ARGUMENTS as specific PR numbers or Linear issue IDs; default is every open PR in this repo (`gh pr list`, cross-checked against the team's `In Review` tickets so orphaned PRs and ticket-less PRs both surface).
 
+**Merge serialization & per-repo lock**: Merges are strictly serialized per repository. Never run concurrent merge supervisors or merge processes against the same repository; a merge run holds exclusive lock over merge execution for that repo to prevent race conditions where one process merges PRs another process has escalated or modified.
+
 `--include-escalated` is a one-off override used only by the foreground TUI's explicitly confirmed **merge all** action. It means the human has decided that existing `escalated` labels are not a hold for this run: include those PRs in the review and merge them when they otherwise meet the normal MERGE bar. Do not treat it as permission to merge with red CI, unresolved conflicts, a failing base/smoke check, or a blocking review finding. Do not apply this override merely because an escalated PR is visible; it must be present in `$ARGUMENTS`.
 
 ## Per PR, in this order
@@ -56,7 +58,9 @@ So:
 
 1. Take the PRs you classified MERGE and read each one's changed files (`gh pr diff <PR> --name-only`).
 2. Form a batch of PRs whose file sets are **pairwise disjoint**, up to **8** (matches the repo's dispatch concurrency cap — batching should be able to clear what one dispatch cycle produces). Any PR sharing a file with one already in the batch waits for the next batch.
-3. Merge the batch back to back, without waiting for base CI between them. Immediately before executing `gh pr merge` on each PR, re-verify that the PR does not carry the `escalated` label (`gh pr view <PR> --json labels -q '.labels[].name'`). GitHub status checks do not re-run when labels change, so a passing check rollup can mask an escalation applied after CI settled. If the `escalated` label is present (and `$ARGUMENTS` does not contain `--include-escalated`), abort the merge immediately.
+3. Merge the batch back to back, without waiting for base CI between them. Immediately before executing `gh pr merge` on each PR:
+   - Re-verify that the PR does not carry the `escalated` label (`gh pr view <PR> --json labels -q '.labels[].name'`). GitHub status checks do not re-run when labels change, so a passing check rollup can mask an escalation applied after CI settled. If the `escalated` label is present (and `$ARGUMENTS` does not contain `--include-escalated`), abort the merge immediately.
+   - Verify that the current PR head SHA matches the reviewed and approved commit SHA (`gh pr view <PR> --json headRefOid -q .headRefOid`). If the head SHA has changed (e.g. from an unreviewed push or review fix added after review approval), stop and re-review the diff before merging.
 4. Then wait **once** for base CI on the batch (`gh run watch <run> --exit-status`), plus the smoke check where the repo has one.
 5. Green: move every ticket in the batch to `Done` and clean up. Red: you have at most 5 suspects and their file sets are disjoint, so the failing job names the culprit. Revert that one merge (`git revert -m 1 <merge-sha>`, push, re-verify), keep the rest, and report what you reverted and why.
 
