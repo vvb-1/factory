@@ -398,7 +398,7 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
 
     expect(await s.client.cancel(prop.runId, "never mind")).toEqual({
       cancelled: true,
-      ambiguousOpenProposals: 2,
+      ambiguousOpenProposals: [{ runId: prop.runId, count: 2 }],
     });
     expect((await s.client.run(prop.runId)).run.state).toBe("CANCELLED");
 

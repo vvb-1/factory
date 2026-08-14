@@ -786,8 +786,12 @@ async function main() {
     case "cancel": {
       if (!args[0]) fail("usage: cancel <run-id> [reason]");
       return withClient(async (client) => {
-        await client.cancel(args[0], args[1]);
-        console.log(`cancelled ${args[0]}`);
+        const res = await client.cancel(args[0], args[1]);
+        if (res?.ambiguousOpenProposals?.length) {
+          console.log(`cancelled ${args[0]} (warning: ${res.ambiguousOpenProposals[0].count} open proposals remain ambiguous)`);
+        } else {
+          console.log(`cancelled ${args[0]}`);
+        }
       });
     }
 

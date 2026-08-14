@@ -2,6 +2,7 @@ import type {
   AdmittedEvent,
   AgentsView,
   ApproveOutcome,
+  CancelOutcome,
   EnvIdentity,
   JournalView,
   OutboxRow,
@@ -66,7 +67,7 @@ export const api = {
   trace: (id: string, since = 0, limit = 500) =>
     call<TraceView>("GET", `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`),
   cancel: (id: string, reason?: string) =>
-    call<{ cancelled: boolean }>("POST", `/runs/${encodeURIComponent(id)}/cancel`, reason ? { reason } : {}),
+    call<CancelOutcome>("POST", `/runs/${encodeURIComponent(id)}/cancel`, reason ? { reason } : {}),
   retry: (id: string, force = false) =>
     call<{ queued: boolean }>("POST", `/runs/${encodeURIComponent(id)}/retry`, { force }),
   replay: (envelope: unknown) =>
