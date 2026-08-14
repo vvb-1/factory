@@ -477,22 +477,40 @@ export function StatTile({
 export function JumpLink({
   children,
   onClick,
+  href,
   title,
   className,
 }: {
   children: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
   title?: string;
   className?: string;
 }) {
+  const cls = `mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`;
+  if (href != null) {
+    return (
+      <a
+        href={href}
+        className={cls}
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
   return (
     <button
       type="button"
-      className={`mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`}
+      className={cls}
       title={title}
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        onClick?.();
       }}
     >
       {children}
