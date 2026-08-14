@@ -147,6 +147,13 @@ repos:
     worktree_root: ~/Develop/.worktrees/watts-mobile
     report_only: true            # No isolated worktree lifecycle yet.
     verify: pnpm typecheck && pnpm lint && pnpm test
+    escalate_paths:
+      - src/features/subscriptions/**
+      - src/auth/**
+      - credentials/**
+      - eas.json
+      - .env.example
+      - .github/workflows/**
 
   - name: legalease
     path: ~/Develop/legalease

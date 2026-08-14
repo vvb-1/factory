@@ -17,6 +17,7 @@ const repos = Bun.YAML.parse(
 ).repos;
 const cashsaasGlobs = repos.find((repo) => repo.name === "cashsaas")?.escalate_paths;
 const wmHomeGlobs = repos.find((repo) => repo.name === "wm-home")?.escalate_paths;
+const wattsMobileGlobs = repos.find((repo) => repo.name === "watts-mobile")?.escalate_paths;
 
 test("wm-home config protects its schema, auth, admin, and deployment boundaries", () => {
   expect(wmHomeGlobs).toBeDefined();
@@ -61,6 +62,45 @@ test("wm-home config leaves ordinary landing page and docs changes unflagged", (
         "docs/setup.md",
       ],
       wmHomeGlobs,
+    ),
+  ).toEqual([]);
+});
+
+test("watts-mobile config protects subscriptions, auth, credentials, and build configuration", () => {
+  expect(wattsMobileGlobs).toBeDefined();
+
+  const hits = matchEscalations(
+    [
+      "src/features/subscriptions/revenueCat.ts",
+      "src/auth/sessionStore.ts",
+      "credentials/apple/distribution.p12",
+      "eas.json",
+      ".env.example",
+      ".github/workflows/build.yml",
+    ],
+    wattsMobileGlobs,
+  );
+
+  expect(hits.map((hit) => hit.file)).toEqual([
+    "src/features/subscriptions/revenueCat.ts",
+    "src/auth/sessionStore.ts",
+    "credentials/apple/distribution.p12",
+    "eas.json",
+    ".env.example",
+    ".github/workflows/build.yml",
+  ]);
+});
+
+test("watts-mobile config leaves ordinary feature screens and components unflagged", () => {
+  expect(
+    matchEscalations(
+      [
+        "src/features/stats/StatsScreen.tsx",
+        "src/components/Button.tsx",
+        "README.md",
+        "docs/setup.md",
+      ],
+      wattsMobileGlobs,
     ),
   ).toEqual([]);
 });
