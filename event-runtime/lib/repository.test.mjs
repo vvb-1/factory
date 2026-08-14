@@ -21,7 +21,10 @@ const tmp = (prefix) => {
 };
 afterAll(() => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
-});
+}, 20_000);
+
+/** Real git init/commit is already ~3–4s in isolation; 5s flakes under parallel load. */
+const GIT_MS = 20_000;
 
 // Fixture repos must not inherit the operator's global git config: a machine
 // with commit.gpgsign=true blocks on pinentry until the 5s test timeout, and
@@ -69,12 +72,12 @@ describe("repos.yaml is read, not owned", () => {
       verify: "echo ok",
     });
     expect(expandHome("~/x")).toBe(path.join(process.env.HOME ?? "", "x"));
-  });
+  }, { timeout: GIT_MS });
 
   test("an unknown repo names what is configured instead of failing vaguely", () => {
     const repos = loadRepos({ root: makeFactoryRoot(makeRepo().dir) });
     expect(() => getRepo(repos, "nope")).toThrow(/not in config\/repos\.yaml \(have: testrepo\)/);
-  });
+  }, { timeout: GIT_MS });
 
   test("a missing config fails closed", () => {
     expect(() => loadRepos({ root: tmp("evrt-empty-") })).toThrow(RepoError);
@@ -100,7 +103,7 @@ describe("mirror + pinned checkout", () => {
     git(["commit", "--quiet", "-m", "third"], src.dir);
     syncMirror(repo, { root: mirrors });
     expect(resolveRef(repo, "main", { root: mirrors }).sha).toBe(git(["rev-parse", "HEAD"], src.dir));
-  });
+  }, { timeout: GIT_MS });
 
   test("resolves a ref to an immutable sha — the pin a run is reproducible against", () => {
     const src = makeRepo();
@@ -108,7 +111,7 @@ describe("mirror + pinned checkout", () => {
     const repo = getRepo(loadRepos({ root: makeFactoryRoot(src.dir) }), "testrepo");
     expect(resolveRef(repo, "main", { root: mirrors }).sha).toBe(src.head);
     expect(resolveRef(repo, src.first, { root: mirrors }).sha).toBe(src.first);
-  });
+  }, { timeout: GIT_MS });
 
   test("materializes the pinned tree inside the workspace, then releases it", () => {
     const src = makeRepo();
@@ -132,7 +135,7 @@ describe("mirror + pinned checkout", () => {
     // The mirror survives as cache, with no stale worktree registration.
     expect(existsSync(mirrorPath("testrepo", mirrors))).toBe(true);
     expect(git(["worktree", "list"], mirrorPath("testrepo", mirrors))).not.toContain(workspaceDir);
-  });
+  }, { timeout: GIT_MS });
 
   test("a checkout may not escape its workspace", () => {
     const src = makeRepo();
@@ -148,7 +151,7 @@ describe("mirror + pinned checkout", () => {
         reposRoot,
       }),
     ).toThrow(RepositoryWorkspaceError);
-  });
+  }, { timeout: GIT_MS });
 
   test("an unpinned run refuses rather than guessing a ref", () => {
     expect(() =>

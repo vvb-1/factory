@@ -78,4 +78,35 @@ describe("cli", () => {
     expect(out).toContain("serve --watch: restarting on event-runtime/ changes");
     expect(out).toContain("control API on");
   });
+
+  test("serve binds the control API, starts the loop, and answers /health", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-serve-"));
+    const port = String(59800 + (process.pid % 100));
+    const child = spawn("bun", [CLI, "serve", "--port", port], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    let health;
+    try {
+      expect(out).toContain("control API on");
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(res.ok).toBe(true);
+      health = await res.json();
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+    expect(health.ok).toBe(true);
+  });
 });
