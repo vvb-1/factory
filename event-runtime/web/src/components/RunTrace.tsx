@@ -2,7 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { RunState, TraceEntry, TracePayload } from "../types";
-import { humanSize, JsonBlock, Section } from "./ui";
+import { humanSize, JsonBlock, Section, notify } from "./ui";
+
+function copyText(text: string, label: string = "text") {
+  navigator.clipboard.writeText(text);
+  notify(`Copied ${label} to clipboard`, "info");
+}
 
 /** States in which the trace is still being written — poll incrementally. */
 const LIVE_STATES: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
@@ -64,11 +69,206 @@ function useTraceFeed(runId: string, live: boolean) {
   };
 }
 
-function TextBlock({ text }: { text: string }) {
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const tokenRegex = /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)|(~~[^~]+~~)|(\[[^\]]+\]\([^)]+\))/g;
+  const nodes: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      nodes.push(text.slice(lastIdx, match.index));
+    }
+    const full = match[0];
+    if (match[1]) {
+      nodes.push(
+        <code key={match.index} className="mono rounded bg-(--surface-2) px-1 py-0.5 text-[11px] text-(--text)">
+          {full.slice(1, -1)}
+        </code>
+      );
+    } else if (match[2]) {
+      nodes.push(<strong key={match.index} className="font-semibold text-(--text)">{full.slice(2, -2)}</strong>);
+    } else if (match[3]) {
+      nodes.push(<em key={match.index} className="italic text-(--text-dim)">{full.slice(1, -1)}</em>);
+    } else if (match[4]) {
+      nodes.push(<del key={match.index} className="line-through text-(--text-faint)">{full.slice(2, -2)}</del>);
+    } else if (match[5]) {
+      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(full);
+      if (linkMatch) {
+        nodes.push(
+          <a key={match.index} href={linkMatch[2]} target="_blank" rel="noreferrer" className="text-(--accent) underline hover:opacity-80">
+            {linkMatch[1]}
+          </a>
+        );
+      } else {
+        nodes.push(full);
+      }
+    }
+    lastIdx = tokenRegex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    nodes.push(text.slice(lastIdx));
+  }
+  return nodes.length ? nodes : [text];
+}
+
+export function MarkdownView({
+  text,
+  allowToggle = true,
+  className = "",
+}: {
+  text: string;
+  allowToggle?: boolean;
+  className?: string;
+}) {
+  const [raw, setRaw] = useState(false);
+
+  if (raw) {
+    return (
+      <div className={`relative ${className}`}>
+        {allowToggle && (
+          <div className="mb-1 flex justify-end gap-2 text-[10.5px]">
+            <button type="button" onClick={() => copyText(text, "raw markdown")} className="text-(--text-faint) hover:text-(--text)">Copy</button>
+            <button type="button" onClick={() => setRaw(false)} className="text-(--accent) hover:underline">Formatted view</button>
+          </div>
+        )}
+        <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-2.5 text-[11.5px] leading-relaxed whitespace-pre-wrap text-(--text-dim)">
+          {text}
+        </pre>
+      </div>
+    );
+  }
+
+  const lines = text.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeLang = "";
+  let codeBuffer: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+  let listItems: string[] = [];
+
+  const flushList = (key: number) => {
+    if (!listType || !listItems.length) return;
+    if (listType === "ul") {
+      blocks.push(
+        <ul key={`ul-${key}`} className="my-1 ml-4 list-disc space-y-0.5 text-[12px] text-(--text-dim)">
+          {listItems.map((item, idx) => (
+            <li key={idx}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>
+      );
+    } else {
+      blocks.push(
+        <ol key={`ol-${key}`} className="my-1 ml-4 list-decimal space-y-0.5 text-[12px] text-(--text-dim)">
+          {listItems.map((item, idx) => (
+            <li key={idx}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ol>
+      );
+    }
+    listType = null;
+    listItems = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trim().startsWith("```")) {
+      flushList(i);
+      if (inCodeBlock) {
+        inCodeBlock = false;
+        const codeText = codeBuffer.join("\n");
+        blocks.push(
+          <div key={`code-${i}`} className="my-1.5 overflow-hidden rounded-md border border-(--border) bg-(--surface-0)">
+            <div className="flex items-center justify-between border-b border-(--border) bg-(--surface-1) px-2.5 py-0.5 text-[10px] text-(--text-faint) mono">
+              <span>{codeLang || "code"}</span>
+              <button type="button" onClick={() => copyText(codeText, "code block")} className="hover:text-(--text)">Copy</button>
+            </div>
+            <pre className="mono overflow-auto p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-(--text)">
+              {codeText}
+            </pre>
+          </div>
+        );
+        codeBuffer = [];
+        codeLang = "";
+      } else {
+        inCodeBlock = true;
+        codeLang = line.trim().slice(3).trim();
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeBuffer.push(line);
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (headingMatch) {
+      flushList(i);
+      const level = headingMatch[1].length;
+      const content = headingMatch[2];
+      if (level === 1) {
+        blocks.push(<h1 key={i} className="mb-1.5 mt-2 text-[14.5px] font-bold text-(--text) border-b border-(--border) pb-0.5">{renderInlineMarkdown(content)}</h1>);
+      } else if (level === 2) {
+        blocks.push(<h2 key={i} className="mb-1 mt-2 text-[13.5px] font-semibold text-(--text) border-b border-(--border) pb-0.5">{renderInlineMarkdown(content)}</h2>);
+      } else if (level === 3) {
+        blocks.push(<h3 key={i} className="mb-0.5 mt-1.5 text-[12.5px] font-semibold text-(--text)">{renderInlineMarkdown(content)}</h3>);
+      } else {
+        blocks.push(<h4 key={i} className="mb-0.5 mt-1 text-[12px] font-semibold text-(--text)">{renderInlineMarkdown(content)}</h4>);
+      }
+      continue;
+    }
+
+    if (line.startsWith("> ")) {
+      flushList(i);
+      blocks.push(
+        <blockquote key={i} className="my-1 border-l-2 border-(--accent) pl-2.5 italic text-(--text-dim) text-[12px]">
+          {renderInlineMarkdown(line.slice(2))}
+        </blockquote>
+      );
+      continue;
+    }
+
+    const ulMatch = /^[-*]\s+(.+)$/.exec(line);
+    if (ulMatch) {
+      if (listType !== "ul") flushList(i);
+      listType = "ul";
+      listItems.push(ulMatch[1]);
+      continue;
+    }
+
+    const olMatch = /^(\d+)\.\s+(.+)$/.exec(line);
+    if (olMatch) {
+      if (listType !== "ol") flushList(i);
+      listType = "ol";
+      listItems.push(olMatch[2]);
+      continue;
+    }
+
+    flushList(i);
+    if (!line.trim()) {
+      blocks.push(<div key={i} className="h-1" />);
+    } else {
+      blocks.push(
+        <p key={i} className="my-0.5 text-[12px] leading-relaxed text-(--text-dim)">
+          {renderInlineMarkdown(line)}
+        </p>
+      );
+    }
+  }
+  flushList(lines.length);
+
   return (
-    <pre className="mono overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-3 leading-relaxed whitespace-pre-wrap">
-      {text}
-    </pre>
+    <div className={`relative ${className}`}>
+      {allowToggle && text.length > 50 && (
+        <div className="mb-1 flex justify-end gap-2 text-[10px]">
+          <button type="button" onClick={() => copyText(text, "markdown text")} className="text-(--text-faint) hover:text-(--text)">Copy</button>
+          <button type="button" onClick={() => setRaw(true)} className="text-(--text-faint) hover:text-(--accent)">Raw</button>
+        </div>
+      )}
+      <div className="space-y-0.5">{blocks}</div>
+    </div>
   );
 }
 
@@ -86,9 +286,29 @@ function ContentBlock({ content }: { content: unknown }) {
         // Fall back to plain text if not valid JSON
       }
     }
-    return <TextBlock text={content} />;
+    return <MarkdownView text={content} />;
   }
   return <JsonBlock value={content ?? null} />;
+}
+
+function getEntryDuration(e: TraceEntry, next?: TraceEntry): number | null {
+  if (e.payload?.durationMs != null) return e.payload.durationMs;
+  if (!next) return null;
+  const delta = Date.parse(next.ts) - Date.parse(e.ts);
+  return Number.isNaN(delta) || delta < 0 ? null : delta;
+}
+
+function TimingWaterfall({ durationMs, maxMs }: { durationMs: number; maxMs: number }) {
+  const pct = Math.min(100, Math.max(8, (durationMs / (maxMs || 1)) * 100));
+  const durLabel = durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`;
+  return (
+    <div className="flex items-center gap-1.5 mono text-[10px] text-(--text-faint)" title={`Execution time: ${durLabel}`}>
+      <div className="h-1.5 w-12 overflow-hidden rounded-full bg-(--surface-2)">
+        <div className="h-full rounded-full bg-(--accent) opacity-80" style={{ width: `${pct}%` }} />
+      </div>
+      <span>{durLabel}</span>
+    </div>
+  );
 }
 
 /**
@@ -138,10 +358,14 @@ function TraceBody({
   kind,
   p,
   forceOpen,
+  durationMs,
+  maxMs,
 }: {
   kind: string;
   p: TracePayload;
   forceOpen?: boolean;
+  durationMs?: number | null;
+  maxMs?: number;
 }) {
   // Oversize payload clipped in place: whatever the kind was, only the
   // preview survives — say so rather than rendering half a payload silently.
@@ -160,12 +384,24 @@ function TraceBody({
     );
   }
   if (kind === "assistant_text") {
-    return <div className="min-w-0 flex-1 whitespace-pre-wrap text-(--text-dim)">{p.text ?? ""}</div>;
+    return (
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <MarkdownView text={p.text ?? ""} />
+          </div>
+          {durationMs != null && maxMs != null && <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />}
+        </div>
+      </div>
+    );
   }
   if (kind === "tool_use") {
     return (
       <div className="min-w-0 flex-1">
-        <span className="mono">🔧 {p.name ?? "unknown tool"}</span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="mono">🔧 {p.name ?? "unknown tool"}</span>
+          {durationMs != null && maxMs != null && <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />}
+        </div>
         {p.input !== undefined && (
           <Disclosure label="input" forceOpen={forceOpen}>
             <JsonBlock value={p.input} />
@@ -259,6 +495,9 @@ export function RunTrace({
   const { entries, isPending, isError } = useTraceFeed(runId, live);
   const [filter, setFilter] = useState<TraceFilterKind>("all");
   const [expandAll, setExpandAll] = useState<boolean>(false);
+  const [search, setSearch] = useState<string>("");
+  const [activeMatch, setActiveMatch] = useState<number>(0);
+  const [autoScrollPaused, setAutoScrollPaused] = useState<boolean>(false);
 
   const counts = useMemo(() => {
     let tools = 0;
@@ -274,6 +513,23 @@ export function RunTrace({
     return { all: entries.length, tools, reasoning, errors, usage };
   }, [entries]);
 
+  const tokenStats = useMemo(() => {
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let totalCost = 0;
+    let hasTokens = false;
+    for (const e of entries) {
+      if (e.payload?.usage) {
+        hasTokens = true;
+        const u = e.payload.usage;
+        promptTokens += u.input_tokens ?? u.prompt_tokens ?? u.inputTokens ?? 0;
+        completionTokens += u.output_tokens ?? u.completion_tokens ?? u.outputTokens ?? 0;
+      }
+      if (e.payload?.costUSD) totalCost += e.payload.costUSD;
+    }
+    return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, totalCost, hasTokens };
+  }, [entries]);
+
   const visibleEntries = useMemo(() => {
     if (filter === "all") return entries;
     if (filter === "tools") return entries.filter((e) => isToolKind(e.kind));
@@ -286,15 +542,68 @@ export function RunTrace({
   const tailCut = !full && visibleEntries.length > PANEL_TAIL;
   const shown = tailCut ? visibleEntries.slice(-PANEL_TAIL) : visibleEntries;
 
+  // Waterfall timing calculations:
+  const { durations, maxDurationMs } = useMemo(() => {
+    const map = new Map<number, number>();
+    let max = 0;
+    for (let i = 0; i < shown.length; i++) {
+      const dur = getEntryDuration(shown[i], shown[i + 1]);
+      if (dur != null) {
+        map.set(shown[i].seq, dur);
+        if (dur > max) max = dur;
+      }
+    }
+    return { durations: map, maxDurationMs: max || 1000 };
+  }, [shown]);
+
+  // In-trace text search matches:
+  const searchMatches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    const matches: number[] = [];
+    for (let i = 0; i < shown.length; i++) {
+      const e = shown[i];
+      const text = [
+        e.kind,
+        e.payload?.text,
+        e.payload?.name,
+        e.payload?.note,
+        typeof e.payload?.input === "object" ? JSON.stringify(e.payload.input) : String(e.payload?.input ?? ""),
+        typeof e.payload?.content === "object" ? JSON.stringify(e.payload.content) : String(e.payload?.content ?? ""),
+      ].join(" ").toLowerCase();
+      if (text.includes(q)) matches.push(i);
+    }
+    return matches;
+  }, [shown, search]);
+
+  const scroller = useRef<HTMLDivElement>(null);
+
+  // Jump to active search match:
+  useEffect(() => {
+    if (searchMatches.length > 0 && scroller.current) {
+      const idx = searchMatches[activeMatch % searchMatches.length];
+      const el = scroller.current.querySelector(`[data-trace-idx="${idx}"]`);
+      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [activeMatch, searchMatches]);
+
+  // Live auto-scroll:
+  useEffect(() => {
+    if (live && !autoScrollPaused && scroller.current) {
+      scroller.current.scrollTop = scroller.current.scrollHeight;
+    }
+  }, [shown.length, live, autoScrollPaused]);
+
+  const onScrollHandler = () => {
+    if (!scroller.current || !live) return;
+    const { scrollTop, scrollHeight, clientHeight } = scroller.current;
+    const atBottom = scrollHeight - scrollTop - clientHeight < 30;
+    setAutoScrollPaused(!atBottom);
+  };
+
   // Multi-attempt runs: divider per attempt (entries are seq-ascending, so
   // attempts are contiguous). A single attempt needs no labels.
   const multiAttempt = new Set(shown.map((e) => e.attempt)).size > 1;
-
-  // Follow the stream: while live, keep the scroll pinned to the newest entry.
-  const scroller = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (live && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [shown.length, live]);
 
   const filterTabs: { key: TraceFilterKind; label: string; count: number }[] = [
     { key: "all", label: "All", count: counts.all },
@@ -306,12 +615,21 @@ export function RunTrace({
 
   const body = (
     <>
-      {live && (
-        <div className="mb-2 flex items-center gap-1.5 text-[11px]" style={{ color: "var(--hue-warn)" }}>
-          <span className="size-1.5 animate-pulse rounded-full" style={{ background: "var(--hue-warn)" }} />
-          live — following the running attempt
-        </div>
-      )}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        {live ? (
+          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--hue-warn)" }}>
+            <span className="size-1.5 animate-pulse rounded-full" style={{ background: "var(--hue-warn)" }} />
+            live — following the running attempt
+          </div>
+        ) : <div />}
+
+        {tokenStats.hasTokens && (
+          <div className="flex items-center gap-1.5 rounded bg-(--surface-1) border border-(--border) px-2 py-0.5 text-[10.5px] mono text-(--text-dim)">
+            <span title="Cumulative token burn across trace">🔥 {tokenStats.promptTokens.toLocaleString()} in · {tokenStats.completionTokens.toLocaleString()} out</span>
+            {tokenStats.totalCost > 0 && <span className="text-(--text-faint)">(${tokenStats.totalCost.toFixed(4)})</span>}
+          </div>
+        )}
+      </div>
 
       {entries.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -333,13 +651,61 @@ export function RunTrace({
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => setExpandAll((v) => !v)}
-            className="text-[11px] text-(--text-faint) hover:text-(--text-dim)"
-          >
-            {expandAll ? "Collapse details" : "Expand details"}
-          </button>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded border border-(--border) bg-(--surface-0) px-1.5 py-0.5 text-[11px]">
+              <input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setActiveMatch(0);
+                }}
+                placeholder="Search trace…"
+                className="w-24 bg-transparent outline-none text-(--text) placeholder:text-(--text-faint) sm:w-32"
+              />
+              {search && (
+                <>
+                  <span className="mono text-[10px] text-(--text-faint)">
+                    {searchMatches.length ? `${(activeMatch % searchMatches.length) + 1}/${searchMatches.length}` : "0"}
+                  </span>
+                  {searchMatches.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMatch((m) => (m - 1 + searchMatches.length) % searchMatches.length)}
+                        className="text-(--text-faint) hover:text-(--text)"
+                        title="Previous match"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMatch((m) => (m + 1) % searchMatches.length)}
+                        className="text-(--text-faint) hover:text-(--text)"
+                        title="Next match"
+                      >
+                        ↓
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="text-(--text-faint) hover:text-(--text)"
+                  >
+                    ✕
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setExpandAll((v) => !v)}
+              className="text-[11px] text-(--text-faint) hover:text-(--text-dim)"
+            >
+              {expandAll ? "Collapse details" : "Expand details"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -356,27 +722,60 @@ export function RunTrace({
                   : "No trace — this adapter does not stream events."}
         </div>
       ) : (
-        <div
-          ref={scroller}
-          className={`${
-            full ? "max-h-[70vh]" : "max-h-96"
-          } overflow-auto rounded-md border border-(--border) px-3 py-1`}
-        >
-          {shown.map((e, i) => (
-            <Fragment key={e.seq}>
-              {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
-                <div className="border-b border-(--border) py-1 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-                  Attempt #{e.attempt}
-                </div>
-              )}
-              <div className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.ts}>
-                  {new Date(e.ts).toLocaleTimeString([], { hour12: false })}
-                </span>
-                <TraceBody kind={e.kind} p={e.payload ?? {}} forceOpen={expandAll} />
-              </div>
-            </Fragment>
-          ))}
+        <div className="relative">
+          <div
+            ref={scroller}
+            onScroll={onScrollHandler}
+            className={`${
+              full ? "max-h-[70vh]" : "max-h-96"
+            } overflow-auto rounded-md border border-(--border) px-3 py-1`}
+          >
+            {shown.map((e, i) => {
+              const isMatch = searchMatches.includes(i);
+              const isActiveMatch = searchMatches.length > 0 && searchMatches[activeMatch % searchMatches.length] === i;
+              return (
+                <Fragment key={e.seq}>
+                  {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
+                    <div className="border-b border-(--border) py-1 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+                      Attempt #{e.attempt}
+                    </div>
+                  )}
+                  <div
+                    data-trace-idx={i}
+                    className={`flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0 transition-colors ${
+                      isActiveMatch ? "bg-(--surface-2) -mx-2 px-2 rounded" : isMatch ? "bg-(--surface-1) -mx-2 px-2 rounded" : ""
+                    }`}
+                  >
+                    <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.ts}>
+                      {new Date(e.ts).toLocaleTimeString([], { hour12: false })}
+                    </span>
+                    <TraceBody
+                      kind={e.kind}
+                      p={e.payload ?? {}}
+                      forceOpen={expandAll}
+                      durationMs={durations.get(e.seq)}
+                      maxMs={maxDurationMs}
+                    />
+                  </div>
+                </Fragment>
+              );
+            })}
+          </div>
+
+          {live && autoScrollPaused && (
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoScrollPaused(false);
+                  if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
+                }}
+                className="rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105"
+              >
+                ↓ New trace events below
+              </button>
+            </div>
+          )}
         </div>
       )}
 

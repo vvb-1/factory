@@ -115,6 +115,19 @@ export function Proposals({
   // disagree about which open proposals are already dead.
   const staleState = (p: Proposal) => proposalRunState(p, runStates);
 
+  const CANNED_REJECTION_REASONS = [
+    "Scope too wide",
+    "Wrong target branch",
+    "Needs dry-run parameter",
+    "Token limit excessive",
+  ] as const;
+
+  const agentsQuery = useQuery({
+    queryKey: ["agents"],
+    queryFn: api.agents,
+    refetchInterval: 5000,
+  });
+
   const [filter, setFilter] = useState("");
   const [expiredOnly, setExpiredOnly] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -333,14 +346,9 @@ export function Proposals({
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex gap-1" role="tablist" aria-label="Proposal status">
             {PROPOSAL_TABS.map((t) => {
-              const count =
-                t === "open"
-                  ? context.kind === "repo"
-                    ? (query.data?.proposals ?? []).filter((p) => matchesRepo(p.repos, context)).length
-                    : (statusQ.data?.proposals.open ?? 0)
-                  : (history.data?.proposals ?? []).filter(
-                      (p) => p.status !== "open" && matchesRepo(p.repos, context),
-                    ).length;
+              const count = t === "open"
+                ? (context.kind === "repo" ? (query.data?.proposals ?? []).filter((p) => matchesRepo(p.repos, context)).length : (statusQ.data?.proposals.open ?? 0))
+                : (history.data?.proposals ?? []).filter((p) => p.status !== "open" && matchesRepo(p.repos, context)).length;
               return (
                 <button
                   key={t}
@@ -348,9 +356,7 @@ export function Proposals({
                   role="tab"
                   aria-selected={tab === t}
                   onClick={() => selectTab(t)}
-                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                    tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
-                  }`}
+                  className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"}`}
                 >
                   {t === "open" ? "Open" : "History"}
                   {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
@@ -414,14 +420,16 @@ export function Proposals({
             </tr>
           </thead>
           <tbody>
-            {visible.map((p, i) => (
+            {visible.map((p, i) => {
+              const tdCls = "border-b border-(--border) px-3 py-1.5";
+              return (
               <tr
                 key={p.id}
                 onClick={() => onSelectProposal(p.id)}
                 aria-selected={i === selectedIndex}
                 className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${i === selectedIndex ? "row-selected" : ""}`}
               >
-                <td className="border-b border-(--border) px-3 py-1.5">
+                <td className={tdCls}>
                   {p.agent ? (
                     <JumpLink
                       onClick={() => onJumpAgent(p.agent!)}
@@ -435,7 +443,7 @@ export function Proposals({
                 </td>
                 {tab === "open" ? (
                   <>
-                    <td className="border-b border-(--border) px-3 py-1.5">
+                    <td className={tdCls}>
                       <StateBadge state={p.decision} hues={DECISION_HUES} />
                       {p.expired && (
                         <span className="ml-2" style={{ color: "var(--hue-warn)" }}>
@@ -448,22 +456,22 @@ export function Proposals({
                         </span>
                       )}
                     </td>
-                    <td className="border-b border-(--border) px-3 py-1.5">
+                    <td className={tdCls}>
                       <Countdown createdAt={p.created_at} ttlSeconds={p.ttl_seconds} />
                     </td>
                   </>
                 ) : (
                   <>
-                    <td className="border-b border-(--border) px-3 py-1.5">
+                    <td className={tdCls}>
                       <StateBadge state={p.status} hues={PROPOSAL_STATUS_HUES} />
                     </td>
-                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.decided_by ?? "-"}</td>
-                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                    <td className={`${tdCls} text-(--text-dim)`}>{p.decided_by ?? "-"}</td>
+                    <td className={`${tdCls} text-(--text-faint)`}>
                       <Ago iso={p.decided_at} now={now} />
                     </td>
                   </>
                 )}
-                <td className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)" title={originType(p) ?? undefined}>
+                <td className={`mono max-w-40 truncate ${tdCls} text-(--text-faint)`} title={originType(p) ?? undefined}>
                   {p.eventId && p.eventSource ? (
                     <JumpLink
                       onClick={() => onJumpEvent(p.eventSource!, p.eventId!)}
@@ -475,12 +483,12 @@ export function Proposals({
                     (p.eventId ?? "-")
                   )}
                 </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                <td className={`${tdCls} text-(--text-faint)`}>
                   <Ago iso={p.created_at} now={now} />
                 </td>
-                <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{p.reason ?? "-"}</td>
+                <td className={`max-w-64 truncate ${tdCls} text-(--text-dim)`}>{p.reason ?? "-"}</td>
               </tr>
-            ))}
+            );})}
             {visible.length === 0 && (
               <ListEmpty
                 colSpan={tab === "open" ? 6 : 7}
@@ -571,67 +579,65 @@ export function Proposals({
             </Section>
           )}
 
-          {sel.spec && (
-            <Section title="Spec Highlights — safety check">
-              <div className="mb-2 rounded-md border border-(--border) bg-(--surface-0) p-3">
-                <div className="mb-2 flex items-center justify-between gap-2 border-b border-(--border) pb-2">
-                  <div className="flex items-center gap-1.5 font-medium">
-                    <span className="mono">{sel.spec.agent}</span>
-                    <span className="text-[11px] text-(--text-faint)">({sel.spec.adapter})</span>
-                  </div>
-                  <span
-                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
-                    style={
-                      sel.spec.capabilities && sel.spec.capabilities.length > 0
-                        ? {
-                            color: "var(--hue-warn)",
-                            background: "color-mix(in oklch, var(--hue-warn) 14%, transparent)",
-                          }
-                        : {
-                            color: "var(--hue-ok)",
-                            background: "color-mix(in oklch, var(--hue-ok) 14%, transparent)",
-                          }
-                    }
-                  >
-                    {sel.spec.capabilities && sel.spec.capabilities.length > 0
-                      ? `${sel.spec.capabilities.length} cap${sel.spec.capabilities.length === 1 ? "" : "s"}`
-                      : "read-only"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-[12px]">
-                  <div>
-                    <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Workspace</div>
-                    <div className="mono text-(--text-dim) truncate">
-                      {sel.spec.workspace?.type ?? "default"}
+          {sel.spec && (() => {
+            const ag = (agentsQuery.data?.agents ?? []).find((a) => a.id === sel.agent || a.ref === sel.agent || a.id === sel.spec?.agent);
+            const inp = (typeof sel.spec.input === "object" && sel.spec.input ? sel.spec.input : {}) as Record<string, unknown>;
+            const repo = sel.repos.length ? sel.repos.join(", ") : String(inp.repo || inp.repository || "unscoped");
+            const branch = String(inp.branch || inp.targetBranch || inp.base || "default");
+            const issue = String(inp.issueId || inp.issue || inp.ticket || sel.eventId || "—");
+            const host = sel.spec.placement ? Object.entries(sel.spec.placement).map(([k, v]) => `${k}=${v}`).join(", ") : (ag?.hosts?.length ? ag.hosts.join(", ") : "any worker");
+            const mut = ag ? ag.mutating : (sel.spec.capabilities?.some((c) => /write|mutate|exec/i.test(c)) ?? false);
+            const egress = ag?.capabilities?.services ?? sel.spec.capabilities?.filter((c) => /net|http|api/i.test(c)) ?? [];
+            const caps = sel.spec.capabilities ?? [];
+            const score = (mut ? 2 : 0) + (["main", "master", "develop"].includes(branch.toLowerCase()) ? 1 : 0) + (egress.length ? 1 : 0) + (sel.spec.timeoutSeconds > 300 ? 1 : 0);
+            const blast = score >= 3 ? "HIGH" : score >= 1 ? "MEDIUM" : "LOW";
+            const blastHue = blast === "HIGH" ? "var(--hue-err)" : blast === "MEDIUM" ? "var(--hue-warn)" : "var(--hue-ok)";
+            const prev = (runsQuery.data?.runs ?? []).find((r) => r.agent === sel.agent && r.state === "COMPLETED");
+
+            return (
+              <Section title="Summary Safety Card & Blast Radius Radar">
+                <div className="mb-3 rounded-md border border-(--border) bg-(--surface-0) p-3 text-[12px]">
+                  <div className="mb-2 flex items-center justify-between border-b border-(--border) pb-2">
+                    <div className="flex gap-2">
+                      <span className="rounded px-2 py-0.5 text-[11px] font-semibold uppercase" style={{ color: mut ? "var(--hue-err)" : "var(--hue-ok)", background: `color-mix(in oklch, ${mut ? "var(--hue-err)" : "var(--hue-ok)"} 12%, transparent)` }}>
+                        {mut ? "🔴 Mutating" : "🟢 Read-Only"}
+                      </span>
+                      <span className="rounded px-2 py-0.5 text-[11px] font-semibold uppercase" style={{ color: blastHue, background: `color-mix(in oklch, ${blastHue} 12%, transparent)` }}>
+                        Radar: {blast} Risk
+                      </span>
                     </div>
+                    <span className="mono text-[11px] text-(--text-faint)">{sel.spec.adapter}</span>
                   </div>
-                  <div>
-                    <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Timeout & SLA</div>
-                    <div className="mono text-(--text-dim)">
-                      {sel.spec.timeoutSeconds}s · max {sel.spec.maxAttempts} att
-                    </div>
-                  </div>
-                  {sel.spec.capabilities && sel.spec.capabilities.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><div className="text-[10px] uppercase text-(--text-faint)">Target Repo</div><div className="mono truncate text-(--text-dim)" title={repo}>{repo}</div></div>
+                    <div><div className="text-[10px] uppercase text-(--text-faint)">Target Branch</div><div className="mono truncate text-(--text-dim)" title={branch}>{branch}</div></div>
+                    <div><div className="text-[10px] uppercase text-(--text-faint)">Issue ID</div><div className="mono truncate text-(--text-dim)" title={issue}>{issue}</div></div>
+                    <div><div className="text-[10px] uppercase text-(--text-faint)">Host</div><div className="mono truncate text-(--text-dim)" title={host}>{host}</div></div>
+                    <div><div className="text-[10px] uppercase text-(--text-faint)">Budget</div><div className="mono text-(--text-dim)">{sel.spec.timeoutSeconds}s · max {sel.spec.maxAttempts} att</div></div>
+                    <div><div className="text-[10px] uppercase text-(--text-faint)">Egress</div><div className="mono truncate text-(--text-dim)">{egress.length ? egress.join(", ") : "none"}</div></div>
                     <div className="col-span-2">
-                      <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Capabilities</div>
-                      <div className="mono text-(--text-dim) truncate">
-                        {sel.spec.capabilities.join(", ")}
+                      <div className="text-[10px] uppercase text-(--text-faint)">Capabilities</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {caps.length ? caps.map((c) => <span key={c} className="rounded bg-(--surface-2) px-1.5 py-0.5 mono text-[10.5px] text-(--text-dim)">{c}</span>) : <span className="text-[11px] text-(--text-faint)">none (sandboxed)</span>}
                       </div>
                     </div>
-                  )}
-                  <div className="col-span-2">
-                    <div className="text-[10px] text-(--text-faint) uppercase tracking-wide">Placement</div>
-                    <div className="mono text-(--text-dim) truncate">
-                      {sel.spec.placement ? JSON.stringify(sel.spec.placement) : "any worker"}
-                    </div>
+                  </div>
+                  <div className="mt-2.5 border-t border-(--border) pt-2 text-[11px]">
+                    <div className="uppercase text-(--text-faint) mb-0.5">Historical Comparison</div>
+                    {prev ? (
+                      <div className="flex justify-between text-(--text-dim)">
+                        <span>Prior: <JumpLink onClick={() => onRunQueued(prev.runId)}>{prev.runId}</JumpLink> (<Ago iso={prev.updated_at} now={now} />)</span>
+                        <span className="mono text-(--text-faint)">{prev.attempts} att</span>
+                      </div>
+                    ) : <div className="text-(--text-faint)">No prior run for {sel.agent}.</div>}
                   </div>
                 </div>
-              </div>
-              <Disclosure label="immutable RunSpec" defaultOpen={isOpen}>
-                <JsonBlock value={sel.spec} />
-              </Disclosure>
-            </Section>
-          )}
+                <Disclosure label="immutable RunSpec" defaultOpen={isOpen}>
+                  <JsonBlock value={sel.spec} />
+                </Disclosure>
+              </Section>
+            );
+          })()}
 
           {isOpen && staleState(sel) && (
             <div
@@ -663,25 +669,48 @@ export function Proposals({
           )}
 
           {isOpen && rejecting && (
-            <div className="mt-3 flex gap-2">
-              <input
-                ref={reasonRef}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && reason.trim()) reject.mutate({ id: sel.id, why: reason.trim() });
-                  if (e.key === "Escape") setRejecting(false);
-                }}
-                placeholder="Reason (required — rejections are audit records)"
-                className="flex-1 rounded-md border border-(--border-strong) bg-(--surface-0) px-2.5 py-1 text-(--text) outline-none focus:border-(--accent)"
-              />
-              <Button
-                variant="danger"
-                disabled={!reason.trim() || reject.isPending}
-                onClick={() => reject.mutate({ id: sel.id, why: reason.trim() })}
-              >
-                Confirm
-              </Button>
+            <div className="mt-3 flex flex-col gap-2 rounded-md border border-(--border) bg-(--surface-0) p-2.5">
+              <div className="text-[11px] font-medium text-(--text-faint)">Canned Rejection Templates:</div>
+              <div className="flex flex-wrap gap-1.5">
+                {CANNED_REJECTION_REASONS.map((tmpl) => (
+                  <button
+                    key={tmpl}
+                    type="button"
+                    onClick={() => {
+                      setReason(tmpl);
+                      reasonRef.current?.focus();
+                    }}
+                    className={`rounded border px-2 py-0.5 text-[11px] transition-colors ${
+                      reason === tmpl
+                        ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                        : "border-(--border) bg-(--surface-1) text-(--text-dim) hover:bg-(--surface-2)"
+                    }`}
+                  >
+                    {tmpl}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-1">
+                <input
+                  ref={reasonRef}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && reason.trim()) reject.mutate({ id: sel.id, why: reason.trim() });
+                    if (e.key === "Escape") setRejecting(false);
+                  }}
+                  placeholder="Reason (required — rejections are audit records)"
+                  className="flex-1 rounded-md border border-(--border-strong) bg-(--surface-1) px-2.5 py-1 text-(--text) outline-none focus:border-(--accent)"
+                />
+                <Button
+                  variant="danger"
+                  disabled={!reason.trim() || reject.isPending}
+                  onClick={() => reject.mutate({ id: sel.id, why: reason.trim() })}
+                >
+                  Confirm
+                </Button>
+                <Button onClick={() => setRejecting(false)}>Cancel</Button>
+              </div>
             </div>
           )}
 

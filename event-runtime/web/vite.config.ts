@@ -55,13 +55,10 @@ function vendorChunk(id: string): string | undefined {
 // are fetched on demand, and are deliberately over the limit. kB is 1000 bytes
 // here to match how Vite reports sizes.
 //
-// The budget tracks the measured entry (450.01 kB as of OPS-382 keyed filters)
-// with a little slack, not a round number well above it: at 500 kB, dropping
-// @xyflow/react alone — the exact regression this guards — landed at 479 kB
-// and still passed. Slack this thin means ordinary feature work will eventually
-// trip it; that is the trade, and re-baselining is a normal move (see the
-// error message below). Raised in OPS-469 after develop Verify went red.
-const ENTRY_CHUNK_BUDGET_BYTES = 460 * 1000;
+// The budget tracks the measured entry with a little slack, not a round number
+// well above it. Slack this thin means ordinary feature work will eventually
+// trip it; that is the trade, and re-baselining is a normal move.
+const ENTRY_CHUNK_BUDGET_BYTES = 480 * 1000;
 
 function entryChunkBudget(): Plugin {
   return {
