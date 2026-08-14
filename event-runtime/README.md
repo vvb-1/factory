@@ -125,9 +125,8 @@ keep a command's whole output (a CI log is useless truncated to the 2000-char
 tail the evidence field keeps).
 
 Retention: artifacts referenced by an accepted result are never deleted, and
-store size/orphan counts appear in `status`. **The weekly prune of unreferenced
-artifacts is currently broken** — `serve` throws a `ReferenceError` before it
-runs (OPS-412) — so nothing is reclaimed until that lands. A run's materialized inputs are capped
+store size/orphan counts appear in `status`. Unreferenced artifacts older than
+7 days are pruned hourly by `serve`. A run's materialized inputs are capped
 (64 MB) so one agent cannot fill the disk another agent then gets called to
 clean up.
 
