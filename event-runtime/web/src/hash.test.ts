@@ -3,12 +3,14 @@ import type { HashWriteScheduler } from "./hash";
 import {
   createHashWriter,
   eventsHash,
+  flushHash,
   hashPath,
   hashProject,
   hashSearch,
   hashView,
   HASH_WRITE_INTERVAL_MS,
   parseHash,
+  setActiveHashWriter,
   shouldReplaceHash,
   withProject,
 } from "./hash";
@@ -263,6 +265,25 @@ describe("createHashWriter", () => {
     writer.replace("#/runs/run_02");
     expect(writes.length).toBe(2);
     expect(writes.at(-1)?.hash).toBe("#/runs/run_02");
+  });
+
+  test("flushHash with no active writer is a safe no-op", () => {
+    setActiveHashWriter(null);
+    expect(() => flushHash()).not.toThrow();
+  });
+
+  test("flushHash with active writer lands buffered value immediately", () => {
+    const { writer, writes } = harness();
+    setActiveHashWriter(writer);
+    writer.replace("#/runs/run_01");
+    writer.replace("#/runs/run_02");
+    expect(writes).toEqual([{ hash: "#/runs/run_01", replace: true }]);
+    flushHash();
+    expect(writes).toEqual([
+      { hash: "#/runs/run_01", replace: true },
+      { hash: "#/runs/run_02", replace: true },
+    ]);
+    setActiveHashWriter(null);
   });
 });
 

@@ -7,7 +7,7 @@
  */
 
 export interface RevealFeedbackInput {
-  kind: "run" | "event";
+  kind: "run" | "event" | "proposal";
   id: string;
   state?: string | null;
   tabChanged: boolean;
@@ -34,4 +34,49 @@ export function formatRevealNotification(input: RevealFeedbackInput): string | n
 
   // filterCleared only
   return `Cleared the filter to show ${kind} ${id}`;
+}
+
+/**
+ * Pure decision helper for filter clearing during a reveal latch (OPS-250, OPS-252).
+ *
+ * Given the filter snapshot at arm time, the current filter state, the empty/default
+ * filter state, and whether the target row is currently visible:
+ * - If visible: keeps all current filters and reports nothing cleared.
+ * - If hidden: clears only those filter fields that match the arm-time snapshot
+ *   (i.e. unchanged by the operator since arming) and differ from emptyValues.
+ *   Any filter modified by the operator after arming is preserved.
+ */
+export function decideRevealFilters<T extends Record<string, unknown>>(
+  snapshot: T,
+  current: T,
+  emptyValues: T,
+  isVisible: boolean,
+): {
+  next: T;
+  cleared: boolean;
+  clearedFields: (keyof T)[];
+} {
+  if (isVisible) {
+    return {
+      next: current,
+      cleared: false,
+      clearedFields: [],
+    };
+  }
+
+  const next = { ...current };
+  const clearedFields: (keyof T)[] = [];
+
+  for (const key of Object.keys(current) as (keyof T)[]) {
+    if (current[key] === snapshot[key] && current[key] !== emptyValues[key]) {
+      next[key] = emptyValues[key];
+      clearedFields.push(key);
+    }
+  }
+
+  return {
+    next,
+    cleared: clearedFields.length > 0,
+    clearedFields,
+  };
 }

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { goPrefixActive } from "./goSequence";
 import type { HashWriter } from "./hash";
-import { createHashWriter, hashSearch, parseHash, shouldReplaceHash } from "./hash";
+import {
+  createHashWriter,
+  hashSearch,
+  parseHash,
+  setActiveHashWriter,
+  shouldReplaceHash,
+} from "./hash";
 
 /** Open-modal depth: global list-navigation keys stand down while a dialog is up. */
 export const modal = { depth: 0 };
@@ -40,6 +46,7 @@ export function useHashRoute(): [string[], (path: string) => void] {
     });
   }
   useEffect(() => {
+    setActiveHashWriter(writer.current);
     const onChange = () => {
       // Back, or a view writing window.location.hash directly: the URL is
       // authoritative again, and a buffered write would clobber it.
@@ -48,10 +55,23 @@ export function useHashRoute(): [string[], (path: string) => void] {
       setRoute(read());
       setHash(window.location.hash);
     };
+    const onPageHide = () => {
+      writer.current?.flush();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        writer.current?.flush();
+      }
+    };
     window.addEventListener("hashchange", onChange);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.removeEventListener("hashchange", onChange);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       writer.current?.cancel();
+      setActiveHashWriter(null);
     };
   }, []);
   const navigate = useCallback((path: string) => {
