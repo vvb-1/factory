@@ -163,9 +163,9 @@ fi
 FRESH=0
 [[ -f "$HOME_DIR/runtime.db" ]] || FRESH=1
 
-ADAPTER_ARG=""
+ADAPTER_ARGS=()
 if [[ "$LIVE" -ne 1 ]]; then
-  ADAPTER_ARG="--adapter-override fake"
+  ADAPTER_ARGS=(--adapter-override fake)
 fi
 
 # Last line of defence before bind: if the chosen port already serves a
@@ -180,15 +180,9 @@ if pid_alive "$RUN_DIR/serve.pid"; then
   info "event runtime already running (pid $(cat "$RUN_DIR/serve.pid"), port $API_PORT)"
 else
   info "starting event runtime on $API_PORT ($([[ "$LIVE" -eq 1 ]] && echo "live adapters" || echo "fake adapter"), home $HOME_DIR)"
-  # exec so the subshell BECOMES bun: $! is the daemon's real pid, and no
-  # bash wrapper lingers holding the caller's stdout open.
-  (
-    cd "$WT" || exit 1
-    exec env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
-      bun event-runtime/cli.mjs serve ${ADAPTER_ARG} \
-      </dev/null >"$RUN_DIR/serve.log" 2>&1
-  ) &
-  echo $! >"$RUN_DIR/serve.pid"
+  spawn_daemon "$RUN_DIR/serve.pid" "$RUN_DIR/serve.log" "$WT" \
+    env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
+    bun event-runtime/cli.mjs serve ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"}
 fi
 
 # Wait for /health BEFORE starting the worker: on a fresh DB, serve and worker
@@ -223,26 +217,18 @@ if pid_alive "$RUN_DIR/worker.pid"; then
   info "worker already running (pid $(cat "$RUN_DIR/worker.pid"))"
 else
   info "starting worker ($([[ "$LIVE" -eq 1 ]] && echo "live adapters" || echo "fake adapter"))"
-  (
-    cd "$WT" || exit 1
-    exec env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
-      bun event-runtime/cli.mjs work ${ADAPTER_ARG} \
-      </dev/null >"$RUN_DIR/worker.log" 2>&1
-  ) &
-  echo $! >"$RUN_DIR/worker.pid"
+  spawn_daemon "$RUN_DIR/worker.pid" "$RUN_DIR/worker.log" "$WT" \
+    env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
+    bun event-runtime/cli.mjs work ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"}
 fi
 
 if pid_alive "$RUN_DIR/web.pid"; then
   info "web server already running (pid $(cat "$RUN_DIR/web.pid"), port $WEB_PORT)"
 else
   info "starting web server on $WEB_PORT"
-  (
-    cd "$WT" || exit 1
-    exec env FACTORY_EVENT_PORT="$API_PORT" FACTORY_EVENT_WEB_PORT="$WEB_PORT" \
-      bun event-runtime/web/serve.mjs \
-      </dev/null >"$RUN_DIR/web.log" 2>&1
-  ) &
-  echo $! >"$RUN_DIR/web.pid"
+  spawn_daemon "$RUN_DIR/web.pid" "$RUN_DIR/web.log" "$WT" \
+    env FACTORY_EVENT_PORT="$API_PORT" FACTORY_EVENT_WEB_PORT="$WEB_PORT" \
+    bun event-runtime/web/serve.mjs
 fi
 
 # ------------------------------------------------------------------- seed ---

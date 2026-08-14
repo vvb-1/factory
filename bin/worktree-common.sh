@@ -50,6 +50,36 @@ event_home() { printf '%s/.factory/event-runtime' "$1"; }
 
 pid_alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
+# Spawn a detached daemon in its own process group (setsid) so it survives the
+# parent shell exiting (OPS-306).
+spawn_daemon() { # <pidfile> <logfile> <workdir> <cmd...>
+  local pidfile="$1" logfile="$2" workdir="$3"
+  shift 3
+  mkdir -p "$(dirname "$pidfile")" "$(dirname "$logfile")"
+  local pid
+  pid=$(
+    SPAWN_CWD="$workdir" SPAWN_LOG="$logfile" bun --eval '
+      import { spawn } from "node:child_process";
+      import { openSync } from "node:fs";
+      const out = openSync(process.env.SPAWN_LOG, "a");
+      const args = process.argv.slice(1);
+      const child = spawn(args[0], args.slice(1), {
+        cwd: process.env.SPAWN_CWD,
+        detached: true,
+        stdio: ["ignore", out, out],
+        env: process.env,
+      });
+      child.unref();
+      process.stdout.write(String(child.pid));
+    ' "$@"
+  )
+  if [[ "$pid" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$pid" >"$pidfile"
+  else
+    die "failed to spawn daemon: $*"
+  fi
+}
+
 # Persist / restore the ports this checkout actually bound (OPS-460).
 read_ports() { # <worktree> → prints "api web"
   local f api="" web="" k v
