@@ -1,37 +1,49 @@
 #!/usr/bin/env bun
 /**
- * Seed a fake-adapter event runtime with one of everything (OPS-217).
+ * Seed a fake-adapter event runtime with one of everything (OPS-217, OPS-422).
  *
  * Drives real state through the real surfaces — intake, planner, watched
- * approval, worker, verifier — never the database. Requires `serve
- * --adapter-override fake` running on the target port; refuses to seed a
- * runtime whose adapter is real (approving would spawn real agents).
+ * approval, worker, verifier — with rich fixture coverage across agents,
+ * workspace types, recommendation chains, artifacts, and lifecycle edges.
+ * Requires `serve --adapter-override fake` running on the target port; refuses
+ * to seed a runtime whose adapter is real (approving would spawn real agents).
  *
- * Terminal states produced, via the fake adapter's input modes
- * (lib/adapters/fake.mjs — behavior selects on payload.repos[0]):
+ * Scenarios & terminal states produced:
  *
- *   COMPLETED   repos:["ok"]               result + receipt + evidence
- *   REFUSED     repos:["refuse"]           typed refusal (needs_human)
- *   FAILED      repos:["crash"]            nonzero exit
- *   FAILED      repos:["invalid-artifact"] output-contract violation
- *   CANCELLED   rejected proposal
- *   RUNNING     repos:["hang"]             approved LAST — the single worker
- *                                          sits on it until the spec timeout
- *                                          (600s), then TIMED_OUT
+ *   COMPLETED   status-report (repos:["ok"])             result + receipt + evidence
+ *   COMPLETED   status-report (repos:["with-artifact"])   declared report.txt + transcript
+ *   COMPLETED   status-report (repos:["trace-flood"])     >100 live trace events
+ *   REFUSED     status-report (repos:["refuse"])          typed refusal (needs_human)
+ *   FAILED      status-report (repos:["crash"])           attempt: 2 (multi-attempt retry)
+ *   FAILED      status-report (repos:["invalid-artifact"]) output-contract violation
+ *   CANCELLED   rejected proposal                         closed via reject verb
+ *   CANCELLED   operator cancelled                        cancelled via cancel verb
  *
- * Plus two open proposals: one approvable (`run`) and one `human_needed`
- * (empty repos fails the input schema's minItems).
+ *   CI Chain (3 hops with causationId & artifacts workspace):
+ *     COMPLETED ci-log-capture@1                          captured ci-log artifact
+ *     COMPLETED ci-doctor@2                               artifacts workspace, verdict FLAKE
+ *     COMPLETED ci-rerun@1                                command adapter follow-up
  *
- * Some fixtures carry a second repo — a real project name from the serve
- * process's GET /repos (the same list the UI's project tabs use), appended
- * after the mode. Names come from the server on purpose, not from the
- * seeder's local config/repos.yaml, so a seed aimed at a runtime serving a
- * different checkout still tags with names the tabs can offer (OPS-387).
- * Only appended, never substituted: repos[0] stays the mode.
+ *   Triage Chain (repository workspace with repoPin):
+ *     COMPLETED triage-scan@1                             repository workspace, pinned sha
+ *
+ *   Open proposals:
+ *     - open approvable (`run`)
+ *     - open human_needed (empty repos fails schema minItems)
+ *     - open TTL-expired proposal
+ *     - open triage-apply@1 from chain
+ *
+ *   Admitted & anomaly events:
+ *     - dead-lettered event (lastPlanError present)
+ *     - duplicate delivery suppression
+ *
+ *   RUNNING     repos:["hang"] (approved LAST — single worker holds until 600s timeout)
  *
  *   bun event-runtime/demo/seed.mjs [--port 7381] [--prefix demo]
  */
 import { apiClient } from "../lib/client.mjs";
+import { openDb } from "../lib/db.mjs";
+import { dbPath, runtimeHome } from "../lib/config.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => {
@@ -49,9 +61,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Real project names for the tags, from the serve process's GET /repos — the
  * same list the UI's project tabs offer. Optional by design: a missing or
  * unreadable registry (HTTP 500) must still seed a full demo set, so it
- * costs the tags, not the run. Resolved after the health check; calling the
- * API at module scope would surface a connection error instead of the
- * "no control API" message.
+ * costs the tags, not the run.
  */
 async function projectNames() {
   try {
@@ -66,11 +76,11 @@ async function projectNames() {
 /** repos[0] must stay the fake adapter's mode — the project name only trails it. */
 const tag = (mode, project) => (project ? [mode, project] : [mode]);
 
-function envelope(id, repos) {
+function envelope(id, repos, type = "factory.status-report.requested") {
   return {
     schemaVersion: "factory.event/v1",
     eventId: `${prefix}-${id}`,
-    type: "factory.status-report.requested",
+    type,
     source: "demo-seed",
     subject: "factory",
     occurredAt: new Date().toISOString(),
@@ -90,20 +100,32 @@ async function until(what, fn, { timeoutMs = 30_000, everyMs = 300 } = {}) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function openProposalFor(eventId) {
-  return until(`proposal for ${eventId}`, async () => {
+async function openProposalFor(eventId, { agent } = {}) {
+  return until(`proposal for ${agent ?? eventId}`, async () => {
     const { proposals } = await client.proposals();
-    return proposals.find(
-      (p) => p.status === "open" && (p.spec?.idempotencyKey?.includes(eventId) || p.reason?.includes(eventId)),
-    );
+    return proposals.find((p) => {
+      if (p.status !== "open") return false;
+      if (agent) return p.spec?.agent === agent || p.agent === agent;
+      return (
+        p.spec?.idempotencyKey?.includes(eventId) ||
+        p.reason?.includes(eventId) ||
+        p.eventId?.includes(eventId) ||
+        (p.spec?.input && JSON.stringify(p.spec.input).includes(eventId))
+      );
+    });
   });
 }
 
 /** human_needed proposals carry no spec — match via their admitted event. */
-async function humanNeededProposal() {
-  return until("human_needed proposal", async () => {
+async function humanNeededProposal(eventId) {
+  return until(`human_needed proposal${eventId ? ` for ${eventId}` : ""}`, async () => {
     const { proposals } = await client.proposals();
-    return proposals.find((p) => p.status === "open" && p.decision === "human_needed");
+    return proposals.find(
+      (p) =>
+        p.status === "open" &&
+        p.decision === "human_needed" &&
+        (!eventId || p.eventId?.includes(eventId) || p.reason?.includes(eventId)),
+    );
   });
 }
 
@@ -144,14 +166,14 @@ if (probe.spec?.adapter !== "fake") {
 await client.reject(probe.id, "adapter probe — not part of the demo set");
 
 const [projectA, projectB = projectA] = await projectNames();
-log(projectA ? `project tags: ${[...new Set([projectA, projectB])].join(", ")}` : "project tags: none");
+const primaryProject = projectA || "factory";
+log(projectA ? `project tags: ${[...new Set([projectA, projectB])].join(", ")}` : "project tags: none (fallback: factory)");
 
-// Quick terminals first: the single worker handles them one per tick. The
-// hang run is approved last so it never blocks the rest of the seed.
-// Only some fixtures get a project tag: a tab that matches every row proves
-// nothing about filtering.
+// 1. Quick terminals for status-report (ephemeral workspace)
 const terminals = [
   { id: "completed", repos: tag("ok", projectA), wanted: "COMPLETED" },
+  { id: "with-artifact", repos: tag("with-artifact", projectA), wanted: "COMPLETED" },
+  { id: "trace-flood", repos: ["trace-flood"], wanted: "COMPLETED" },
   { id: "refused", repos: ["refuse"], wanted: "REFUSED" },
   { id: "failed-crash", repos: ["crash"], wanted: "FAILED" },
   { id: "failed-contract", repos: ["invalid-artifact"], wanted: "FAILED" },
@@ -161,25 +183,134 @@ for (const t of terminals) {
   const proposal = await openProposalFor(`${prefix}-${t.id}`);
   await client.approve(proposal.id);
   await runTerminal(proposal.runId, t.wanted);
-  log(`${proposal.runId} → ${t.wanted}`);
+  log(`${proposal.runId} → ${t.wanted} (${t.id})`);
 }
 
-// CANCELLED via the reject verb.
+// 2. Multi-attempt run: retry the failed-crash run (attempt: 2)
+const failedCrashProposal = await until("failed-crash run for retry", async () => {
+  const { runs } = await client.runs("FAILED");
+  return runs.find((r) => r.reasonCode === "agent_exit_1");
+});
+if (failedCrashProposal) {
+  log(`retrying ${failedCrashProposal.runId} with force=true to create attempt 2`);
+  await client.retry(failedCrashProposal.runId, { force: true });
+  await runTerminal(failedCrashProposal.runId, "FAILED");
+  log(`${failedCrashProposal.runId} → FAILED (attempt 2 completed)`);
+}
+
+// 3. CANCELLED via proposal rejection
 await client.replay(envelope("rejected", tag("ok", projectB)));
 const rejected = await openProposalFor(`${prefix}-rejected`);
 await client.reject(rejected.id, "demo: rejected on purpose");
 await runTerminal(rejected.runId, "CANCELLED");
 log(`${rejected.runId} → CANCELLED (proposal rejected)`);
 
-// Two open proposals: one approvable, one human_needed (empty repos).
+// 4. CANCELLED via operator cancel
+await client.replay(envelope("cancel-op", tag("ok", projectA)));
+const toCancel = await openProposalFor(`${prefix}-cancel-op`);
+await client.cancel(toCancel.runId, "demo: operator cancelled");
+await runTerminal(toCancel.runId, "CANCELLED");
+log(`${toCancel.runId} → CANCELLED (operator cancelled)`);
+
+// 5. CI Failure Chain scenario: github.workflow-run.failed → ci-log-capture → ci-doctor → ci-rerun
+const ciRunId = 12345;
+const ciEventId = `${prefix}-ci-failed`;
+await client.replay({
+  schemaVersion: "factory.event/v1",
+  eventId: ciEventId,
+  type: "github.workflow-run.failed",
+  source: "github",
+  subject: "ci",
+  occurredAt: new Date().toISOString(),
+  correlationId: ciEventId,
+  payload: { repo: `wm/${primaryProject}`, runId: ciRunId },
+});
+const ciCaptureProposal = await openProposalFor(ciEventId, { agent: "ci-log-capture@1" });
+await client.approve(ciCaptureProposal.id);
+await runTerminal(ciCaptureProposal.runId, "COMPLETED");
+log(`${ciCaptureProposal.runId} → COMPLETED (ci-log-capture@1, emitted ci-log artifact)`);
+
+// Hop 2: ci-doctor@2 (artifacts workspace type with $.artifactHash.ci-log)
+const ciDoctorProposal = await openProposalFor(ciEventId, { agent: "ci-doctor@2" });
+await client.approve(ciDoctorProposal.id);
+await runTerminal(ciDoctorProposal.runId, "COMPLETED");
+log(`${ciDoctorProposal.runId} → COMPLETED (ci-doctor@2, verdict FLAKE, artifacts workspace)`);
+
+// Hop 3: ci-rerun@1 (command adapter follow-up with causationId)
+const ciRerunProposal = await openProposalFor(ciEventId, { agent: "ci-rerun@1" });
+await client.approve(ciRerunProposal.id);
+await runTerminal(ciRerunProposal.runId, "COMPLETED");
+log(`${ciRerunProposal.runId} → COMPLETED (ci-rerun@1, command adapter)`);
+
+// 6. Triage scan scenario: factory.triage.requested (repository workspace type with repoPin)
+const triageEventId = `${prefix}-triage`;
+await client.replay({
+  schemaVersion: "factory.event/v1",
+  eventId: triageEventId,
+  type: "factory.triage.requested",
+  source: "operator",
+  subject: primaryProject,
+  occurredAt: new Date().toISOString(),
+  correlationId: triageEventId,
+  payload: { repo: primaryProject },
+});
+const triageScanProposal = await openProposalFor(triageEventId, { agent: "triage-scan@1" });
+await client.approve(triageScanProposal.id);
+await runTerminal(triageScanProposal.runId, "COMPLETED");
+log(`${triageScanProposal.runId} → COMPLETED (triage-scan@1, repository workspace)`);
+
+// Follow-up triage-apply proposal from chain
+const triageApplyProposal = await openProposalFor(triageEventId, { agent: "triage-apply@1" });
+log(`${triageApplyProposal.id} left open (triage-apply@1 chain recommendation)`);
+
+// 7. Duplicate delivery suppression
+const dupOutcome = await client.replay(envelope("completed", tag("ok", projectA)));
+log(`duplicate admission test: duplicate=${dupOutcome.duplicate}`);
+
+// 8. Open proposals: approvable (`run`), human_needed, and TTL-expired
 await client.replay(envelope("open", tag("ok", projectA)));
 const open = await openProposalFor(`${prefix}-open`);
 log(`${open.id} left open (approvable → instant COMPLETED)`);
+
 await client.replay(envelope("human-needed", []));
-const human = await humanNeededProposal();
+const human = await humanNeededProposal(`${prefix}-human-needed`);
 log(`${human.id} left open (human_needed: ${human.reason})`);
 
-// RUNNING, last: occupies the single worker until the 600s spec timeout.
+// TTL-expired proposal
+await client.replay(envelope("expired", tag("ok", projectA)));
+const expiredProposal = await openProposalFor(`${prefix}-expired`);
+
+// 9. Database state for anomaly fixtures (dead-lettered event & expired proposal timestamp)
+const home = health.env?.home || runtimeHome();
+try {
+  const db = openDb(dbPath(home));
+  // Set expired proposal created_at to 2 hours ago
+  db.query("UPDATE proposals SET created_at = datetime('now', '-2 hours') WHERE id = ?").run(expiredProposal.id);
+  log(`${expiredProposal.id} timestamp updated to 2h ago (TTL-expired proposal anomaly)`);
+
+  // Insert a dead-lettered event directly into events table
+  const deadEventId = `${prefix}-dead-letter`;
+  const deadEnvelope = envelope("dead-letter", tag("ok", projectA));
+  const nowStr = new Date().toISOString();
+  db.query(
+    `INSERT INTO events
+       (source, event_id, type, subject, occurred_at, received_at,
+        correlation_id, causation_id, envelope_json, payload_hash, status, plan_failures, last_plan_error, admitted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dead_lettered', 3, 'simulated planning failure: poison payload', ?)
+     ON CONFLICT(source, event_id) DO UPDATE SET
+       status = 'dead_lettered', plan_failures = 3, last_plan_error = 'simulated planning failure: poison payload'`,
+  ).run(
+    deadEnvelope.source, deadEventId, deadEnvelope.type, deadEnvelope.subject,
+    deadEnvelope.occurredAt, nowStr, deadEnvelope.correlationId, null,
+    JSON.stringify(deadEnvelope), "none", nowStr,
+  );
+  db.close();
+  log(`${deadEventId} inserted as dead_lettered (dead-letter anomaly)`);
+} catch (err) {
+  log(`warning: could not write direct db anomalies (${err.message})`);
+}
+
+// 10. RUNNING, last: occupies worker until 600s timeout
 await client.replay(envelope("running", tag("hang", projectB)));
 const hang = await openProposalFor(`${prefix}-running`);
 await client.approve(hang.id);
@@ -187,10 +318,10 @@ await until(`run ${hang.runId} → RUNNING`, async () => {
   const view = await client.run(hang.runId);
   return view.run.state === "RUNNING" ? view : null;
 });
-log(`${hang.runId} → RUNNING (hang mode; TIMED_OUT after the 600s timeout — or cancel it from the UI)`);
+log(`${hang.runId} → RUNNING (hang mode; TIMED_OUT after 600s timeout)`);
 
-log("done — one of everything:");
+log("done — seeded comprehensive fixture across all agents & states:");
 const { runs } = await client.runs();
-for (const r of runs) log(`  ${r.runId}  ${r.state}  repos:[${(r.repos ?? []).join(", ")}]`);
+for (const r of runs) log(`  ${r.runId}  ${r.state}  agent:${r.agent}  repos:[${(r.repos ?? []).join(", ")}]`);
 const { proposals } = await client.proposals();
-for (const p of proposals) log(`  ${p.id}  ${p.decision} (open)  repos:[${(p.repos ?? []).join(", ")}]`);
+for (const p of proposals) log(`  ${p.id}  ${p.decision} (open)  agent:${p.agent ?? p.spec?.agent}  expired:${p.expired}`);
