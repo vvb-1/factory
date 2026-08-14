@@ -245,18 +245,20 @@ export function RunFull({
               </Section>
 
               <Section title="Lifecycle">
-                <div className="rounded-md border border-(--border) px-3 py-1">
+                <div className="rounded-md border border-(--border) px-3 py-1 text-[12px]">
                   {d.lifecycle.map((e) => (
                     <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                      <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.at}>
+                      <span className="mono w-[64px] shrink-0 text-[11px] text-(--text-faint)" title={e.at}>
                         {new Date(e.at).toLocaleTimeString([], { hour12: false })}
                       </span>
-                      <span className="shrink-0">
-                        {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
+                      <span className="shrink-0 font-medium">
+                        <span className="text-(--text-dim)">{e.from_state ?? "·"}</span>
+                        <span className="mx-1 text-(--text-faint)">→</span>
+                        <StateBadge state={e.to_state} />
                       </span>
-                      <span className="truncate text-(--text-faint)">
-                        <ActorRef actor={e.actor} className="text-[13px]!" />
-                        {e.reason ? ` · ${e.reason}` : ""}
+                      <span className="truncate text-[11.5px] text-(--text-faint)">
+                        <ActorRef actor={e.actor} className="text-[11.5px] mono rounded bg-(--surface-1) px-1.5 py-0.5 border border-(--border)" />
+                        {e.reason ? <span className="ml-1 text-(--text-dim)">· {e.reason}</span> : ""}
                       </span>
                     </div>
                   ))}
@@ -266,17 +268,21 @@ export function RunFull({
               {d.attempts.length > 0 && (
                 <Section title="Attempts">
                   {d.attempts.map((a) => (
-                    <div key={a.attempt} className="mb-1 rounded-md border border-(--border) px-3 py-1.5">
-                      <div className="flex justify-between">
-                        <span>#{a.attempt}</span>
+                    <div key={a.attempt} className="mb-1 rounded-md border border-(--border) bg-(--surface-0) px-3 py-2 text-[12px]">
+                      <div className="flex justify-between font-medium">
+                        <span className="mono text-(--text)">#{a.attempt}</span>
                         <span className="text-(--text-dim)">{a.terminal_state ?? "in flight"}</span>
                       </div>
-                      <div className="mono truncate text-[11px] text-(--text-faint)">
+                      <div className="mono truncate text-[11px] text-(--text-faint) mt-0.5">
                         {a.reason_code ?? ""} {a.workspace_path ?? ""}
                       </div>
-                      <div className="flex items-baseline gap-1.5 truncate text-[11px] text-(--text-faint)">
-                        <span>owner</span>
-                        {a.lease_owner ? <ActorRef actor={a.lease_owner} /> : <span className="mono">unclaimed</span>}
+                      <div className="flex items-baseline gap-1.5 truncate text-[11px] text-(--text-faint) mt-1">
+                        <span className="uppercase text-[10px] tracking-wider text-(--text-faint)">owner</span>
+                        {a.lease_owner ? (
+                          <ActorRef actor={a.lease_owner} className="mono rounded bg-(--surface-1) px-1.5 py-0.5 border border-(--border) text-[11px]" />
+                        ) : (
+                          <span className="mono text-(--text-faint)">unclaimed</span>
+                        )}
                       </div>
                     </div>
                   ))}
