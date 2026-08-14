@@ -31,6 +31,14 @@ jobs:
         with:
           bun-version: latest
 
+      # Web .test.tsx files resolve React's JSX runtime from
+      # event-runtime/web/node_modules. Root `bun test` used to run first, so
+      # those files died with `Cannot find module 'react/jsx-dev-runtime'`
+      # before this install (OPS-384). worktree-up.sh installs web first, which
+      # is why local `bun test event-runtime` was a false green.
+      - name: Install event-runtime/web deps
+        run: cd event-runtime/web && bun install --frozen-lockfile
+
       - name: Collision detection tests
         run: bun test
 
@@ -43,7 +51,7 @@ jobs:
       # Agents already typecheck/build the web UI locally; a green Verify on a
       # TSX PR said nothing about compilation until this step existed (OPS-243).
       - name: Typecheck and build event-runtime/web
-        run: cd event-runtime/web && bun install --frozen-lockfile && bun run build
+        run: cd event-runtime/web && bun run build
 
       - name: Schedule renders
         run: bun deploy/gen.mjs
