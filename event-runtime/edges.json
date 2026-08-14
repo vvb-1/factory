@@ -48,6 +48,44 @@
       }
     }
   },
+  "merge-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "MERGE": {
+        "eventType": "factory.merge-apply.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "plan": "$.artifact.plan"
+        }
+      },
+      "ESCALATE": {
+        "eventType": "factory.merge-escalate.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "summary": "$.artifact.summary"
+        }
+      }
+    }
+  },
+  "ship-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "SHIP": {
+        "eventType": "factory.ship-apply.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "base": "$.artifact.base",
+          "deployBranch": "$.artifact.deployBranch",
+          "headSha": "$.artifact.headSha",
+          "deployHeadSha": "$.artifact.deployHeadSha",
+          "changelog": "$.artifact.changelog",
+          "plan": "$.artifact.plan"
+        }
+      }
+    }
+  },
   "ci-log-capture@1": {
     "recommendationField": "exitCode",
     "edges": {
@@ -57,6 +95,35 @@
           "repo": "$.input.repo",
           "runId": "$.input.runId",
           "logArtifact": "$.artifactHash.ci-log"
+        }
+      }
+    }
+  },
+  "work-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "DISPATCH": {
+        "eventType": "factory.dispatch.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "ticket": "$.artifact.ticket"
+        }
+      }
+    }
+  },
+  "dispatch@1": {
+    "recommendationField": "outcome",
+    "edges": {
+      "PR_OPEN": {
+        "eventType": "factory.work.requested",
+        "input": {
+          "repo": "$.input.repo"
+        }
+      },
+      "NOT_CLAIMED": {
+        "eventType": "factory.work.requested",
+        "input": {
+          "repo": "$.input.repo"
         }
       }
     }

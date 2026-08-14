@@ -1,7 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useListKeys, useNow } from "../hooks";
+import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import {
+  buildSections,
+  cycleColumnSort,
+  flattenSections,
+  grouped,
+  toggleCollapsed,
+  visibleColumns,
+  type DisplayConfig,
+} from "../displayOptions";
+import { DisplayOptions } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import type { Worker } from "../types";
 import type { OperatorContext } from "../context";
@@ -24,26 +34,72 @@ import {
   KV,
   ListEmpty,
   ListPane,
+  GroupHeaderRow,
   Section,
   StateBadge,
+  Th,
   copyLink,
   copyText,
+  shortId,
 } from "../components/ui";
+import { health, WORKER_HUES } from "../workerHealth";
 
-/** Four mutually exclusive tokens; `stale` is the loudest because it is a lie detector. */
-const WORKER_HUES: Record<string, string> = {
-  idle: "var(--hue-ok)",
-  busy: "var(--hue-warn)",
-  stopped: "var(--hue-idle)",
-  stale: "var(--hue-err)",
-};
+export const WORKER_TABS = ["ALL", "LIVE", "STOPPED"] as const;
+export type WorkerTab = (typeof WORKER_TABS)[number];
 
 /**
- * A stale heartbeat outranks whatever the row claims: a stale busy worker is
- * gone, not busy. `listWorkers` never marks a cleanly stopped worker stale, so
- * these four are disjoint.
+ * Live = anything that could still be holding or claiming work: idle, busy, or
+ * stale. Stale belongs here, not with stopped — a stale worker is a problem to
+ * look at, while a cleanly stopped one is history.
  */
-const health = (w: Worker) => (w.stale ? "stale" : w.state);
+export const isLive = (w: Worker) => health(w) !== "stopped";
+
+/** Split the registry into live and stopped, preserving order within each group. */
+export function partitionWorkers(rows: Worker[]): { live: Worker[]; stopped: Worker[] } {
+  const live: Worker[] = [];
+  const stopped: Worker[] = [];
+  for (const w of rows) (isLive(w) ? live : stopped).push(w);
+  return { live, stopped };
+}
+
+/**
+ * The list opens on the workers that matter: live ones when any exist. A fleet
+ * that is all history (or empty) opens on All, so the page never looks blank
+ * while stopped workers hide behind a tab.
+ */
+export const defaultWorkerTab = (rows: Worker[]): WorkerTab =>
+  rows.some(isLive) ? "LIVE" : "ALL";
+
+/** Grouping/ordering/columns for the fleet table (OPS-493). */
+const WORKERS_DISPLAY: DisplayConfig<Worker> = {
+  view: "workers",
+  groups: [
+    {
+      key: "state",
+      label: "State",
+      get: health,
+      order: ["busy", "idle", "stale", "stopped"],
+      hue: WORKER_HUES,
+    },
+    { key: "host", label: "Host", get: (w) => w.host },
+  ],
+  subGroups: ["host", "state"],
+  sorts: [
+    { key: "lastSeen", label: "Last seen", get: (w) => w.lastSeen ?? "", defaultDir: "desc", column: "heartbeat" },
+    { key: "host", label: "Host", get: (w) => w.host, column: "host" },
+    { key: "started", label: "Started", get: (w) => w.startedAt ?? "", defaultDir: "desc" },
+  ],
+  columns: [
+    { key: "worker", label: "Worker", always: true },
+    { key: "host", label: "Host" },
+    { key: "pid", label: "PID" },
+    { key: "state", label: "State" },
+    { key: "labels", label: "Labels" },
+    { key: "adapters", label: "Adapters" },
+    { key: "run", label: "Current run" },
+    { key: "heartbeat", label: "Heartbeat" },
+  ],
+};
 
 /**
  * The distance to the stale threshold, worded the same way in the row and the
@@ -158,23 +214,59 @@ export function Workers({
     [rows],
   );
 
+  const parts = useMemo(() => partitionWorkers(rows), [rows]);
+
+  // `null` = no explicit choice yet: follow the data (live when any worker is
+  // live). The first click pins the tab and the default stops moving under it.
+  const [tabChoice, setTabChoice] = useState<WorkerTab | null>(null);
+  const tab = tabChoice ?? defaultWorkerTab(rows);
+  useTabKeys(WORKER_TABS, tab, setTabChoice);
+
+  // Live before stopped regardless of recency; within a group the registry's
+  // own order stands. Display Options grouping/sorting (OPS-493) applies on
+  // top of whatever the active tab lets through.
+  const byTab = useMemo(
+    () =>
+      tab === "ALL" ? [...parts.live, ...parts.stopped] : tab === "LIVE" ? parts.live : parts.stopped,
+    [tab, parts],
+  );
+
   const [filter, setFilter] = useState("");
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((w) =>
+    if (!q) return byTab;
+    return byTab.filter((w) =>
       [w.workerId, w.host, String(w.pid), health(w), labelText(w.labels), w.adapters.join(","), w.currentRun].some(
         (v) => (v ?? "").toLowerCase().includes(q),
       ),
     );
-  }, [rows, filter]);
+  }, [byTab, filter]);
+
+  // Display options (OPS-493): partition into sections, order inside them,
+  // and feed keyboard navigation only the rows of open sections.
+  const [display, setDisplay] = useDisplayOptions(WORKERS_DISPLAY);
+  const sections = useMemo(
+    () => buildSections(visible, WORKERS_DISPLAY, display),
+    [visible, display],
+  );
+  const flat = useMemo(
+    () => flattenSections(sections, display.collapsed),
+    [sections, display.collapsed],
+  );
+  const cols = visibleColumns(WORKERS_DISPLAY, display);
+  const show = useMemo(() => new Set(cols.map((c) => c.key)), [cols]);
 
   const selectedId = focusWorkerId;
+  // Keyboard index walks the open sections; the detail pane keys off the row
+  // itself so collapsing the group under a selection never closes the pane.
   const selectedIndex = useMemo(
-    () => visible.findIndex((w) => w.workerId === selectedId),
+    () => flat.findIndex((w) => w.workerId === selectedId),
+    [flat, selectedId],
+  );
+  const sel = useMemo(
+    () => (selectedId ? (visible.find((w) => w.workerId === selectedId) ?? null) : null),
     [visible, selectedId],
   );
-  const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
   const selHeartbeat: Heartbeat = sel ? heartbeatOf(sel, now) : { kind: "none" };
 
   useEffect(() => {
@@ -185,10 +277,21 @@ export function Workers({
     if (focusWorkerId) setFilter("");
   }, [focusWorkerId]);
 
+  // Deep link / jump: reveal a focused worker the active tab hides, once per
+  // focus id, so the jump lands without overriding a tab the operator picks later.
+  const jumpedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusWorkerId || jumpedFor.current === focusWorkerId) return;
+    const w = rows.find((r) => r.workerId === focusWorkerId);
+    if (!w) return;
+    jumpedFor.current = focusWorkerId;
+    if (tab !== "ALL" && (tab === "LIVE") !== isLive(w)) setTabChoice("ALL");
+  }, [focusWorkerId, rows, tab]);
+
   useListKeys({
-    count: visible.length,
+    count: flat.length,
     selected: selectedIndex,
-    onSelect: (i) => onSelectWorker(visible[i]?.workerId ?? null),
+    onSelect: (i) => onSelectWorker(flat[i]?.workerId ?? null),
     onClose: () => {
       if (selectedId) onSelectWorker(null);
       else if (filter) setFilter("");
@@ -222,7 +325,32 @@ export function Workers({
           <>
             <h1 className="display mb-4 text-lg font-semibold">Workers</h1>
             <ScopeCaption context={context} surface="fleet" />
-            <div className="mb-3">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label="Worker state">
+                {WORKER_TABS.map((t) => {
+                  const count =
+                    t === "ALL" ? rows.length : t === "LIVE" ? parts.live.length : parts.stopped.length;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === t}
+                      onClick={() => setTabChoice(t)}
+                      title={t === "LIVE" ? "idle, busy, or stale" : t === "STOPPED" ? "cleanly stopped — history" : undefined}
+                      className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                        tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
+                      }`}
+                    >
+                      {t === "ALL" ? "All" : t === "LIVE" ? "Live" : "Stopped"}
+                      {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="ml-auto">
+                <DisplayOptions config={WORKERS_DISPLAY} state={display} onChange={setDisplay} />
+              </span>
               <FilterInput
                 value={filter}
                 onChange={setFilter}
@@ -257,68 +385,124 @@ export function Workers({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Worker</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Host</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">PID</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">State</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Labels</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Adapters</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Current run</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium" title={`Last check-in, and how far that is from the ${HEARTBEAT_STALE_MS / 1000}s stale threshold`}>Heartbeat</th>
+              {cols.map((c) => {
+                const sort = WORKERS_DISPLAY.sorts.find((s) => s.column === c.key);
+                return (
+                  <Th
+                    key={c.key}
+                    label={c.label}
+                    dir={sort && display.sortBy === sort.key ? display.sortDir : null}
+                    naturalDir={sort?.defaultDir}
+                    onSort={sort ? () => setDisplay((s) => cycleColumnSort(WORKERS_DISPLAY, s, c.key)) : undefined}
+                  />
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {visible.map((w, i) => (
-              <tr
-                key={w.workerId}
-                onClick={() => onSelectWorker(w.workerId)}
-                aria-selected={i === selectedIndex}
-                className={`cursor-pointer hover:bg-(--surface-1) ${w.stale ? "row-wash-err" : ""} ${
-                  i === selectedIndex ? "row-selected" : ""
-                }`}
-              >
-                <td
-                  className={`mono max-w-52 truncate border-b border-(--border) px-3 py-1.5 ${
-                    w.state === "stopped" && !w.stale ? "text-(--text-faint)" : ""
-                  }`}
+            {(() => {
+              const renderRow = (w: Worker) => (
+                <tr
+                  key={w.workerId}
+                  onClick={() => onSelectWorker(w.workerId)}
+                  aria-selected={w.workerId === selectedId}
+                  className={`cursor-pointer hover:bg-(--surface-1) ${w.stale ? "row-wash-err" : ""} ${
+                    !isLive(w) ? "opacity-55" : ""
+                  } ${w.workerId === selectedId ? "row-selected" : ""}`}
                 >
-                  {w.workerId}
-                </td>
-                <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{w.host}</td>
-                <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-faint)">{w.pid}</td>
-                <td className="border-b border-(--border) px-3 py-1.5">
-                  <span className="flex items-baseline gap-1.5">
-                    <StateBadge state={health(w)} hues={WORKER_HUES} />
-                    {w.stale && (
-                      <span className="text-[11px] text-(--text-faint)" title="What the worker last reported before its heartbeat stopped">
-                        reported {w.state}
-                      </span>
-                    )}
-                  </span>
-                </td>
-                <td className="max-w-48 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)" title={labelText(w.labels)}>
-                  {labelText(w.labels)}
-                </td>
-                <td className="max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                  {w.adapters.join(", ") || "-"}
-                </td>
-                <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                  {w.currentRun ? (
-                    <JumpLink onClick={() => openRun(w.currentRun!)} title="Open this run">
-                      {w.currentRun}
-                    </JumpLink>
-                  ) : (
-                    "-"
+                  <td
+                    className={`mono max-w-52 truncate border-b border-(--border) px-3 py-1.5 ${
+                      w.state === "stopped" && !w.stale ? "text-(--text-faint)" : ""
+                    }`}
+                    title={w.workerId}
+                  >
+                    {w.workerId}
+                  </td>
+                  {show.has("host") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{w.host}</td>
                   )}
-                </td>
-                <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap tabular-nums text-(--text-faint)">
-                  <HeartbeatCell w={w} now={now} />
-                </td>
-              </tr>
-            ))}
+                  {show.has("pid") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-faint)">{w.pid}</td>
+                  )}
+                  {show.has("state") && (
+                    <td className="border-b border-(--border) px-3 py-1.5">
+                      <span className="flex items-baseline gap-1.5">
+                        <StateBadge state={health(w)} hues={WORKER_HUES} />
+                        {w.stale && (
+                          <span className="text-[11px] text-(--text-faint)" title="What the worker last reported before its heartbeat stopped">
+                            reported {w.state}
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                  )}
+                  {show.has("labels") && (
+                    <td className="max-w-48 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)" title={labelText(w.labels)}>
+                      {labelText(w.labels)}
+                    </td>
+                  )}
+                  {show.has("adapters") && (
+                    <td
+                      className="max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)"
+                      title={w.adapters.length > 0 ? w.adapters.join(", ") : undefined}
+                    >
+                      {w.adapters.join(", ") || "-"}
+                    </td>
+                  )}
+                  {show.has("run") && (
+                    <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                      {w.currentRun ? (
+                        <JumpLink onClick={() => openRun(w.currentRun!)} title={`Open ${w.currentRun}`}>
+                          {shortId(w.currentRun)}
+                        </JumpLink>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                  )}
+                  {show.has("heartbeat") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap tabular-nums text-(--text-faint)">
+                      <HeartbeatCell w={w} now={now} />
+                    </td>
+                  )}
+                </tr>
+              );
+              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
+              return sections.map((s) => {
+                const closed = display.collapsed.includes(s.key);
+                return (
+                  <Fragment key={s.key}>
+                    <GroupHeaderRow
+                      colSpan={cols.length}
+                      section={s}
+                      collapsed={closed}
+                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                    />
+                    {!closed &&
+                      (s.subsections
+                        ? s.subsections.map((child) => {
+                            const childClosed = display.collapsed.includes(child.key);
+                            return (
+                              <Fragment key={child.key}>
+                                <GroupHeaderRow
+                                  colSpan={cols.length}
+                                  section={child}
+                                  collapsed={childClosed}
+                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
+                                  sub
+                                />
+                                {!childClosed && child.rows.map(renderRow)}
+                              </Fragment>
+                            );
+                          })
+                        : s.rows.map(renderRow))}
+                  </Fragment>
+                );
+              });
+            })()}
             {visible.length === 0 && (
               <ListEmpty
-                colSpan={8}
+                colSpan={cols.length}
                 query={query}
                 filtered={rows.length > 0}
                 noun="workers"
@@ -396,8 +580,8 @@ export function Workers({
               k="currentRun"
               v={
                 sel.currentRun ? (
-                  <JumpLink onClick={() => openRun(sel.currentRun!)} title="Open this run">
-                    {sel.currentRun}
+                  <JumpLink onClick={() => openRun(sel.currentRun!)} title={`Open ${sel.currentRun}`}>
+                    {shortId(sel.currentRun)}
                   </JumpLink>
                 ) : (
                   "-"

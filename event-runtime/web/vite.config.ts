@@ -58,7 +58,9 @@ function vendorChunk(id: string): string | undefined {
 // The budget tracks the measured entry with a little slack, not a round number
 // well above it. Slack this thin means ordinary feature work will eventually
 // trip it; that is the trade, and re-baselining is a normal move.
-const ENTRY_CHUNK_BUDGET_BYTES = 480 * 1000;
+// Re-baselined for OPS-513 (after landing 17+ UI feature wave including autocomplete,
+// bulk actions, breadcrumbs, and live graph overlays): 499.82 kB measured on CI Linux.
+const ENTRY_CHUNK_BUDGET_BYTES = 520 * 1000;
 
 function entryChunkBudget(): Plugin {
   return {

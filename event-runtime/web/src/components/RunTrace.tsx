@@ -506,7 +506,12 @@ export function RunTrace({
   const [expandAll, setExpandAll] = useState<boolean>(false);
   const [search, setSearch] = useState<string>("");
   const [activeMatch, setActiveMatch] = useState<number>(0);
-  const [autoScrollPaused, setAutoScrollPaused] = useState<boolean>(false);
+  const [followLive, setFollowLive] = useState<boolean>(true);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const lastSeenSeqRef = useRef<number>(0);
+  const [activeErrorIdx, setActiveErrorIdx] = useState<number | null>(null);
+  const [jumpCount, setJumpCount] = useState<number>(0);
+  const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(new Set());
 
   const counts = useMemo(() => {
     let tools = 0;
@@ -521,6 +526,8 @@ export function RunTrace({
     }
     return { all: entries.length, tools, reasoning, errors, usage };
   }, [entries]);
+
+  const allErrorEntries = useMemo(() => entries.filter(isErrorKind), [entries]);
 
   const tokenStats = useMemo(() => {
     let promptTokens = 0;
@@ -550,6 +557,25 @@ export function RunTrace({
 
   const tailCut = !full && visibleEntries.length > PANEL_TAIL;
   const shown = tailCut ? visibleEntries.slice(-PANEL_TAIL) : visibleEntries;
+
+  const handleJumpToError = () => {
+    if (allErrorEntries.length === 0) return;
+    const nextIdx = activeErrorIdx === null ? 0 : (activeErrorIdx + 1) % allErrorEntries.length;
+    const target = allErrorEntries[nextIdx];
+    setActiveErrorIdx(nextIdx);
+    setJumpCount((c) => c + 1);
+    if (target) {
+      setExpandedSeqs((prev) => {
+        const next = new Set(prev);
+        next.add(target.seq);
+        return next;
+      });
+      const inShown = shown.some((e) => e.seq === target.seq);
+      if (!inShown) {
+        setFilter(full ? "all" : "errors");
+      }
+    }
+  };
 
   // Waterfall timing calculations:
   const { durations, maxDurationMs } = useMemo(() => {
@@ -596,18 +622,69 @@ export function RunTrace({
     }
   }, [activeMatch, searchMatches]);
 
+  // Track unread entries when paused or update lastSeenSeq when following live
+  useEffect(() => {
+    if (!live) {
+      setUnreadCount(0);
+      return;
+    }
+    if (followLive) {
+      setUnreadCount(0);
+      lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    } else {
+      const count = entries.filter((e) => e.seq > lastSeenSeqRef.current).length;
+      setUnreadCount(count);
+    }
+  }, [entries, live, followLive]);
+
+  // Jump to active error match:
+  useEffect(() => {
+    if (activeErrorIdx !== null && allErrorEntries.length > 0 && scroller.current) {
+      const target = allErrorEntries[activeErrorIdx % allErrorEntries.length];
+      if (!target) return;
+      const targetIdx = shown.findIndex((e) => e.seq === target.seq);
+      if (targetIdx !== -1) {
+        const el = scroller.current.querySelector(`[data-trace-idx="${targetIdx}"]`);
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }
+  }, [activeErrorIdx, jumpCount, shown, allErrorEntries]);
+
   // Live auto-scroll:
   useEffect(() => {
-    if (live && !autoScrollPaused && scroller.current) {
+    if (live && followLive && scroller.current) {
       scroller.current.scrollTop = scroller.current.scrollHeight;
     }
-  }, [shown.length, live, autoScrollPaused]);
+  }, [shown.length, live, followLive]);
 
   const onScrollHandler = () => {
     if (!scroller.current || !live) return;
     const { scrollTop, scrollHeight, clientHeight } = scroller.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 30;
-    setAutoScrollPaused(!atBottom);
+    if (atBottom) {
+      if (!followLive) {
+        setFollowLive(true);
+      }
+      setUnreadCount(0);
+      lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    } else {
+      if (followLive) {
+        setFollowLive(false);
+        lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+      }
+    }
+  };
+
+  const jumpToLatest = () => {
+    setFollowLive(true);
+    setUnreadCount(0);
+    lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    if (scroller.current) {
+      scroller.current.scrollTo({
+        top: scroller.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   };
 
   // Multi-attempt runs: divider per attempt (entries are seq-ascending, so
@@ -626,9 +703,35 @@ export function RunTrace({
     <>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         {live ? (
-          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--hue-warn)" }}>
-            <span className="size-1.5 animate-pulse rounded-full" style={{ background: "var(--hue-warn)" }} />
-            live — following the running attempt
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (followLive) {
+                  setFollowLive(false);
+                  lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+                } else {
+                  jumpToLatest();
+                }
+              }}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                followLive
+                  ? "border-(--border-strong) bg-(--surface-2) text-(--text)"
+                  : "border-(--border) bg-(--surface-0) text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text-dim)"
+              }`}
+              title={followLive ? "Auto-scrolling live. Click to pause." : "Auto-scroll paused. Click to follow live."}
+            >
+              <span
+                className={`size-1.5 rounded-full ${followLive ? "animate-pulse" : ""}`}
+                style={{ background: followLive ? "var(--hue-warn)" : "var(--text-faint)" }}
+              />
+              <span>{followLive ? "Follow live" : "Follow live (paused)"}</span>
+            </button>
+            {unreadCount > 0 && !followLive ? (
+              <span className="text-[11px] font-medium" style={{ color: "var(--hue-warn)" }}>
+                {unreadCount} new {unreadCount === 1 ? "event" : "events"}
+              </span>
+            ) : null}
           </div>
         ) : <div />}
 
@@ -662,6 +765,28 @@ export function RunTrace({
           </div>
 
           <div className="flex items-center gap-2">
+            {counts.errors > 0 && (
+              <button
+                type="button"
+                onClick={handleJumpToError}
+                className="flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium transition-colors hover:opacity-80"
+                style={{
+                  borderColor: "var(--hue-err)",
+                  color: "var(--hue-err)",
+                  background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
+                }}
+                title="Jump to next error entry"
+              >
+                <span>⚠️</span>
+                <span>{counts.errors === 1 ? "1 error" : `${counts.errors} errors`}</span>
+                {activeErrorIdx !== null && (
+                  <span className="mono text-[10px] opacity-75">
+                    ({(activeErrorIdx % counts.errors) + 1}/{counts.errors})
+                  </span>
+                )}
+              </button>
+            )}
+
             <div className="flex items-center gap-1 rounded border border-(--border) bg-(--surface-0) px-1.5 py-0.5 text-[11px]">
               <input
                 value={search}
@@ -709,7 +834,10 @@ export function RunTrace({
             </div>
             <button
               type="button"
-              onClick={() => setExpandAll((v) => !v)}
+              onClick={() => {
+                setExpandAll((v) => !v);
+                if (expandAll) setExpandedSeqs(new Set());
+              }}
               className="text-[11px] text-(--text-faint) hover:text-(--text-dim)"
             >
               {expandAll ? "Collapse details" : "Expand details"}
@@ -742,6 +870,10 @@ export function RunTrace({
             {shown.map((e, i) => {
               const isMatch = searchMatches.includes(i);
               const isActiveMatch = searchMatches.length > 0 && searchMatches[activeMatch % searchMatches.length] === i;
+              const isActiveError =
+                activeErrorIdx !== null &&
+                allErrorEntries.length > 0 &&
+                allErrorEntries[activeErrorIdx % allErrorEntries.length]?.seq === e.seq;
               return (
                 <Fragment key={e.seq}>
                   {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
@@ -752,7 +884,13 @@ export function RunTrace({
                   <div
                     data-trace-idx={i}
                     className={`flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0 transition-colors ${
-                      isActiveMatch ? "bg-(--surface-2) -mx-2 px-2 rounded" : isMatch ? "bg-(--surface-1) -mx-2 px-2 rounded" : ""
+                      isActiveError
+                        ? "bg-(--surface-2) -mx-2 px-2 rounded ring-1 ring-(--hue-err)"
+                        : isActiveMatch
+                          ? "bg-(--surface-2) -mx-2 px-2 rounded"
+                          : isMatch
+                            ? "bg-(--surface-1) -mx-2 px-2 rounded"
+                            : ""
                     }`}
                   >
                     <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.ts}>
@@ -761,7 +899,7 @@ export function RunTrace({
                     <TraceBody
                       kind={e.kind}
                       p={e.payload ?? {}}
-                      forceOpen={expandAll}
+                      forceOpen={expandAll || expandedSeqs.has(e.seq)}
                       durationMs={durations.get(e.seq)}
                       maxMs={maxDurationMs}
                     />
@@ -771,17 +909,19 @@ export function RunTrace({
             })}
           </div>
 
-          {live && autoScrollPaused && (
+          {live && !followLive && (
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
               <button
                 type="button"
-                onClick={() => {
-                  setAutoScrollPaused(false);
-                  if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-                }}
-                className="rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105"
+                onClick={jumpToLatest}
+                className="flex items-center gap-1.5 rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
               >
-                ↓ New trace events below
+                <span>⬇</span>
+                <span>
+                  {unreadCount > 0
+                    ? `New activity (${unreadCount}) — Jump to latest`
+                    : "Jump to latest"}
+                </span>
               </button>
             </div>
           )}

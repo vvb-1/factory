@@ -1,12 +1,8 @@
 import { Dialog } from "./ui";
 import { NAV } from "../nav";
 
-const ROWS: { keys: string; does: string }[] = [
+const ACTIONS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
-  {
-    keys: `g → ${NAV.map((n) => n.go).join(" / ")}`,
-    does: NAV.map((n) => n.label).join(" / "),
-  },
   { keys: "i", does: "inject event" },
   { keys: "/", does: "focus filter (Events, if none on this view)" },
   { keys: "j k  ↑↓", does: "move list (or graph) selection" },
@@ -25,14 +21,42 @@ const ROWS: { keys: string; does: string }[] = [
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Keyboard" onClose={onClose}>
-      <div className="text-[12px] text-(--text-dim)">
-        {ROWS.map((r) => (
-          <div key={r.keys} className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0">
-            <span className="mono text-(--text)">{r.keys}</span>
-            <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
+      <div className="space-y-5 text-[12px] text-(--text-dim)">
+        <section aria-label="Navigation chords">
+          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+            Navigation chords
           </div>
-        ))}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4">
+            {NAV.map((n) => (
+              <div
+                key={n.key}
+                className="flex items-baseline justify-between gap-2 border-b border-(--border) py-1.5"
+              >
+                <span className="mono text-(--text)">g {n.go}</span>
+                <span className="text-right text-(--text-faint)">{n.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section aria-label="Actions">
+          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+            Actions
+          </div>
+          <div>
+            {ACTIONS.map((r) => (
+              <div
+                key={r.keys}
+                className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
+              >
+                <span className="mono text-(--text)">{r.keys}</span>
+                <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </Dialog>
   );
 }
+

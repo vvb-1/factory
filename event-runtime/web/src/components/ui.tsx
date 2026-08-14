@@ -1,13 +1,18 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { modal, useNow } from "../hooks";
+import { modal, useFocusReturn, useNow } from "../hooks";
+import type { Section, SortDir } from "../displayOptions";
 import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
 import { flushHash } from "../hash";
 import {
   type FilterChipToken,
+  type FilterFacets,
   type FilterQuery,
+  type FilterSuggestion,
   chipHelp,
   chipLabel,
   filterHint,
+  getActiveFilterToken,
+  getFilterSuggestions,
   removeFilterToken,
 } from "../filterQuery";
 
@@ -49,6 +54,34 @@ export const DECISION_HUES: Record<string, string> = {
   human_needed: "var(--hue-warn)",
   noop: "var(--hue-idle)",
 };
+
+/**
+ * Returns the matching theme hue for a facet value (states, statuses, decisions).
+ */
+export const getValueHue = (_field: string, value: string): string | undefined => {
+  const norm = value.trim();
+  return (
+    STATE_HUES[norm.toUpperCase()] ??
+    EVENT_STATUS_HUES[norm.toLowerCase()] ??
+    PROPOSAL_STATUS_HUES[norm.toLowerCase()] ??
+    DECISION_HUES[norm.toLowerCase()]
+  );
+};
+
+/**
+ * Short display form of a prefixed id: `run_ec9c87f9-…` → `run_ec9c87f9`
+ * (WM-96). Keeps the type prefix up to the first `_` plus the first 8
+ * characters of the body — enough to tell runs apart at a glance. Ids without
+ * a prefix, or already at most 8 characters past it, come back unchanged, so
+ * short human-written ids never lose information. Callers must carry the full
+ * id in a `title` (and keep copy/open verbs on the full id).
+ */
+export function shortId(id: string): string {
+  const sep = id.indexOf("_");
+  if (sep === -1) return id;
+  const body = id.slice(sep + 1);
+  return body.length <= 8 ? id : id.slice(0, sep + 1) + body.slice(0, 8);
+}
 
 export function copyText(text: string, label: string) {
   navigator.clipboard.writeText(text);
@@ -99,51 +132,159 @@ function FilterToken({
 }
 
 /**
- * The list filter box. Pass `query` (parsed by the view, which is the only
- * thing that knows its own facets) to get the keyed syntax: the text stays
- * authoritative and the chips are what it parsed to, so editing the box and
- * dismissing a chip can never disagree about the current filter.
+ * The list filter box with facet autocomplete dropdown. Pass `query` or `facets`
+ * to get keyed syntax autocompletion and chip management.
  */
-export function FilterInput({
+export function FilterInput<T = unknown, C = unknown>({
   value,
   onChange,
   placeholder,
   label,
   query,
+  facets,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   label: string;
   query?: FilterQuery;
+  facets?: FilterFacets<T, C>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const hintId = useId();
+  const listboxId = useId();
   const [hint, setHint] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(false);
+  const [cursorPos, setCursorPos] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
   const chips = query?.chips ?? [];
   const hintText = query ? filterHint(query) : "";
+
+  const safeCursor = Math.min(cursorPos, value.length);
+  const activeToken = useMemo(() => {
+    return getActiveFilterToken(value, safeCursor);
+  }, [value, safeCursor]);
+
+  const suggestions = useMemo(() => {
+    if (!facets && !query) return [];
+    return getFilterSuggestions(activeToken.raw, facets, query, getValueHue);
+  }, [activeToken.raw, facets, query]);
+
+  const showPopover = isFocused && !isDismissed && (facets != null || query != null) && suggestions.length > 0;
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [suggestions]);
+
+  useEffect(() => {
+    if (showPopover && listRef.current) {
+      const activeEl = listRef.current.querySelector<HTMLElement>(`[aria-selected="true"]`);
+      activeEl?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex, showPopover]);
+
+  const updateCursor = () => {
+    if (inputRef.current) {
+      setCursorPos(inputRef.current.selectionStart ?? 0);
+    }
+  };
+
+  const applySuggestion = (s: FilterSuggestion) => {
+    const token = getActiveFilterToken(value, safeCursor);
+    const before = value.slice(0, token.start);
+    const after = value.slice(token.end);
+    const nextValue = before + s.insertText + after;
+    const nextCursor = token.start + s.insertText.length;
+    onChange(nextValue);
+    setCursorPos(nextCursor);
+    setIsDismissed(false);
+    setSelectedIndex(0);
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(nextCursor, nextCursor);
+      }
+    });
+  };
+
   // Dismissal rewrites the query text, so focus returns to the box: the next
   // keystroke — or Esc — lands where the operator thinks it is.
   const rewrite = (next: string) => {
     onChange(next);
     inputRef.current?.focus();
   };
+
   return (
     <>
       <span className="relative inline-flex w-56 shrink-0">
         <input
           ref={inputRef}
           data-view-filter
-          value={value}
+          role="combobox"
+          aria-expanded={showPopover}
+          aria-autocomplete="list"
+          aria-controls={showPopover ? listboxId : undefined}
+          aria-activedescendant={showPopover && suggestions[selectedIndex] ? `${listboxId}-opt-${selectedIndex}` : undefined}
           aria-describedby={query ? hintId : undefined}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setHint(true)}
-          onBlur={() => setHint(false)}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setCursorPos(e.target.selectionStart ?? 0);
+            setIsDismissed(false);
+          }}
+          onFocus={(e) => {
+            setIsFocused(true);
+            setHint(true);
+            setCursorPos(e.target.selectionStart ?? 0);
+            setIsDismissed(false);
+          }}
+          onBlur={() => {
+            setIsFocused(false);
+            setHint(false);
+          }}
+          onClick={updateCursor}
+          onKeyUp={updateCursor}
+          onSelect={updateCursor}
           onKeyDown={(e) => {
-            if (e.key !== "Escape") return;
-            e.preventDefault();
-            if (value) onChange("");
-            else e.currentTarget.blur();
+            if (showPopover) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSelectedIndex((prev) => (prev + 1) % suggestions.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                if (suggestions[selectedIndex]) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  applySuggestion(suggestions[selectedIndex]);
+                  return;
+                }
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDismissed(true);
+                return;
+              }
+            } else if (e.key === "ArrowDown" && suggestions.length > 0 && isDismissed) {
+              e.preventDefault();
+              setIsDismissed(false);
+              return;
+            }
+
+            if (e.key === "Escape") {
+              e.preventDefault();
+              if (value) onChange("");
+              else e.currentTarget.blur();
+            }
           }}
           placeholder={placeholder}
           aria-label={label}
@@ -157,17 +298,58 @@ export function FilterInput({
             /
           </kbd>
         )}
-        {/* Syntax on `/`, not on hover — the operators who need it reached
-            this box with a keystroke. It floats over the table rather than
-            taking a row, so focusing the filter never moves the rows. Right-
-            aligned and wider than the box: Runs parks the input at the far
-            end of the tab row, and a box-width column of wrapping text is
-            unreadable. */}
+        {showPopover && (
+          <ul
+            ref={listRef}
+            id={listboxId}
+            role="listbox"
+            aria-label="Filter suggestions"
+            className="absolute top-full left-0 z-30 mt-1 max-h-60 w-64 overflow-auto rounded-md border border-(--border-strong) bg-(--surface-1) p-1 text-[12px] shadow-xl outline-none"
+          >
+            {suggestions.map((s, idx) => (
+              <li
+                key={s.id}
+                id={`${listboxId}-opt-${idx}`}
+                role="option"
+                aria-selected={idx === selectedIndex}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  applySuggestion(s);
+                }}
+                className={`flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 select-none ${
+                  idx === selectedIndex
+                    ? "bg-(--surface-3) text-(--text)"
+                    : "text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+                }`}
+              >
+                <span className="flex min-w-0 items-center gap-1.5 truncate">
+                  {s.hue && (
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ background: s.hue }}
+                    />
+                  )}
+                  <span
+                    className={`mono truncate ${
+                      s.kind === "facet" ? "font-semibold text-(--accent)" : ""
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </span>
+                <span className="mono shrink-0 truncate text-[10px] text-(--text-faint)">
+                  {s.kind === "facet" ? "facet" : s.field || s.description}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
         {query && (
           <span
             id={hintId}
             className={
-              hint && !value
+              hint && !value && !showPopover
                 ? "absolute top-full right-0 z-20 mt-1 w-72 rounded-md border border-(--border-strong) bg-(--surface-2) px-2 py-1 text-[11px] text-(--text-faint)"
                 : "sr-only"
             }
@@ -235,18 +417,29 @@ export function DetailPane({
   widthClass,
   title,
   actions,
+  close,
   children,
 }: {
   widthClass: string;
   title: ReactNode;
   actions: ReactNode;
+  /** Escape hatch pinned at the top-right, outside the wrapping action row,
+   *  so it stays visible and clickable no matter how many actions the view
+   *  stacks up or how narrow the panel gets (WM-97). */
+  close?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <aside className={`${widthClass} flex min-h-0 shrink-0 flex-col border-l border-(--border) bg-(--surface-1)`}>
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-(--border) px-4 py-3">
-        <div className="display min-w-0 truncate text-[14px] font-semibold">{title}</div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">{actions}</div>
+      <div className="shrink-0 border-b border-(--border) px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="display min-w-0 flex-1 truncate text-[14px] font-semibold">{title}</div>
+          {close != null && <div className="shrink-0">{close}</div>}
+        </div>
+        {/* Own row under the title, and no shrink-0: the actions must be free
+            to wrap when the panel is narrower than the button row, instead of
+            crushing the title or clipping past the panel edge (WM-97). */}
+        <div className="mt-2 flex flex-wrap justify-end gap-1.5">{actions}</div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
     </aside>
@@ -287,6 +480,108 @@ export function ListEmpty({
           <div className="mt-2 text-[11px]">{ESC_CLEARS_FILTER}</div>
         )}
         {action && !query.isPending && !query.isError && !filtered && <div className="mt-3">{action}</div>}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * One sticky header cell (OPS-493). All wired views share this so the group
+ * header rows below can pin at exactly `top-7` — the cell is a fixed h-7 and
+ * the hairline is a shadow, not a border, so the offset never drifts by 1px.
+ * With `onSort` the label is a button cycling natural → reversed → API order.
+ */
+export function Th({
+  label,
+  align,
+  dir,
+  naturalDir,
+  onSort,
+}: {
+  label: string;
+  align?: "right";
+  dir?: SortDir | null;
+  /** What the first click will do — the hover hint must not promise "↑" on a newest-first column. */
+  naturalDir?: SortDir;
+  onSort?: () => void;
+}) {
+  const alignCls = align === "right" ? "text-right" : "text-left";
+  const base = `sticky top-0 z-10 h-7 bg-(--surface-0) px-3 font-medium whitespace-nowrap shadow-[inset_0_-1px_0_var(--border)] ${alignCls}`;
+  if (!onSort) return <th className={base}>{label}</th>;
+  return (
+    <th aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : undefined} className={`${base} p-0`}>
+      <button
+        type="button"
+        onClick={onSort}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.stopPropagation()}
+        title={`Sort by ${label.toLowerCase()}`}
+        className={`group/th inline-flex h-7 w-full cursor-pointer items-center gap-1 px-3 font-medium transition-colors hover:text-(--text) ${align === "right" ? "justify-end" : ""} ${dir ? "text-(--text)" : ""}`}
+      >
+        {label}
+        <span
+          aria-hidden
+          className={`text-[9px] transition-opacity ${dir ? "opacity-100" : "opacity-0 group-hover/th:opacity-50"}`}
+        >
+          {(dir ?? naturalDir ?? "asc") === "desc" ? "↓" : "↑"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+/**
+ * A Linear-style section header row: chevron, state dot, label, count. The
+ * whole band is one button (Enter/Space toggle for free, `aria-expanded` for
+ * screen readers); it pins just under the `Th` row while its section scrolls.
+ * Sub-group headers indent and give up stickiness — two pinned tiers fight.
+ */
+export function GroupHeaderRow({
+  colSpan,
+  section,
+  collapsed,
+  onToggle,
+  sub,
+}: {
+  colSpan: number;
+  section: Section<unknown>;
+  collapsed: boolean;
+  onToggle: () => void;
+  sub?: boolean;
+}) {
+  const hue = section.hue ?? "var(--text-faint)";
+  return (
+    <tr>
+      <td colSpan={colSpan} className={`p-0 ${sub ? "" : "sticky top-7 z-[5]"}`}>
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.stopPropagation()}
+          className={`flex w-full cursor-pointer items-center gap-2 border-b border-(--border) bg-(--surface-1) px-3 text-left transition-colors hover:bg-(--surface-2) ${
+            sub ? "h-7 pl-8" : "h-8"
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`text-[9px] text-(--text-faint) transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
+          >
+            ▶
+          </span>
+          {!sub && (
+            <span
+              aria-hidden
+              className="size-2 rounded-full"
+              style={{ background: hue, boxShadow: `0 0 0 3px color-mix(in oklch, ${hue} 18%, transparent)` }}
+            />
+          )}
+          <span className={`font-medium ${sub ? "text-[11.5px] text-(--text-dim)" : "text-[12px] text-(--text)"}`}>
+            {section.label}
+          </span>
+          <span className="tabular-nums text-[11px] text-(--text-faint)">{section.count}</span>
+          {collapsed && section.count > 0 && (
+            <span className="ml-auto pr-1 text-[10px] text-(--text-faint)">collapsed</span>
+          )}
+        </button>
       </td>
     </tr>
   );
@@ -348,22 +643,40 @@ export function StatTile({
 export function JumpLink({
   children,
   onClick,
+  href,
   title,
   className,
 }: {
   children: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
   title?: string;
   className?: string;
 }) {
+  const cls = `mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`;
+  if (href != null) {
+    return (
+      <a
+        href={href}
+        className={cls}
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
   return (
     <button
       type="button"
-      className={`mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`}
+      className={cls}
       title={title}
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        onClick?.();
       }}
     >
       {children}
@@ -454,6 +767,11 @@ function dismissToast(id: string) {
   const next = activeToasts.filter((t) => t.id !== id);
   if (next.length === activeToasts.length) return;
   activeToasts = next;
+  toastListeners.forEach((l) => l(activeToasts));
+}
+
+export function clearToasts() {
+  activeToasts = [];
   toastListeners.forEach((l) => l(activeToasts));
 }
 
@@ -695,13 +1013,13 @@ export function Dialog({
   wide?: boolean;
   extraWide?: boolean;
 }) {
+  useFocusReturn();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useEffect(() => {
     modal.depth += 1;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
       else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
@@ -713,7 +1031,6 @@ export function Dialog({
     return () => {
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
-      previous?.focus();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose lives in the ref
   }, []);
@@ -927,3 +1244,42 @@ export function VerbError({ error }: { error: unknown }) {
     </div>
   );
 }
+
+/** Floating bulk action bar that pins above the bottom edge when items are selected. */
+export function BulkActionBar({
+  count,
+  onClear,
+  children,
+}: {
+  count: number;
+  onClear?: () => void;
+  children: ReactNode;
+}) {
+  if (count <= 0) return null;
+  return (
+    <div
+      role="toolbar"
+      aria-label="Bulk actions"
+      className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-(--border-strong) bg-(--surface-1) px-4 py-2.5 shadow-2xl backdrop-blur-sm"
+    >
+      <div className="flex items-center gap-2 text-[12px] font-medium text-(--text)">
+        <span className="tabular-nums font-semibold">{count}</span> selected
+      </div>
+      <div className="h-4 w-px bg-(--border)" />
+      <div className="flex items-center gap-2">{children}</div>
+      {onClear && (
+        <>
+          <div className="h-4 w-px bg-(--border)" />
+          <button
+            type="button"
+            onClick={onClear}
+            className="cursor-pointer text-[11px] text-(--text-faint) hover:text-(--text)"
+          >
+            Clear
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+

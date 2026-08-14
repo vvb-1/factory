@@ -202,9 +202,36 @@ export function Agents({
               v={`${sel.workspace.type}${sel.workspace.retainOnFailure ? " · retain on failure" : ""}`}
             />
             <KV k="capabilities" v={caps(sel)} />
+            <KV k="hosts" v={sel.hosts && sel.hosts.length > 0 ? sel.hosts.join(", ") : "-"} />
+            <KV k="command" v={sel.command && sel.command.length > 0 ? sel.command.join(" ") : "-"} />
+            <KV
+              k="actionRegistry"
+              v={
+                sel.actionRegistry && Object.keys(sel.actionRegistry).length > 0
+                  ? Object.keys(sel.actionRegistry).join(", ")
+                  : "-"
+              }
+            />
             <KV k="timeout" v={sel.limits.timeout_seconds != null ? `${sel.limits.timeout_seconds}s` : "-"} />
             <KV k="attempts" v={String(sel.limits.attempts ?? "-")} />
           </Section>
+
+          {sel.command && (
+            <Section title="Command argv">
+              <div className="mb-1.5 flex justify-end">
+                <Button onClick={() => copyText(sel.command!.join(" "), "command")}>Copy command</Button>
+              </div>
+              <JsonBlock value={sel.command} />
+            </Section>
+          )}
+
+          {sel.actionRegistry && (
+            <Section
+              title={`Action registry${sel.hosts && sel.hosts.length > 0 ? ` · hosts ${sel.hosts.join(", ")}` : ""}`}
+            >
+              <JsonBlock value={sel.actionRegistry} />
+            </Section>
+          )}
 
           <Section title={`Prompt · ${sel.promptFile}`}>
             <div className="mb-1.5 flex justify-end">

@@ -1,7 +1,8 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
-import { act, cleanup, render } from "@testing-library/react";
-import { Countdown, notify, ToastContainer } from "./ui";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { Button, clearToasts, Countdown, DetailPane, FilterInput, getValueHue, notify, shortId, ToastContainer } from "./ui";
+import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 
 function stackOf(r: ReturnType<typeof render>): HTMLElement {
   const parent = r.getByRole("status").parentElement;
@@ -15,16 +16,30 @@ function classes(el: HTMLElement): string[] {
 
 beforeEach(() => {
   jest.useFakeTimers();
+  clearToasts();
 });
 
 afterEach(() => {
-  // activeToasts in ui.tsx is module-scoped with no exported reset. Drain the
-  // 3s dismiss timeouts so leftover toasts cannot leak into the next test.
-  act(() => {
-    jest.runOnlyPendingTimers();
-  });
+  clearToasts();
   jest.useRealTimers();
   cleanup();
+});
+
+describe("shortId (WM-96)", () => {
+  test("shortens a prefixed UUID id to the prefix plus the first 8 body characters", () => {
+    expect(shortId("run_ec9c87f9-4c1d-4f4a-9d7e-2c2f3a1b0c9d")).toBe("run_ec9c87f9");
+    expect(shortId("worker_0f3b2a1c-9e8d-4b7a-8c6d-5e4f3a2b1c0d")).toBe("worker_0f3b2a1c");
+  });
+
+  test("returns ids whose body is already 8 characters or fewer unchanged", () => {
+    expect(shortId("run_failed_1")).toBe("run_failed_1");
+    expect(shortId("run_a")).toBe("run_a");
+  });
+
+  test("returns ids without a prefix unchanged", () => {
+    expect(shortId("plainid-with-no-underscore")).toBe("plainid-with-no-underscore");
+    expect(shortId("")).toBe("");
+  });
 });
 
 describe("ToastContainer", () => {
@@ -123,3 +138,181 @@ describe("Countdown", () => {
     expect(el.getAttribute("title")).toBe(new Date(new Date(createdAt).getTime() + ttlSeconds * 1000).toISOString());
   });
 });
+
+describe("DetailPane", () => {
+  // WM-97: with six actions in the Runs toolbar the old single-row header
+  // grew past the panel edge and clipped Close off entirely. Close now rides
+  // a dedicated non-wrapping slot next to the title; the other actions live
+  // in a row that is allowed to wrap. jsdom does no layout, so these assert
+  // the structure that produces that behavior, plus that Close stays wired.
+
+  function renderPane(onClose: () => void) {
+    return render(
+      <DetailPane
+        widthClass="w-[460px]"
+        title={<span>run_0000</span>}
+        actions={
+          <>
+            <Button onClick={() => {}}>Open in tab</Button>
+            <Button onClick={() => {}}>Expand</Button>
+            <Button onClick={() => {}}>Copy id</Button>
+            <Button onClick={() => {}}>Copy CLI</Button>
+            <Button onClick={() => {}}>Copy link</Button>
+          </>
+        }
+        close={<Button onClick={onClose}>Close</Button>}
+      >
+        <div>body</div>
+      </DetailPane>,
+    );
+  }
+
+  test("renders Close and fires its handler even with many actions present", () => {
+    const onClose = jest.fn();
+    const r = renderPane(onClose);
+    const close = r.getByText("Close");
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("pins Close outside the wrapping action row, in a non-shrinking slot", () => {
+    const r = renderPane(() => {});
+    const close = r.getByText("Close");
+    const actionRow = r.getByText("Copy link").parentElement;
+    if (!actionRow) throw new Error("action row is missing");
+    // Close must not be a sibling inside the wrapping row, or wrapping order
+    // could push it below the fold with everything else.
+    expect(actionRow.contains(close)).toBe(false);
+    expect(classes(actionRow)).toContain("flex-wrap");
+    // shrink-0 on the row is what defeated flex-wrap originally: the row then
+    // keeps its max-content width and overflows instead of wrapping.
+    expect(classes(actionRow)).not.toContain("shrink-0");
+    const closeSlot = close.parentElement;
+    if (!closeSlot) throw new Error("close slot is missing");
+    expect(classes(closeSlot)).toContain("shrink-0");
+  });
+
+  test("omits the close slot when no close action is given", () => {
+    const r = render(
+      <DetailPane widthClass="w-[440px]" title="t" actions={<Button onClick={() => {}}>Copy id</Button>}>
+        <div>body</div>
+      </DetailPane>,
+    );
+    expect(r.queryByText("Close")).toBeNull();
+  });
+});
+
+describe("getValueHue", () => {
+  test("returns matching hues for states, decisions, and statuses", () => {
+    expect(getValueHue("state", "failed")).toBe("var(--hue-err)");
+    expect(getValueHue("state", "COMPLETED")).toBe("var(--hue-ok)");
+    expect(getValueHue("state", "RUNNING")).toBe("var(--hue-warn)");
+    expect(getValueHue("decision", "run")).toBe("var(--hue-info)");
+    expect(getValueHue("status", "admitted")).toBe("var(--hue-info)");
+  });
+});
+
+describe("FilterInput autocomplete (OPS-506)", () => {
+  function renderFilter(props: {
+    value?: string;
+    onChange?: (v: string) => void;
+    query?: ReturnType<typeof parseFilterQuery>;
+    facets?: typeof RUN_FACETS;
+  } = {}) {
+    const { value = "", onChange = () => {}, query, facets = RUN_FACETS } = props;
+    const parsed = query ?? parseFilterQuery(value, facets);
+    return render(
+      <FilterInput
+        value={value}
+        onChange={onChange}
+        placeholder="Filter runs"
+        label="Filter runs"
+        query={parsed}
+        facets={facets}
+      />,
+    );
+  }
+
+  test("shows suggestions dropdown when focused and detects active token", () => {
+    const r = renderFilter({ value: "" });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const listbox = r.getByRole("listbox");
+    expect(listbox).toBeTruthy();
+    expect(r.getByText("state:")).toBeTruthy();
+    expect(r.getByText("agent:")).toBeTruthy();
+    expect(r.getByText("is:stale")).toBeTruthy();
+  });
+
+  test("suggests available enum values with hues when typing facet value", () => {
+    const r = renderFilter({ value: "state:" });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const listbox = r.getByRole("listbox");
+    expect(listbox).toBeTruthy();
+    const failedOption = r.getByText("failed");
+    expect(failedOption).toBeTruthy();
+  });
+
+  test("navigates suggestions with ArrowDown / ArrowUp and selects with Enter", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "st", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const options = r.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("state:");
+  });
+
+  test("selects active suggestion with Tab", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "state:fa", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(onChange).toHaveBeenCalledWith("state:failed ");
+  });
+
+  test("Esc dismisses dropdown, subsequent Esc clears filter", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "state:fa", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    expect(r.queryByRole("listbox")).toBeTruthy();
+
+    // First Esc: dismisses popover
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(r.queryByRole("listbox")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+
+    // Second Esc: clears filter
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  test("clicking a suggestion item selects it and updates input value", () => {
+    const onChange = jest.fn();
+    const r = renderFilter({ value: "", onChange });
+    const input = r.getByRole("combobox");
+    fireEvent.focus(input);
+
+    const agentOpt = r.getByText("agent:");
+    fireEvent.mouseDown(agentOpt);
+    expect(onChange).toHaveBeenCalledWith("agent:");
+  });
+});
+

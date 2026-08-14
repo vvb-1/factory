@@ -1,7 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useListKeys, useNow, useTabKeys } from "../hooks";
+import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import {
+  buildSections,
+  cycleColumnSort,
+  flattenSections,
+  grouped,
+  toggleCollapsed,
+  visibleColumns,
+  type DisplayConfig,
+} from "../displayOptions";
+import { DisplayOptions } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import type { Proposal } from "../types";
 import type { OperatorContext } from "../context";
@@ -12,6 +22,7 @@ import { SpecDiff } from "../components/SpecDiff";
 import { decideRevealFilters } from "../reveal";
 import {
   Ago,
+  BulkActionBar,
   Button,
   Countdown,
   DECISION_HUES,
@@ -26,14 +37,76 @@ import {
   ListEmpty,
   notify,
   PROPOSAL_STATUS_HUES,
+  GroupHeaderRow,
   Section,
   StateBadge,
+  Th,
   VerbError,
   copyText,
   copyLink,
 } from "../components/ui";
 
 const PROPOSAL_TABS = ["open", "history"] as const;
+
+const ttlExpiry = (p: Proposal) => new Date(p.created_at).getTime() + p.ttl_seconds * 1000;
+
+/** Grouping/ordering/columns per tab (OPS-493) — two views, two persisted keys. */
+const OPEN_DISPLAY: DisplayConfig<Proposal> = {
+  view: "proposals-open",
+  groups: [
+    {
+      key: "decision",
+      label: "Decision",
+      get: (p) => p.decision,
+      order: ["run", "human_needed", "noop"],
+      hue: DECISION_HUES,
+    },
+    { key: "agent", label: "Agent", get: (p) => p.agent ?? "" },
+  ],
+  subGroups: ["agent", "decision"],
+  sorts: [
+    { key: "created", label: "Created", get: (p) => p.created_at, defaultDir: "desc", column: "created" },
+    { key: "ttl", label: "Time left", get: ttlExpiry, column: "ttl" },
+    { key: "agent", label: "Agent", get: (p) => p.agent ?? "", column: "agent" },
+  ],
+  columns: [
+    { key: "agent", label: "Agent", always: true },
+    { key: "decision", label: "Decision" },
+    { key: "ttl", label: "TTL" },
+    { key: "origin", label: "Origin" },
+    { key: "created", label: "Created" },
+    { key: "reason", label: "Reason" },
+  ],
+};
+
+const HISTORY_DISPLAY: DisplayConfig<Proposal> = {
+  view: "proposals-history",
+  groups: [
+    {
+      key: "status",
+      label: "Status",
+      get: (p) => p.status,
+      order: ["approved", "rejected", "superseded", "resolved"],
+      hue: PROPOSAL_STATUS_HUES,
+    },
+    { key: "agent", label: "Agent", get: (p) => p.agent ?? "" },
+  ],
+  subGroups: ["agent", "status"],
+  sorts: [
+    { key: "decided", label: "Decided", get: (p) => p.decided_at ?? "", defaultDir: "desc", column: "decided" },
+    { key: "created", label: "Created", get: (p) => p.created_at, defaultDir: "desc", column: "created" },
+    { key: "agent", label: "Agent", get: (p) => p.agent ?? "", column: "agent" },
+  ],
+  columns: [
+    { key: "agent", label: "Agent", always: true },
+    { key: "status", label: "Status" },
+    { key: "decidedBy", label: "Decided by" },
+    { key: "decided", label: "Decided" },
+    { key: "origin", label: "Origin" },
+    { key: "created", label: "Created" },
+    { key: "reason", label: "Reason" },
+  ],
+};
 
 /**
  * Proposals (webui spec §4.2) — the watched-approval centerpiece. The full
@@ -136,6 +209,14 @@ export function Proposals({
   const [replan, setReplan] = useState<{ before: Proposal; after: Proposal } | null>(null);
   const reasonRef = useRef<HTMLInputElement>(null);
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkReason, setBulkReason] = useState("");
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const bulkReasonRef = useRef<HTMLInputElement>(null);
+
   const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
   // The expired chip only exists on Open; History rows have no live TTL. Derive
   // the gate once so the row filter and the empty copy can never disagree.
@@ -151,6 +232,104 @@ export function Proposals({
       return matchesFilterQuery(p, parsed, PROPOSAL_FACETS, { runStates });
     });
   }, [scoped, parsed, expiredFilter, runStates]);
+
+  const actionableVisible = useMemo(
+    () => (tab === "open" ? visible.filter((p) => p.status === "open") : []),
+    [tab, visible],
+  );
+  const allActionableSelected =
+    actionableVisible.length > 0 && actionableVisible.every((p) => selectedIds.has(p.id));
+  const someActionableSelected =
+    actionableVisible.some((p) => selectedIds.has(p.id)) && !allActionableSelected;
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someActionableSelected;
+    }
+  }, [someActionableSelected]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allActionableSelected) {
+        actionableVisible.forEach((p) => next.delete(p.id));
+      } else {
+        actionableVisible.forEach((p) => next.add(p.id));
+      }
+      return next;
+    });
+  };
+
+  const selectedRows = useMemo(
+    () => rows.filter((p) => selectedIds.has(p.id)),
+    [rows, selectedIds],
+  );
+  const approvableSelected = useMemo(
+    () => selectedRows.filter((p) => p.status === "open" && p.decision === "run" && !staleState(p)),
+    [selectedRows, runStates],
+  );
+  const rejectableSelected = useMemo(
+    () => selectedRows.filter((p) => p.status === "open"),
+    [selectedRows],
+  );
+
+  const handleBulkApprove = async () => {
+    if (!approvableSelected.length) return;
+    setBulkApproving(true);
+    let ok = 0;
+    let replanned = 0;
+    let err = 0;
+    for (const p of approvableSelected) {
+      try {
+        const o = await api.approve(p.id);
+        if (o.approved && o.runId) {
+          ok++;
+          onRunQueued(o.runId);
+        } else if (o.replanned && o.proposal) {
+          replanned++;
+        }
+      } catch {
+        err++;
+      }
+    }
+    invalidate();
+    setSelectedIds(new Set());
+    setBulkApproving(false);
+    if (ok) notify(`Approved ${ok} proposal${ok === 1 ? "" : "s"}`, "ok");
+    if (replanned) notify(`${replanned} proposal${replanned === 1 ? "" : "s"} expired and re-planned`, "info");
+    if (err) notify(`Failed to approve ${err} proposal${err === 1 ? "" : "s"}`, "err");
+  };
+
+  const handleBulkReject = async () => {
+    const why = bulkReason.trim();
+    if (!rejectableSelected.length || !why) return;
+    setBulkRejecting(true);
+    let ok = 0;
+    let err = 0;
+    for (const p of rejectableSelected) {
+      try {
+        await api.reject(p.id, why);
+        ok++;
+      } catch {
+        err++;
+      }
+    }
+    invalidate();
+    setSelectedIds(new Set());
+    setBulkRejecting(false);
+    setBulkRejectOpen(false);
+    setBulkReason("");
+    if (ok) notify(`Rejected ${ok} proposal${ok === 1 ? "" : "s"}`, "info");
+    if (err) notify(`Failed to reject ${err} proposal${err === 1 ? "" : "s"}`, "err");
+  };
 
   // What the list would show without the text filter. An empty list under the
   // expired chip has two causes and needs two messages: no expired opens exist
@@ -169,9 +348,29 @@ export function Proposals({
   // cell — never doubled — and stays quiet while loading or the API is down.
   const escClearsFilter = filter.trim() !== "" || expiredFilter;
 
+  // Display options (OPS-493): partition into sections, order inside them,
+  // and feed keyboard navigation only the rows of open sections.
+  const displayConfig = tab === "open" ? OPEN_DISPLAY : HISTORY_DISPLAY;
+  const [display, setDisplay] = useDisplayOptions(displayConfig);
+  const sections = useMemo(
+    () => buildSections(visible, displayConfig, display),
+    [visible, displayConfig, display],
+  );
+  const flat = useMemo(
+    () => flattenSections(sections, display.collapsed),
+    [sections, display.collapsed],
+  );
+  const cols = visibleColumns(displayConfig, display);
+  const show = useMemo(() => new Set(cols.map((c) => c.key)), [cols]);
+
   const selectedId = focusProposalId;
-  const selectedIndex = useMemo(() => visible.findIndex((p) => p.id === selectedId), [visible, selectedId]);
-  const sel = selectedIndex >= 0 ? visible[selectedIndex] : null;
+  // Keyboard index walks the open sections; the detail pane keys off the row
+  // itself so collapsing the group under a selection never closes the pane.
+  const selectedIndex = useMemo(() => flat.findIndex((p) => p.id === selectedId), [flat, selectedId]);
+  const sel = useMemo(
+    () => (selectedId ? (visible.find((p) => p.id === selectedId) ?? null) : null),
+    [visible, selectedId],
+  );
 
   useEffect(() => {
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
@@ -226,9 +425,11 @@ export function Proposals({
     );
     if (inOpen && tab !== "open") {
       setTab("open");
+      setSelectedIds(new Set());
     } else if (!inOpen && inHistory && tab === "open") {
       setTab("history");
       setExpiredOnly(false);
+      setSelectedIds(new Set());
     }
   }, [focusProposalId, query.isPending, history.isPending, query.data, history.data, tab]);
 
@@ -237,6 +438,7 @@ export function Proposals({
     setTab("open");
     setExpiredOnly(true);
     setFilter("");
+    setSelectedIds(new Set());
     onFocusExpiredConsumed();
   }, [focusExpired, onFocusExpiredConsumed]);
 
@@ -283,9 +485,9 @@ export function Proposals({
   };
 
   useListKeys({
-    count: visible.length,
+    count: flat.length,
     selected: selectedIndex,
-    onSelect: (i) => onSelectProposal(visible[i]?.id ?? null),
+    onSelect: (i) => onSelectProposal(flat[i]?.id ?? null),
     onClose: () => {
       if (sel) onSelectProposal(null);
       else if (filter || expiredOnly) {
@@ -332,6 +534,7 @@ export function Proposals({
     setTab(t);
     setExpiredOnly(false);
     onSelectProposal(null);
+    setSelectedIds(new Set());
   };
   useTabKeys(PROPOSAL_TABS, tab, selectTab);
 
@@ -383,6 +586,9 @@ export function Proposals({
               )}
             </button>
           )}
+          <span className="ml-auto">
+            <DisplayOptions config={displayConfig} state={display} onChange={setDisplay} />
+          </span>
           {/* Last in the row: the token chips are a full-width item, so anything
               after the filter box would be pushed onto a third line the moment
               a chip appears. */}
@@ -401,48 +607,71 @@ export function Proposals({
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Agent</th>
-              {tab === "open" ? (
-                <>
-                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Decision</th>
-                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">TTL</th>
-                </>
-              ) : (
-                <>
-                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Status</th>
-                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Decided by</th>
-                  <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Decided</th>
-                </>
+              {tab === "open" && (
+                <th className="sticky top-0 z-10 h-7 w-8 bg-(--surface-0) px-3 shadow-[inset_0_-1px_0_var(--border)]">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all proposals"
+                    ref={headerCheckboxRef}
+                    checked={allActionableSelected}
+                    disabled={actionableVisible.length === 0}
+                    onChange={toggleSelectAll}
+                    className="cursor-pointer"
+                  />
+                </th>
               )}
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Origin</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Created</th>
-              <th className="sticky top-0 z-10 bg-(--surface-0) border-b border-(--border) px-3 py-1.5 font-medium">Reason</th>
+              {cols.map((c) => {
+                const sort = displayConfig.sorts.find((s) => s.column === c.key);
+                return (
+                  <Th
+                    key={c.key}
+                    label={c.label}
+                    dir={sort && display.sortBy === sort.key ? display.sortDir : null}
+                    naturalDir={sort?.defaultDir}
+                    onSort={sort ? () => setDisplay((s) => cycleColumnSort(displayConfig, s, c.key)) : undefined}
+                  />
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {visible.map((p, i) => {
+            {(() => {
+              const totalColSpan = cols.length + (tab === "open" ? 1 : 0);
               const tdCls = "border-b border-(--border) px-3 py-1.5";
-              return (
-              <tr
-                key={p.id}
-                onClick={() => onSelectProposal(p.id)}
-                aria-selected={i === selectedIndex}
-                className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${i === selectedIndex ? "row-selected" : ""}`}
-              >
-                <td className={tdCls}>
-                  {p.agent ? (
-                    <JumpLink
-                      onClick={() => onJumpAgent(p.agent!)}
-                      title={`What is ${p.agent}? Open in Agents`}
-                    >
-                      {p.agent}
-                    </JumpLink>
-                  ) : (
-                    "—"
+              const renderRow = (p: Proposal) => (
+                <tr
+                  key={p.id}
+                  onClick={() => onSelectProposal(p.id)}
+                  aria-selected={p.id === selectedId}
+                  className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${p.id === selectedId ? "row-selected" : ""}`}
+                >
+                  {tab === "open" && (
+                    <td className={`${tdCls} w-8`} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select proposal ${p.id}`}
+                        checked={selectedIds.has(p.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleSelect(p.id);
+                        }}
+                        className="cursor-pointer"
+                      />
+                    </td>
                   )}
-                </td>
-                {tab === "open" ? (
-                  <>
+                  <td className={tdCls}>
+                    {p.agent ? (
+                      <JumpLink
+                        onClick={() => onJumpAgent(p.agent!)}
+                        title={`What is ${p.agent}? Open in Agents`}
+                      >
+                        {p.agent}
+                      </JumpLink>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  {show.has("decision") && (
                     <td className={tdCls}>
                       <StateBadge state={p.decision} hues={DECISION_HUES} />
                       {staleState(p) && (
@@ -451,42 +680,85 @@ export function Proposals({
                         </span>
                       )}
                     </td>
+                  )}
+                  {show.has("ttl") && (
                     <td className={tdCls}>
                       <Countdown createdAt={p.created_at} ttlSeconds={p.ttl_seconds} />
                     </td>
-                  </>
-                ) : (
-                  <>
+                  )}
+                  {show.has("status") && (
                     <td className={tdCls}>
                       <StateBadge state={p.status} hues={PROPOSAL_STATUS_HUES} />
                     </td>
+                  )}
+                  {show.has("decidedBy") && (
                     <td className={`${tdCls} text-(--text-dim)`}>{p.decided_by ?? "-"}</td>
+                  )}
+                  {show.has("decided") && (
                     <td className={`${tdCls} text-(--text-faint)`}>
                       <Ago iso={p.decided_at} now={now} />
                     </td>
-                  </>
-                )}
-                <td className={`mono max-w-40 truncate ${tdCls} text-(--text-faint)`} title={originType(p) ?? undefined}>
-                  {p.eventId && p.eventSource ? (
-                    <JumpLink
-                      onClick={() => onJumpEvent(p.eventSource!, p.eventId!)}
-                      title={originType(p) ?? "Open origin event"}
-                    >
-                      {p.eventId}
-                    </JumpLink>
-                  ) : (
-                    (p.eventId ?? "-")
                   )}
-                </td>
-                <td className={`${tdCls} text-(--text-faint)`}>
-                  <Ago iso={p.created_at} now={now} />
-                </td>
-                <td className={`max-w-64 truncate ${tdCls} text-(--text-dim)`}>{p.reason ?? "-"}</td>
-              </tr>
-            );})}
+                  {show.has("origin") && (
+                    <td className={`mono max-w-40 truncate ${tdCls} text-(--text-faint)`} title={originType(p) ?? undefined}>
+                      {p.eventId && p.eventSource ? (
+                        <JumpLink
+                          onClick={() => onJumpEvent(p.eventSource!, p.eventId!)}
+                          title={originType(p) ?? "Open origin event"}
+                        >
+                          {p.eventId}
+                        </JumpLink>
+                      ) : (
+                        (p.eventId ?? "-")
+                      )}
+                    </td>
+                  )}
+                  {show.has("created") && (
+                    <td className={`${tdCls} text-(--text-faint)`}>
+                      <Ago iso={p.created_at} now={now} />
+                    </td>
+                  )}
+                  {show.has("reason") && (
+                    <td className={`max-w-64 truncate ${tdCls} text-(--text-dim)`}>{p.reason ?? "-"}</td>
+                  )}
+                </tr>
+              );
+              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
+              return sections.map((s) => {
+                const closed = display.collapsed.includes(s.key);
+                return (
+                  <Fragment key={s.key}>
+                    <GroupHeaderRow
+                      colSpan={totalColSpan}
+                      section={s}
+                      collapsed={closed}
+                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                    />
+                    {!closed &&
+                      (s.subsections
+                        ? s.subsections.map((child) => {
+                            const childClosed = display.collapsed.includes(child.key);
+                            return (
+                              <Fragment key={child.key}>
+                                <GroupHeaderRow
+                                  colSpan={totalColSpan}
+                                  section={child}
+                                  collapsed={childClosed}
+                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
+                                  sub
+                                />
+                                {!childClosed && child.rows.map(renderRow)}
+                              </Fragment>
+                            );
+                          })
+                        : s.rows.map(renderRow))}
+                  </Fragment>
+                );
+              });
+            })()}
             {visible.length === 0 && (
               <ListEmpty
-                colSpan={tab === "open" ? 6 : 7}
+                colSpan={cols.length + (tab === "open" ? 1 : 0)}
                 query={tab === "open" ? query : history}
                 filtered={unfilteredCount > 0}
                 noun="proposals"
@@ -514,9 +786,9 @@ export function Proposals({
             <>
               <Button onClick={() => copyText(sel.id, "proposal id")}>Copy id</Button>
               <Button onClick={copyLink}>Copy link</Button>
-              <Button onClick={() => onSelectProposal(null)}>Close</Button>
             </>
           }
+          close={<Button onClick={() => onSelectProposal(null)}>Close</Button>}
         >
 
           <Section title="Proposal">
@@ -771,6 +1043,82 @@ export function Proposals({
               }}
             >
               Approve new proposal
+            </Button>
+          </div>
+        </Dialog>
+      )}
+
+      {selectedIds.size > 0 && tab === "open" && (
+        <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
+          <Button
+            variant="primary"
+            disabled={!connected || bulkApproving || approvableSelected.length === 0}
+            onClick={handleBulkApprove}
+          >
+            {bulkApproving ? "Approving…" : `Approve selected (${selectedIds.size})`}
+          </Button>
+          <Button
+            variant="danger"
+            disabled={!connected || bulkRejecting || rejectableSelected.length === 0}
+            onClick={() => {
+              setBulkRejectOpen(true);
+              setBulkReason("");
+            }}
+          >
+            Reject selected ({selectedIds.size})
+          </Button>
+        </BulkActionBar>
+      )}
+
+      {bulkRejectOpen && (
+        <Dialog
+          title={`Reject ${rejectableSelected.length} selected proposal${rejectableSelected.length === 1 ? "" : "s"}`}
+          onClose={() => setBulkRejectOpen(false)}
+        >
+          <div className="mb-3 text-[12px] text-(--text-dim)">
+            Provide a rejection reason for all {rejectableSelected.length} selected proposals:
+          </div>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {CANNED_REJECTION_REASONS.map((tmpl) => (
+              <button
+                key={tmpl}
+                type="button"
+                onClick={() => {
+                  setBulkReason(tmpl);
+                  bulkReasonRef.current?.focus();
+                }}
+                className={`rounded border px-2 py-0.5 text-[11px] transition-colors ${
+                  bulkReason === tmpl
+                    ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                    : "border-(--border) bg-(--surface-1) text-(--text-dim) hover:bg-(--surface-2)"
+                }`}
+              >
+                {tmpl}
+              </button>
+            ))}
+          </div>
+          <input
+            ref={bulkReasonRef}
+            autoFocus
+            value={bulkReason}
+            onChange={(e) => setBulkReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && bulkReason.trim() && !bulkRejecting) {
+                e.preventDefault();
+                handleBulkReject();
+              }
+            }}
+            placeholder="Reason (required — rejections are audit records)"
+            className="w-full rounded-md border border-(--border-strong) bg-(--surface-0) px-2.5 py-1.5 text-[12px] text-(--text) outline-none focus:border-(--accent)"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <Button onClick={() => setBulkRejectOpen(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              disabled={!bulkReason.trim() || bulkRejecting || !connected}
+              onClick={handleBulkReject}
+            >
+              {bulkRejecting ? "Rejecting…" : `Reject ${rejectableSelected.length} proposals`}
             </Button>
           </div>
         </Dialog>

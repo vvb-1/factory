@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api, type ScheduleItem, type TriggerOutcome } from "../api";
 import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { AdmittedEvent, AgentDef } from "../types";
@@ -25,55 +25,23 @@ import {
   notify,
 } from "../components/ui";
 
-export interface ScheduleItem {
-  loop: string;
-  every: string;
-  cadenceSeconds: number | null;
-  eventType: string;
-  approval: "watched" | "auto";
-  catchUp: "none" | "last" | "all";
-  singleton: boolean;
-  enabled: boolean;
-  lastSlot: string | null;
-  lastCompletedSlot: string | null;
-  neverCompleted: boolean;
-  nextDue: string | null;
-  intervalsLate: number | null;
-  stopped: boolean;
-  error: string | null;
-}
+export type { ScheduleItem, TriggerOutcome };
 
-export interface TriggerOutcome {
-  admitted: boolean;
-  duplicate: boolean;
-  eventId: string;
-  proposalId: string | null;
-  runId: string | null;
-  decision: string;
-  reason: string | null;
-  disabled: boolean;
-  loop: string;
-}
-
-async function fetchSchedules(): Promise<{ schedules: ScheduleItem[] }> {
-  const res = await fetch("/api/schedules");
-  if (!res.ok) {
-    throw new Error(`Failed to fetch schedules: HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-async function triggerSchedule(loop: string): Promise<TriggerOutcome> {
-  const res = await fetch(`/api/schedules/${encodeURIComponent(loop)}/run`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok) {
-    const message = json?.error ?? `HTTP ${res.status}`;
-    throw new Error(message);
-  }
-  return json as TriggerOutcome;
+/**
+ * Free-text filter tokens for a schedule row (WM-101). The enabled/state
+ * tokens must match the words rendered in the Enabled and State cells so
+ * filtering by what the operator sees works.
+ */
+export function scheduleFilterTokens(s: ScheduleItem): string[] {
+  return [
+    s.loop,
+    s.every,
+    s.eventType,
+    s.approval,
+    s.catchUp,
+    s.enabled ? "enabled" : "disabled",
+    s.error ? "error" : !s.enabled ? "not scheduled" : s.stopped ? "stopped" : "running",
+  ];
 }
 
 /**
@@ -105,7 +73,7 @@ export function Schedules({
 
   const schedulesQ = useQuery({
     queryKey: ["schedules"],
-    queryFn: fetchSchedules,
+    queryFn: api.schedules,
     refetchInterval: 2000,
   });
   const rows = schedulesQ.data?.schedules ?? [];
@@ -129,9 +97,7 @@ export function Schedules({
     const q = filter.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((s) =>
-      [s.loop, s.every, s.eventType, s.approval, s.catchUp, s.enabled ? "enabled" : "off", s.stopped ? "stopped" : "ok"].some(
-        (v) => (v ?? "").toLowerCase().includes(q),
-      ),
+      scheduleFilterTokens(s).some((v) => (v ?? "").toLowerCase().includes(q)),
     );
   }, [rows, filter]);
 
@@ -159,7 +125,7 @@ export function Schedules({
   const [confirmLoop, setConfirmLoop] = useState<ScheduleItem | null>(null);
 
   const triggerMut = useMutation({
-    mutationFn: (loop: string) => triggerSchedule(loop),
+    mutationFn: (loop: string) => api.triggerSchedule(loop),
     onSuccess: (outcome, loop) => {
       queryClient.invalidateQueries({ queryKey: ["schedules"] });
       queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -235,12 +201,22 @@ export function Schedules({
             <tr className="text-left text-[11px] text-(--text-faint)">
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Loop</th>
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Cadence</th>
-              <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Enabled</th>
+              <th
+                className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium"
+                title="Config flag from event-runtime/schedules.json — edit that file (or use the CLI) to enable/disable; there is no toggle in this UI"
+              >
+                Enabled
+              </th>
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Approval</th>
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Catch-up</th>
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Last fire</th>
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">Next due</th>
-              <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium">State</th>
+              <th
+                className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 font-medium"
+                title="Runtime health of the scheduler loop: running, stopped (no ticks), not scheduled (disabled), or error"
+              >
+                State
+              </th>
               <th className="sticky top-0 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1.5 text-right font-medium">Action</th>
             </tr>
           </thead>
@@ -264,9 +240,19 @@ export function Schedules({
                   </td>
                   <td className="border-b border-(--border) px-3 py-2">
                     {s.enabled ? (
-                      <span className="mono text-[11px] text-(--hue-ok)">enabled</span>
+                      <span
+                        className="mono text-[11px] text-(--hue-ok)"
+                        title="enabled: true in event-runtime/schedules.json — the scheduler will fire this loop on cadence"
+                      >
+                        enabled
+                      </span>
                     ) : (
-                      <span className="mono text-[11px] text-(--text-faint)">off</span>
+                      <span
+                        className="mono text-[11px] text-(--text-faint)"
+                        title="enabled: false in event-runtime/schedules.json — edit that file (or use the CLI) to re-enable"
+                      >
+                        disabled
+                      </span>
                     )}
                   </td>
                   <td className="border-b border-(--border) px-3 py-2">
@@ -317,27 +303,29 @@ export function Schedules({
                       >
                         error
                       </span>
-                    ) : s.stopped ? (
-                      <span
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-err)"
-                        style={{ background: "color-mix(in oklch, var(--hue-err) 14%, transparent)" }}
-                        title={`No ticks for ${s.intervalsLate} intervals`}
-                      >
-                        STOPPED ({s.intervalsLate} late)
-                      </span>
                     ) : !s.enabled ? (
                       <span
                         className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--text-faint)"
                         style={{ background: "var(--surface-2)" }}
+                        title="Not scheduled: enabled: false in event-runtime/schedules.json, so the scheduler loop is not running for this schedule"
                       >
-                        off
+                        not scheduled
+                      </span>
+                    ) : s.stopped ? (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-err)"
+                        style={{ background: "color-mix(in oklch, var(--hue-err) 14%, transparent)" }}
+                        title={`Stopped: enabled: true but the scheduler loop is not ticking — no ticks for ${s.intervalsLate} intervals. Check the event runtime serve process.`}
+                      >
+                        stopped ({s.intervalsLate} late)
                       </span>
                     ) : (
                       <span
                         className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-ok)"
                         style={{ background: "color-mix(in oklch, var(--hue-ok) 14%, transparent)" }}
+                        title="Running: enabled: true and the scheduler loop is ticking on cadence"
                       >
-                        ok
+                        running
                       </span>
                     )}
                   </td>
@@ -362,6 +350,11 @@ export function Schedules({
             )}
           </tbody>
         </table>
+        <div className="px-3 py-2 text-[11px] text-(--text-faint)">
+          Enable or disable schedules in{" "}
+          <code className="mono">event-runtime/schedules.json</code> (or via the CLI) — there is no
+          toggle here.
+        </div>
       </ListPane>
 
       {sel && (
@@ -479,7 +472,9 @@ export function Schedules({
                   sel.enabled ? (
                     <span className="text-(--hue-ok)">true</span>
                   ) : (
-                    <span className="text-(--text-faint)">false (disabled)</span>
+                    <span className="text-(--text-faint)">
+                      false (disabled — re-enable in event-runtime/schedules.json or via the CLI)
+                    </span>
                   )
                 }
               />
@@ -662,8 +657,9 @@ export function Schedules({
                 })()}
                 {!confirmLoop.enabled && (
                   <div className="mt-2 rounded bg-(--surface-3) p-2 text-[12px] text-(--hue-warn)">
-                    Note: This schedule is marked <code className="mono">enabled: false</code> in
-                    registry. Triggering ad-hoc will evaluate the loop once.
+                    Note: This schedule is disabled (<code className="mono">enabled: false</code> in{" "}
+                    <code className="mono">event-runtime/schedules.json</code>), so it is not
+                    scheduled to run on its own. Triggering ad-hoc will evaluate the loop once.
                   </div>
                 )}
               </div>
