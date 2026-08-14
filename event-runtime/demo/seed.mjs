@@ -39,7 +39,7 @@
  *
  *   RUNNING     repos:["hang"] (approved LAST — single worker holds until 600s timeout)
  *
- *   bun event-runtime/demo/seed.mjs [--port 7381] [--prefix demo]
+ *   bun event-runtime/demo/seed.mjs [--port 7381] [--prefix demo] [--poll-ms 300]
  */
 import { apiClient } from "../lib/client.mjs";
 import { openDb } from "../lib/db.mjs";
@@ -52,7 +52,22 @@ const flag = (name) => {
 };
 const port = Number(flag("--port") ?? process.env.FACTORY_EVENT_PORT ?? 7381);
 const prefix = flag("--prefix") ?? "demo";
-const client = apiClient({ port });
+const pollMs = Number(flag("--poll-ms") ?? 300);
+if (!Number.isInteger(pollMs) || pollMs < 25 || pollMs > 5_000) {
+  console.error("seed: --poll-ms must be an integer between 25 and 5000");
+  process.exit(2);
+}
+const rawClient = apiClient({ port });
+const client = new Proxy(rawClient, {
+  get(target, prop) {
+    const value = target[prop];
+    if (typeof value !== "function") return value;
+    if (["approve", "cancel", "reject", "replay", "retry"].includes(prop)) {
+      return (...args) => retryDatabaseLock(`${prop} ${args[0] ?? ""}`, () => value(...args));
+    }
+    return value;
+  },
+});
 
 const log = (line) => console.log(`seed: ${line}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -93,6 +108,20 @@ function envelope(id, repos, type = "factory.status-report.requested") {
  * Replay an envelope, exiting immediately (<1s) if intake detects a duplicate
  * event id/prefix instead of timing out downstream in until() (OPS-464).
  */
+async function retryDatabaseLock(label, operation) {
+  let last;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      return await operation();
+    } catch (err) {
+      last = err;
+      if (!/database is locked/i.test(String(err?.message))) throw err;
+      await sleep(25 * (attempt + 1));
+    }
+  }
+  throw new Error(`${label}: database remained locked after 20 retries (${last?.message ?? "unknown error"})`);
+}
+
 async function replay(env) {
   const res = await client.replay(env);
   if (res.duplicate) {
@@ -108,7 +137,7 @@ async function replay(env) {
 }
 
 /** Poll until `fn` returns truthy, or die loudly — a seed must not half-run. */
-async function until(what, fn, { timeoutMs = 30_000, everyMs = 300 } = {}) {
+async function until(what, fn, { timeoutMs = 30_000, everyMs = pollMs } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = await fn();

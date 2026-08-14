@@ -9,6 +9,19 @@ const CLI = fileURLToPath(new URL("../cli.mjs", import.meta.url));
 const SEED = fileURLToPath(new URL("./seed.mjs", import.meta.url));
 const VERIFY = fileURLToPath(new URL("./verify.mjs", import.meta.url));
 
+const redact = (text) => String(text ?? "")
+  .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/g, "[REDACTED]")
+  .replace(/(authorization\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
+
+function expectSuccess(label, result) {
+  const diagnostic = [
+    `${label} exited ${result.status ?? "null"}${result.signal ? ` (signal ${result.signal})` : ""}`,
+    `stdout:\n${redact(result.stdout)}`,
+    `stderr:\n${redact(result.stderr)}`,
+  ].join("\n");
+  expect(result.status, diagnostic).toBe(0);
+}
+
 describe("seed & re-seed deduplication (OPS-464)", () => {
   let home;
   let port;
@@ -45,10 +58,27 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     }
     expect(up).toBe(true);
 
-    workerChild = spawn("bun", [CLI, "work", "--adapter-override", "fake", "--port", port], {
+    workerChild = spawn("bun", [CLI, "work", "--adapter-override", "fake", "--port", port, "--poll-ms", "40"], {
       env: { ...process.env, FACTORY_EVENT_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    // Health only proves the control API is listening. Seed drives approvals
+    // immediately, so wait for the separate worker process to register first.
+    let workerReady = false;
+    const workerDeadline = Date.now() + 8_000;
+    while (Date.now() < workerDeadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/workers`);
+        const body = await res.json();
+        if (res.ok && Array.isArray(body.workers) && body.workers.length > 0) {
+          workerReady = true;
+          break;
+        }
+      } catch {}
+      await Bun.sleep(50);
+    }
+    expect(workerReady).toBe(true);
   });
 
   afterAll(async () => {
@@ -65,17 +95,19 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
   });
 
   test("initial seed succeeds and verify passes", () => {
-    const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t1"], {
+    const t0 = Date.now();
+    const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t1", "--poll-ms", "40"], {
       encoding: "utf8",
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
-    expect(seedRes.status).toBe(0);
+    expectSuccess("initial seed", seedRes);
+    expect(Date.now() - t0).toBeLessThan(8_000);
 
     const verifyRes = spawnSync("bun", [VERIFY, "--port", port], {
       encoding: "utf8",
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
-    expect(verifyRes.status).toBe(0);
+    expectSuccess("initial verify", verifyRes);
   }, 30_000);
 
   test("re-running seed with the SAME prefix fails immediately (<1s) on duplicate intake", () => {
@@ -92,16 +124,18 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
   }, 10_000);
 
   test("re-seeding with a NEW prefix cleans up hang runs and allows verify to pass", () => {
-    const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t2"], {
+    const t0 = Date.now();
+    const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t2", "--poll-ms", "40"], {
       encoding: "utf8",
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
-    expect(seedRes.status).toBe(0);
+    expectSuccess("re-seed", seedRes);
+    expect(Date.now() - t0).toBeLessThan(8_000);
 
     const verifyRes = spawnSync("bun", [VERIFY, "--port", port], {
       encoding: "utf8",
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
-    expect(verifyRes.status).toBe(0);
+    expectSuccess("re-seed verify", verifyRes);
   }, 30_000);
 });
