@@ -369,5 +369,7 @@ export interface JanitorResult {
   unknown: string[];
   removed: string[];
   refused: { id: string; reason: string }[];
+  held: { id: string; state: string; branch?: string; reason: string }[];
   skippedApplyReason?: string;
 }
+
