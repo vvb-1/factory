@@ -109,4 +109,164 @@ describe("cli", () => {
     }
     expect(health.ok).toBe(true);
   });
+
+  test("work with unknown --adapter-override exits non-zero with error", () => {
+    const r = runCli(["work", "--adapter-override", "nonexistent"]);
+    expect(r.status).not.toBe(0);
+    expect(r.all).toContain('work: unknown --adapter-override "nonexistent"');
+  });
+
+  test("executeClaimed respects adapterOverride option", async () => {
+    const { openDb } = await import("./lib/db.mjs");
+    const { createRun, transition } = await import("./lib/lifecycle.mjs");
+    const { canonicalJson, hashJson } = await import("./lib/canonical.mjs");
+    const { loadRegistry } = await import("./lib/registry.mjs");
+    const { claimNext, executeClaimed } = await import("./lib/worker.mjs");
+
+    const db = openDb(":memory:");
+    const registry = loadRegistry();
+    const input = { repos: ["ok"] };
+    const spec = {
+      schemaVersion: "factory.run-spec/v1",
+      runId: "run_override_test",
+      agent: "factory-status-report@1",
+      input,
+      inputHash: hashJson(input),
+      workspace: { type: "ephemeral", retainOnFailure: true },
+      adapter: "real_adapter",
+      promptVersion: "git:test",
+      policyVersion: "git:test",
+      outputContract: "factory.status-report/v1",
+      capabilities: ["linear:read"],
+      timeoutSeconds: 5,
+      maxAttempts: 1,
+      idempotencyKey: "idem_override_test",
+    };
+
+    createRun(db, {
+      runId: spec.runId,
+      idempotencyKey: spec.idempotencyKey,
+      spec,
+      specJson: canonicalJson(spec),
+      specHash: hashJson(spec),
+      actor: "test",
+      policyVersion: "test",
+      now: Date.now(),
+    });
+    transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now: Date.now() });
+    transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now: Date.now() });
+
+    let realCalled = false;
+    let fakeCalled = false;
+    const mockAdapters = {
+      real_adapter: {
+        execute: async () => {
+          realCalled = true;
+          return { exitCode: 0, timedOut: false };
+        },
+      },
+      fake: {
+        execute: async ({ workspaceDir }) => {
+          fakeCalled = true;
+          const { writeFileSync } = await import("node:fs");
+          const { default: path } = await import("node:path");
+          writeFileSync(
+            path.join(workspaceDir, "result.json"),
+            JSON.stringify({
+              schemaVersion: "factory.agent-result/v1",
+              terminalState: "completed",
+              artifact: { repos: [{ name: "ok", triage: 1, agentReady: 2, inProgress: 0, blocked: 0 }], recommendedAction: "dispatch" },
+              evidence: { queries: ["fake"] },
+            }),
+            "utf8",
+          );
+          return { exitCode: 0, timedOut: false };
+        },
+      },
+    };
+
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-override-"));
+    const claim = claimNext(db, { owner: "w1", adapterOverride: "fake" });
+    expect(claim).toBeTruthy();
+
+    const summary = await executeClaimed(db, registry, mockAdapters, claim, {
+      workspacesRoot: home,
+      adapterOverride: "fake",
+    });
+
+    expect(realCalled).toBe(false);
+    expect(fakeCalled).toBe(true);
+    expect(summary.terminalState).toBe("COMPLETED");
+  });
+
+  test("work process with --adapter-override fake executes a command-adapter run via fake", async () => {
+    const { openDb } = await import("./lib/db.mjs");
+    const { createRun, transition } = await import("./lib/lifecycle.mjs");
+    const { canonicalJson, hashJson } = await import("./lib/canonical.mjs");
+
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-work-proc-"));
+    const db = openDb(path.join(home, "runtime.db"));
+
+    const input = { repos: ["ok"] };
+    const spec = {
+      schemaVersion: "factory.run-spec/v1",
+      runId: "run_work_proc_test",
+      agent: "factory-status-report@1",
+      input,
+      inputHash: hashJson(input),
+      workspace: { type: "ephemeral", retainOnFailure: true },
+      adapter: "command", // real adapter that lacks command template for status-report
+      promptVersion: "git:test",
+      policyVersion: "git:test",
+      outputContract: "factory.status-report/v1",
+      capabilities: ["linear:read"],
+      timeoutSeconds: 5,
+      maxAttempts: 1,
+      idempotencyKey: "idem_work_proc_test",
+    };
+
+    createRun(db, {
+      runId: spec.runId,
+      idempotencyKey: spec.idempotencyKey,
+      spec,
+      specJson: canonicalJson(spec),
+      specHash: hashJson(spec),
+      actor: "test",
+      policyVersion: "test",
+      now: Date.now(),
+    });
+    transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now: Date.now() });
+    transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now: Date.now() });
+    db.close();
+
+    const child = spawn("bun", [CLI, "work", "--adapter-override", "fake"], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("run_work_proc_test → COMPLETED")) {
+      await Bun.sleep(100);
+    }
+
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+
+    expect(out).toContain('adapter override: executing every run with "fake"');
+    expect(out).toContain("claimed run_work_proc_test attempt 1 (factory-status-report@1)");
+    expect(out).toContain("run_work_proc_test → COMPLETED (ok)");
+
+    const verifyDb = openDb(path.join(home, "runtime.db"));
+    const row = verifyDb.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_work_proc_test");
+    expect(row?.state).toBe("COMPLETED");
+    verifyDb.close();
+  });
 });
