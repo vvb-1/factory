@@ -321,8 +321,11 @@ export function createDefaultApiMocks(): Record<ApiKey, any> {
       unknown: [],
       removed: [],
       refused: [],
+      held: [],
     })),
     workers: mock(async (): Promise<{ workers: Worker[] }> => ({ workers: [] })),
+    schedules: mock(async (): Promise<{ schedules: any[] }> => ({ schedules: [] })),
+    triggerSchedule: mock(async (_loop: string) => ({ triggered: true, runId: "run_mock_1" })),
   };
 }
 
