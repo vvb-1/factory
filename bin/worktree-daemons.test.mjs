@@ -102,3 +102,49 @@ test("pid_alive returns true for running process and false for dead process", ()
     rmSync(testDir, { recursive: true, force: true });
   }
 });
+
+test("await_daemon falls back to SIGKILL when process ignores SIGTERM", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "await-daemon-sigkill-test-"));
+  const pidfile = path.join(testDir, "stubborn.pid");
+  const logfile = path.join(testDir, "stubborn.log");
+
+  let pid = null;
+  try {
+    // Spawn a process that ignores SIGTERM
+    const spawnRes = sh(`
+      spawn_daemon "${pidfile}" "${logfile}" "${testDir}" bash -c 'trap "" TERM; while true; do sleep 0.1; done'
+    `);
+    expect(spawnRes.status).toBe(0);
+    expect(existsSync(pidfile)).toBe(true);
+
+    pid = readFileSync(pidfile, "utf8").trim();
+    expect(Number(pid)).toBeGreaterThan(0);
+
+    // Verify stubborn process is running
+    expect(sh(`pid_alive "${pidfile}"`).status).toBe(0);
+
+    // Attempt graceful teardown; should fall back to SIGKILL
+    const stopRes = sh(`
+      term_daemon "${pidfile}" "stubborn daemon"
+      await_daemon "${pidfile}" "stubborn daemon"
+    `);
+    expect(stopRes.status).toBe(0);
+    expect(stopRes.stderr).toContain("ignored SIGTERM — killing");
+    expect(existsSync(pidfile)).toBe(false);
+
+    // Verify process is terminated
+    const checkDead = Bun.spawnSync({
+      cmd: ["kill", "-0", pid],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(checkDead.exitCode).not.toBe(0);
+  } finally {
+    if (pid) {
+      try {
+        process.kill(Number(pid), "SIGKILL");
+      } catch {}
+    }
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
