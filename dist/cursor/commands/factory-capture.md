@@ -19,6 +19,7 @@ If the current working directory matches a repo in `config/repos.yaml`, use its 
 Every issue gets exactly one `source:*` label at creation. This came from a human talking in chat, so default to **`source:human`** — use `source:agent` only if the finding is something an agent noticed while doing other work and the human is just asking to have it recorded. Add the canonical `type:*` and `area:*` labels, and set priority from evidence in the conversation (severity, frequency, blast radius) — never left at default.
 
 Decide **Triage vs. `Todo` + `ai:agent-ready`**:
+
 - Write the full §5 template (Problem & Context, Acceptance Criteria, Source File Pointers, Owned Paths, Verification Command) only if the conversation actually gave enough to fill all five sections for real. A plausible-sounding guess at `Owned Paths` or a Verification Command that hasn't actually been confirmed to run is worse than leaving the ticket in `Triage` — it will pass a template check and still fail at execution time.
 - Otherwise file to **`Triage`** with whatever context exists (Problem & Context at minimum), and say explicitly what's missing before it can be promoted.
 

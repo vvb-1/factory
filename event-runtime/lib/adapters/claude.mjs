@@ -105,11 +105,11 @@ export function buildClaudeArgv({ prompt, def, allowedTools = deriveAllowedTools
   if (allowedTools && allowedTools.length > 0) {
     args.push("--allowedTools", allowedTools.join(","));
   }
+  if (settingsPath) args.push("--settings", settingsPath);
   const budget = def?.limits?.budget_usd;
   if (typeof budget === "number" && Number.isFinite(budget) && budget > 0) {
     args.push("--max-budget-usd", String(budget));
   }
-  if (settingsPath) args.push("--settings", settingsPath);
   if (mcpConfig) {
     args.push("--mcp-config", mcpConfig);
   }

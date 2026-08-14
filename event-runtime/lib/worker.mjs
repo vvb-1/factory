@@ -50,12 +50,17 @@ function finishAttempt(db, runId, attempt, terminalState, reasonCode, now) {
   ).run(terminalState, reasonCode, iso(now), runId, attempt);
 }
 
-/** Fail closed: a read-only repository workspace is acceptable only if clean. */
-export function repositoryIsClean(checkoutPath) {
+/** Include ignored files: an agent must not be able to hide a repository write. */
+export function repositoryStatus(checkoutPath) {
   const result = spawnSync("git", ["-C", checkoutPath, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"], {
     encoding: "utf8",
   });
-  return result.status === 0 && result.stdout.trim() === "";
+  return result.status === 0 ? result.stdout : null;
+}
+
+/** Fail closed: a read-only repository workspace is acceptable only if clean. */
+export function repositoryIsClean(checkoutPath) {
+  return repositoryStatus(checkoutPath)?.trim() === "";
 }
 
 function assertCurrentToken(db, runId, fencingToken) {
@@ -172,6 +177,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
   const retain = spec.workspace?.retainOnFailure === true;
   let workspaceDir = null;
   let checkoutPath = null;
+  let checkoutBaseline = null;
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
 
   const nowFn = typeof now === "function" ? now : () => (now ?? Date.now());
@@ -242,6 +248,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     });
     workspaceDir = created.dir;
     checkoutPath = created.checkout?.path ?? null;
+    checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
     db.query(`UPDATE attempts SET workspace_path = ? WHERE run_id = ? AND attempt = ?`)
       .run(workspaceDir, runId, attempt);
 
@@ -374,7 +381,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     // The settings policy is preventative; this is the independent, durable
     // check before a repository-read run's output can be accepted or emitted.
-    if (checkoutPath && !repositoryIsClean(checkoutPath)) {
+    if (checkoutPath && (checkoutBaseline === null || repositoryStatus(checkoutPath) !== checkoutBaseline)) {
       const reasonCode = "workspace_integrity_violation";
       const res = failTerminal("FAILED", reasonCode, reasonCode);
       destroyWorkspace(workspaceDir, { retain: true, checkout: checkoutPath, repoName });

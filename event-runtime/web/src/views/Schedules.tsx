@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api, type ScheduleItem, type TriggerOutcome } from "../api";
 import { useListKeys, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import type { AdmittedEvent, AgentDef } from "../types";
@@ -25,35 +25,7 @@ import {
   notify,
 } from "../components/ui";
 
-export interface ScheduleItem {
-  loop: string;
-  every: string;
-  cadenceSeconds: number | null;
-  eventType: string;
-  approval: "watched" | "auto";
-  catchUp: "none" | "last" | "all";
-  singleton: boolean;
-  enabled: boolean;
-  lastSlot: string | null;
-  lastCompletedSlot: string | null;
-  neverCompleted: boolean;
-  nextDue: string | null;
-  intervalsLate: number | null;
-  stopped: boolean;
-  error: string | null;
-}
-
-export interface TriggerOutcome {
-  admitted: boolean;
-  duplicate: boolean;
-  eventId: string;
-  proposalId: string | null;
-  runId: string | null;
-  decision: string;
-  reason: string | null;
-  disabled: boolean;
-  loop: string;
-}
+export type { ScheduleItem, TriggerOutcome };
 
 /**
  * Free-text filter tokens for a schedule row (WM-101). The enabled/state
@@ -70,27 +42,6 @@ export function scheduleFilterTokens(s: ScheduleItem): string[] {
     s.enabled ? "enabled" : "disabled",
     s.error ? "error" : !s.enabled ? "not scheduled" : s.stopped ? "stopped" : "running",
   ];
-}
-
-async function fetchSchedules(): Promise<{ schedules: ScheduleItem[] }> {
-  const res = await fetch("/api/schedules");
-  if (!res.ok) {
-    throw new Error(`Failed to fetch schedules: HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-async function triggerSchedule(loop: string): Promise<TriggerOutcome> {
-  const res = await fetch(`/api/schedules/${encodeURIComponent(loop)}/run`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-  });
-  const json = await res.json().catch(() => null);
-  if (!res.ok) {
-    const message = json?.error ?? `HTTP ${res.status}`;
-    throw new Error(message);
-  }
-  return json as TriggerOutcome;
 }
 
 /**
@@ -122,7 +73,7 @@ export function Schedules({
 
   const schedulesQ = useQuery({
     queryKey: ["schedules"],
-    queryFn: fetchSchedules,
+    queryFn: api.schedules,
     refetchInterval: 2000,
   });
   const rows = schedulesQ.data?.schedules ?? [];
@@ -174,7 +125,7 @@ export function Schedules({
   const [confirmLoop, setConfirmLoop] = useState<ScheduleItem | null>(null);
 
   const triggerMut = useMutation({
-    mutationFn: (loop: string) => triggerSchedule(loop),
+    mutationFn: (loop: string) => api.triggerSchedule(loop),
     onSuccess: (outcome, loop) => {
       queryClient.invalidateQueries({ queryKey: ["schedules"] });
       queryClient.invalidateQueries({ queryKey: ["events"] });

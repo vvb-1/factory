@@ -112,14 +112,35 @@ function SlidersIcon() {
   );
 }
 
+export function exportJson(filename: string, data: unknown): void {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  if (typeof window !== "undefined" && typeof document !== "undefined") {
+    const url = typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+      ? URL.createObjectURL(blob)
+      : "";
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (url && typeof URL.revokeObjectURL === "function") {
+      URL.revokeObjectURL(url);
+    }
+  }
+}
+
 export function DisplayOptions<T>({
   config,
   state,
   onChange,
+  onExport,
 }: {
   config: DisplayConfig<T>;
   state: DisplayState;
   onChange: (next: DisplayState | ((state: DisplayState) => DisplayState)) => void;
+  onExport?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -295,15 +316,30 @@ export function DisplayOptions<T>({
             </>
           )}
 
-          {customized && (
-            <div className="mt-3 border-t border-(--border) pt-2 text-right">
-              <button
-                type="button"
-                onClick={() => onChange({ ...defaultDisplayState(config), collapsed: [] })}
-                className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-2) hover:text-(--text)"
-              >
-                Reset to defaults
-              </button>
+          {(onExport || customized) && (
+            <div className="mt-3 flex items-center justify-between border-t border-(--border) pt-2">
+              {onExport ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onExport();
+                  }}
+                  className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] font-medium text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+                >
+                  Export JSON
+                </button>
+              ) : (
+                <span />
+              )}
+              {customized && (
+                <button
+                  type="button"
+                  onClick={() => onChange({ ...defaultDisplayState(config), collapsed: [] })}
+                  className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-2) hover:text-(--text)"
+                >
+                  Reset to defaults
+                </button>
+              )}
             </div>
           )}
         </div>

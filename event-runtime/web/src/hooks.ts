@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "./api";
+import { notify } from "./components/ui";
 import { goPrefixActive } from "./goSequence";
 import {
   loadDisplayState,
@@ -25,7 +27,13 @@ export function keyGuard(e: KeyboardEvent): boolean {
   return modal.depth > 0;
 }
 
-/** Hash routing: "#/runs/run_01" → ["runs", "run_01"]. Default view: overview. */
+/**
+ * Hash routing: "#/runs/run_01" → ["runs", "run_01"]. Default view: overview.
+ *
+ * Query-only hash updates (or same-path query changes) depend on producing a
+ * new route array identity `[...segments]` so React component effects and
+ * state updates trigger re-renders properly.
+ */
 export function useHashRoute(): [string[], (path: string) => void] {
   const read = () => parseHash(window.location.hash);
   const [route, setRoute] = useState<string[]>(read);
@@ -240,4 +248,89 @@ export function useNow(): number {
     return () => clearInterval(t);
   }, []);
   return now;
+}
+
+/**
+ * Preserves the active element on mount and restores keyboard focus on unmount.
+ * Handles edge cases cleanly when the triggering element is no longer in DOM.
+ */
+export function useFocusReturn(): void {
+  const previousRef = useRef<HTMLElement | null>(null);
+  if (previousRef.current === null && typeof document !== "undefined") {
+    previousRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  useEffect(() => {
+    const previous = previousRef.current;
+    return () => {
+      if (previous && (previous.isConnected ?? document.contains(previous))) {
+        try {
+          previous.focus();
+        } catch {
+          // Ignore focus errors on detached/unsupported elements
+        }
+      }
+    };
+  }, []);
+}
+
+export type RequeueTarget = { source: string; eventId: string };
+
+/**
+ * Poll for an open proposal after an event is requeued (OPS-293).
+ * Runs an 8s loop polling `GET /proposals` every 250ms for an open proposal
+ * matching `{ eventSource, eventId }`.
+ * - Match found: calls `onJumpProposal(proposal.id)`.
+ * - Loop expires without match: shows info toast "Requeued <eventId> — no open proposal appeared".
+ * - Error thrown during poll: shows error toast "Requeued <eventId> — could not confirm a proposal appeared".
+ * Cancels polling if the component unmounts before completion.
+ */
+export function useRequeuePoll(onJumpProposal: (proposalId: string) => void) {
+  const alive = useRef(true);
+  const jumpRef = useRef(onJumpProposal);
+  jumpRef.current = onJumpProposal;
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  return useCallback(
+    async (
+      targetOrSource: RequeueTarget | string,
+      maybeEventId?: string,
+    ): Promise<void> => {
+      const { source, eventId } =
+        typeof targetOrSource === "string"
+          ? { source: targetOrSource, eventId: maybeEventId! }
+          : targetOrSource;
+      const deadline = Date.now() + 8000;
+      try {
+        while (alive.current && Date.now() < deadline) {
+          const { proposals } = await api.proposals();
+          const match = proposals.find(
+            (p) => p.eventSource === source && p.eventId === eventId,
+          );
+          if (match && alive.current) {
+            jumpRef.current(match.id);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      } catch {
+        // The requeue itself landed; only the confirmation poll broke, so say
+        // that rather than claiming no proposal appeared.
+        if (alive.current) {
+          notify(`Requeued ${eventId} — could not confirm a proposal appeared`, "err");
+        }
+        return;
+      }
+      if (alive.current) {
+        notify(`Requeued ${eventId} — no open proposal appeared`, "info");
+      }
+    },
+    [],
+  );
 }

@@ -1,3 +1,4 @@
+import "../test-dom";
 import { describe, expect, test } from "bun:test";
 import { layoutGraph, LAYOUT_TIMEOUT_MS, NODE_HEIGHT, NODE_WIDTH } from "./layout";
 import type { CapabilityGraph } from "./model";

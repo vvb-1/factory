@@ -19,6 +19,7 @@ If acceptance criteria or a persona are missing, derive a sensible persona from 
 ## Environment & workspace resolution
 
 Before starting visual verification:
+
 - **Verify workspace root:** Confirm your working directory (`pwd`) matches the active worktree root. Do not run commands or review paths against stale or torn-down worktree paths from prior tasks.
 - **Browser tooling availability:** Verify that the required browser MCP tools (or argent for simulator/Electron) are present and responsive. If browser/simulator tools are missing or fail to start, do **not** fall back to source-code reads to infer UX behavior — emit a `NOT-ASSESSED` verdict immediately detailing what could not be verified.
 

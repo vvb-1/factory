@@ -5,6 +5,7 @@ import { api } from "../api";
 import { GO_CHORD_MS, goPrefix, goSequence } from "../goSequence";
 import { keyGuard, modal } from "../hooks";
 import { useContextActions } from "../palette";
+import { health } from "../workerHealth";
 
 export interface PaletteAction {
   label: string;
@@ -223,9 +224,7 @@ export function CommandPalette({
           {(workers.data?.workers ?? []).length > 0 && (
             <Command.Group heading="Workers">
           {(workers.data?.workers ?? []).map((w) => {
-            // A stale heartbeat outranks what the worker last reported, same
-            // as the Workers view — the palette must not call a dead process busy.
-            const state = w.stale ? "stale" : w.state;
+            const state = health(w);
             return (
             <Command.Item
               key={w.workerId}

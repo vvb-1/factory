@@ -1,50 +1,31 @@
 import "../test-dom";
-import { afterEach, describe, expect, test } from "bun:test";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { Runs } from "./Runs";
-import { api } from "../api";
-import type { LifecycleEvent, RunDetail, RunListItem, RunState, StatusView } from "../types";
+import {
+  changeInput,
+  createLifecycleEventFixture,
+  createRunDetailFixture,
+  createRunListItemFixture,
+  createStatusFixture,
+  renderWithClient,
+  restoreApi,
+  withApi,
+} from "../test-render";
+import type { LifecycleEvent, RunDetail, RunListItem, RunState } from "../types";
 
 afterEach(() => {
   cleanup();
+  restoreApi();
+  localStorage.clear();
 });
 
-function renderWithClient(ui: React.ReactElement) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
-}
-
 const noop = () => {};
-
 const FAILURE_REASON = 'contract_violation: $: unknown property "captured"';
-
-function stubStatus(): StatusView {
-  return {
-    env: { name: "test", home: "/tmp/test", adapter: null },
-    events: {},
-    proposals: { open: 0, expired: 0 },
-    runs: { byState: {} },
-    workers: { live: 0, busy: 0, stale: 0 },
-    artifacts: { files: 0, bytes: 0, orphans: 0, orphanBytes: 0 },
-    anomalies: {
-      expiredOpenProposals: [],
-      staleLeases: 0,
-      unpublishedOutbox: 0,
-      deadLettered: [],
-      stalledWorkers: [],
-      noWorkers: false,
-      ambiguousOpenProposals: [],
-    },
-  };
-}
-
 const NOW = new Date().toISOString();
 
-function stubListItem(runId: string, state: RunState): RunListItem {
-  return {
+function stubListItem(runId: string, state: RunState, overrides?: Partial<RunListItem>): RunListItem {
+  return createRunListItemFixture({
     runId,
     state,
     attempts: 1,
@@ -57,11 +38,12 @@ function stubListItem(runId: string, state: RunState): RunListItem {
     created_at: NOW,
     updated_at: NOW,
     repos: [],
-  };
+    ...overrides,
+  });
 }
 
-function stubDetail(runId: string, state: RunState, lifecycle: LifecycleEvent[]): RunDetail {
-  return {
+function stubDetail(runId: string, state: RunState, lifecycle: LifecycleEvent[], overrides?: Partial<RunDetail>): RunDetail {
+  return createRunDetailFixture({
     run: {
       runId,
       state,
@@ -88,62 +70,54 @@ function stubDetail(runId: string, state: RunState, lifecycle: LifecycleEvent[])
       },
     },
     lifecycle,
-    attempts: [],
-    result: null,
-    receipt: null,
-    workspace: null,
-  };
+    ...overrides,
+  });
 }
 
 function transition(seq: number, runId: string, from: string | null, to: string, reason: string | null): LifecycleEvent {
-  return { seq, run_id: runId, from_state: from, to_state: to, actor: "worker_1", reason, attempt: 1, at: NOW };
+  return createLifecycleEventFixture(seq, runId, from, to, reason, NOW);
 }
 
-function renderRuns(focusRunId: string) {
+function renderRuns(props: Partial<Parameters<typeof Runs>[0]> = {}) {
   return renderWithClient(
     <Runs
       connected={true}
       context={{ kind: "all" }}
-      focusRunId={focusRunId}
+      focusRunId={null}
       onSelectRun={noop}
       onOpenFull={noop}
       focusState={null}
       onFocusStateConsumed={noop}
       onJumpAgent={noop}
       onJumpEvent={noop}
+      {...props}
     />,
   );
-}
-
-function withApi(runs: RunListItem[], detail: RunDetail, fn: () => Promise<void>) {
-  const orig = { runs: api.runs, run: api.run, status: api.status, trace: api.trace };
-  api.runs = async () => ({ runs });
-  api.run = async () => detail;
-  api.status = async () => stubStatus();
-  api.trace = async () => ({ head: 0, entries: [] });
-  return fn().finally(() => {
-    api.runs = orig.runs;
-    api.run = orig.run;
-    api.status = orig.status;
-    api.trace = orig.trace;
-  });
 }
 
 describe("Runs table short run ids (WM-96)", () => {
   test("run id cell displays the short form and carries the full id as title", async () => {
     const runId = "run_ec9c87f9-4c1d-4f4a-9d7e-2c2f3a1b0c9d";
     const detail = stubDetail(runId, "COMPLETED", [transition(1, runId, null, "QUEUED", null)]);
-    await withApi([stubListItem(runId, "COMPLETED")], detail, async () => {
-      const { container } = renderRuns(runId);
+    await withApi(
+      {
+        runs: async () => ({ runs: [stubListItem(runId, "COMPLETED")] }),
+        run: async () => detail,
+        status: async () => createStatusFixture(),
+        trace: async () => ({ head: 0, entries: [] }),
+      },
+      async () => {
+        const { container } = renderRuns({ focusRunId: runId });
 
-      const cell = await waitFor(() => {
-        const el = container.querySelector(`td[title="${runId}"]`);
-        if (!el) throw new Error("run id cell with full-id title is missing");
-        return el;
-      });
-      // Short form shown; the full id never rendered as text, only as title.
-      expect(cell.textContent).toBe("run_ec9c87f9");
-    });
+        const cell = await waitFor(() => {
+          const el = container.querySelector(`td[title="${runId}"]`);
+          if (!el) throw new Error("run id cell with full-id title is missing");
+          return el;
+        });
+        // Short form shown; the full id never rendered as text, only as title.
+        expect(cell.textContent).toBe("run_ec9c87f9");
+      },
+    );
   });
 });
 
@@ -156,20 +130,28 @@ describe("Runs detail failure banner (WM-93)", () => {
       transition(3, runId, "LEASED", "RUNNING", null),
       transition(4, runId, "RUNNING", "FAILED", FAILURE_REASON),
     ]);
-    await withApi([stubListItem(runId, "FAILED")], detail, async () => {
-      const { getByRole, getByText } = renderRuns(runId);
+    await withApi(
+      {
+        runs: async () => ({ runs: [stubListItem(runId, "FAILED")] }),
+        run: async () => detail,
+        status: async () => createStatusFixture(),
+        trace: async () => ({ head: 0, entries: [] }),
+      },
+      async () => {
+        const { getByRole, getByText } = renderRuns({ focusRunId: runId });
 
-      await waitFor(() => getByRole("alert"));
+        await waitFor(() => getByRole("alert"));
 
-      const banner = getByRole("alert");
-      // The full, untruncated reason string, plus the copy affordance.
-      expect(banner.textContent).toContain(FAILURE_REASON);
-      expect(getByText("Copy reason")).toBeTruthy();
+        const banner = getByRole("alert");
+        // The full, untruncated reason string, plus the copy affordance.
+        expect(banner.textContent).toContain(FAILURE_REASON);
+        expect(getByText("Copy reason")).toBeTruthy();
 
-      // Before the metadata rows: the banner precedes the "Run" section in the document.
-      const runSection = getByText("idempotencyKey");
-      expect(banner.compareDocumentPosition(runSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    });
+        // Before the metadata rows: the banner precedes the "Run" section in the document.
+        const runSection = getByText("idempotencyKey");
+        expect(banner.compareDocumentPosition(runSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      },
+    );
   });
 
   test("COMPLETED run renders no banner", async () => {
@@ -180,12 +162,306 @@ describe("Runs detail failure banner (WM-93)", () => {
       transition(3, runId, "LEASED", "RUNNING", null),
       transition(4, runId, "RUNNING", "COMPLETED", "ok"),
     ]);
-    await withApi([stubListItem(runId, "COMPLETED")], detail, async () => {
-      const { getByText, queryByRole } = renderRuns(runId);
+    await withApi(
+      {
+        runs: async () => ({ runs: [stubListItem(runId, "COMPLETED")] }),
+        run: async () => detail,
+        status: async () => createStatusFixture(),
+        trace: async () => ({ head: 0, entries: [] }),
+      },
+      async () => {
+        const { getByText, queryByRole } = renderRuns({ focusRunId: runId });
 
-      // Wait for the detail panel to load, then assert no banner appeared.
-      await waitFor(() => getByText("idempotencyKey"));
-      expect(queryByRole("alert")).toBeNull();
-    });
+        // Wait for the detail panel to load, then assert no banner appeared.
+        await waitFor(() => getByText("idempotencyKey"));
+        expect(queryByRole("alert")).toBeNull();
+      },
+    );
+  });
+});
+
+describe("Runs component harness: selection & filter retention", () => {
+  test("clicking a row selects the run via onSelectRun", async () => {
+    const onSelectRun = mock(() => {});
+    const r1 = stubListItem("run_click_test", "RUNNING");
+    await withApi(
+      {
+        runs: async () => ({ runs: [r1] }),
+        run: async () => stubDetail("run_click_test", "RUNNING", []),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { container } = renderRuns({ onSelectRun });
+        const cell = await waitFor(() => {
+          const el = container.querySelector(`td[title="${r1.runId}"]`);
+          if (!el) throw new Error("row not rendered");
+          return el;
+        });
+
+        const row = cell.closest("tr");
+        expect(row).toBeTruthy();
+        fireEvent.click(row!);
+
+        expect(onSelectRun).toHaveBeenCalledWith("run_click_test");
+      },
+    );
+  });
+
+  test("focusRunId highlights the selected row and renders the detail pane", async () => {
+    const r1 = stubListItem("run_selected_1", "RUNNING");
+    const detail = stubDetail("run_selected_1", "RUNNING", [transition(1, "run_selected_1", null, "RUNNING", null)]);
+    await withApi(
+      {
+        runs: async () => ({ runs: [r1] }),
+        run: async () => detail,
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { container, getByText } = renderRuns({ focusRunId: "run_selected_1" });
+
+        const selectedRow = await waitFor(() => {
+          const el = container.querySelector("tr.row-selected");
+          if (!el) throw new Error("selected row not highlighted");
+          return el;
+        });
+        expect(selectedRow).toBeTruthy();
+        await waitFor(() => getByText("idempotencyKey"));
+      },
+    );
+  });
+
+  test("typing in filter input restricts visible rows and retains matching selection", async () => {
+    const r1 = stubListItem("run_alpha", "RUNNING", { agent: "triage-scan" });
+    const r2 = stubListItem("run_beta", "RUNNING", { agent: "review-scan" });
+    const detail = stubDetail("run_alpha", "RUNNING", []);
+
+    await withApi(
+      {
+        runs: async () => ({ runs: [r1, r2] }),
+        run: async () => detail,
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { container, getByLabelText } = renderRuns({ focusRunId: "run_alpha" });
+
+        await waitFor(() => container.querySelector(`td[title="${r1.runId}"]`));
+        expect(container.querySelector(`td[title="${r2.runId}"]`)).toBeTruthy();
+
+        const filterInput = getByLabelText("Filter runs") as HTMLInputElement;
+        act(() => {
+          changeInput(filterInput, "agent:triage-scan");
+        });
+
+        await waitFor(() => {
+          expect(container.querySelector(`td[title="${r1.runId}"]`)).toBeTruthy();
+          expect(container.querySelector(`td[title="${r2.runId}"]`)).toBeNull();
+        });
+
+        // The selected row remains selected
+        const selectedRow = container.querySelector("tr.row-selected");
+        expect(selectedRow).toBeTruthy();
+        expect(selectedRow?.querySelector(`td[title="${r1.runId}"]`)).toBeTruthy();
+      },
+    );
+  });
+
+  test("switching status tabs clears row selection via onSelectRun(null)", async () => {
+    const onSelectRun = mock(() => {});
+    const r1 = stubListItem("run_tab_1", "RUNNING");
+    await withApi(
+      {
+        runs: async () => ({ runs: [r1] }),
+        run: async () => stubDetail("run_tab_1", "RUNNING", []),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByRole, container } = renderRuns({ focusRunId: "run_tab_1", onSelectRun });
+
+        await waitFor(() => container.querySelector("tr.row-selected"));
+
+        const failedTab = getByRole("tab", { name: /^FAILED/i });
+        fireEvent.click(failedTab);
+
+        expect(onSelectRun).toHaveBeenCalledWith(null);
+      },
+    );
+  });
+});
+
+describe("Runs component harness: cross-tab reveal", () => {
+  test("switches tab to ALL when focusRunId points to a run on a different state tab", async () => {
+    const rRunning = stubListItem("run_running_1", "RUNNING");
+    const rFailed = stubListItem("run_failed_target", "FAILED");
+    const allRuns = [rRunning, rFailed];
+    const detailFailed = stubDetail("run_failed_target", "FAILED", [
+      transition(1, "run_failed_target", "RUNNING", "FAILED", "some error"),
+    ]);
+
+    await withApi(
+      {
+        runs: async (state?: string) => ({
+          runs: state && state !== "ALL" ? allRuns.filter((r) => r.state === state) : allRuns,
+        }),
+        run: async () => detailFailed,
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const onFocusStateConsumed = mock(() => {});
+        // Start on RUNNING tab via focusState
+        const { getByRole, container, rerender } = renderRuns({
+          focusState: "RUNNING",
+          onFocusStateConsumed,
+        });
+
+        await waitFor(() => {
+          const tab = getByRole("tab", { name: /^RUNNING/i });
+          expect(tab.getAttribute("aria-selected")).toBe("true");
+        });
+
+        // Now focus the FAILED run
+        rerender(
+          <Runs
+            connected={true}
+            context={{ kind: "all" }}
+            focusRunId="run_failed_target"
+            onSelectRun={noop}
+            onOpenFull={noop}
+            focusState={null}
+            onFocusStateConsumed={noop}
+            onJumpAgent={noop}
+            onJumpEvent={noop}
+          />,
+        );
+
+        // Should switch to ALL tab and reveal the FAILED run
+        await waitFor(() => {
+          const allTab = getByRole("tab", { name: /^ALL/i });
+          expect(allTab.getAttribute("aria-selected")).toBe("true");
+          const targetCell = container.querySelector(`td[title="run_failed_target"]`);
+          expect(targetCell).toBeTruthy();
+        });
+      },
+    );
+  });
+
+  test("clears active text filter when focusRunId is hidden by the filter", async () => {
+    const r1 = stubListItem("run_alpha", "RUNNING", { agent: "triage-scan" });
+    const r2 = stubListItem("run_beta", "RUNNING", { agent: "deploy-scan" });
+
+    await withApi(
+      {
+        runs: async () => ({ runs: [r1, r2] }),
+        run: async () => stubDetail("run_beta", "RUNNING", []),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByLabelText, container, rerender } = renderRuns({});
+
+        await waitFor(() => container.querySelector(`td[title="${r1.runId}"]`));
+
+        // Filter for alpha, hiding beta
+        const filterInput = getByLabelText("Filter runs") as HTMLInputElement;
+        act(() => {
+          changeInput(filterInput, "agent:triage-scan");
+        });
+
+        await waitFor(() => {
+          expect(container.querySelector(`td[title="${r2.runId}"]`)).toBeNull();
+        });
+
+        // Focus beta (which was hidden by the filter)
+        rerender(
+          <Runs
+            connected={true}
+            context={{ kind: "all" }}
+            focusRunId="run_beta"
+            onSelectRun={noop}
+            onOpenFull={noop}
+            focusState={null}
+            onFocusStateConsumed={noop}
+            onJumpAgent={noop}
+            onJumpEvent={noop}
+          />,
+        );
+
+        // Filter should be cleared to reveal run_beta
+        await waitFor(() => {
+          const input = getByLabelText("Filter runs") as HTMLInputElement;
+          expect(input.value).toBe("");
+          expect(container.querySelector(`td[title="run_beta"]`)).toBeTruthy();
+        });
+      },
+    );
+  });
+
+  test("retains active text filter when focusRunId is already visible under that filter", async () => {
+    const r1 = stubListItem("run_alpha", "RUNNING", { agent: "triage-scan" });
+    const r2 = stubListItem("run_beta", "RUNNING", { agent: "triage-scan" });
+
+    await withApi(
+      {
+        runs: async () => ({ runs: [r1, r2] }),
+        run: async () => stubDetail("run_alpha", "RUNNING", []),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByLabelText, container, rerender } = renderRuns({});
+
+        await waitFor(() => container.querySelector(`td[title="${r1.runId}"]`));
+
+        const filterInput = getByLabelText("Filter runs") as HTMLInputElement;
+        act(() => {
+          changeInput(filterInput, "agent:triage-scan");
+        });
+
+        await waitFor(() => {
+          expect(container.querySelector(`td[title="${r1.runId}"]`)).toBeTruthy();
+        });
+
+        // Now focus run_alpha (which is already visible)
+        rerender(
+          <Runs
+            connected={true}
+            context={{ kind: "all" }}
+            focusRunId="run_alpha"
+            onSelectRun={noop}
+            onOpenFull={noop}
+            focusState={null}
+            onFocusStateConsumed={noop}
+            onJumpAgent={noop}
+            onJumpEvent={noop}
+          />,
+        );
+
+        // Filter is retained
+        await waitFor(() => {
+          const input = getByLabelText("Filter runs") as HTMLInputElement;
+          expect(input.value).toBe("agent:triage-scan");
+          expect(container.querySelector(`td[title="run_alpha"]`)).toBeTruthy();
+        });
+      },
+    );
+  });
+
+  test("focusState prop sets the active tab and calls onFocusStateConsumed", async () => {
+    const onFocusStateConsumed = mock(() => {});
+    await withApi(
+      {
+        runs: async () => ({ runs: [] }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByRole } = renderRuns({
+          focusState: "CANCELLED",
+          onFocusStateConsumed,
+        });
+
+        await waitFor(() => {
+          const tab = getByRole("tab", { name: /^CANCELLED/i });
+          expect(tab.getAttribute("aria-selected")).toBe("true");
+          expect(onFocusStateConsumed).toHaveBeenCalledTimes(1);
+        });
+      },
+    );
   });
 });

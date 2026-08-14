@@ -28,7 +28,32 @@ export interface FilterFacets<T, C = undefined> {
   text: (row: T) => FieldValue;
   /** Spellings that mean a canonical key — an operator reaches for both. */
   aliases?: Record<string, string>;
+  /** Available enum suggestions per field. */
+  values?: Record<string, readonly string[]>;
 }
+
+export interface FilterSuggestion {
+  id: string;
+  kind: "facet" | "value" | "flag";
+  label: string;
+  insertText: string;
+  description?: string;
+  field?: string;
+  hue?: string;
+}
+
+const RUN_STATES = ["proposed", "approved", "queued", "leased", "running", "verifying", "completed", "refused", "failed", "timed_out", "cancelled"] as const;
+const ADAPTERS = ["claude", "codex", "fake", "actions", "command"] as const;
+const EVENT_STATUSES = ["admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
+const PROPOSAL_STATUSES = ["open", "approved", "rejected", "superseded", "resolved"] as const;
+const DECISIONS = ["run", "human_needed", "noop"] as const;
+
+export const DEFAULT_FIELD_VALUES: Record<string, readonly string[]> = {
+  state: RUN_STATES,
+  decision: DECISIONS,
+  adapter: ADAPTERS,
+  status: [...PROPOSAL_STATUSES, ...EVENT_STATUSES],
+};
 
 /**
  * Every key any list understands. A word whose key is in here was meant as a
@@ -91,7 +116,7 @@ const unquote = (text: string) => text.replace(/"/g, "");
  * chip can only be dismissed by cutting exactly the word it came from back out
  * of the raw query, which stays the single source of truth.
  */
-function splitWords(input: string): Span[] {
+export function splitWords(input: string): Span[] {
   const words: Span[] = [];
   let start = -1;
   let quoted = false;
@@ -109,6 +134,21 @@ function splitWords(input: string): Span[] {
     }
   }
   return words;
+}
+
+/**
+ * Finds the token under cursor for autocomplete inspection.
+ * Returns the word span if cursor is on/at the boundary of a word, or an empty span at cursor.
+ */
+export function getActiveFilterToken(input: string, cursorPos: number): Span {
+  const safeCursor = Math.max(0, Math.min(cursorPos, input.length));
+  const words = splitWords(input);
+  for (const word of words) {
+    if (safeCursor >= word.start && safeCursor <= word.end) {
+      return word;
+    }
+  }
+  return { raw: "", start: safeCursor, end: safeCursor };
 }
 
 export function parseFilterQuery<T, C>(input: string, facets: FilterFacets<T, C>): FilterQuery {
@@ -287,6 +327,10 @@ export const RUN_FACETS: FilterFacets<RunListItem, RunFilterContext> = {
   },
   text: (r) => [r.runId, r.state, r.agent, r.adapter, r.reasonCode, r.eventId],
   aliases: { id: "run", status: "state" },
+  values: {
+    state: RUN_STATES,
+    adapter: ADAPTERS,
+  },
 };
 
 export const EVENT_FACETS: FilterFacets<AdmittedEvent, undefined> = {
@@ -308,6 +352,9 @@ export const EVENT_FACETS: FilterFacets<AdmittedEvent, undefined> = {
   },
   text: (e) => [e.eventId, e.source, e.type, e.subject],
   aliases: { id: "event", state: "status" },
+  values: {
+    status: EVENT_STATUSES,
+  },
 };
 
 /** Proposals: the run states the open list is watching, for `is:stale`. */
@@ -339,4 +386,104 @@ export const PROPOSAL_FACETS: FilterFacets<Proposal, ProposalFilterContext> = {
   },
   text: (p) => [p.id, p.agent, p.decision, p.status, p.eventId, p.reason],
   aliases: { proposal: "id", state: "status" },
+  values: {
+    decision: DECISIONS,
+    status: PROPOSAL_STATUSES,
+  },
 };
+
+/**
+ * Computes autocomplete suggestions based on the active token and provided facets or query.
+ */
+export function getFilterSuggestions<T, C>(
+  tokenRaw: string,
+  facets?: FilterFacets<T, C>,
+  query?: FilterQuery,
+  customHues?: (field: string, val: string) => string | undefined,
+): FilterSuggestion[] {
+  const fields = facets ? Object.keys(facets.fields) : (query?.fields ?? []);
+  const flags = facets ? Object.keys(facets.flags) : (query?.flags ?? []);
+  const aliases = facets?.aliases ?? {};
+  const values = facets?.values ?? {};
+
+  const suggestions: FilterSuggestion[] = [];
+  const colonIdx = tokenRaw.indexOf(":");
+
+  if (colonIdx === -1) {
+    const prefix = tokenRaw.toLowerCase();
+    // 1. Facet fields
+    for (const field of fields) {
+      if (!prefix || field.toLowerCase().startsWith(prefix)) {
+        suggestions.push({
+          id: `facet:${field}`,
+          kind: "facet",
+          label: `${field}:`,
+          insertText: `${field}:`,
+          description: `Filter by ${field}`,
+        });
+      }
+    }
+    // Facet aliases
+    for (const [alias, canonical] of Object.entries(aliases)) {
+      if (!fields.includes(alias) && (!prefix || alias.toLowerCase().startsWith(prefix))) {
+        suggestions.push({
+          id: `facet:${alias}`,
+          kind: "facet",
+          label: `${alias}:`,
+          insertText: `${alias}:`,
+          description: `Filter by ${canonical}`,
+        });
+      }
+    }
+    // 2. Flags (e.g. is:stale)
+    for (const flag of flags) {
+      const flagLabel = `is:${flag}`;
+      if (!prefix || flagLabel.startsWith(prefix) || flag.toLowerCase().startsWith(prefix) || "is:".startsWith(prefix)) {
+        suggestions.push({
+          id: `flag:${flag}`,
+          kind: "flag",
+          label: flagLabel,
+          insertText: `${flagLabel} `,
+          description: facets?.flags?.[flag]?.help ?? `Filter by is:${flag}`,
+        });
+      }
+    }
+  } else {
+    const rawKey = tokenRaw.slice(0, colonIdx).toLowerCase();
+    const valPrefix = tokenRaw.slice(colonIdx + 1).toLowerCase();
+    const canonicalKey = aliases[rawKey] ?? rawKey;
+
+    if (canonicalKey === "is") {
+      for (const flag of flags) {
+        if (!valPrefix || flag.toLowerCase().startsWith(valPrefix)) {
+          suggestions.push({
+            id: `flag:${flag}`,
+            kind: "flag",
+            label: `is:${flag}`,
+            insertText: `is:${flag} `,
+            description: facets?.flags?.[flag]?.help ?? `Filter by is:${flag}`,
+          });
+        }
+      }
+    } else {
+      const enumVals = values[canonicalKey] ?? values[rawKey] ?? DEFAULT_FIELD_VALUES[canonicalKey] ?? [];
+      for (const val of enumVals) {
+        if (!valPrefix || val.toLowerCase().startsWith(valPrefix)) {
+          const hue = customHues?.(canonicalKey, val);
+          suggestions.push({
+            id: `value:${rawKey}:${val}`,
+            kind: "value",
+            field: rawKey,
+            label: val,
+            insertText: `${rawKey}:${val} `,
+            hue,
+            description: `${rawKey}:${val}`,
+          });
+        }
+      }
+    }
+  }
+
+  return suggestions;
+}
+

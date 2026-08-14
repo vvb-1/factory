@@ -1,6 +1,11 @@
 ---
 description: Find Linear tickets that have gone obsolete (duplicate, already shipped, overtaken by events) and retire them with evidence
-argument-hint: [optional: project name, issue IDs, or a max count; default this repo's project]
+argument-hint:
+  [
+    optional: project name,
+    issue IDs,
+    or a max count; default this repo's project,
+  ]
 model: sonnet
 ---
 

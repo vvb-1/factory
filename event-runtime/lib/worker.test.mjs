@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
@@ -12,7 +12,7 @@ import { createRun, lifecycleOf, runState, transition, IllegalTransition } from 
 import { computeDefHash } from "./receipts.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
 import {
-  cancelRun, claimNext, executeClaimed, reapExpiredLeases, repositoryIsClean, retryRun, runOnce,
+  cancelRun, claimNext, executeClaimed, reapExpiredLeases, repositoryIsClean, repositoryStatus, retryRun, runOnce,
 } from "./worker.mjs";
 
 const registry = loadRegistry();
@@ -89,6 +89,22 @@ describe("worker", () => {
     rmSync(path.join(repo, "ignored.log"));
     writeFileSync(path.join(repo, "agent-wrote.txt"), "dirty\n");
     expect(repositoryIsClean(repo)).toBe(false);
+  });
+
+  test("repository integrity baseline permits pre-existing ignored state but detects later writes", () => {
+    const repo = mkdtempSync(path.join(os.tmpdir(), "evrt-baseline-repo-"));
+    const git = (args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+    expect(git(["init", "--quiet"]).status).toBe(0);
+    writeFileSync(path.join(repo, ".gitignore"), "generated/*.log\n");
+    expect(git(["add", ".gitignore"]).status).toBe(0);
+    expect(git(["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "initial"]).status).toBe(0);
+    mkdirSync(path.join(repo, "generated"));
+    writeFileSync(path.join(repo, "generated", "setup.log"), "pre-existing\n");
+    const baseline = repositoryStatus(repo);
+    expect(baseline).toContain("!! generated/setup.log");
+    expect(repositoryStatus(repo)).toBe(baseline);
+    writeFileSync(path.join(repo, "generated", "agent-write.log"), "new\n");
+    expect(repositoryStatus(repo)).not.toBe(baseline);
   });
 
   test("happy path: COMPLETED, results row, receipt, one completion outbox event, workspace destroyed", async () => {

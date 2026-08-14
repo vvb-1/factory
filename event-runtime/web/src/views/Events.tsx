@@ -2,17 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import { useDisplayOptions, useListKeys, useNow, useRequeuePoll, useTabKeys } from "../hooks";
 import {
   buildSections,
   cycleColumnSort,
   flattenSections,
   grouped,
+  sortRows,
   toggleCollapsed,
   visibleColumns,
   type DisplayConfig,
 } from "../displayOptions";
-import { DisplayOptions } from "../components/DisplayOptions";
+import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import { ScopeCaption } from "../components/ContextTabs";
 import type { AdmittedEvent, EventFocus } from "../types";
@@ -136,19 +137,12 @@ export function Events({
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
-  const alive = useRef(true);
+  const pollRequeue = useRequeuePoll(onJumpProposal);
   const [tab, setTab] = useState<StatusTab>(isStatusTab(focusEvent?.status) ? focusEvent.status : "all");
   const [filter, setFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<string | null>(focusEvent?.type ?? null);
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [confirmReplay, setConfirmReplay] = useState(false);
-
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
 
   const fetchAll = context.kind === "repo";
   const list = useQuery({
@@ -341,24 +335,7 @@ export function Events({
     onSuccess: async (_, e) => {
       invalidate();
       notify(`Requeued event ${e.eventId}`, "ok");
-      const deadline = Date.now() + 8000;
-      try {
-        while (alive.current && Date.now() < deadline) {
-          const { proposals } = await api.proposals();
-          const match = proposals.find((p) => p.eventSource === e.source && p.eventId === e.eventId);
-          if (match && alive.current) {
-            onJumpProposal(match.id);
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 250));
-        }
-      } catch {
-        // The requeue itself landed; only the confirmation poll broke, so say
-        // that rather than claiming no proposal appeared.
-        if (alive.current) notify(`Requeued ${e.eventId} — could not confirm a proposal appeared`, "err");
-        return;
-      }
-      if (alive.current) notify(`Requeued ${e.eventId} — no open proposal appeared`, "info");
+      await pollRequeue(e);
     },
     onError: invalidate, // 404/409 mean someone else acted — converge on truth
   });
@@ -439,6 +416,13 @@ export function Events({
         ? allCount
         : (eventCounts[t] ?? 0);
 
+  const handleExport = () => {
+    const sorted = sortRows(visible, displayConfig, display);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportJson(`events-export-${dateStr}.json`, sorted);
+    notify(`Exported ${sorted.length} event${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+  };
+
   return (
     <div className="flex h-full min-w-0">
       <ListPane
@@ -514,7 +498,12 @@ export function Events({
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="ml-auto">
-            <DisplayOptions config={displayConfig} state={display} onChange={setDisplay} />
+            <DisplayOptions
+              config={displayConfig}
+              state={display}
+              onChange={setDisplay}
+              onExport={visible.length > 0 ? handleExport : undefined}
+            />
           </span>
           {/* Last in the row: the token chips are a full-width item, so anything
               after the filter box would be pushed onto a third line the moment
