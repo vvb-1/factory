@@ -497,7 +497,9 @@ export function RunTrace({
   const [expandAll, setExpandAll] = useState<boolean>(false);
   const [search, setSearch] = useState<string>("");
   const [activeMatch, setActiveMatch] = useState<number>(0);
-  const [autoScrollPaused, setAutoScrollPaused] = useState<boolean>(false);
+  const [followLive, setFollowLive] = useState<boolean>(true);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const lastSeenSeqRef = useRef<number>(0);
   const [activeErrorIdx, setActiveErrorIdx] = useState<number | null>(null);
   const [jumpCount, setJumpCount] = useState<number>(0);
   const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(new Set());
@@ -611,6 +613,21 @@ export function RunTrace({
     }
   }, [activeMatch, searchMatches]);
 
+  // Track unread entries when paused or update lastSeenSeq when following live
+  useEffect(() => {
+    if (!live) {
+      setUnreadCount(0);
+      return;
+    }
+    if (followLive) {
+      setUnreadCount(0);
+      lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    } else {
+      const count = entries.filter((e) => e.seq > lastSeenSeqRef.current).length;
+      setUnreadCount(count);
+    }
+  }, [entries, live, followLive]);
+
   // Jump to active error match:
   useEffect(() => {
     if (activeErrorIdx !== null && allErrorEntries.length > 0 && scroller.current) {
@@ -626,16 +643,39 @@ export function RunTrace({
 
   // Live auto-scroll:
   useEffect(() => {
-    if (live && !autoScrollPaused && scroller.current) {
+    if (live && followLive && scroller.current) {
       scroller.current.scrollTop = scroller.current.scrollHeight;
     }
-  }, [shown.length, live, autoScrollPaused]);
+  }, [shown.length, live, followLive]);
 
   const onScrollHandler = () => {
     if (!scroller.current || !live) return;
     const { scrollTop, scrollHeight, clientHeight } = scroller.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 30;
-    setAutoScrollPaused(!atBottom);
+    if (atBottom) {
+      if (!followLive) {
+        setFollowLive(true);
+      }
+      setUnreadCount(0);
+      lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    } else {
+      if (followLive) {
+        setFollowLive(false);
+        lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+      }
+    }
+  };
+
+  const jumpToLatest = () => {
+    setFollowLive(true);
+    setUnreadCount(0);
+    lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    if (scroller.current) {
+      scroller.current.scrollTo({
+        top: scroller.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   };
 
   // Multi-attempt runs: divider per attempt (entries are seq-ascending, so
@@ -654,9 +694,35 @@ export function RunTrace({
     <>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         {live ? (
-          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--hue-warn)" }}>
-            <span className="size-1.5 animate-pulse rounded-full" style={{ background: "var(--hue-warn)" }} />
-            live — following the running attempt
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (followLive) {
+                  setFollowLive(false);
+                  lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+                } else {
+                  jumpToLatest();
+                }
+              }}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                followLive
+                  ? "border-(--border-strong) bg-(--surface-2) text-(--text)"
+                  : "border-(--border) bg-(--surface-0) text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text-dim)"
+              }`}
+              title={followLive ? "Auto-scrolling live. Click to pause." : "Auto-scroll paused. Click to follow live."}
+            >
+              <span
+                className={`size-1.5 rounded-full ${followLive ? "animate-pulse" : ""}`}
+                style={{ background: followLive ? "var(--hue-warn)" : "var(--text-faint)" }}
+              />
+              <span>{followLive ? "Follow live" : "Follow live (paused)"}</span>
+            </button>
+            {unreadCount > 0 && !followLive ? (
+              <span className="text-[11px] font-medium" style={{ color: "var(--hue-warn)" }}>
+                {unreadCount} new {unreadCount === 1 ? "event" : "events"}
+              </span>
+            ) : null}
           </div>
         ) : <div />}
 
@@ -834,17 +900,19 @@ export function RunTrace({
             })}
           </div>
 
-          {live && autoScrollPaused && (
+          {live && !followLive && (
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
               <button
                 type="button"
-                onClick={() => {
-                  setAutoScrollPaused(false);
-                  if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-                }}
-                className="rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105"
+                onClick={jumpToLatest}
+                className="flex items-center gap-1.5 rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
               >
-                ↓ New trace events below
+                <span>⬇</span>
+                <span>
+                  {unreadCount > 0
+                    ? `New activity (${unreadCount}) — Jump to latest`
+                    : "Jump to latest"}
+                </span>
               </button>
             </div>
           )}
