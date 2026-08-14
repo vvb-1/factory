@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { modal, useNow } from "../hooks";
+import { modal, useFocusReturn, useNow } from "../hooks";
 import type { Section, SortDir } from "../displayOptions";
 import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
 import { flushHash } from "../hash";
@@ -824,13 +824,13 @@ export function Dialog({
   wide?: boolean;
   extraWide?: boolean;
 }) {
+  useFocusReturn();
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   useEffect(() => {
     modal.depth += 1;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
       else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
@@ -842,7 +842,6 @@ export function Dialog({
     return () => {
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
-      previous?.focus();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose lives in the ref
   }, []);

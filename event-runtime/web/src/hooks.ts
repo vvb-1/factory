@@ -241,3 +241,28 @@ export function useNow(): number {
   }, []);
   return now;
 }
+
+/**
+ * Preserves the active element on mount and restores keyboard focus on unmount.
+ * Handles edge cases cleanly when the triggering element is no longer in DOM.
+ */
+export function useFocusReturn(): void {
+  const previousRef = useRef<HTMLElement | null>(null);
+  if (previousRef.current === null && typeof document !== "undefined") {
+    previousRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  useEffect(() => {
+    const previous = previousRef.current;
+    return () => {
+      if (previous && (previous.isConnected ?? document.contains(previous))) {
+        try {
+          previous.focus();
+        } catch {
+          // Ignore focus errors on detached/unsupported elements
+        }
+      }
+    };
+  }, []);
+}
+
