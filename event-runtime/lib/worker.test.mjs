@@ -495,5 +495,46 @@ describe("worker", () => {
     expect(attempt.started_at).toBe(running.at);
     expect(attempt.finished_at).toBe(completed.at);
   });
+
+  test("claimNext unconstrained candidate query: 60 unsatisfiable placement runs do not starve matching run (OPS-454)", () => {
+    const db = openDb(":memory:");
+    for (let i = 0; i < 60; i += 1) {
+      queueRun(db, makeSpec({ placement: { node: "nowhere" } }), T0 + i * 1000);
+    }
+    const claimableSpec = queueRun(db, makeSpec({ placement: null }), T0 + 60 * 1000);
+
+    const claim = claimNext(db, opts({ labels: {} }));
+    expect(claim).not.toBeNull();
+    expect(claim.runId).toBe(claimableSpec.runId);
+  });
+
+  test("claimNext unconstrained candidate query: 60 unsatisfiable adapter runs do not starve matching run (OPS-454)", () => {
+    const db = openDb(":memory:");
+    for (let i = 0; i < 60; i += 1) {
+      queueRun(db, makeSpec({ adapter: "missing_adapter" }), T0 + i * 1000);
+    }
+    const claimableSpec = queueRun(db, makeSpec({ adapter: "fake" }), T0 + 60 * 1000);
+
+    const claim = claimNext(db, opts({ adapters: ["fake"] }));
+    expect(claim).not.toBeNull();
+    expect(claim.runId).toBe(claimableSpec.runId);
+  });
+
+  test("claimNext preserves oldest-eligible-first ordering among satisfiable runs (OPS-454)", () => {
+    const db = openDb(":memory:");
+    const unclaimable1 = queueRun(db, makeSpec({ placement: { node: "gpu" } }), T0);
+    const claimable1 = queueRun(db, makeSpec({ placement: null }), T0 + 1000);
+    const unclaimable2 = queueRun(db, makeSpec({ placement: { node: "gpu" } }), T0 + 2000);
+    const claimable2 = queueRun(db, makeSpec({ placement: null }), T0 + 3000);
+
+    const firstClaim = claimNext(db, opts({ labels: {} }));
+    expect(firstClaim).not.toBeNull();
+    expect(firstClaim.runId).toBe(claimable1.runId);
+
+    const secondClaim = claimNext(db, opts({ labels: {} }));
+    expect(secondClaim).not.toBeNull();
+    expect(secondClaim.runId).toBe(claimable2.runId);
+  });
 });
+
 

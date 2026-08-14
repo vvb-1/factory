@@ -83,7 +83,7 @@ export function claimNext(db, { owner, now = () => Date.now(), policyVersion = "
     const candidates = db
       .query(
         `SELECT run_id, spec_json, attempts FROM runs
-         WHERE state = 'QUEUED' ORDER BY created_at, run_id LIMIT 50`,
+         WHERE state = 'QUEUED' ORDER BY created_at, run_id`,
       )
       .all();
     let row = null;
@@ -161,7 +161,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
   /** Terminal failure-shaped write: transition + attempts row, one tx. */
   const failTerminal = (to, journalReason, reasonCode, { requeue = false } = {}) =>
-    tx(db, () => {
+    txImmediate(db, () => {
       const currentNow = nowFn();
       transition(db, {
         runId, to, expectFrom: "RUNNING",
@@ -177,7 +177,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     });
 
   try {
-    tx(db, () => {
+    txImmediate(db, () => {
       const currentNow = nowFn();
       transition(db, {
         runId, to: "RUNNING", expectFrom: "LEASED",
@@ -267,7 +267,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       if (!(err instanceof ContractViolation)) throw err;
       // Invalid output is a typed contract failure and emits no completion
       // event (§15) — no results row, no outbox row.
-      tx(db, () => {
+      txImmediate(db, () => {
         const currentNow = nowFn();
         transition(db, {
           runId, to: "FAILED", expectFrom: "VERIFYING",
@@ -308,7 +308,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
       // Refusal is not failure (§5.3): store the typed result, publish no
       // completion event, clean the workspace normally.
-      tx(db, () => {
+      txImmediate(db, () => {
         const currentNow = nowFn();
         transition(db, {
           runId, to: "REFUSED", expectFrom: "VERIFYING",
@@ -338,7 +338,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     // Completed: fencing check, result, receipt, outbox event, and the
     // COMPLETED transition are one transaction.
-    const published = tx(db, () => {
+    const published = txImmediate(db, () => {
       const currentNow = nowFn();
       const maxToken = db
         .query(`SELECT MAX(fencing_token) AS m FROM attempts WHERE run_id = ?`)
@@ -411,7 +411,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
  */
 export function reapExpiredLeases(db, { now = () => Date.now(), policyVersion = "unknown" } = {}) {
   const currentNow = resolveNow(now);
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const rows = db
       .query(
         `SELECT r.run_id, r.attempts, r.spec_json, r.state FROM runs r
@@ -469,7 +469,7 @@ export async function runOnce(db, registry, adapters, opts = {}) {
  */
 export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = () => Date.now(), policyVersion } = {}) {
   const currentNow = resolveNow(now);
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new Error(`unknown run ${runId}`);
     let result;
@@ -496,7 +496,7 @@ export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = 
  */
 export function forceFailRun(db, runId, { actor = "operator", reason = "operator_force_fail", now = () => Date.now(), policyVersion = "unknown" } = {}) {
   const currentNow = resolveNow(now);
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new Error(`unknown run ${runId}`);
     let result;
@@ -528,7 +528,7 @@ export function retryRun(db, runId, { actor, force = false, now = () => Date.now
   const spec = JSON.parse(row.spec_json);
   if (!force && row.attempts >= spec.maxAttempts) throw new Error("attempts_exhausted");
   if (row.state === "VERIFYING") {
-    return tx(db, () => {
+    return txImmediate(db, () => {
       transition(db, { runId, to: "FAILED", actor, reason: "operator_retry_verifying", policyVersion, now: currentNow });
       finishAttempt(db, runId, row.attempts, "FAILED", "operator_retry", currentNow);
       return transition(db, {

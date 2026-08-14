@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { hashJson } from "./canonical.mjs";
 import { DEAD_LETTER_AFTER } from "./config.mjs";
 import { openDb } from "./db.mjs";
@@ -198,4 +201,56 @@ describe("planAdmittedEvents", () => {
     expect(counts).toEqual({ planned: 2, failed: 0, deadLettered: 0 });
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
   });
+
+  test("holds write transaction from second connection and does not increment plan_failures or dead-letter (OPS-451)", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-planner-"));
+    const file = path.join(dir, "test.db");
+    const db1 = openDb(file);
+    const db2 = openDb(file);
+    db2.exec("PRAGMA busy_timeout = 10;");
+
+    const ref = admit(db1);
+
+    // db1 holds write transaction
+    db1.exec("BEGIN IMMEDIATE;");
+    try {
+      for (let i = 0; i < DEAD_LETTER_AFTER + 1; i++) {
+        const res = planAdmittedEvents(db2, registry);
+        expect(res.deadLettered).toBe(0);
+        expect(res.failed).toBe(0);
+      }
+    } finally {
+      db1.exec("ROLLBACK;");
+    }
+
+    const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    expect(event.status).toBe("admitted");
+    expect(event.plan_failures).toBe(0);
+  });
+
+  test("three consecutive lock collisions leave the event admitted, not dead_lettered (OPS-451)", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-planner-"));
+    const file = path.join(dir, "test.db");
+    const db1 = openDb(file);
+    const db2 = openDb(file);
+    db2.exec("PRAGMA busy_timeout = 10;");
+
+    const ref = admit(db1);
+
+    db1.exec("BEGIN IMMEDIATE;");
+    try {
+      for (let i = 0; i < 3; i++) {
+        const res = planAdmittedEvents(db2, registry);
+        expect(res.deadLettered).toBe(0);
+      }
+    } finally {
+      db1.exec("ROLLBACK;");
+    }
+
+    const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    expect(event.status).toBe("admitted");
+    expect(event.plan_failures).toBe(0);
+  });
 });
+
+

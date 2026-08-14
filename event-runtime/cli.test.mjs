@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { openDb } from "./lib/db.mjs";
 
 const CLI = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -24,7 +25,7 @@ describe("cli", () => {
     const r = runCli([]);
     expect(r.status).not.toBe(0);
     for (const verb of [
-      "serve", "status", "ps", "runs", "proposals", "approve", "reject",
+      "serve", "status", "doctor", "ps", "runs", "proposals", "approve", "reject",
       "inject", "cancel", "retry", "inspect", "update-pins",
     ]) {
       expect(r.all).toContain(verb);
@@ -268,5 +269,114 @@ describe("cli", () => {
     const row = verifyDb.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_work_proc_test");
     expect(row?.state).toBe("COMPLETED");
     verifyDb.close();
+  });
+
+  test("doctor against a dead port says serve is not running, non-zero exit", () => {
+    const r = runCli(["doctor"], { FACTORY_EVENT_PORT: DEAD_PORT });
+    expect(r.status).not.toBe(0);
+    expect(r.all).toContain(
+      `control API not reachable on 127.0.0.1:${DEAD_PORT} — start it with: bun event-runtime/cli.mjs serve`,
+    );
+  });
+
+  test("doctor reports anomalies (stale workers, unreferenced artifacts, orphaned workspaces) and exits non-zero (OPS-428)", async () => {
+    const { getAnomalyLines } = await import("./cli.mjs");
+    const statusPayload = {
+      anomalies: {
+        stalledWorkers: [{ workerId: "w-dead", host: "node-1", runId: "run-99", lastSeen: "2026-08-14T10:00:00Z" }],
+        stoppedSchedules: [{ loop: "nightly", error: null, intervalsLate: 3 }],
+        noWorkers: true,
+        orphanedWorkspaces: ["/tmp/orphaned-ws-1"],
+        unreferencedArtifacts: 5,
+        customAnomaly: "something unexpected",
+      },
+      artifacts: {
+        orphans: 5,
+        orphanBytes: 1024,
+      },
+    };
+
+    const lines = getAnomalyLines(statusPayload);
+    expect(lines.some((l) => l.includes("stalled worker w-dead on node-1"))).toBe(true);
+    expect(lines.some((l) => l.includes("stopped schedule nightly: 3 intervals late"))).toBe(true);
+    expect(lines.some((l) => l.includes("no live workers with queued runs") || l.includes("no workers"))).toBe(true);
+    expect(lines.some((l) => l.includes("orphaned workspace: /tmp/orphaned-ws-1"))).toBe(true);
+    expect(lines.some((l) => l.includes("unreferenced artifacts: 5"))).toBe(true);
+    expect(lines.some((l) => l.includes("customAnomaly: something unexpected"))).toBe(true);
+  });
+
+  test("doctor against a healthy live serve outputs anomalies none and exits 0", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-doc-healthy-"));
+    const port = String(59700 + (process.pid % 100));
+    const child = spawn("bun", [CLI, "serve", "--port", port], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_SECRET: "test-secret" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    let docRes;
+    try {
+      expect(out).toContain("control API on");
+      docRes = spawnSync("bun", [CLI, "doctor"], {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_PORT: port },
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+    expect(docRes.status).toBe(0);
+    expect(docRes.stdout).toContain("anomalies");
+    expect(docRes.stdout).toContain("none");
+  });
+
+  test("doctor against a live serve with an anomaly exits non-zero and reports anomaly", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-doc-anomaly-"));
+    const port = String(59600 + (process.pid % 100));
+    const db = openDb(path.join(home, "runtime.db"));
+    const at = new Date(Date.now() - 200_000).toISOString();
+    db.query(
+      `INSERT INTO workers (worker_id, host, pid, labels_json, adapters, started_at, last_seen, state, current_run)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("w-stalled-test", "host-1", 1234, "{}", "fake", at, at, "busy", "run-stalled-test");
+    db.close();
+
+    const child = spawn("bun", [CLI, "serve", "--port", port], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    let docRes;
+    try {
+      expect(out).toContain("control API on");
+      docRes = spawnSync("bun", [CLI, "doctor"], {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_PORT: port },
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+    expect(docRes.status).not.toBe(0);
+    expect(docRes.stdout).toContain("stalled worker w-stalled-test");
   });
 });

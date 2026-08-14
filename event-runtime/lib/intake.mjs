@@ -11,7 +11,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { canonicalJson, hashJson } from "./canonical.mjs";
 import { TIMESTAMP_TOLERANCE_MS } from "./config.mjs";
-import { tx } from "./db.mjs";
+import { tx, txImmediate } from "./db.mjs";
 import { validate } from "./schema.mjs";
 
 /** ISO-8601 or epoch-millis string → epoch millis, or null when unparseable. */
@@ -84,7 +84,7 @@ export function admitEvent(db, registry, envelope, { now = Date.now() } = {}) {
     }
   }
 
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const existing = db
       .query(`SELECT * FROM events WHERE source = ? AND event_id = ?`)
       .get(stored.source, stored.eventId);
