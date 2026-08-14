@@ -234,8 +234,8 @@ web_build_hash() { # <web-dir>
 # Prevents concurrent worktree bring-ups from racing on bun's global cache DB.
 locked_bun_install() { # <dir>
   local target_dir="$1"
-  local lock_dir="${HOME}/.factory/locks/bun-install.lock"
-  local max_wait=120
+  local lock_dir="${FACTORY_LOCK_DIR:-$HOME/.factory/locks/bun-install.lock}"
+  local max_wait="${FACTORY_LOCK_MAX_WAIT:-120}"
   local start_time
   start_time=$(date +%s)
 
@@ -246,8 +246,17 @@ locked_bun_install() { # <dir>
       local holder
       holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
       if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-        rm -rf "$lock_dir" 2>/dev/null || true
-        continue
+        local stale_candidate="${lock_dir}.stale.$$.$RANDOM"
+        if mv "$lock_dir" "$stale_candidate" 2>/dev/null; then
+          local stale_holder
+          stale_holder=$(cat "$stale_candidate/pid" 2>/dev/null || true)
+          if [[ -n "$stale_holder" ]] && kill -0 "$stale_holder" 2>/dev/null; then
+            mv "$stale_candidate" "$lock_dir" 2>/dev/null || rm -rf "$stale_candidate"
+          else
+            rm -rf "$stale_candidate"
+          fi
+          continue
+        fi
       fi
     fi
     local now
@@ -263,7 +272,9 @@ locked_bun_install() { # <dir>
   while [[ $attempt -le $max_attempts ]]; do
     out=$(cd "$target_dir" && bun install --frozen-lockfile 2>&1) && code=0 || code=$?
     if [[ $code -eq 0 ]]; then
-      rm -rf "$lock_dir" 2>/dev/null || true
+      if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
+        rm -rf "$lock_dir" 2>/dev/null || true
+      fi
       return 0
     fi
     if [[ "$out" =~ "SQLITE_BUSY" || "$out" =~ "database is locked" ]]; then
@@ -271,12 +282,16 @@ locked_bun_install() { # <dir>
       sleep $(( attempt ))
       attempt=$(( attempt + 1 ))
     else
-      rm -rf "$lock_dir" 2>/dev/null || true
+      if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
+        rm -rf "$lock_dir" 2>/dev/null || true
+      fi
       printf '%s\n' "$out" >&2
       return $code
     fi
   done
-  rm -rf "$lock_dir" 2>/dev/null || true
+  if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
+    rm -rf "$lock_dir" 2>/dev/null || true
+  fi
   printf '%s\n' "$out" >&2
   return $code
 }
