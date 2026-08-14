@@ -31,6 +31,7 @@ done
 REPO="$(repo_root)"
 
 if [[ "$HERE" -eq 1 ]]; then
+  [[ -z "$TICKET" ]] || die "--here takes no ticket"
   WT="$REPO"
 else
   [[ -n "$TICKET" ]] || die "usage: worktree-down.sh <TICKET-ID> [--force] | --here"
