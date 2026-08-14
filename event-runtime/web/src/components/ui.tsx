@@ -927,7 +927,9 @@ export function KV({ k, v }: { k: string; v: ReactNode }) {
       {copyable ? (
         <button
           type="button"
-          title={`Copy ${k}`}
+          // The row truncates long values; the tooltip is the only place the
+          // full string is readable without copying (WM-129 critique).
+          title={text}
           onClick={() => copyText(text, k)}
           className="mono max-w-[70%] truncate text-right text-(--text-dim) hover:text-(--accent)"
         >

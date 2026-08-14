@@ -5,21 +5,16 @@ import { keyGuard, useNow } from "../hooks";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
 import {
-  Ago,
   Button,
   Dialog,
-  Disclosure,
-  JsonBlock,
   JumpLink,
-  KV,
-  Section,
   StateBadge,
   VerbError,
   copyLink,
   copyText,
   notify,
 } from "../components/ui";
-import { ActorRef, ArtifactRow, RunFailureBanner, TERMINAL } from "./Runs";
+import { RunDetailBlocks, RunFailureBanner, isCancellable } from "../components/RunDetailBlocks";
 
 /**
  * Full-page run view (`#/run/:id`, webui doc §10.11) — the trace at a
@@ -97,7 +92,7 @@ export function RunFull({
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
         onBack();
-      } else if (e.key === "x" && d && connected && !TERMINAL.includes(d.run.state)) {
+      } else if (e.key === "x" && d && connected && isCancellable(d.run.state)) {
         e.preventDefault();
         setConfirm("cancel");
       } else if (e.key === "c") {
@@ -120,7 +115,7 @@ export function RunFull({
       setContextActions(copy);
     } else {
       setContextActions([
-        ...(!TERMINAL.includes(d.run.state)
+        ...(isCancellable(d.run.state)
           ? [{ label: `Cancel ${d.run.runId}…`, hint: "x", run: () => setConfirm("cancel") }]
           : []),
         ...(d.run.state === "FAILED"
@@ -202,155 +197,19 @@ export function RunFull({
             </main>
 
             <aside className="w-full shrink-0 xl:w-[400px]">
-              <div className="mb-4 flex gap-2">
-                {!TERMINAL.includes(d.run.state) && (
-                  <Button variant="danger" disabled={!connected} onClick={() => setConfirm("cancel")}>
-                    Cancel <span className="mono ml-1 opacity-70">x</span>
-                  </Button>
-                )}
-                {/* §8: only FAILED → QUEUED is a legal retry transition. */}
-                {d.run.state === "FAILED" &&
-                  (attemptsExhausted ? (
-                    <Button disabled={!connected} onClick={() => setConfirm("force-retry")}>
-                      Force retry…
-                    </Button>
-                  ) : (
-                    <Button
-                      disabled={!connected || retry.isPending}
-                      onClick={() => retry.mutate({ id: d.run.runId, force: false })}
-                    >
-                      Retry
-                    </Button>
-                  ))}
-              </div>
-              <VerbError error={cancel.error ?? (confirm === "force-retry" ? null : retry.error)} />
-
-              <Section title="Run">
-                <KV
-                  k="agent"
-                  v={
-                    <JumpLink
-                      onClick={() => onJumpAgent(d.run.spec.agent)}
-                      title={`What is ${d.run.spec.agent}? Open in Agents`}
-                    >
-                      {d.run.spec.agent}
-                    </JumpLink>
-                  }
-                />
-                <KV k="adapter" v={d.run.spec.adapter} />
-                <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} />
-                {listRow?.eventId && (
-                  <KV
-                    k="origin event"
-                    v={
-                      listRow.eventSource ? (
-                        <JumpLink
-                          onClick={() => onJumpEvent(listRow.eventSource!, listRow.eventId!)}
-                          title="Open origin event"
-                        >
-                          {`${listRow.eventSource} · ${listRow.eventId}`}
-                        </JumpLink>
-                      ) : (
-                        listRow.eventId
-                      )
-                    }
-                  />
-                )}
-                <KV k="idempotencyKey" v={d.run.idempotencyKey} />
-                <KV k="specHash" v={d.run.specHash} />
-                <KV k="workspace" v={d.workspace} />
-                <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
-                <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
-                <Disclosure label="immutable RunSpec">
-                  <JsonBlock value={d.run.spec} />
-                </Disclosure>
-              </Section>
-
-              <Section title="Lifecycle">
-                <div className="rounded-md border border-(--border) px-3 py-1 text-[12px]">
-                  {d.lifecycle.map((e) => (
-                    <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                      <span className="mono w-[64px] shrink-0 text-[11px] text-(--text-faint)" title={e.at}>
-                        {new Date(e.at).toLocaleTimeString([], { hour12: false })}
-                      </span>
-                      <span className="shrink-0 font-medium">
-                        <span className="text-(--text-dim)">{e.from_state ?? "·"}</span>
-                        <span className="mx-1 text-(--text-faint)">→</span>
-                        <StateBadge state={e.to_state} />
-                      </span>
-                      <span className="truncate text-[11.5px] text-(--text-faint)">
-                        <ActorRef actor={e.actor} className="text-[11.5px] mono rounded bg-(--surface-1) px-1.5 py-0.5 border border-(--border)" />
-                        {e.reason ? <span className="ml-1 text-(--text-dim)">· {e.reason}</span> : ""}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </Section>
-
-              {d.attempts.length > 0 && (
-                <Section title="Attempts">
-                  {d.attempts.map((a) => (
-                    <div key={a.attempt} className="mb-1 rounded-md border border-(--border) bg-(--surface-0) px-3 py-2 text-[12px]">
-                      <div className="flex justify-between font-medium">
-                        <span className="mono text-(--text)">#{a.attempt}</span>
-                        <span className="text-(--text-dim)">{a.terminal_state ?? "in flight"}</span>
-                      </div>
-                      <div className="mono truncate text-[11px] text-(--text-faint) mt-0.5">
-                        {a.reason_code ?? ""} {a.workspace_path ?? ""}
-                      </div>
-                      <div className="flex items-baseline gap-1.5 truncate text-[11px] text-(--text-faint) mt-1">
-                        <span className="uppercase text-[10px] tracking-wider text-(--text-faint)">owner</span>
-                        {a.lease_owner ? (
-                          <ActorRef actor={a.lease_owner} className="mono rounded bg-(--surface-1) px-1.5 py-0.5 border border-(--border) text-[11px]" />
-                        ) : (
-                          <span className="mono text-(--text-faint)">unclaimed</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </Section>
-              )}
-
-              {d.result && (
-                <Section title={`Result · ${d.result.terminalState}${d.result.reasonCode ? ` · ${d.result.reasonCode}` : ""}`}>
-                  {d.result.artifact !== undefined ? (
-                    <Disclosure label="artifact" defaultOpen>
-                      <JsonBlock value={d.result.artifact} />
-                    </Disclosure>
-                  ) : (
-                    <Disclosure label="result" defaultOpen>
-                      <JsonBlock value={d.result} />
-                    </Disclosure>
-                  )}
-                  {d.result.evidence !== undefined && (
-                    <Disclosure label="evidence — what the agent claims it verified">
-                      <JsonBlock value={d.result.evidence} />
-                    </Disclosure>
-                  )}
-                </Section>
-              )}
-
-              {d.result && (
-                <Section title="Artifacts">
-                  {(d.result.artifacts ?? []).length === 0 ? (
-                    <div className="text-(--text-faint)">No stored artifacts.</div>
-                  ) : (
-                    <div className="rounded-md border border-(--border) px-3 py-1">
-                      {(d.result.artifacts ?? []).map((a) => (
-                        <ArtifactRow key={a.sha256} a={a} />
-                      ))}
-                    </div>
-                  )}
-                </Section>
-              )}
-
-              {d.receipt && (
-                <Section title="Receipt">
-                  {Object.entries(d.receipt).map(([k, v]) => (
-                    <KV key={k} k={k} v={v} />
-                  ))}
-                </Section>
-              )}
+              <RunDetailBlocks
+                d={d}
+                now={now}
+                connected={connected}
+                origin={listRow}
+                onJumpAgent={onJumpAgent}
+                onJumpEvent={onJumpEvent}
+                onCancel={() => setConfirm("cancel")}
+                onRetry={() => retry.mutate({ id: d.run.runId, force: false })}
+                onForceRetry={() => setConfirm("force-retry")}
+                retryPending={retry.isPending}
+                verbError={cancel.error ?? (confirm === "force-retry" ? null : retry.error)}
+              />
             </aside>
           </div>
           </>

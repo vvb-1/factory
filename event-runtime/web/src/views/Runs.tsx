@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, artifactUrl } from "../api";
-import { hashPath, hashProject, withProject } from "../hash";
-import { dur } from "../heartbeat";
+import { api, ApiError } from "../api";
 import { useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
 import {
   buildSections,
@@ -17,27 +15,31 @@ import {
 import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
+import {
+  BudgetClock,
+  IN_FLIGHT,
+  LeaseClock,
+  RunDetailBlocks,
+  RunFailureBanner,
+  clockTo,
+  isCancellable,
+} from "../components/RunDetailBlocks";
 import { readPinnedRuns, savePinnedRuns } from "../components/ContextTabs";
 import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
 import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
-import type { Attempt, ArtifactRef, LifecycleEvent, RunListItem, RunState } from "../types";
+import type { RunListItem, RunState } from "../types";
 import {
   Ago,
   Button,
   Dialog,
-  Disclosure,
   FilterInput,
   ListPane,
   DetailPane,
-  humanSize,
-  JsonBlock,
   JumpLink,
-  KV,
   ListEmpty,
   notify,
-  Section,
   StateBadge,
   STATE_HUES,
   GroupHeaderRow,
@@ -51,16 +53,6 @@ import {
 const STATE_TABS: (RunState | "ALL")[] = [
   "ALL", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
 ];
-export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
-export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && state !== "VERIFYING";
-
-/**
- * The two states `reapExpiredLeases` sweeps (lib/worker.mjs) — so exactly the
- * states where the current attempt is racing a deadline. A VERIFYING run has
- * already exited its agent and is never reaped, so it has no clock to show.
- */
-const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING"];
-
 /**
  * Grouping/ordering/columns (OPS-493). One config for every status tab: the
  * tabs only filter rows, the column set never changes with them.
@@ -100,105 +92,6 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   ],
 };
 
-/** `off`: no deadline running yet. `spent`: the deadline passed; the runtime has not caught up. */
-type Clock = { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };
-
-/** A deadline we cannot read is no deadline: better silent than counting down to NaN. */
-const clockTo = (iso: string, offsetMs: number, now: number): Clock => {
-  const deadline = Date.parse(iso) + offsetMs;
-  if (Number.isNaN(deadline)) return { kind: "off" };
-  // Whole seconds, rounded up: the last fraction of a second reads 0:01, so
-  // only a genuinely spent deadline reads `spent`.
-  const left = Math.ceil((deadline - now) / 1000) * 1000;
-  return left <= 0 ? { kind: "spent" } : { kind: "live", leftMs: left };
-};
-
-/**
- * The two deadlines an in-flight attempt is racing, both from what the API
- * already serves:
- *
- * - the agent's budget — the worker hands `spec.timeoutSeconds` to the adapter
- *   when it starts the attempt and records TIMED_OUT if the child outlives it,
- *   so the deadline is `started_at + timeoutSeconds`, a shade early because
- *   workspace setup happens between the two;
- * - the lease — minted once at claim for the budget plus a fixed grace and
- *   never renewed, so when it passes `reapExpiredLeases` re-queues the run
- *   whatever the worker believes it is doing.
- */
-function deadlinesOf(a: Attempt, timeoutSeconds: number, now: number): { timeout: Clock; lease: Clock } {
-  return {
-    timeout: a.started_at ? clockTo(a.started_at, timeoutSeconds * 1000, now) : { kind: "off" },
-    lease: a.lease_expires_at ? clockTo(a.lease_expires_at, 0, now) : { kind: "off" },
-  };
-}
-
-/** One hue per clock, so the countdown and the meter never disagree. */
-const budgetHue = (c: Clock, timeoutSeconds: number): string | undefined => {
-  if (c.kind === "spent") return "var(--hue-err)";
-  // The last tenth of the declared budget — long enough to notice on a long run.
-  if (c.kind === "live" && c.leftMs <= timeoutSeconds * 100) return "var(--hue-warn)";
-  return undefined;
-};
-
-/**
- * How long this agent has left before the worker stops it. The arithmetic is
- * local and the verdict stays the runtime's: a spent budget says so rather than
- * claiming the run is TIMED_OUT, which is the state badge's call on the next poll.
- */
-function BudgetClock({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }) {
-  const budget = `${timeoutSeconds}s budget`;
-  if (c.kind === "off")
-    return (
-      <span className="text-(--text-faint)" title={`${budget}, not started`}>
-        {budget}, not started
-      </span>
-    );
-  const hue = budgetHue(c, timeoutSeconds);
-  if (c.kind === "spent")
-    return (
-      <span style={{ color: hue }} title="budget spent">
-        budget spent
-      </span>
-    );
-  return (
-    <span style={{ color: hue }} title={`timeout in ${dur(c.leftMs)}`}>
-      timeout in {dur(c.leftMs)}
-    </span>
-  );
-}
-
-function LeaseClock({ c, urgent }: { c: Clock; urgent: boolean }) {
-  if (c.kind === "off") return <span title="no lease">no lease</span>;
-  if (c.kind === "spent")
-    return (
-      <span style={{ color: "var(--hue-err)" }} title="reap due">
-        reap due
-      </span>
-    );
-  return (
-    <span style={urgent ? { color: "var(--hue-warn)" } : undefined} title={`reaped in ${dur(c.leftMs)}`}>
-      reaped in {dur(c.leftMs)}
-    </span>
-  );
-}
-
-/** How much of the budget is spent — the glance; `BudgetClock` is the number. */
-function BudgetMeter({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }) {
-  if (c.kind === "off" || timeoutSeconds <= 0) return null;
-  const spent = c.kind === "spent" ? 1 : 1 - c.leftMs / (timeoutSeconds * 1000);
-  return (
-    <div className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)" aria-hidden="true">
-      <div
-        className="h-full rounded-full transition-[width,background-color] duration-1000 ease-linear"
-        style={{
-          width: `${Math.min(100, Math.max(2, spent * 100))}%`,
-          background: budgetHue(c, timeoutSeconds) ?? "var(--hue-ok)",
-        }}
-      />
-    </div>
-  );
-}
-
 function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
   const { startedAt, leaseExpiresAt, timeoutSeconds = 0 } = r as { startedAt?: string | null; leaseExpiresAt?: string | null; timeoutSeconds?: number };
   const t = startedAt && timeoutSeconds > 0 ? clockTo(startedAt, timeoutSeconds * 1000, now) : null;
@@ -215,159 +108,8 @@ function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
   );
 }
 
-/** Terminal states whose reason is a failure the operator reads first (WM-93). */
-const ERROR_STATES: RunState[] = ["FAILED", "TIMED_OUT", "REFUSED"];
-
-/**
- * Why the run ended badly, surfaced first (WM-93): a FAILED/TIMED_OUT/REFUSED
- * run's reason used to live only in the last LIFECYCLE row, below the spec
- * JSON. Derived from the same lifecycle data the LIFECYCLE section renders —
- * the last transition into the current terminal state — no new API surface.
- * Renders nothing for any other state.
- */
-export function RunFailureBanner({
-  state,
-  lifecycle,
-  className = "mb-4",
-}: {
-  state: RunState;
-  lifecycle: LifecycleEvent[];
-  className?: string;
-}) {
-  if (!ERROR_STATES.includes(state)) return null;
-  const terminal = [...lifecycle].reverse().find((e) => e.to_state === state);
-  const reason = terminal?.reason ?? null;
-  const hue = state === "REFUSED" ? "var(--hue-warn)" : "var(--hue-err)";
-  return (
-    <div
-      role="alert"
-      className={`rounded-md border px-3 py-2 ${className}`}
-      style={{ borderColor: hue, background: `color-mix(in oklch, ${hue} 8%, transparent)` }}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[11px] font-medium tracking-wider uppercase" style={{ color: hue }}>
-          {state}
-        </span>
-        {reason && (
-          <button
-            type="button"
-            onClick={() => copyText(reason, "failure reason")}
-            className="shrink-0 text-[12px] text-(--text-dim) hover:text-(--accent)"
-          >
-            Copy reason
-          </button>
-        )}
-      </div>
-      {/* Full string, wrapping allowed — never truncate the one line that explains the failure. */}
-      <div className="mono mt-1 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-(--text)">
-        {reason ?? "No reason recorded on the terminal transition."}
-      </div>
-    </div>
-  );
-}
-
 const rowWash = (s: string) =>
   s === "FAILED" || s === "TIMED_OUT" ? "row-wash-err" : s === "REFUSED" ? "row-wash-warn" : "";
-
-export function isWorkerId(actor: string): boolean {
-  return /^worker_.+/.test(actor);
-}
-
-export function ActorRef({ actor, className }: { actor: string; className?: string }) {
-  if (!isWorkerId(actor)) return <>{actor}</>;
-  return (
-    <JumpLink
-      onClick={() => {
-        window.location.hash = `#/${withProject(hashPath("workers", actor), hashProject(window.location.hash))}`;
-      }}
-      title={actor}
-      className={className}
-    >
-      {actor}
-    </JumpLink>
-  );
-}
-
-const isTextArtifact = (k: string) =>
-  /^(transcript|diff|report|evidence)$/i.test(k) || /\.(txt|json|jsonl|md|log)$/i.test(k);
-
-export function ArtifactRow({ a }: { a: ArtifactRef }) {
-  const [open, setOpen] = useState(false);
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const textFriendly = isTextArtifact(a.kind);
-
-  const togglePreview = async () => {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    setOpen(true);
-    if (content === null && !loading) {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(artifactUrl(a.sha256));
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const txt = await res.text();
-        setContent(txt);
-      } catch (err) {
-        setError((err as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
-  return (
-    <div className="border-b border-(--border) py-1.5 last:border-0">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="truncate">
-          {a.kind}
-          <span className="mono ml-2 text-[11px] text-(--text-faint)" title={a.sha256}>
-            {a.sha256.slice(0, 12)}
-          </span>
-        </span>
-        <span className="flex shrink-0 items-baseline gap-3">
-          <span className="tabular-nums text-(--text-faint)">{humanSize(a.sizeBytes)}</span>
-          {textFriendly && (
-            <button
-              type="button"
-              onClick={togglePreview}
-              className="text-[12px] text-(--text-dim) hover:text-(--accent)"
-            >
-              {open ? "Hide" : "Preview"}
-            </button>
-          )}
-          <a
-            href={artifactUrl(a.sha256, a.kind)}
-            target="_blank"
-            rel="noreferrer"
-            className="text-(--accent) hover:underline"
-          >
-            Open
-          </a>
-        </span>
-      </div>
-      {open && (
-        <div className="mt-2">
-          {loading && <div className="text-[11px] text-(--text-faint)">Loading artifact preview…</div>}
-          {error && (
-            <div className="text-[11px]" style={{ color: "var(--hue-err)" }}>
-              Failed to load preview: {error}
-            </div>
-          )}
-          {content !== null && (
-            <pre className="mono max-h-64 overflow-auto rounded-md border border-(--border) bg-(--surface-0) p-2.5 text-[11.5px] leading-relaxed whitespace-pre-wrap">
-              {content}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** Runs (webui spec §4.3): state tabs, lifecycle timeline, guarded verbs. */
 export function Runs({
@@ -622,14 +364,6 @@ export function Runs({
 
   const d = detail.data;
   const attemptsExhausted = d ? d.run.attempts >= d.run.spec.maxAttempts : false;
-
-  // The reaper keys off the run's current attempt (`a.attempt = r.attempts`),
-  // so that is the only attempt whose deadlines are still running.
-  const current =
-    d && IN_FLIGHT.includes(d.run.state)
-      ? (d.attempts.find((a) => a.attempt === d.run.attempts) ?? null)
-      : null;
-  const clocks = d && current ? deadlinesOf(current, d.run.spec.timeoutSeconds, now) : null;
 
   const pinRun = (id: string) => {
     const cur = readPinnedRuns();
@@ -943,211 +677,28 @@ export function Runs({
           {d && (
             <>
           <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} />
-
-          <Section title="Run">
-            <KV k="run" v={d.run.runId} />
-            <KV
-              k="agent"
-              v={
-                <JumpLink
-                  onClick={() => onJumpAgent(d.run.spec.agent)}
-                  title={`Open ${d.run.spec.agent} in Agents`}
-                >
-                  {d.run.spec.agent}
-                </JumpLink>
-              }
-            />
-            <KV k="adapter" v={d.run.spec.adapter} />
-            <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} />
-            {sel.eventId && (
-              <KV
-                k="origin event"
-                v={
-                  sel.eventSource ? (
-                    <JumpLink
-                      onClick={() => onJumpEvent(sel.eventSource!, sel.eventId!)}
-                      title="Open origin event"
-                    >
-                      {`${sel.eventSource} · ${sel.eventId}`}
-                    </JumpLink>
-                  ) : (
-                    `${sel.eventSource ?? "?"} · ${sel.eventId}`
-                  )
-                }
+          <RunDetailBlocks
+            d={d}
+            now={now}
+            connected={connected}
+            origin={sel}
+            onJumpAgent={onJumpAgent}
+            onJumpEvent={onJumpEvent}
+            onCancel={() => setConfirm("cancel")}
+            onRetry={() => retry.mutate({ id: d.run.runId, force: false })}
+            onForceRetry={() => setConfirm("force-retry")}
+            retryPending={retry.isPending}
+            verbError={cancel.error ?? (confirm === "force-retry" ? null : retry.error)}
+            afterLifecycle={
+              /* key: a run switch must reset the feed's cursor and scroll state. */
+              <RunTrace
+                key={d.run.runId}
+                runId={d.run.runId}
+                state={d.run.state}
+                onExpand={() => onOpenFull(d.run.runId)}
               />
-            )}
-            <KV k="idempotencyKey" v={d.run.idempotencyKey} />
-            <KV k="specHash" v={d.run.specHash} />
-            <KV k="workspace" v={d.workspace} />
-            <KV k="created" v={<Ago iso={d.run.created_at} now={now} />} />
-            <KV k="updated" v={<Ago iso={d.run.updated_at} now={now} />} />
-            <KV k="placement" v={d.run.spec.placement ? JSON.stringify(d.run.spec.placement) : "any worker"} />
-            <Disclosure label="immutable RunSpec" defaultOpen>
-              <JsonBlock value={d.run.spec} />
-            </Disclosure>
-          </Section>
-
-          {/* What a live run is racing, above the verbs: cancelling is the
-              answer to a budget about to be spent on a hung agent. */}
-          {current && clocks && (
-            <Section title="Deadlines">
-              <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums" aria-live="off">
-                <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-(--text-faint)">
-                    attempt #{current.attempt}{" "}
-                    {current.started_at ? (
-                      <>
-                        started <Ago iso={current.started_at} now={now} className="text-(--text-dim)" />
-                      </>
-                    ) : (
-                      "not started"
-                    )}
-                  </span>
-                  <BudgetClock c={clocks.timeout} timeoutSeconds={d.run.spec.timeoutSeconds} />
-                </div>
-                <BudgetMeter c={clocks.timeout} timeoutSeconds={d.run.spec.timeoutSeconds} />
-                <div className="mt-2 flex items-baseline justify-between gap-4 text-[11px] text-(--text-faint)">
-                  <span className="flex items-baseline gap-1.5 truncate">
-                    lease owner
-                    {current.lease_owner ? (
-                      <ActorRef actor={current.lease_owner} />
-                    ) : (
-                      <span className="mono">unclaimed</span>
-                    )}
-                  </span>
-                  <LeaseClock c={clocks.lease} urgent={clocks.timeout.kind === "spent"} />
-                </div>
-                <div className="mt-2 text-[11px] text-(--text-faint)">
-                  The lease outlasts the budget by a fixed grace and is never renewed.
-                </div>
-              </div>
-            </Section>
-          )}
-
-          <div className="mb-4 flex gap-2">
-            {isCancellable(d.run.state) && (
-              <Button variant="danger" disabled={!connected} onClick={() => setConfirm("cancel")}>
-                Cancel <span className="mono ml-1 opacity-70">x</span>
-              </Button>
-            )}
-            {/* §8: only FAILED → QUEUED is a legal retry transition. */}
-            {d.run.state === "FAILED" &&
-              (attemptsExhausted ? (
-                <Button disabled={!connected} onClick={() => setConfirm("force-retry")}>
-                  Force retry…
-                </Button>
-              ) : (
-                <Button
-                  disabled={!connected || retry.isPending}
-                  onClick={() => retry.mutate({ id: d.run.runId, force: false })}
-                >
-                  Retry
-                </Button>
-              ))}
-          </div>
-          <VerbError error={cancel.error ?? (confirm === "force-retry" ? null : retry.error)} />
-
-          <Section title="Lifecycle">
-            <div className="rounded-md border border-(--border) px-3 py-1">
-              {d.lifecycle.map((e) => (
-                <div key={e.seq} className="flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0">
-                  <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.at}>
-                    {new Date(e.at).toLocaleTimeString([], { hour12: false })}
-                  </span>
-                  <span className="shrink-0">
-                    {e.from_state ?? "·"} → <StateBadge state={e.to_state} />
-                  </span>
-                  <span className="truncate text-(--text-faint)">
-                    <ActorRef actor={e.actor} className="text-[13px]" />
-                    {e.reason ? ` · ${e.reason}` : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Section>
-
-          {/* key: a run switch must reset the feed's cursor and scroll state. */}
-          <RunTrace
-            key={d.run.runId}
-            runId={d.run.runId}
-            state={d.run.state}
-            onExpand={() => onOpenFull(d.run.runId)}
+            }
           />
-
-          {d.attempts.length > 0 && (
-            <Section title="Attempts">
-              {d.attempts.map((a) => (
-                <div key={a.attempt} className="mb-1 rounded-md border border-(--border) px-3 py-1.5">
-                  <div className="flex justify-between">
-                    <span>#{a.attempt}</span>
-                    <span className="text-(--text-dim)">{a.terminal_state ?? "in flight"}</span>
-                  </div>
-                  <div className="mono truncate text-[11px] text-(--text-faint)">
-                    {a.reason_code ?? ""} {a.workspace_path ?? ""}
-                  </div>
-                  <div className="flex items-baseline gap-1.5 truncate text-[11px] text-(--text-faint)">
-                    <span>owner</span>
-                    {a.lease_owner ? <ActorRef actor={a.lease_owner} /> : <span className="mono">unclaimed</span>}
-                  </div>
-                  {(a.started_at || a.finished_at) && (
-                    <div className="mt-1 flex gap-3 text-[11px] text-(--text-faint)">
-                      {a.started_at && (
-                        <span>
-                          started <Ago iso={a.started_at} now={now} />
-                        </span>
-                      )}
-                      {a.finished_at && (
-                        <span>
-                          finished <Ago iso={a.finished_at} now={now} />
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </Section>
-          )}
-
-          {d.result && (
-            <Section title={`Result · ${d.result.terminalState}${d.result.reasonCode ? ` · ${d.result.reasonCode}` : ""}`}>
-              {d.result.artifact !== undefined ? (
-                <Disclosure label="artifact" defaultOpen>
-                  <JsonBlock value={d.result.artifact} />
-                </Disclosure>
-              ) : (
-                <Disclosure label="result" defaultOpen>
-                  <JsonBlock value={d.result} />
-                </Disclosure>
-              )}
-              {d.result.evidence !== undefined && (
-                <Disclosure label="evidence — what the agent claims it verified">
-                  <JsonBlock value={d.result.evidence} />
-                </Disclosure>
-              )}
-            </Section>
-          )}
-
-          {d.result && (
-            <Section title="Artifacts">
-              {(d.result.artifacts ?? []).length === 0 ? (
-                <div className="text-(--text-faint)">No stored artifacts.</div>
-              ) : (
-                <div className="rounded-md border border-(--border) px-3 py-1">
-                  {(d.result.artifacts ?? []).map((a) => (
-                    <ArtifactRow key={a.sha256} a={a} />
-                  ))}
-                </div>
-              )}
-            </Section>
-          )}
-
-          {d.receipt && (
-            <Section title="Receipt">
-              {Object.entries(d.receipt).map(([k, v]) => (
-                <KV key={k} k={k} v={v} />
-              ))}
-            </Section>
-          )}
             </>
           )}
         </DetailPane>
