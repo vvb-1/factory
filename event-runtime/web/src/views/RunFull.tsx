@@ -139,25 +139,45 @@ export function RunFull({
 
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-(--border) px-6 py-3">
-        <Button onClick={onBack}>← Runs</Button>
-        {d && <StateBadge state={d.run.state} />}
-        <span className="display mono min-w-0 truncate text-[15px] font-semibold" title={runId}>
-          {runId}
-        </span>
-        {d && (
-          <span className="text-[12px] text-(--text-faint)">
-            <JumpLink
-              onClick={() => onJumpAgent(d.run.spec.agent)}
-              title={`What is ${d.run.spec.agent}? Open in Agents`}
-            >
-              {d.run.spec.agent}
-            </JumpLink>{" "}
-            · {d.run.spec.adapter} · {d.run.attempts}/{d.run.spec.maxAttempts} attempts
-          </span>
-        )}
-        <span className="ml-auto flex shrink-0 gap-1.5">
+      <header className="sticky top-0 z-10 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-(--border) bg-(--surface-1) px-6 py-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <nav aria-label="Breadcrumb" className="flex items-center gap-2">
+            <ol className="flex min-w-0 flex-wrap items-center gap-2 list-none p-0 m-0 text-[13px]">
+              <li className="shrink-0">
+                <Button onClick={onBack}>
+                  ← Runs
+                </Button>
+              </li>
+              <li aria-hidden="true" className="text-(--text-faint) shrink-0">
+                /
+              </li>
+              <li className="flex min-w-0 items-center gap-2" aria-current="page">
+                {(d?.run.state || listRow?.state) && (
+                  <StateBadge state={d?.run.state ?? listRow!.state} />
+                )}
+                <span className="display mono min-w-0 truncate text-[15px] font-semibold text-(--text)" title={runId}>
+                  {runId}
+                </span>
+              </li>
+            </ol>
+          </nav>
+          {d && (
+            <span className="text-[12px] text-(--text-faint)">
+              <JumpLink
+                onClick={() => onJumpAgent(d.run.spec.agent)}
+                title={`What is ${d.run.spec.agent}? Open in Agents`}
+              >
+                {d.run.spec.agent}
+              </JumpLink>{" "}
+              · {d.run.spec.adapter} · {d.run.attempts}/{d.run.spec.maxAttempts} attempts
+            </span>
+          )}
+        </div>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <Button onClick={() => copyText(runId, "run id")}>Copy id</Button>
+          <Button onClick={() => copyText(`bun event-runtime/cli.mjs inspect ${runId}`, "CLI inspect command")}>
+            Copy CLI
+          </Button>
           <Button onClick={copyLink}>Copy link</Button>
         </span>
       </header>
