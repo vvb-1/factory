@@ -30,7 +30,7 @@ The Web Control Plane provides a dense, keyboard-driven interface adhering to Li
 │ • Stat tile overload    │ • Linear repetitive loop│ • Monolithic trace feed │
 │ • Table column squeeze  │ • Multi-tab loss of ctx │ • Plain text artifacts  │
 │ • Monospace visual fatigue│ • Monochromatic payloads│ • Static graph canvas │
-│ • Lack of split control │ • Unstructured search   │ • Missing timing waterfall│
+│ • Lack of split control │ • Unstructured search   │ • No timing waterfall   │
 └─────────────────────────┴─────────────────────────┴─────────────────────────┘
 ```
 
@@ -174,7 +174,7 @@ Items marked `unfiled` had no Linear issue at last check. Search before filing; 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ [ All ] [ In flight ] [ watt-mind/factory ] │ [ 📌 run_48ac ✕ ] [ 📌 prop_8f12 ✕ ] │
+│ [ All ] [ In flight ] [ factory ] │ [ 📌 run_48ac ✕ ] [ 📌 prop_8f12 ✕ ]      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -191,9 +191,9 @@ Items marked `unfiled` had no Linear issue at last check. Search before filing; 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ TRACE WATERFALL & COST ACCUMULATOR                                          │
-│ Turn 1: 4.2s (Reasoning: 1.1s │ tool:read_file: 12ms │ tool:git_diff: 85ms)  │
+│ Turn 1: 4.2s (Reasoning: 1.1s │ tool:read_file: 12ms │ tool:git_diff: 85ms) │
 │ Turn 2: 26.4s (Reasoning: 2.1s │ tool:run_command [npm test]: 24.1s)        │
-│ Total: 30.6s · 18,420 tokens ($0.0552) · 2 turns                           │
+│ Total: 30.6s · 18,420 tokens ($0.0552) · 2 turns                            │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

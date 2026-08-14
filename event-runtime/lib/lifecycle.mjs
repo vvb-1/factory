@@ -6,7 +6,7 @@
  * that updates the run row. Illegal transitions are rejected, never repaired.
  */
 import { hashJson } from "./canonical.mjs";
-import { tx } from "./db.mjs";
+import { tx, txImmediate } from "./db.mjs";
 
 export const STATES = [
   "PROPOSED", "APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING",
@@ -60,7 +60,7 @@ function appendJournal(db, record) {
  */
 export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash, actor, correlationId, causationId, policyVersion, now = Date.now() }) {
   const at = new Date(now).toISOString();
-  return tx(db, () => {
+  return txImmediate(db, () => {
     db.query(
       `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'PROPOSED', 0, ?, ?)`,
@@ -80,7 +80,7 @@ export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash,
  */
 export function transition(db, { runId, to, expectFrom, actor, reason, attempt, correlationId, causationId, policyVersion, now = Date.now() }) {
   const at = new Date(now).toISOString();
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const run = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new IllegalTransition(runId, undefined, to);
     const from = run.state;
