@@ -156,6 +156,107 @@ describe("snapshot and reporting", () => {
     expect(report).toContain("API Server");
     expect(report).toContain("Event Worker");
     expect(report).toContain("Web UI Server");
+    expect(report).toContain("bj29/CLNT-616");
+    expect(report).toContain("vite:301");
+    expect(report).toContain("3000");
+  });
+
+  test("formatFactoryPsReport renders offline status for control plane when serve is unreachable", () => {
+    const snapshot = {
+      timestamp: "2026-08-14T12:00:00.000Z",
+      controlPlane: [
+        {
+          service: "serve",
+          subservice: "API Server",
+          pid: 101,
+          port: 7404,
+          uptime: "01:23",
+          cpu: "0.1%",
+          mem: "0.2%",
+          ticket: null,
+          worktree: null,
+        },
+      ],
+      apiProbes: [
+        {
+          online: false,
+          port: 7404,
+          host: "127.0.0.1",
+          error: "fetch failed",
+        },
+      ],
+      workers: [],
+      runs: [],
+      agents: [],
+      devServers: [],
+      worktrees: [],
+      ports: [],
+      summary: {
+        controlServices: 1,
+        activeWorkers: 0,
+        activeRuns: 0,
+        activeAgents: 0,
+        activeWorktrees: 0,
+        totalWorktrees: 0,
+        listeningPorts: 0,
+      },
+    };
+
+    const report = formatFactoryPsReport(snapshot, { colors: false });
+    expect(report).toContain("API Server");
+    expect(report).toContain("offline");
+    expect(report).not.toContain("starting/busy");
+  });
+
+  test("formatFactoryPsReport renders discovered devServers and ports for worktrees", () => {
+    const snapshot = {
+      timestamp: "2026-08-14T12:00:00.000Z",
+      controlPlane: [],
+      apiProbes: [],
+      workers: [],
+      runs: [],
+      agents: [],
+      devServers: [
+        {
+          pid: 301,
+          service: "vite",
+          repo: "bj29",
+          ticket: "CLNT-616",
+          worktree: "/Users/hdkiller/Develop/.worktrees/bj29/CLNT-616",
+          port: 3000,
+          uptime: "10:00",
+          cpu: "0.0%",
+          mem: "0.1%",
+          command: "vite --port 3000",
+        },
+      ],
+      worktrees: [
+        {
+          repo: "bj29",
+          name: "CLNT-616",
+          path: "/Users/hdkiller/Develop/.worktrees/bj29/CLNT-616",
+          branch: "feat/CLNT-616",
+          ticket: "CLNT-616",
+          pids: {},
+          active: false,
+        },
+      ],
+      ports: [{ command: "node", pid: 301, port: 3000, host: "*" }],
+      summary: {
+        controlServices: 0,
+        activeWorkers: 0,
+        activeRuns: 0,
+        activeAgents: 0,
+        activeWorktrees: 1,
+        totalWorktrees: 1,
+        listeningPorts: 1,
+      },
+    };
+
+    const report = formatFactoryPsReport(snapshot, { colors: false });
+    expect(report).toContain("bj29/CLNT-616");
+    expect(report).toContain("vite:301");
+    expect(report).toContain("3000");
   });
 
   test("collectFactoryPsSnapshot probes multiple candidate ports concurrently without stalling", async () => {
