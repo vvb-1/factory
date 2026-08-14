@@ -29,7 +29,7 @@ The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In P
    - Risks: <what the reviewer should look at first, or "none known">
    ```
 
-   The merge stage reviews from this comment, so a vague Handoff costs a slower review; a missing one is a protocol finding against this run. For user-facing changes attach before/after screenshots to the ticket — never commit them to the repo.
+   The merge stage reviews from this comment, so a vague Handoff costs a slower review; a missing one is a protocol finding against this run. For user-facing changes attach before/after screenshots to the ticket — never commit them to the repo. Always report your explicit terminal state (`STATE: PR_OPEN`).
 7. **Heartbeat** the ticket at each phase change and at least every 20 minutes, saying what changed. Silence for 45 minutes and the reaper takes the ticket back.
 
 ## Don't
@@ -40,7 +40,7 @@ The dispatcher (`orchestrator/tick.mjs`) has done the setup: the ticket is `In P
 
 ## When it goes wrong
 
-Do not open a PR. Comment the ticket with the specific decision, credential, or missing piece you need — phrased so one reply unblocks it — then move it to `Blocked` + `ai:blocked` and stop. A blocked ticket with a clear question is a good outcome; a PR built on a guess is not.
+Do not open a PR. Comment the ticket with the specific decision, credential, or missing piece you need — phrased so one reply unblocks it — then move it to `Blocked` + `ai:blocked`, report terminal state `STATE: BLOCKED` (or `STATE: FAILED`), and stop. A blocked ticket with a clear question is a good outcome; a PR built on a guess is not.
 
 If the work turns out to touch auth/authz, payments, secrets, destructive migrations, or production infra, say so and stop rather than pushing. Those are never merged without a human, so the useful thing is the finding, not the diff.
 
