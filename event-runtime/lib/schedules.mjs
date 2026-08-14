@@ -79,15 +79,17 @@ export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none", ma
   return { slots, skipped: Math.max(0, totalMissed - 1) };
 }
 
-/** The newest slot already admitted for a loop, or null if it never fired. */
-export function lastAdmittedSlot(db, loop) {
+/** The newest slot already admitted for a loop at or before now, or null if it never fired (OPS-437). */
+export function lastAdmittedSlot(db, loop, { now = Date.now() } = {}) {
+  const nowMs = typeof now === "number" ? now : (typeof now === "string" ? Date.parse(now) : Date.now());
+  const maxEventId = tickEventId(loop, new Date(nowMs).toISOString());
   const row = db
     .query(
       `SELECT event_id FROM events
-       WHERE source = ? AND type = ?
+       WHERE source = ? AND type = ? AND event_id <= ?
        ORDER BY event_id DESC LIMIT 1`,
     )
-    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`);
+    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`, maxEventId);
   // eventId is clock:<loop>:<ISO slot>; ISO sorts lexicographically, so the
   // newest row is the newest slot without parsing every payload.
   return row ? row.event_id.slice(`clock:${loop}:`.length) : null;
@@ -108,7 +110,7 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
     try {
       const cadenceSeconds = parseCadence(schedule.every);
       const { slots, skipped } = dueSlots({
-        lastSlot: lastAdmittedSlot(db, loop),
+        lastSlot: lastAdmittedSlot(db, loop, { now }),
         nowMs: now,
         cadenceSeconds,
         catchUp: schedule.catchUp,

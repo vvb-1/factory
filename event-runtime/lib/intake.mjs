@@ -70,10 +70,19 @@ export function admitEvent(db, registry, envelope, { now = Date.now() } = {}) {
   if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) {
     return { admitted: false, duplicate: false, errors: ["$: envelope must be an object"] };
   }
-  const receivedAt = new Date(now).toISOString();
+  const nowMs = typeof now === "number" ? now : (typeof now === "string" ? Date.parse(now) : Date.now());
+  const receivedAt = new Date(nowMs).toISOString();
   const stored = { ...envelope, receivedAt };
   const { valid, errors } = validate(registry.schemas.envelope, stored);
   if (!valid) return { admitted: false, duplicate: false, errors };
+
+  // Refuse clock tick events whose slot is in the future relative to now (OPS-437).
+  if (stored.source === "schedule" || (typeof stored.type === "string" && stored.type.startsWith("clock.tick."))) {
+    const occurredMs = Date.parse(stored.occurredAt);
+    if (!Number.isNaN(occurredMs) && occurredMs > nowMs) {
+      return { admitted: false, duplicate: false, errors: ["occurredAt: clock tick slot cannot be in the future"] };
+    }
+  }
 
   return tx(db, () => {
     const existing = db

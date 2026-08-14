@@ -192,6 +192,39 @@ describe("emitDueTicks (§3)", () => {
     emitDueTicks(d, registry, { now: at("2026-08-13T22:00:00Z") });
     expect(lastAdmittedSlot(d, "reaper")).toBe("2026-08-13T22:00:00.000Z");
   });
+
+  test("a future-dated schedule row does not halt due-slot emission (OPS-437)", () => {
+    const d = db();
+    const registry = withLoop();
+    // Directly insert a rogue future-dated event row (e.g. year 9999)
+    d.query(
+      `INSERT INTO events
+         (source, event_id, type, subject, occurred_at, received_at,
+          correlation_id, causation_id, envelope_json, payload_hash, status, admitted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?)`,
+    ).run(
+      "schedule",
+      "clock:reaper:9999-01-01T00:00:00.000Z",
+      "clock.tick.reaper",
+      "reaper",
+      "9999-01-01T00:00:00.000Z",
+      "2026-08-13T21:00:00.000Z",
+      null,
+      null,
+      JSON.stringify({}),
+      "sha256:fake",
+      "2026-08-13T21:00:00.000Z",
+    );
+
+    const now = at("2026-08-13T21:00:00Z");
+    // lastAdmittedSlot bounded by now ignores the future-dated row
+    expect(lastAdmittedSlot(d, "reaper", { now })).toBeNull();
+
+    // emitDueTicks fires normally for the current slot
+    const ticks = emitDueTicks(d, registry, { now });
+    expect(ticks.emitted).toHaveLength(1);
+    expect(ticks.emitted[0].slot).toBe("2026-08-13T21:00:00.000Z");
+  });
 });
 
 describe("planning a tick (§5, §6)", () => {

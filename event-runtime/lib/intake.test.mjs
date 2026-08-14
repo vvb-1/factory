@@ -151,4 +151,24 @@ describe("admitEvent", () => {
     }
     expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(0);
   });
+
+  test("direct admission refuses clock tick events whose slot is in the future relative to now (OPS-437)", () => {
+    const db = openDb(":memory:");
+    const futureTick = {
+      schemaVersion: "factory.event/v1",
+      eventId: "clock:reaper:9999-01-01T00:00:00.000Z",
+      type: "clock.tick.reaper",
+      source: "schedule",
+      subject: "reaper",
+      occurredAt: "9999-01-01T00:00:00.000Z",
+      correlationId: "clock:reaper:9999-01-01T00:00:00.000Z",
+      causationId: null,
+      payload: { loop: "reaper", slot: "9999-01-01T00:00:00.000Z", cadenceSeconds: 3600, skippedSlots: 0 },
+    };
+    const result = admitEvent(db, registry, futureTick, { now: NOW });
+    expect(result.admitted).toBe(false);
+    expect(result.duplicate).toBe(false);
+    expect(result.errors).toContain("occurredAt: clock tick slot cannot be in the future");
+    expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(0);
+  });
 });
