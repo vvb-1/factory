@@ -8,7 +8,7 @@
  * tickets a human curated — so it gets real tests.
  */
 import { test, expect } from "bun:test";
-import { resolveLabelIds, claimLabels, validateLabels, formatTicket, agentLabel, TYPE_LABELS } from "./linear.mjs";
+import { resolveLabelIds, claimLabels, validateLabels, formatTicket, agentLabel, TYPE_LABELS, formatComment, formatComments } from "./linear.mjs";
 
 const LABELS = [
   { id: "l-ready", name: "ai:agent-ready" },
@@ -104,3 +104,80 @@ test("formatTicket shows the fields the protocol acts on", () => {
   expect(text).toContain("(unassigned)");
   expect(text).toContain("ai:agent-ready");
 });
+
+// ------------------------------------------------------------- comments ---
+test("formatComment formats author, timestamp, and body", () => {
+  const text = formatComment({
+    user: { id: "u-1", name: "Laszlo Racz" },
+    createdAt: "2026-08-14T12:00:00.000Z",
+    body: "## Handoff\n- PR: https://github.com/org/repo/pull/1\n- Verification: pass",
+  });
+  expect(text).toContain("Laszlo Racz");
+  expect(text).toContain("2026-08-14T12:00:00.000Z");
+  expect(text).toContain("## Handoff");
+});
+
+test("formatComment handles missing user and missing timestamp gracefully", () => {
+  const text = formatComment({
+    body: "Automated comment",
+  });
+  expect(text).toContain("(unknown)");
+  expect(text).toContain("Automated comment");
+});
+
+test("formatComments handles empty comment list", () => {
+  expect(formatComments([])).toBe("(no comments)");
+  expect(formatComments({ comments: { nodes: [] } })).toBe("(no comments)");
+});
+
+test("formatComments joins multiple comments in chronological order with delimiter", () => {
+  const comments = [
+    {
+      user: { name: "Alice" },
+      createdAt: "2026-08-14T10:00:00.000Z",
+      body: "First comment",
+    },
+    {
+      user: { name: "Bob" },
+      createdAt: "2026-08-14T11:00:00.000Z",
+      body: "Second comment",
+    },
+  ];
+  const text = formatComments(comments);
+  expect(text).toContain("Alice");
+  expect(text).toContain("First comment");
+  expect(text).toContain("Bob");
+  expect(text).toContain("Second comment");
+  expect(text).toContain("---");
+  expect(text.indexOf("Alice")).toBeLessThan(text.indexOf("Bob"));
+});
+
+test("formatComments accepts issue object containing comments nodes", () => {
+  const issue = {
+    identifier: "OPS-294",
+    comments: {
+      nodes: [
+        {
+          user: { name: "Charlie" },
+          createdAt: "2026-08-14T12:00:00.000Z",
+          body: "Testing issue comments wrapper",
+        },
+      ],
+    },
+  };
+  const text = formatComments(issue);
+  expect(text).toContain("Charlie");
+  expect(text).toContain("Testing issue comments wrapper");
+});
+
+// -------------------------------------------------------- label mutations ---
+test("label edits support both addition and removal without touching other labels", () => {
+  const current = ["type:bug", "area:api", "ai:in-progress"];
+  const ids = resolveLabelIds(current, { add: ["ai:needs-review"], remove: ["ai:in-progress"] }, LABELS);
+  expect(ids).toContain("l-bug");
+  expect(ids).toContain("l-area");
+  expect(ids).toContain("l-review");
+  expect(ids).not.toContain("l-prog");
+  expect(ids).toHaveLength(3);
+});
+
