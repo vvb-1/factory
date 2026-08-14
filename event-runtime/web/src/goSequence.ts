@@ -20,21 +20,32 @@ export function goPrefixActive(now: number = Date.now()): boolean {
  * `g r`, `g t`, `g w`. Kept free of React and the DOM so it is testable —
  * `useGoSequences` owns the listener, the key guard and `preventDefault`.
  *
- * Returns a stepper: feed it key names, and it answers whether this key
- * completed a chord. `g` is both the prefix and the Graph suffix, so a key
- * is matched against the map *before* it is considered as a new prefix.
+ * Returns a stepper: feed it key names through `press`, and it answers whether
+ * this key completed a chord. `g` is both the prefix and the Graph suffix, so a
+ * key is matched against the map *before* it is considered as a new prefix.
+ *
+ * `armed` reports whether a `g` is still waiting for its suffix. That is the
+ * same pending state `press` already keeps, exposed so the on-screen
+ * affordance renders from it instead of re-deriving the chord rules — and it is
+ * deliberately not `goPrefixActive()`, which stays true for the rest of the
+ * window after a chord resolves so the list verbs keep standing down.
  */
 export function goSequence(
   hasTarget: (key: string) => boolean,
   now: () => number = Date.now,
 ) {
   let pendingG = 0;
-  return function press(key: string): boolean {
-    if (pendingG && now() - pendingG < GO_CHORD_MS && hasTarget(key)) {
-      pendingG = 0;
-      return true;
-    }
-    pendingG = key === "g" ? now() : 0;
-    return false;
+  return {
+    press(key: string): boolean {
+      if (pendingG && now() - pendingG < GO_CHORD_MS && hasTarget(key)) {
+        pendingG = 0;
+        return true;
+      }
+      pendingG = key === "g" ? now() : 0;
+      return false;
+    },
+    armed(): boolean {
+      return pendingG > 0 && now() - pendingG < GO_CHORD_MS;
+    },
   };
 }
