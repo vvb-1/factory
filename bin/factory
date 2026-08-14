@@ -86,6 +86,9 @@ case "$cmd" in
   tick)         run_bun orchestrator/tick.mjs "$@" ;;
   dispatch)     run_bun tools/dispatch.mjs "$@" ;;
   events)       run_bun event-runtime/cli.mjs "$@" ;;
+  approve)      run_bun event-runtime/cli.mjs approve "$@" ;;
+  reject)       run_bun event-runtime/cli.mjs reject "$@" ;;
+  inject)       run_bun event-runtime/cli.mjs inject "$@" ;;
   serve)
     _has_web=0
     for _a in "$@"; do
@@ -183,6 +186,9 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   tick          orchestrator/tick.mjs
   dispatch      tools/dispatch.mjs (swift event task runner: triage, status, janitor)
   events        event-runtime/cli.mjs (status, ps, runs, proposals, approve, reject, inject, requeue)
+  approve       event-runtime/cli.mjs approve <proposal-id>
+  reject        event-runtime/cli.mjs reject <proposal-id> "<reason>"
+  inject        event-runtime/cli.mjs inject <envelope.json|->
   serve         start event runtime control API (use --web or --all to launch web UI too)
   web           start event runtime web UI server (use --dev for Vite live HMR mode)
   up            start live event-runtime stack (API 7381, live worker, and Web UI 7382)
