@@ -298,8 +298,12 @@ function watchServe(args) {
 async function serve(args) {
   if (args.includes("--watch") && !underBunWatch()) return watchServe(args);
 
-  const port = flagValue(args, "--port") ? Number(flagValue(args, "--port")) : DEFAULT_PORT;
-  if (!Number.isInteger(port) || port < 0) fail(`serve: invalid --port ${flagValue(args, "--port")}`);
+  const portFlag = flagValue(args, "--port");
+  const rawPort = portFlag ?? process.env.FACTORY_EVENT_PORT ?? "7381";
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    fail(`serve: invalid port "${rawPort}" (must be integer 1-65535)`);
+  }
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
   const adapters = { actions, claude, command, fake };
   if (adapterOverride && !adapters[adapterOverride]) {
@@ -391,6 +395,9 @@ async function serve(args) {
   server.on("listening", () => {
     log(`environment "${env.name}" — control API on http://${API_HOST}:${port} (db ${dbPath()}, policy ${pv})`);
     if (adapterOverride) log(`adapter override: all new run specs use "${adapterOverride}"`);
+    if (!process.env.FACTORY_EVENT_SECRET) {
+      log("webhook intake: disabled (FACTORY_EVENT_SECRET is unset; webhooks will be rejected with 401)");
+    }
     log(
       withWorker
         ? "worker: in-process (--with-worker) — restarting serve interrupts running agents"
@@ -578,6 +585,7 @@ async function status(client) {
   console.log(states.length ? countLine("runs", s.runs.byState, states) : `${pad("runs", 11)}none`);
   const a = s.anomalies;
   const anomalyLines = [];
+  for (const c of a.configuration ?? []) anomalyLines.push(`configuration: ${c}`);
   for (const id of a.expiredOpenProposals) anomalyLines.push(`expired open proposal ${id}`);
   if (a.staleLeases > 0) anomalyLines.push(`stale leases: ${a.staleLeases}`);
   if (a.unpublishedOutbox > 0) anomalyLines.push(`unpublished outbox rows: ${a.unpublishedOutbox}`);

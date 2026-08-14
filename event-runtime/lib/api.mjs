@@ -129,7 +129,7 @@ function runCounts(db) {
 }
 
 /** §13 status + doctor view: aggregates plus anomalies, all read-only SQL. */
-function statusView(db, registry, nowMs) {
+function statusView(db, registry, nowMs, { secret, policyVersion } = {}) {
   const open = openProposals(db, { now: nowMs });
   const expiredOpen = open.filter((p) => p.expired);
   const staleLeases = db
@@ -152,6 +152,14 @@ function statusView(db, registry, nowMs) {
   const store = storeStats(db, artifactsRoot(), { now: nowMs });
   const stalled = stalledWorkers(db, { now: nowMs });
 
+  const configAnomalies = [];
+  if (!secret) {
+    configAnomalies.push("FACTORY_EVENT_SECRET is unset (webhook intake disabled)");
+  }
+  if (policyVersion === "unknown") {
+    configAnomalies.push("policyVersion is unknown");
+  }
+
   return {
     events: eventCounts(db),
     proposals: { open: open.length, expired: expiredOpen.length },
@@ -163,6 +171,7 @@ function statusView(db, registry, nowMs) {
     },
     artifacts: { files: store.files, bytes: store.bytes, orphans: store.orphans, orphanBytes: store.orphanBytes },
     anomalies: {
+      configuration: configAnomalies,
       expiredOpenProposals: expiredOpen.map((p) => p.id),
       staleLeases,
       unpublishedOutbox,
@@ -552,7 +561,12 @@ export function createApi({
       const nowMs = now();
 
       if (route === "GET /health") {
-        return send(res, 200, { ok: true, policyVersion, env });
+        return send(res, 200, {
+          ok: true,
+          policyVersion,
+          env,
+          webhookSecret: secret ? "set" : "absent",
+        });
       }
 
       if (route === "POST /events") {
@@ -575,7 +589,7 @@ export function createApi({
       }
 
       if (route === "GET /status") {
-        return send(res, 200, { env, ...statusView(db, registry, nowMs) });
+        return send(res, 200, { env, ...statusView(db, registry, nowMs, { secret, policyVersion }) });
       }
 
       if (route === "GET /events") {

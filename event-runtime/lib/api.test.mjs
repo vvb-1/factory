@@ -1150,4 +1150,102 @@ describe("serve PID lock (OPS-458)", () => {
   });
 });
 
+describe("missing FACTORY_EVENT_SECRET visibility and port validation (OPS-457)", () => {
+  test("GET /health reports webhookSecret set vs absent", async () => {
+    const sWithSecret = await makeServer({ secret: "test-secret" });
+    try {
+      const res = await fetch(sWithSecret.url("/health"));
+      const body = await res.json();
+      expect(body.webhookSecret).toBe("set");
+    } finally {
+      sWithSecret.close();
+    }
+
+    const sNoSecret = await makeServer({ secret: null });
+    try {
+      const res = await fetch(sNoSecret.url("/health"));
+      const body = await res.json();
+      expect(body.webhookSecret).toBe("absent");
+    } finally {
+      sNoSecret.close();
+    }
+  });
+
+  test("GET /status includes configuration anomaly when secret is absent or policyVersion is unknown", async () => {
+    const sNoSecret = await makeServer({ secret: null, policyVersion: "git:abc1234" });
+    try {
+      const status = await sNoSecret.client.status();
+      expect(status.anomalies.configuration).toContain("FACTORY_EVENT_SECRET is unset (webhook intake disabled)");
+      expect(status.anomalies.configuration).not.toContain("policyVersion is unknown");
+    } finally {
+      sNoSecret.close();
+    }
+
+    const sUnknownPv = await makeServer({ secret: "test-secret", policyVersion: "unknown" });
+    try {
+      const status = await sUnknownPv.client.status();
+      expect(status.anomalies.configuration).toContain("policyVersion is unknown");
+      expect(status.anomalies.configuration).not.toContain("FACTORY_EVENT_SECRET is unset (webhook intake disabled)");
+    } finally {
+      sUnknownPv.close();
+    }
+
+    const sClean = await makeServer({ secret: "test-secret", policyVersion: "git:abc1234" });
+    try {
+      const status = await sClean.client.status();
+      expect(status.anomalies.configuration).toEqual([]);
+    } finally {
+      sClean.close();
+    }
+  });
+
+  test("serve with invalid non-numeric FACTORY_EVENT_PORT fails loudly", async () => {
+    const { spawn } = await import("node:child_process");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-port-err-"));
+    const CLI = path.resolve(import.meta.dir, "../cli.mjs");
+
+    const child = spawn("bun", [CLI, "serve"], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_PORT: "notanumber" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let errOut = "";
+    child.stderr.on("data", (b) => { errOut += b; });
+    const code = await new Promise((resolve) => child.on("exit", resolve));
+    expect(code).not.toBe(0);
+    expect(errOut).toContain('serve: invalid port "notanumber"');
+  });
+
+  test("serve startup banner warns when FACTORY_EVENT_SECRET is unset", async () => {
+    const { spawn } = await import("node:child_process");
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-banner-"));
+    const port = String(59600 + (process.pid % 200));
+    const CLI = path.resolve(import.meta.dir, "../cli.mjs");
+
+    const env = { ...process.env, FACTORY_EVENT_HOME: home };
+    delete env.FACTORY_EVENT_SECRET;
+
+    const child = spawn("bun", [CLI, "serve", "--port", port], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let out = "";
+    child.stdout.on("data", (b) => { out += b; });
+    child.stderr.on("data", (b) => { out += b; });
+
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    try {
+      expect(out).toContain("webhook intake: disabled (FACTORY_EVENT_SECRET is unset");
+    } finally {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+  });
+});
+
+
 
