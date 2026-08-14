@@ -26,21 +26,7 @@ import { Proposals } from "./views/Proposals";
 import { RunFull } from "./views/RunFull";
 import { Runs } from "./views/Runs";
 import { Workers } from "./views/Workers";
-
-// Agents rides `g t` ("what is this agent?"): o/e/p/r are taken, and `g a`
-// would double-fire the proposals view's `a` (approve) list key — chord
-// suffixes must never collide with single-key verbs. Workers keeps its
-// natural `g w`: `w` is no view's list verb.
-const NAV = [
-  { key: "overview", label: "Overview", go: "o" },
-  { key: "events", label: "Events", go: "e" },
-  { key: "proposals", label: "Proposals", go: "p" },
-  { key: "runs", label: "Runs", go: "r" },
-  { key: "projects", label: "Projects", go: "f" },
-  { key: "agents", label: "Agents", go: "t" },
-  { key: "workers", label: "Workers", go: "w" },
-  { key: "graph", label: "Graph", go: "g" },
-] as const;
+import { NAV } from "./nav";
 
 export function App() {
   const [route, navigateRaw] = useHashRoute();

@@ -1,10 +1,11 @@
 import { Dialog } from "./ui";
+import { NAV } from "../nav";
 
 const ROWS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
   {
-    keys: "g → o / e / p / r / f / t / w / g",
-    does: "Overview / Events / Proposals / Runs / Projects / Agents / Workers / Graph",
+    keys: `g → ${NAV.map((n) => n.go).join(" / ")}`,
+    does: NAV.map((n) => n.label).join(" / "),
   },
   { keys: "i", does: "inject event" },
   { keys: "/", does: "focus filter (Events, if none on this view)" },
