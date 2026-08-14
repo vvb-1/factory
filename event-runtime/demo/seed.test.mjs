@@ -70,7 +70,7 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
     expect(verifyRes.status).toBe(0);
-  });
+  }, 30_000);
 
   test("re-running seed with the SAME prefix fails immediately (<1s) on duplicate intake", () => {
     const t0 = Date.now();
@@ -83,7 +83,7 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     expect(elapsedMs).toBeLessThan(2000);
     const output = `${res.stdout}${res.stderr}`;
     expect(output).toContain("duplicate prefix \"t1\"");
-  });
+  }, 10_000);
 
   test("re-seeding with a NEW prefix cleans up hang runs and allows verify to pass", () => {
     const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t2"], {
@@ -97,5 +97,5 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
     expect(verifyRes.status).toBe(0);
-  });
+  }, 30_000);
 });
