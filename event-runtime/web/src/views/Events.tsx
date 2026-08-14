@@ -9,6 +9,7 @@ import type { AdmittedEvent, EventFocus } from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
 import { EVENT_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
+import { formatRevealNotification } from "../reveal";
 import {
   Ago,
   Button,
@@ -159,6 +160,7 @@ export function Events({
   // before the tab effect below has made the row renderable.
   const pendingReveal = useRef<string | null>(null);
   const lastKey = useRef<string | null>(null);
+  const tabChangedFor = useRef<string | null>(null);
   useEffect(() => {
     if (selectedKey !== lastKey.current) {
       lastKey.current = selectedKey;
@@ -170,23 +172,55 @@ export function Events({
     if (!row) return; // tab switch / poll still pending
     if (fetchAll && tab !== "all" && row.status !== tab) return; // waiting on the tab switch
     pendingReveal.current = null; // decided once
-    if (visible.some((e) => keyOf(e) === key)) return; // visible: keep the filters
-    setFilter("");
-    setSourceFilter(null);
-    if (!focusEvent?.type) setTypeFilter(null);
-  }, [selectedKey, rows, visible, focusEvent?.type, fetchAll, tab]);
+    const isHidden = !visible.some((e) => keyOf(e) === key);
+    let filterCleared = false;
+    if (isHidden) {
+      if (filter || sourceFilter || (typeFilter && !focusEvent?.type)) {
+        filterCleared = true;
+      }
+      setFilter("");
+      setSourceFilter(null);
+      if (!focusEvent?.type) setTypeFilter(null);
+    }
+    const tabChanged = tabChangedFor.current === key;
+    tabChangedFor.current = null;
+    if (tabChanged || filterCleared) {
+      const msg = formatRevealNotification({
+        kind: "event",
+        id: focusEvent?.eventId ?? row.eventId,
+        state: row.status,
+        tabChanged,
+        filterCleared,
+      });
+      if (msg) notify(msg, "info");
+    }
+  }, [selectedKey, rows, visible, focusEvent?.type, focusEvent?.eventId, fetchAll, tab, filter, sourceFilter, typeFilter]);
 
   // Hash id: switch to All if the row isn't on this tab. Don't strip the hash.
   // With a repo context the fetch ignores the tab, so the row's own status —
   // not its presence in `rows` — decides whether this tab can render it.
   useEffect(() => {
-    if (!focusEvent?.source || !focusEvent?.eventId) return;
+    if (!focusEvent?.source || !focusEvent?.eventId) {
+      tabChangedFor.current = null;
+      return;
+    }
+    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) return;
+    if (list.isPending || !list.data) return;
     const key = `${focusEvent.source}:${focusEvent.eventId}`;
     const row = rows.find((e) => keyOf(e) === key);
-    const onTab = !!row && (!fetchAll || tab === "all" || row.status === tab);
-    if (!onTab && tab !== "all") setTab("all");
+    if (fetchAll) {
+      if (row && tab !== "all" && row.status !== tab) {
+        tabChangedFor.current = key;
+        setTab("all");
+      }
+      return;
+    }
+    if (!row && tab !== "all") {
+      tabChangedFor.current = key;
+      setTab("all");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusEvent?.source, focusEvent?.eventId, rows, tab, fetchAll]);
+  }, [focusEvent?.source, focusEvent?.eventId, focusEvent?.status, rows, tab, fetchAll, list.isPending, list.data]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });

@@ -8,6 +8,7 @@ import { RunTrace } from "../components/RunTrace";
 import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
 import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
+import { formatRevealNotification } from "../reveal";
 import type { Attempt, ArtifactRef, RunState } from "../types";
 import {
   Ago,
@@ -376,9 +377,11 @@ export function Runs({
   // nothing about the tab — the tab has to be part of the membership test, or
   // the switch to ALL never fires and the row stays unrendered.
   const revealedFor = useRef<string | null>(null);
+  const tabChangedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!focusRunId) {
       revealedFor.current = null;
+      tabChangedFor.current = null;
       return;
     }
     const onTab = rows.some(
@@ -387,12 +390,33 @@ export function Runs({
     if (onTab) {
       if (revealedFor.current !== focusRunId) {
         revealedFor.current = focusRunId;
-        if (!visible.some((r) => r.runId === focusRunId)) setFilter("");
+        const isHidden = !visible.some((r) => r.runId === focusRunId);
+        let filterCleared = false;
+        if (isHidden && filter) {
+          setFilter("");
+          filterCleared = true;
+        }
+        const tabChanged = tabChangedFor.current === focusRunId;
+        tabChangedFor.current = null;
+        if (tabChanged || filterCleared) {
+          const row = rows.find((r) => r.runId === focusRunId);
+          const msg = formatRevealNotification({
+            kind: "run",
+            id: focusRunId,
+            state: row?.state,
+            tabChanged,
+            filterCleared,
+          });
+          if (msg) notify(msg, "info");
+        }
       }
       return;
     }
-    if (tab !== "ALL") setTab("ALL");
-  }, [focusRunId, rows, tab, visible, fetchAll]);
+    if (tab !== "ALL") {
+      tabChangedFor.current = focusRunId;
+      setTab("ALL");
+    }
+  }, [focusRunId, rows, tab, visible, fetchAll, filter]);
 
   useEffect(() => {
     if (focusState && (STATE_TABS as readonly string[]).includes(focusState)) {

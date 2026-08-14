@@ -57,7 +57,7 @@ export function ContextTabs({
   );
   const activeId = active.kind === "repo" ? active.name : active.kind;
   const activeTab = () =>
-    stripRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null;
+    stripRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? null;
 
   // The strip scrolls its own active tab: `[` / `]` scroll-into-view belongs to
   // the view's status tabs, and a repo tab can go active without being clicked
@@ -106,14 +106,13 @@ export function ContextTabs({
       <div
         ref={stripRef}
         className="flex min-w-0 flex-1 items-stretch gap-0.5"
-        role="tablist"
+        role="toolbar"
         aria-label="Context"
         {...{ [CONTEXT_TABS_ATTR]: "" }}
       >
         <button
           type="button"
-          role="tab"
-          aria-selected={active.kind === "all"}
+          aria-pressed={active.kind === "all"}
           className={tabClass("all")}
           onClick={() => onSelect({ kind: "all" })}
         >
@@ -127,8 +126,7 @@ export function ContextTabs({
             <div key={name} role="presentation" className="flex shrink-0 items-center">
               <button
                 type="button"
-                role="tab"
-                aria-selected={active.kind === "repo" && active.name === name}
+                aria-pressed={active.kind === "repo" && active.name === name}
                 className={tabClass(name)}
                 onClick={() => onSelect({ kind: "repo", name })}
               >
@@ -136,6 +134,7 @@ export function ContextTabs({
               </button>
               <button
                 type="button"
+                tabIndex={-1}
                 aria-label={`Close ${name}`}
                 title={`Close ${name}`}
                 className="rounded px-1 text-[11px] text-(--text-faint) hover:text-(--text)"
@@ -152,8 +151,7 @@ export function ContextTabs({
         </div>
         <button
           type="button"
-          role="tab"
-          aria-selected={active.kind === "inflight"}
+          aria-pressed={active.kind === "inflight"}
           className={tabClass(INFLIGHT)}
           onClick={() => onSelect({ kind: "inflight" })}
         >

@@ -26,9 +26,9 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     <Dialog title="Keyboard" onClose={onClose}>
       <div className="text-[12px] text-(--text-dim)">
         {ROWS.map((r) => (
-          <div key={r.keys} className="flex items-baseline justify-between gap-4 border-b border-(--border) py-1.5 last:border-0">
+          <div key={r.keys} className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0">
             <span className="mono text-(--text)">{r.keys}</span>
-            <span className="text-right text-(--text-faint)">{r.does}</span>
+            <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
           </div>
         ))}
       </div>

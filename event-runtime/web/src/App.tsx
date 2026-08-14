@@ -610,7 +610,7 @@ function GoPrefixHint({ armed }: { armed: boolean }) {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 left-1/2 z-30 -translate-x-1/2"
+      className="pointer-events-none fixed bottom-4 left-4 z-30 max-w-[calc(100vw-20rem)] lg:left-1/2 lg:-translate-x-1/2 lg:max-w-[calc(100vw-24rem)]"
     >
       {armed && (
         <>
@@ -619,7 +619,7 @@ function GoPrefixHint({ armed }: { armed: boolean }) {
               aloud: the sentence above says the same thing in one breath. */}
           <div
             aria-hidden="true"
-            className="flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-center gap-x-2.5 gap-y-1 rounded-full border border-(--border-strong) bg-(--surface-2) px-3 py-1.5 text-[11px] shadow-lg"
+            className="flex max-w-full flex-wrap items-center justify-center gap-x-2.5 gap-y-1 rounded-full border border-(--border-strong) bg-(--surface-2) px-3 py-1.5 text-[11px] shadow-lg"
           >
             <span
               className="mono rounded px-1.5 font-semibold"
