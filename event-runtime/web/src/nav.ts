@@ -9,6 +9,7 @@ export const NAV = [
   { key: "runs", label: "Runs", go: "r" },
   { key: "projects", label: "Projects", go: "f" },
   { key: "agents", label: "Agents", go: "t" },
+  { key: "schedules", label: "Schedules", go: "s" },
   { key: "workers", label: "Workers", go: "w" },
   { key: "graph", label: "Graph", go: "g" },
 ] as const;
