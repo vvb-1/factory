@@ -33,8 +33,8 @@
   --surface-1: color-mix(in oklch, var(--base) 97%, var(--contrast));
   --surface-2: color-mix(in oklch, var(--base) 93%, var(--contrast));
   --surface-3: color-mix(in oklch, var(--base) 88%, var(--contrast));
-  --border: color-mix(in oklch, var(--base) 89%, var(--contrast));
-  --border-strong: color-mix(in oklch, var(--base) 78%, var(--contrast));
+  --border: color-mix(in oklch, var(--base) 80%, var(--contrast));
+  --border-strong: color-mix(in oklch, var(--base) 65%, var(--contrast));
   --text: color-mix(in oklch, var(--contrast) 94%, var(--base));
   --text-dim: color-mix(in oklch, var(--contrast) 72%, var(--base));
   --text-faint: color-mix(in oklch, var(--contrast) 58%, var(--base));
