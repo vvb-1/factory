@@ -37,6 +37,8 @@ export function slotFor(nowMs, cadenceSeconds) {
 
 export const tickEventId = (loop, slot) => `clock:${loop}:${slot}`;
 
+export const DEFAULT_MAX_CATCH_UP = 24;
+
 /**
  * Which slots to fire, given the last one already admitted (§4 catch-up).
  *
@@ -45,23 +47,36 @@ export const tickEventId = (loop, slot) => `clock:${loop}:${slot}`;
  * while still reporting how many slots it stands for, so a six-hour gap
  * reads as a decision rather than as silence.
  *
+ * Under `all`, at most `maxCatchUp` newest slots are returned in order (default
+ * 24), and any older missed slots are reported in `skipped` (OPS-452).
+ *
  * @returns {{ slots: string[], skipped: number }}
  */
-export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none" }) {
+export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none", maxCatchUp = DEFAULT_MAX_CATCH_UP }) {
   const current = slotFor(nowMs, cadenceSeconds);
   if (!lastSlot) return { slots: [current], skipped: 0 };
   if (Date.parse(lastSlot) >= Date.parse(current)) return { slots: [], skipped: 0 };
 
   const period = cadenceSeconds * 1000;
-  const missed = [];
-  for (let t = Date.parse(lastSlot) + period; t <= Date.parse(current); t += period) {
-    missed.push(new Date(t).toISOString());
+  const totalMissed = Math.round((Date.parse(current) - Date.parse(lastSlot)) / period);
+  if (totalMissed <= 0) return { slots: [], skipped: 0 };
+
+  if (catchUp === "all") {
+    const cap = Math.max(1, maxCatchUp ?? DEFAULT_MAX_CATCH_UP);
+    const count = Math.min(totalMissed, cap);
+    const skipped = totalMissed - count;
+    const slots = [];
+    const startT = Date.parse(current) - (count - 1) * period;
+    for (let t = startT; t <= Date.parse(current); t += period) {
+      slots.push(new Date(t).toISOString());
+    }
+    return { slots, skipped };
   }
-  if (catchUp === "all") return { slots: missed, skipped: 0 };
+
   // "none" and "last" both fire exactly one tick here; they differ only in
   // which slot it claims to be, and therefore in what a replay would mean.
-  const slots = [catchUp === "last" ? missed[missed.length - 1] : current];
-  return { slots, skipped: Math.max(0, missed.length - 1) };
+  const slots = [current];
+  return { slots, skipped: Math.max(0, totalMissed - 1) };
 }
 
 /** The newest slot already admitted for a loop, or null if it never fired. */
@@ -97,6 +112,7 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
         nowMs: now,
         cadenceSeconds,
         catchUp: schedule.catchUp,
+        maxCatchUp: schedule.maxCatchUp,
       });
       for (const slot of slots) {
         const outcome = admitEvent(

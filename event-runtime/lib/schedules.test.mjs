@@ -112,6 +112,38 @@ describe("dueSlots — catch-up policy (§4)", () => {
     ]);
     expect(outcome.skipped).toBe(0);
   });
+
+  test("all: large downtime gap caps at maxCatchUp (default 24) and reports skipped older slots (OPS-452)", () => {
+    // 30 days downtime on a 60s loop = 30 * 24 * 60 = 43,200 intervals
+    const sixtySec = 60;
+    const monthAgo = at("2026-07-15T04:00:00Z");
+    const outcome = dueSlots({
+      lastSlot: new Date(monthAgo).toISOString(),
+      nowMs: now, // 2026-08-14T04:30:00Z -> slot is 2026-08-14T04:30:00.000Z
+      cadenceSeconds: sixtySec,
+      catchUp: "all",
+    });
+    expect(outcome.slots).toHaveLength(24);
+    // last slot is the current slot
+    expect(outcome.slots[outcome.slots.length - 1]).toBe("2026-08-14T04:30:00.000Z");
+    // slots are strictly in chronological order
+    for (let i = 1; i < outcome.slots.length; i++) {
+      expect(Date.parse(outcome.slots[i])).toBeGreaterThan(Date.parse(outcome.slots[i - 1]));
+    }
+    // Total intervals: (nowMs slot - monthAgo) / 60s = 43230 intervals -> skipped = 43230 - 24 = 43206
+    expect(outcome.skipped).toBe(43206);
+
+    // Custom maxCatchUp configuration
+    const custom = dueSlots({
+      lastSlot: new Date(monthAgo).toISOString(),
+      nowMs: now,
+      cadenceSeconds: sixtySec,
+      catchUp: "all",
+      maxCatchUp: 5,
+    });
+    expect(custom.slots).toHaveLength(5);
+    expect(custom.skipped).toBe(43230 - 5);
+  });
 });
 
 describe("emitDueTicks (§3)", () => {
