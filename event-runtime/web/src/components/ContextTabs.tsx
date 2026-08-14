@@ -59,6 +59,19 @@ export function ContextTabs({
   const activeTab = () =>
     stripRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? null;
 
+  const tabIds = useMemo(() => ["all", ...openRepos, INFLIGHT], [openRepos]);
+  const [tabStopId, setTabStopId] = useState<string | null>(null);
+
+  const effectiveTabStop = useMemo(() => {
+    if (tabStopId && tabIds.includes(tabStopId)) return tabStopId;
+    if (tabIds.includes(activeId)) return activeId;
+    return "all";
+  }, [tabStopId, tabIds, activeId]);
+
+  useEffect(() => {
+    setTabStopId(tabIds.includes(activeId) ? activeId : "all");
+  }, [activeId, tabIds]);
+
   // The strip scrolls its own active tab: `[` / `]` scroll-into-view belongs to
   // the view's status tabs, and a repo tab can go active without being clicked
   // (opening a project, the command palette), so it may sit past the overflow.
@@ -96,6 +109,51 @@ export function ContextTabs({
     };
   }, [picker]);
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = (e.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-context-tab]");
+    if (!target) return;
+    const currentId = target.getAttribute("data-context-tab");
+    if (!currentId) return;
+    const currentIndex = tabIds.indexOf(currentId);
+    if (currentIndex === -1) return;
+
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      const nextIndex = (currentIndex + 1) % tabIds.length;
+      const nextId = tabIds[nextIndex];
+      setTabStopId(nextId);
+      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
+      btn?.focus();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      const nextIndex = (currentIndex - 1 + tabIds.length) % tabIds.length;
+      const nextId = tabIds[nextIndex];
+      setTabStopId(nextId);
+      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
+      btn?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      const nextId = tabIds[0];
+      setTabStopId(nextId);
+      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
+      btn?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      const nextId = tabIds[tabIds.length - 1];
+      setTabStopId(nextId);
+      const btn = stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`);
+      btn?.focus();
+    } else if (e.key === "Delete" || e.key === "Backspace") {
+      if (openRepos.includes(currentId)) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose(currentId);
+        setCloses((n) => n + 1);
+      }
+    }
+  };
+
   const tabClass = (id: string) =>
     `flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-medium ${
       activeId === id ? "bg-(--surface-3) text-(--text)" : "text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
@@ -108,13 +166,17 @@ export function ContextTabs({
         className="flex min-w-0 flex-1 items-stretch gap-0.5"
         role="toolbar"
         aria-label="Context"
+        onKeyDown={handleKeyDown}
         {...{ [CONTEXT_TABS_ATTR]: "" }}
       >
         <button
           type="button"
+          data-context-tab="all"
+          tabIndex={effectiveTabStop === "all" ? 0 : -1}
           aria-pressed={active.kind === "all"}
           className={tabClass("all")}
           onClick={() => onSelect({ kind: "all" })}
+          onFocus={() => setTabStopId("all")}
         >
           All
         </button>
@@ -126,9 +188,12 @@ export function ContextTabs({
             <div key={name} role="presentation" className="flex shrink-0 items-center">
               <button
                 type="button"
+                data-context-tab={name}
+                tabIndex={effectiveTabStop === name ? 0 : -1}
                 aria-pressed={active.kind === "repo" && active.name === name}
                 className={tabClass(name)}
                 onClick={() => onSelect({ kind: "repo", name })}
+                onFocus={() => setTabStopId(name)}
               >
                 {name}
               </button>
@@ -151,9 +216,12 @@ export function ContextTabs({
         </div>
         <button
           type="button"
+          data-context-tab={INFLIGHT}
+          tabIndex={effectiveTabStop === INFLIGHT ? 0 : -1}
           aria-pressed={active.kind === "inflight"}
           className={tabClass(INFLIGHT)}
           onClick={() => onSelect({ kind: "inflight" })}
+          onFocus={() => setTabStopId(INFLIGHT)}
         >
           In flight
         </button>
