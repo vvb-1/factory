@@ -93,4 +93,32 @@ test("factory workers executes orchestrator/workers.mjs via CLI", () => {
   expect(result.stdout.toString()).toContain("factory workers");
 });
 
+test("factory approve delegates to event-runtime/cli.mjs", () => {
+  const result = Bun.spawnSync({
+    cmd: ["bash", FACTORY, "approve"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("usage: approve <proposal-id>");
+});
 
+test("factory reject delegates to event-runtime/cli.mjs", () => {
+  const result = Bun.spawnSync({
+    cmd: ["bash", FACTORY, "reject"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain('usage: reject <proposal-id> "<reason>"');
+});
+
+test("factory inject delegates to event-runtime/cli.mjs", () => {
+  const result = Bun.spawnSync({
+    cmd: ["bash", FACTORY, "inject"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("usage: inject <envelope.json|->");
+});
