@@ -155,7 +155,7 @@ export function useTabKeys<T extends string>(
   }, [current]);
 }
 
-const THEMES = ["dark", "light", "contrast"] as const;
+export const THEMES = ["dark", "light", "contrast"] as const;
 export type Theme = (typeof THEMES)[number];
 
 /** Theme state on <html data-theme>; dark is the default (spec §5.1). */

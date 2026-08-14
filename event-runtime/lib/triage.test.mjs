@@ -15,7 +15,10 @@ import { runOnce } from "./worker.mjs";
 
 const registry = loadRegistry();
 const PV = "git:test-pv";
-const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+// See repository.test.mjs: neutralise the operator's global git config so a
+// signing key or a global hooks path cannot hang the fixture (OPS-441).
+const HERMETIC = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.template="];
+const git = (args, cwd) => execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
 
 // Hermetic repo fixtures: these tests must not depend on which repos happen
 // to be checked out on the machine, so they point FACTORY_REPOS_ROOT at a

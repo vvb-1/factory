@@ -13,9 +13,16 @@ emit checks, queue scans, or ticket dispatch.
 ## Run it
 
 ```bash
-bun event-runtime/cli.mjs serve          # control API (loopback) + planner + one worker, foreground
+bun event-runtime/cli.mjs serve          # control API (loopback) + planner + scheduler, foreground
 bun event-runtime/cli.mjs serve --watch  # same, restart on event-runtime/ changes (dev; drops in-flight work)
+bun event-runtime/cli.mjs work           # a worker: claim → execute → verify → publish
 ```
+
+`serve` runs **no worker** — approving a proposal queues a run and nothing more
+until a `work` process claims it (OPS-233). `serve --with-worker` restores the
+all-in-one for a demo. Start `serve` first and let it reach `/health` before
+starting `work`: on a brand-new database both processes race the WAL
+journal-mode switch (OPS-376). `bin/worktree-up.sh` already sequences them.
 
 Operator verbs (clients of the control API — they need `serve` running):
 
@@ -28,6 +35,8 @@ bun event-runtime/cli.mjs proposals                   # open proposals with TTL 
 bun event-runtime/cli.mjs agents                      # registered agents and event routing
 bun event-runtime/cli.mjs workers                     # worker processes: host, labels, state, heartbeat
 bun event-runtime/cli.mjs schedule                    # recurring loops: cadence, last fire, next due
+bun event-runtime/cli.mjs trace <run-id>              # live agent trace: assistant text, tool calls, usage
+bun event-runtime/cli.mjs repos                       # factory repos: team, base, dispatch vs report-only
 bun event-runtime/cli.mjs requeue <source> <event-id> # re-plan a dead-lettered/human_needed event
 bun event-runtime/cli.mjs approve <proposal-id>
 bun event-runtime/cli.mjs reject <proposal-id> "<reason>"
@@ -45,9 +54,10 @@ No secret configured → webhooks are refused; the replay CLI still works.
 ## Web control plane
 
 A second client of the same control API
-([docs/event-runtime-webui.md](../docs/event-runtime-webui.md)) — Linear-style
-UI over proposals, runs, and the doctor view. Loopback only, no auth by
-decision; `serve` must be running.
+([docs/event-runtime-webui.md](../docs/event-runtime-webui.md)) — a Linear-style
+UI whose views are Overview (doctor deck and pipeline triage), Events,
+Proposals, Runs, Agents, Workers, Projects, and the Graph canvas. Loopback
+only, no auth by decision; `serve` must be running.
 
 ```bash
 cd event-runtime/web && bun install && bun run build   # once, and after UI changes
@@ -55,8 +65,9 @@ bun event-runtime/web/serve.mjs                        # http://127.0.0.1:7382 (
 ```
 
 Dev loop: `cd event-runtime/web && bunx vite` (proxies /api to the control
-API). Keyboard-first: `⌘K` palette, `g o/p/r` to navigate, `j/k` + `Enter` on
-lists, `a`/`x` to approve/reject the selected proposal.
+API). Keyboard-first: `⌘K` palette, `g` + a view letter to navigate (the armed
+prefix shows on screen), `j/k` + `Enter` on lists, `a`/`x` to approve/reject the
+selected proposal, `?` for the full legend.
 
 ## Scheduled loops (OPS-381)
 
@@ -113,9 +124,10 @@ them the usual way; a command-adapter definition can set `captureStdout` to
 keep a command's whole output (a CI log is useless truncated to the 2000-char
 tail the evidence field keeps).
 
-Retention: artifacts referenced by an accepted result are never deleted;
-unreferenced ones are pruned after a week by the serve loop, and store
-size/orphan counts appear in `status`. A run's materialized inputs are capped
+Retention: artifacts referenced by an accepted result are never deleted, and
+store size/orphan counts appear in `status`. **The weekly prune of unreferenced
+artifacts is currently broken** — `serve` throws a `ReferenceError` before it
+runs (OPS-412) — so nothing is reclaimed until that lands. A run's materialized inputs are capped
 (64 MB) so one agent cannot fill the disk another agent then gets called to
 clean up.
 
@@ -140,10 +152,11 @@ Agents never spawn agents: a completed run whose artifact carries a typed
 recommendation (per `edges.json`) emits an internal event through the same
 intake — `eventId chain-<runId>` (once per run, ever), `correlationId`
 inherited, `causationId` = the source run — and the planner proposes the
-follow-up, **watched like everything else**. First chain: `ci-doctor@1`
-diagnoses a failed GitHub Actions run (`github.workflow-run.failed`) and
-recommends `FLAKE|ENV → ci-rerun@1` (closed command template
-`gh run rerun … --failed`, once-per-run by idempotency) or
+follow-up, **watched like everything else**. First chain, three nodes deep:
+`github.workflow-run.failed` routes to `ci-log-capture@1` (so the diagnosis
+reads pinned bytes rather than re-fetching from GitHub — OPS-372), which chains
+to `ci-doctor@2`, which recommends either `FLAKE|ENV → ci-rerun@1` (closed
+command template `gh run rerun … --failed`, once-per-run by idempotency) or
 `TICKET → ci-notify@1` (`factory notify "CI RED …"`). Mutating definitions
 are admitted only as closed command templates (`lib/adapters/command.mjs`) —
 enforceable by construction, no shell, no model (§14).
@@ -235,7 +248,14 @@ cat > /tmp/status-report.json <<'EOF'
 EOF
 bun event-runtime/cli.mjs inject /tmp/status-report.json
 bun event-runtime/cli.mjs proposals        # → approve <id>
+bun event-runtime/cli.mjs approve <id>
+bun event-runtime/cli.mjs runs             # QUEUED until a worker claims it
 ```
+
+Approval queues the run; it stays `QUEUED` until a `cli.mjs work` process is
+running, so start one in a second terminal (or use `serve --with-worker`).
+`cli.mjs trace <run-id>` follows the agent live, and `cli.mjs inspect <run-id>`
+prints the spec, journal, result and receipt once it lands.
 
 Injecting the same envelope twice is safe: one admission, one proposal, one run
 (§5.4). Approval after the proposal TTL re-plans instead of executing a stale
@@ -254,18 +274,19 @@ spec (§12).
 | `lib/planner.mjs` | deterministic plan(event) → NOOP \| HUMAN_NEEDED \| RunSpec (§4, §5.4) |
 | `lib/proposals.mjs` | watched approval, TTL, re-plan on expiry (§12) |
 | `lib/workspace.mjs` | ephemeral workspaces, path confinement (§7) |
-| `lib/worker.mjs` | single worker: lease, execute, verify, publish with fencing (§8) |
+| `lib/worker.mjs` | worker loop: claim under `BEGIN IMMEDIATE`, lease, execute, verify, publish with fencing (§8) |
 | `lib/verify.mjs` | result verification + compact receipts (§9) |
-| `lib/adapters/` | adapter registry: `claude` (real), `fake` (tests) (§6) |
-| `lib/artifacts.mjs` | content-addressed store: collect, serve, materialize declared inputs, retention (OPS-372) |
+| `lib/adapters/` | adapter registry (§6): `claude` (LLM), `command` (closed argv template), `actions` (approved action list → closed registry), `fake` (tests/demo) |
+| `lib/artifacts.mjs` | content-addressed store: collect, stream via `GET /artifacts/:sha256`, materialize declared inputs, retention (OPS-372) |
 | `lib/schedules.mjs` `schedules.json` | clock ticks: slots, catch-up, singleton, earned auto-approval (OPS-381) |
 | `lib/workers.mjs` | worker registry, heartbeats, placement predicate (OPS-233) |
 | `lib/repos.mjs` `lib/repository.mjs` | repos.yaml reader; mirror + pinned read-only checkout (OPS-228) |
 | `lib/adapters/actions.mjs` | closed action-list executor: approved action IDs → fixed SSH commands, probe evidence (OPS-208) |
 | `lib/chain.mjs` `edges.json` | discovered chains: typed recommendation → internal event → watched proposal (OPS-223) |
 | `lib/adapters/command.mjs` | closed-template command executor — the only admissible mutating agent form (§14) |
-| `lib/artifacts.mjs` | content-addressed artifact/transcript store, streamed via `GET /artifacts/:sha256` |
-| `lib/api.mjs` `cli.mjs` | loopback control API + CLI client (§12–§13) |
+| `lib/trace.mjs` | live agent trace: `factory.trace/v1` records from the claude stream (OPS-295) |
+| `lib/outbox.mjs` | transactional outbox: publish receipts after the run's transaction commits (§10) |
+| `lib/api.mjs` `cli.mjs` `lib/client.mjs` | loopback control API, CLI client, and the shared HTTP client (§12–§13) |
 | `web/` | web control plane: Vite/React app + `serve.mjs` static/proxy server |
 | `demo/` | seeded one-of-everything fixture + e2e verify (OPS-217, see above) |
 | `agents/` `schemas/` `event-types.json` | registered agents, contracts, event→agent mappings |

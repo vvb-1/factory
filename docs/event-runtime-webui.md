@@ -15,11 +15,26 @@ mapping, and exit criteria. Nothing here changes the runtime's contracts.
 
 Made by the operator, recorded here so nobody relitigates them mid-build:
 
-- **Stack: Vite + React + Tailwind + shadcn/ui + cmdk.** The target aesthetic
-  is Linear's: dense dark lists, a side detail panel, keyboard-first
-  navigation, a ⌘K command palette. shadcn/ui (Radix + Tailwind) and `cmdk`
-  are the shortest honest path to that look; TanStack Query handles fetching
-  and polling.
+- **Stack: Vite + React 19 + Tailwind v4 + cmdk.** The target aesthetic is
+  Linear's: dense dark lists, a side detail panel, keyboard-first navigation,
+  a ⌘K command palette. `cmdk` carries the palette and TanStack Query handles
+  fetching and polling. This bullet originally named **shadcn/ui (Radix +
+  Tailwind)** as the shortest honest path to that look; **it was never
+  installed.** `package.json` declares no `shadcn` and no direct
+  `@radix-ui/*` dependency, there is no `components.json`, and no module
+  under `src/` imports a Radix primitive. What displaced it is §5.1: every
+  surface, border, and text shade is derived from three OKLCH tokens, so
+  generated components would have had to be rewritten down to those variables
+  before they were usable, and the widget set this app actually needs is
+  small enough to own outright. It lives hand-rolled in
+  `src/components/ui.tsx` — `StateBadge`, `StatTile`, `ListPane`,
+  `DetailPane`, `ListEmpty`, `FilterInput`, `Section`, `KV`, `Disclosure`,
+  `JsonBlock`, `Button`, `Dialog` (with its own focus trap and Tab cycle),
+  `Countdown`, `Ago`, `JumpLink`, and the toast region. Radix is still in the
+  lockfile, but only transitively beneath `cmdk`. Two later additions round
+  the stack out: `@xyflow/react` + `elkjs` for the graph canvas (§10.13,
+  code-split off the entry chunk) and `@fontsource-variable/inter` for
+  §5.1's typeface.
 - **No authentication.** This narrows §14's "the web-app step requires real
   auth" to its actual precondition: auth is required _when approval and cancel
   become network-reachable_. They do not. The web server binds `127.0.0.1`
@@ -31,8 +46,12 @@ Made by the operator, recorded here so nobody relitigates them mid-build:
   it.
 - **TypeScript, confined to `event-runtime/web/`.** The repo's plain-`.mjs`
   convention continues to govern all runtime code. The web app is leaf UI code
-  with its own toolchain, never imported by the runtime; shadcn/ui generates
-  TSX, and fighting that in plain JS costs more than the exception.
+  with its own toolchain, never imported by the runtime. The original reason
+  was that shadcn/ui generates TSX; with shadcn gone the decision stands on
+  its own merit — `src/types.ts` is the typed mirror of every control-API
+  response, and `bun run build` runs `tsc --noEmit` before Vite, so a field
+  the API renamed fails the build instead of rendering `undefined` in a
+  panel.
 - **Polling, not push.** The control API has no event stream, and the worker
   fleet (OPS-233 onward — several processes may register at once) reports
   itself by heartbeat rather than by push: a worker's `lastSeen` is never
@@ -47,16 +66,23 @@ Made by the operator, recorded here so nobody relitigates them mid-build:
 - No new mutation surface except the loopback janitor verb
   (`POST /repos/:name/janitor`, OPS-301): Dry and Apply, 127.0.0.1, actor
   `operator`, same trust as typing `factory janitor` on the machine. Apply
-  never passes `--force`. The Projects-tab buttons (typed confirm, Dry
-  before Apply) are a follow-up (OPS-362); this records the API exception.
-  Everything else the UI exposes is still approve, reject, cancel, retry,
-  replay.
+  never passes `--force`. The Projects-view buttons (typed confirm, Dry
+  before Apply) shipped as OPS-362 (§10.14); this bullet records the API
+  exception they use. Everything else the UI exposes is still approve,
+  reject, cancel, retry, replay — including Projects' Quick Dispatch
+  (OPS-369), which is an inject through `POST /replay` and therefore adds no
+  surface, only a shortcut to it.
 - No database access, no imports from `event-runtime/lib/`.
 - No SSE/WebSocket work in the first version.
-- No transcript/artifact _content_ viewer. `GET /runs/:id` returns the
-  retained workspace _path_; a browser cannot read local paths, and an
-  artifact-fetch endpoint is new API surface. Deferred (§8) — the UI shows
-  the path and hashes, and `cli.mjs inspect` remains the deep-inspection tool.
+- No transcript/artifact _content_ viewer — **superseded, the non-goal no
+  longer holds.** The reasoning was sound at the time: `GET /runs/:id`
+  returned the retained workspace _path_, a browser cannot read local paths,
+  and an artifact-fetch endpoint is new API surface. Both halves then got
+  built, in the order the reasoning implies — the content-addressed store
+  and `GET /artifacts/:sha256` first (§7), an **Open** link into it second,
+  and finally an in-panel preview for text-shaped artifacts (OPS-277). §10.5
+  is the shipped behaviour; `cli.mjs inspect` is still the deeper tool, but
+  it is no longer the only one.
 - No involvement in the emit pipeline or `shared/`. The control API may
   spawn `factory janitor` for the Projects verb (OPS-301); the web app still
   does not import the orchestrator.
@@ -77,7 +103,7 @@ web server — Bun, 127.0.0.1:7382 (FACTORY_EVENT_WEB_PORT)
                     existing lib/api.mjs — unchanged trust model
 ```
 
-- `event-runtime/web/serve.mjs` — ~30 lines of `Bun.serve`: static files plus
+- `event-runtime/web/serve.mjs` — ~50 lines of `Bun.serve`: static files plus
   an `/api/*` proxy that strips the prefix and forwards to
   `127.0.0.1:${FACTORY_EVENT_PORT}`. A separate process, started explicitly
   (`bun event-runtime/web/serve.mjs`); stopping it affects nothing else.
@@ -95,9 +121,19 @@ app. The CLI loses nothing.
 
 ## 4. Views
 
-Four views, all thin projections of existing endpoints. Layout is Linear's
-three-zone shape: a narrow left nav rail, a dense list, and a right-side
-detail panel (shadcn `Sheet`) that opens without leaving the list.
+Four views were specified; nine shipped (`src/views/`). This section is the
+four the spec planned — Overview, Proposals, Runs, and Inject, the last of
+which shipped as a dialog reachable from anywhere rather than a view of its
+own. §10 covers the rest as each arrived: Events (§10.1), Agents (§10.6),
+Workers (§10.9), the full-page run view (§10.11), Graph (§10.13), and
+Projects (§10.14). Eight of them own a nav-rail entry; the full-page run view
+is reached from Runs, not from the rail. All nine are still thin projections
+of existing endpoints.
+
+Layout is Linear's three-zone shape: a narrow left nav rail, a dense list,
+and a right-side detail panel that opens without leaving the list. The panel
+is `DetailPane` in `src/components/ui.tsx` — hand-rolled, not a shadcn
+`Sheet`, per §1.
 
 ### 4.1 Overview — `GET /status`, `GET /health`
 
@@ -207,8 +243,13 @@ Linear's feel is keyboard-first; this is a requirement, not garnish.
 - `⌘↵` — confirm inject (from the envelope textarea too).
 - On a selected proposal: `a` approve (opens the confirm with the spec in
   view), `x` reject (focuses the reason field).
-- `g o` / `g e` / `g p` / `g r` / `g t` / `g w` / `g g` — go to Overview /
-  Events / Proposals / Runs / Agents / Workers / Graph.
+- `g o` / `g e` / `g p` / `g r` / `g f` / `g t` / `g w` / `g g` — go to
+  Overview / Events / Proposals / Runs / Projects / Agents / Workers / Graph.
+  Projects took `g f` because `p` and `r` were already Proposals and Runs.
+  The rail footer and the `?` cheatsheet render this list from the single `NAV`
+  table in `App.tsx` rather than spelling it out, after a hand-listed footer
+  had already fallen one chord behind; OPS-311 additionally shows the armed
+  `g` on screen while it waits for its suffix.
 - Every verb the palette offers checks current state first — it never shows
   "approve" on a decided proposal or "cancel" on a terminal run.
 
@@ -239,9 +280,12 @@ constraints, not vibes:
 - **The inverted-L is the whole chrome.** Nav rail plus view header form an
   inverted L around the content, and Linear's redesign spent most of its
   effort on pixel-level alignment inside it — icons, labels, and counts on
-  one consistent grid. Every one of our four views uses the identical
-  skeleton (header → dense list → right detail panel), so hierarchy and
-  density never reset between views.
+  one consistent grid. Every list view uses the identical skeleton (header →
+  dense list → right detail panel), so hierarchy and density never reset
+  between views. The two views that are not lists keep the same frame around
+  a different middle: Graph swaps the list for a canvas (§10.13) and the
+  full-page run view swaps it for a two-column reading layout (§10.11), both
+  still built from the same `DetailPane` and the same header grid.
 - **Stress-test before ship.** Linear validated against three axes —
   environment, appearance, hierarchy — rather than a formal method. The
   implementation ticket's hallmark critique pass adopts the same axes:
@@ -293,7 +337,8 @@ and shared with the CLI:
   `--json` for that one name (OPS-301). Body `{ apply: false | true }`;
   omitted `apply` is Dry. Apply never `--force`. Unknown name 404; Apply on
   a `report_only` repo without `worktree_down` 409. Actor `"operator"`. The
-  UI confirm is OPS-362, not this endpoint.
+  UI confirm was OPS-362 rather than this endpoint, and shipped in the
+  Projects view (§10.14).
 - **`GET /artifacts/:sha256`** — content-addressed artifact/transcript bytes
   (the §8 deferral, since triggered and shipped).
 - **`GET /workers`** — the worker registry the CLI `workers` command prints,
@@ -307,13 +352,13 @@ Still explicitly _not_ added: pagination beyond `journal`/`outbox` limits
 
 ## 8. Deferred, with triggers
 
-| Deferred item                                     | Trigger                                                                                             |
-| :------------------------------------------------ | :-------------------------------------------------------------------------------------------------- |
-| Authentication + real actor identity              | Binding the web server or control API beyond loopback — precondition, not retrofit (§1, parent §14) |
-| SSE / push updates                                | Polling demonstrably too slow — e.g. watching slice-2 remediation runs live                         |
-| ~~Artifact/transcript content endpoint + viewer~~ | **Shipped** — content-addressed artifact store + `GET /artifacts/:sha256` + transcript capture (§7) |
-| Pagination on `/runs`, `/events`                  | First list where scrolling actually hurts                                                           |
-| Notification channel                              | Unattended stage (parent §12) — watched mode means the operator is watching                         |
+| Deferred item                                     | Trigger                                                                                                                                                                   |
+| :------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Authentication + real actor identity              | Binding the web server or control API beyond loopback — precondition, not retrofit (§1, parent §14)                                                                       |
+| SSE / push updates                                | Polling demonstrably too slow — e.g. watching slice-2 remediation runs live                                                                                               |
+| ~~Artifact/transcript content endpoint + viewer~~ | **Shipped** — content-addressed artifact store + `GET /artifacts/:sha256` + transcript capture (§7), Open-in-tab and in-panel preview for text artifacts (OPS-277, §10.5) |
+| Pagination on `/runs`, `/events`                  | First list where scrolling actually hurts                                                                                                                                 |
+| Notification channel                              | Unattended stage (parent §12) — watched mode means the operator is watching                                                                                               |
 
 ## 9. Exit criteria
 
@@ -418,11 +463,23 @@ include a runtime-captured `transcript` automatically). The run detail's
 **Artifacts** section lists each with kind, human-readable size, short hash
 (full hash on hover), and an **Open** link to `/api/artifacts/<sha256>` in a
 new tab — the serve proxy forwards to the control API, which streams
-`text/plain` for texty content and `octet-stream` otherwise. This partially
-lifts §2's "no artifact content viewer" non-goal: the trigger in §8 ("first
-time opening the transcript matters from the browser") fired, and the viewer
-is the browser itself, not new UI. Empty state shown when a result has no
-stored artifacts.
+`text/plain` for texty content and `octet-stream` otherwise. The trigger in
+§8 ("first time opening the transcript matters from the browser") fired, and
+the viewer at that point was the browser itself, not new UI. Empty state
+shown when a result has no stored artifacts.
+
+**In-panel preview (OPS-277)** finished lifting §2's non-goal, because a new
+tab per artifact is the wrong shape for the thing operators actually do —
+glance at a transcript while the run detail is still on screen. Rows whose
+kind is text-shaped (`transcript`, `diff`, `report`, `evidence`, or a
+`.txt`/`.json`/`.jsonl`/`.md`/`.log` suffix) gain a **Preview** toggle that
+expands the bytes inline in a scroll-capped monospace block; every other kind
+keeps **Open** alone, so a binary is never rendered as if it were text. The
+fetch is lazy and happens once per row — first expand loads, subsequent
+toggles are free — and loading, failure (with the HTTP status), and content
+are three distinct states rather than one silent blank. Nothing is cached
+beyond the panel's lifetime; the artifact store is content-addressed and the
+bytes are immutable, so re-fetching is cheap and staleness is impossible.
 
 ### 10.6 Agents view (`#/agents`, `g t`)
 
@@ -680,3 +737,126 @@ project container and not a second nav rail. Decisions: [product-decisions.md](p
   still cycle status tabs.
 - Pinning a run as a document tab on this strip is OPS-357, not this
   section. The Projects _view_ (OPS-300) is a separate registry list.
+
+### 10.13 Graph canvas (`#/graph`, `g g`) — OPS-224
+
+The one view that answers a question no list can: **what this runtime can do
+at all**, before any event has arrived. It is the capability map, derived
+from `GET /agents` alone — registry topology, never runtime state — with the
+deliberate consequence that a factory which has never admitted an event still
+draws a full graph.
+
+- **The topology rules are pure and unit-tested** (`src/graph/model.ts`,
+  `model.test.ts`), kept clear of React so the rendering layer could be
+  swapped without touching what the map _means_. Three node kinds: an **event
+  type** per registered route, carrying its adapter, idempotency scope, and
+  proposal TTL; an **agent** per registry entry, carrying its execution shape
+  — `model`, `command`, or `actions`, derived from whether the definition
+  closes over a command template or an action registry; and a **terminal**,
+  which exists because "the chain ends here" is topology rather than an
+  omission — an agent whose output enum declares recommendation values that
+  no edge maps anywhere gets one node summarising exactly those values. Two
+  edge kinds: `routes` (event type → the agent the planner selects, solid,
+  and never drawn to a ref the registry does not actually have) and
+  `recommends` (agent → follow-up event type, dashed and accent-toned,
+  labelled with the recommendation field and the value that fires it).
+- **Rendering** is React Flow over an elkjs layered left-to-right layout,
+  with a dot background, zoom controls, and a pannable minimap. Hand-rolling
+  DAG layout is where views like this die, so elk does it. elk is ~1.4 MB of
+  pre-minified layout engine, so it is imported dynamically and rides its own
+  async chunk (OPS-255): fetched the first time there is a graph to lay out,
+  never by a list view. The minimap paints into SVG, where `var()` and
+  `color-mix()` do not resolve, so its nodes are styled by class from
+  `theme.css` instead of inline — §5.1's tokens still govern, by a different
+  route.
+- **Failure states itself.** A layout import that fails — the realistic case
+  being a stale `index.html` pointing at a chunk a redeploy removed — logs
+  and then says the deployed build is incomplete and to reload (OPS-287,
+  OPS-297). Without that the canvas sat on "Laying out…" and read as merely
+  busy, which is the §6 lie in miniature. The empty copy separates loading,
+  an unreachable `/agents`, a genuinely empty registry, and layout still
+  running.
+- **On the same rails as every list** (§10.8): `j`/`k` walk nodes in _layout_
+  order — top-to-bottom then left-to-right, so the keyboard follows what the
+  eye sees rather than registry order — `c` copies the node's id or agent
+  ref, `Esc` closes the panel, and `#/graph/:nodeId` is shareable. Moving the
+  selection pans that node into view at the current zoom rather than
+  refitting the whole canvas, and **Show on canvas** does the same from the
+  panel, because a selection that is off-screen is not a selection.
+- **The panel is the way out of the map and back into the lists.** An
+  event-type node offers **Show in Events** (`#/events?type=`); an agent node
+  shows execution, output contract, mutating flag, capabilities, limits, the
+  literal closed command template or action registry when it has one, and the
+  full prompt, with its ref linking into Agents (§10.6); a terminal node
+  explains itself in prose — these recommendation values have no registered
+  edge, so a run returning one completes and chains no further.
+
+Phase 2 — overlaying live run state onto the map, so the capability graph
+lights up as work moves through it — **is not built**. Phase 1 draws
+capability only, on purpose: a map that is correct with an empty database is
+worth having on its own, and mixing live state into it doubles the failure
+modes. The link phase 2 needs already ships (`GET /events` projects
+`causationId`), so this is a matter of what was worth building next, not of
+anything blocking it.
+
+### 10.14 Projects view (`#/projects`, `g f`) — OPS-300, OPS-362, OPS-369
+
+`GET /repos` (OPS-299) exposes `config/repos.yaml` as an allow-listed
+registry, and Projects is the view of it: which repositories this factory is
+configured to act on, on what terms, and what maintenance they are owed. It
+is the second registry view after Agents (§10.6) and, like it, reads
+configuration rather than runtime state — which is why it polls at 5 s
+instead of §6's 2 s: a YAML file does not change while you watch it. Unlike
+Agents it is not strictly read-only, because the janitor verb acts on the
+worktrees a repo owns.
+
+- **List** over `GET /repos`: name, team as a hued chip (`CLNT`, `WM`, `CW`,
+  `LAB`, `OPS`), project or GitHub slug, execution mode, base branch with the
+  deploy branch appended when one is configured, and which of the three
+  worktree scripts (`up` / `down` / `warm`) the repo actually ships. Mode is
+  the distinction that matters, so it is a badge and not a column of prose:
+  **Dispatchable** or **Report Only**. Three mode tabs (All / Dispatchable /
+  Report-Only) sit beside one client-side filter spanning name, project,
+  team, and GitHub slug. `j`/`k` move, `c` copies the repo name,
+  `#/projects/:name` is shareable per §10.8, and the empty state names the
+  file that is empty (`config/repos.yaml`) rather than saying "no results".
+- **Detail panel.** **Configuration** — path (click to copy), GitHub link,
+  base and deploy branch, execution mode spelled out ("Autonomous
+  Dispatchable" / "Report Only (Watched)"), max in flight, worktree root, and
+  the verify command verbatim, since a paraphrased verify command is worse
+  than none. **Worktree Automation Scripts** renders `up`/`down`/`warm` as
+  three present-or-absent tiles: the shape of a repo's automation is
+  something you check before dispatching to it, not after.
+- **Janitor, Dry before Apply (OPS-362).** `POST /repos/:name/janitor` — §2's
+  one mutation exception, specified in §7 — is wired as two buttons in an
+  order the UI enforces rather than suggests: **Run Dry Janitor** first, and
+  Apply stays disabled until a Dry result exists for the selected repo. Dry
+  renders what the janitor found in four groups: reclaimable, each with its
+  Linear ticket state; kept, because the ticket is still active;
+  named/custom worktrees; and unknown tickets. The last two are captioned as
+  kept _safe_, because the interesting thing about a janitor is what it
+  declines to touch. Apply sits behind a typed confirmation — the operator
+  types the repo name exactly, and the dialog states how many worktrees it
+  will act on and that uncommitted work is refused rather than forced. The
+  result separates removed from refused-with-reason, and a report-only repo
+  with no `worktree_down` script disables Apply with that reason on screen
+  instead of letting the API's 409 explain it after the click. Selecting a
+  different repo clears both results: a scan is about exactly one repo, and
+  stale output that still looks current is the failure mode this view could
+  most easily have.
+- **Quick Dispatch (OPS-369).** The same panel injects the three factory
+  agent events scoped to the selected repo —
+  `factory.triage.requested`, `factory.status-report.requested`,
+  `factory.janitor-scan.requested` — by building an envelope and posting it
+  to `POST /replay`, which is why §2 counts this as a shortcut rather than
+  new surface. It then behaves like any other admitted event: planner,
+  proposal, a worker lease, and a trace streaming into the run (§10.10). The
+  direct janitor verb and the dispatched `janitor-scan` event coexist on
+  purpose — one is synchronous and loopback, the other is a placed
+  command-adapter agent run (OPS-368) — and the panel captions which button
+  is which so the choice is visible rather than folklore.
+- **⌘K** carries the selected repo's actions: the three dispatches, a Dry
+  run, copy path, copy link, and open on GitHub.
+
+Nothing here writes `config/repos.yaml`. The registry is edited in the file
+and read by the UI, exactly as the agent registry is in §10.6.

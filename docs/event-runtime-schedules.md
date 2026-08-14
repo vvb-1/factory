@@ -81,8 +81,10 @@ universally right answer, so each loop declares one:
 | `last` | Fire the most recent missed slot, then resume | Loops where one late run still has value |
 | `all` | Fire every missed slot in order | Anything that accumulates per-interval work; rare, and expensive by construction |
 
-Skipped slots are written to the journal with a reason, so a six-hour gap is
-visible as a decision rather than as silence.
+The count of skipped slots travels on the tick that did fire
+(`payload.skippedSlots`), and `serve` logs it — so a six-hour gap reads as one
+run standing for six slots rather than as silence. There is no separate journal
+record per skipped slot.
 
 ## 5. Overlap: a loop is a singleton by default
 
@@ -160,7 +162,7 @@ pinned and validated at load like every other registry file:
     "catchUp": "none",
     "singleton": true,
     "approval": "watched",
-    "enabled": true
+    "enabled": false
   }
 }
 ```
@@ -188,9 +190,10 @@ error, not a surprise at 03:00.
   two intervals while enabled means the clock is not turning (serve down,
   machine asleep, a bad `every`). Silence is the failure mode a scheduler
   must never have, and it is the one a launchd plist gives you.
-- **Doctor anomaly — proposals piling up.** A watched loop with more than N
-  open proposals is either mis-cadenced or nobody is watching it; both are
-  worth saying.
+- **Not built yet — proposals piling up.** A watched loop with more than N
+  open proposals is either mis-cadenced or nobody is watching it. Worth saying,
+  and not implemented (see also OPS-436: an unapproved first proposal silences
+  the loop entirely).
 
 ## 10. Exit criteria
 
