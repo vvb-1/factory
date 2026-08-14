@@ -5,10 +5,14 @@ import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
 import { flushHash } from "../hash";
 import {
   type FilterChipToken,
+  type FilterFacets,
   type FilterQuery,
+  type FilterSuggestion,
   chipHelp,
   chipLabel,
   filterHint,
+  getActiveFilterToken,
+  getFilterSuggestions,
   removeFilterToken,
 } from "../filterQuery";
 
@@ -49,6 +53,19 @@ export const DECISION_HUES: Record<string, string> = {
   run: "var(--hue-info)",
   human_needed: "var(--hue-warn)",
   noop: "var(--hue-idle)",
+};
+
+/**
+ * Returns the matching theme hue for a facet value (states, statuses, decisions).
+ */
+export const getValueHue = (_field: string, value: string): string | undefined => {
+  const norm = value.trim();
+  return (
+    STATE_HUES[norm.toUpperCase()] ??
+    EVENT_STATUS_HUES[norm.toLowerCase()] ??
+    PROPOSAL_STATUS_HUES[norm.toLowerCase()] ??
+    DECISION_HUES[norm.toLowerCase()]
+  );
 };
 
 /**
@@ -115,51 +132,159 @@ function FilterToken({
 }
 
 /**
- * The list filter box. Pass `query` (parsed by the view, which is the only
- * thing that knows its own facets) to get the keyed syntax: the text stays
- * authoritative and the chips are what it parsed to, so editing the box and
- * dismissing a chip can never disagree about the current filter.
+ * The list filter box with facet autocomplete dropdown. Pass `query` or `facets`
+ * to get keyed syntax autocompletion and chip management.
  */
-export function FilterInput({
+export function FilterInput<T = unknown, C = unknown>({
   value,
   onChange,
   placeholder,
   label,
   query,
+  facets,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   label: string;
   query?: FilterQuery;
+  facets?: FilterFacets<T, C>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const hintId = useId();
+  const listboxId = useId();
   const [hint, setHint] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(false);
+  const [cursorPos, setCursorPos] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
   const chips = query?.chips ?? [];
   const hintText = query ? filterHint(query) : "";
+
+  const safeCursor = Math.min(cursorPos, value.length);
+  const activeToken = useMemo(() => {
+    return getActiveFilterToken(value, safeCursor);
+  }, [value, safeCursor]);
+
+  const suggestions = useMemo(() => {
+    if (!facets && !query) return [];
+    return getFilterSuggestions(activeToken.raw, facets, query, getValueHue);
+  }, [activeToken.raw, facets, query]);
+
+  const showPopover = isFocused && !isDismissed && (facets != null || query != null) && suggestions.length > 0;
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [suggestions]);
+
+  useEffect(() => {
+    if (showPopover && listRef.current) {
+      const activeEl = listRef.current.querySelector<HTMLElement>(`[aria-selected="true"]`);
+      activeEl?.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex, showPopover]);
+
+  const updateCursor = () => {
+    if (inputRef.current) {
+      setCursorPos(inputRef.current.selectionStart ?? 0);
+    }
+  };
+
+  const applySuggestion = (s: FilterSuggestion) => {
+    const token = getActiveFilterToken(value, safeCursor);
+    const before = value.slice(0, token.start);
+    const after = value.slice(token.end);
+    const nextValue = before + s.insertText + after;
+    const nextCursor = token.start + s.insertText.length;
+    onChange(nextValue);
+    setCursorPos(nextCursor);
+    setIsDismissed(false);
+    setSelectedIndex(0);
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(nextCursor, nextCursor);
+      }
+    });
+  };
+
   // Dismissal rewrites the query text, so focus returns to the box: the next
   // keystroke — or Esc — lands where the operator thinks it is.
   const rewrite = (next: string) => {
     onChange(next);
     inputRef.current?.focus();
   };
+
   return (
     <>
       <span className="relative inline-flex w-56 shrink-0">
         <input
           ref={inputRef}
           data-view-filter
-          value={value}
+          role="combobox"
+          aria-expanded={showPopover}
+          aria-autocomplete="list"
+          aria-controls={showPopover ? listboxId : undefined}
+          aria-activedescendant={showPopover && suggestions[selectedIndex] ? `${listboxId}-opt-${selectedIndex}` : undefined}
           aria-describedby={query ? hintId : undefined}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setHint(true)}
-          onBlur={() => setHint(false)}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setCursorPos(e.target.selectionStart ?? 0);
+            setIsDismissed(false);
+          }}
+          onFocus={(e) => {
+            setIsFocused(true);
+            setHint(true);
+            setCursorPos(e.target.selectionStart ?? 0);
+            setIsDismissed(false);
+          }}
+          onBlur={() => {
+            setIsFocused(false);
+            setHint(false);
+          }}
+          onClick={updateCursor}
+          onKeyUp={updateCursor}
+          onSelect={updateCursor}
           onKeyDown={(e) => {
-            if (e.key !== "Escape") return;
-            e.preventDefault();
-            if (value) onChange("");
-            else e.currentTarget.blur();
+            if (showPopover) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSelectedIndex((prev) => (prev + 1) % suggestions.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                if (suggestions[selectedIndex]) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  applySuggestion(suggestions[selectedIndex]);
+                  return;
+                }
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDismissed(true);
+                return;
+              }
+            } else if (e.key === "ArrowDown" && suggestions.length > 0 && isDismissed) {
+              e.preventDefault();
+              setIsDismissed(false);
+              return;
+            }
+
+            if (e.key === "Escape") {
+              e.preventDefault();
+              if (value) onChange("");
+              else e.currentTarget.blur();
+            }
           }}
           placeholder={placeholder}
           aria-label={label}
@@ -173,17 +298,58 @@ export function FilterInput({
             /
           </kbd>
         )}
-        {/* Syntax on `/`, not on hover — the operators who need it reached
-            this box with a keystroke. It floats over the table rather than
-            taking a row, so focusing the filter never moves the rows. Right-
-            aligned and wider than the box: Runs parks the input at the far
-            end of the tab row, and a box-width column of wrapping text is
-            unreadable. */}
+        {showPopover && (
+          <ul
+            ref={listRef}
+            id={listboxId}
+            role="listbox"
+            aria-label="Filter suggestions"
+            className="absolute top-full left-0 z-30 mt-1 max-h-60 w-64 overflow-auto rounded-md border border-(--border-strong) bg-(--surface-1) p-1 text-[12px] shadow-xl outline-none"
+          >
+            {suggestions.map((s, idx) => (
+              <li
+                key={s.id}
+                id={`${listboxId}-opt-${idx}`}
+                role="option"
+                aria-selected={idx === selectedIndex}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  applySuggestion(s);
+                }}
+                className={`flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 select-none ${
+                  idx === selectedIndex
+                    ? "bg-(--surface-3) text-(--text)"
+                    : "text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+                }`}
+              >
+                <span className="flex min-w-0 items-center gap-1.5 truncate">
+                  {s.hue && (
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ background: s.hue }}
+                    />
+                  )}
+                  <span
+                    className={`mono truncate ${
+                      s.kind === "facet" ? "font-semibold text-(--accent)" : ""
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </span>
+                <span className="mono shrink-0 truncate text-[10px] text-(--text-faint)">
+                  {s.kind === "facet" ? "facet" : s.field || s.description}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
         {query && (
           <span
             id={hintId}
             className={
-              hint && !value
+              hint && !value && !showPopover
                 ? "absolute top-full right-0 z-20 mt-1 w-72 rounded-md border border-(--border-strong) bg-(--surface-2) px-2 py-1 text-[11px] text-(--text-faint)"
                 : "sr-only"
             }
@@ -477,22 +643,40 @@ export function StatTile({
 export function JumpLink({
   children,
   onClick,
+  href,
   title,
   className,
 }: {
   children: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
   title?: string;
   className?: string;
 }) {
+  const cls = `mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`;
+  if (href != null) {
+    return (
+      <a
+        href={href}
+        className={cls}
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
   return (
     <button
       type="button"
-      className={`mono cursor-pointer text-left hover:text-(--accent) ${className ?? ""}`}
+      className={cls}
       title={title}
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        onClick?.();
       }}
     >
       {children}

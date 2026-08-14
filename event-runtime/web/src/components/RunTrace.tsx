@@ -500,6 +500,9 @@ export function RunTrace({
   const [followLive, setFollowLive] = useState<boolean>(true);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const lastSeenSeqRef = useRef<number>(0);
+  const [activeErrorIdx, setActiveErrorIdx] = useState<number | null>(null);
+  const [jumpCount, setJumpCount] = useState<number>(0);
+  const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(new Set());
 
   const counts = useMemo(() => {
     let tools = 0;
@@ -514,6 +517,8 @@ export function RunTrace({
     }
     return { all: entries.length, tools, reasoning, errors, usage };
   }, [entries]);
+
+  const allErrorEntries = useMemo(() => entries.filter(isErrorKind), [entries]);
 
   const tokenStats = useMemo(() => {
     let promptTokens = 0;
@@ -543,6 +548,25 @@ export function RunTrace({
 
   const tailCut = !full && visibleEntries.length > PANEL_TAIL;
   const shown = tailCut ? visibleEntries.slice(-PANEL_TAIL) : visibleEntries;
+
+  const handleJumpToError = () => {
+    if (allErrorEntries.length === 0) return;
+    const nextIdx = activeErrorIdx === null ? 0 : (activeErrorIdx + 1) % allErrorEntries.length;
+    const target = allErrorEntries[nextIdx];
+    setActiveErrorIdx(nextIdx);
+    setJumpCount((c) => c + 1);
+    if (target) {
+      setExpandedSeqs((prev) => {
+        const next = new Set(prev);
+        next.add(target.seq);
+        return next;
+      });
+      const inShown = shown.some((e) => e.seq === target.seq);
+      if (!inShown) {
+        setFilter(full ? "all" : "errors");
+      }
+    }
+  };
 
   // Waterfall timing calculations:
   const { durations, maxDurationMs } = useMemo(() => {
@@ -603,6 +627,19 @@ export function RunTrace({
       setUnreadCount(count);
     }
   }, [entries, live, followLive]);
+
+  // Jump to active error match:
+  useEffect(() => {
+    if (activeErrorIdx !== null && allErrorEntries.length > 0 && scroller.current) {
+      const target = allErrorEntries[activeErrorIdx % allErrorEntries.length];
+      if (!target) return;
+      const targetIdx = shown.findIndex((e) => e.seq === target.seq);
+      if (targetIdx !== -1) {
+        const el = scroller.current.querySelector(`[data-trace-idx="${targetIdx}"]`);
+        el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }
+  }, [activeErrorIdx, jumpCount, shown, allErrorEntries]);
 
   // Live auto-scroll:
   useEffect(() => {
@@ -719,6 +756,28 @@ export function RunTrace({
           </div>
 
           <div className="flex items-center gap-2">
+            {counts.errors > 0 && (
+              <button
+                type="button"
+                onClick={handleJumpToError}
+                className="flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium transition-colors hover:opacity-80"
+                style={{
+                  borderColor: "var(--hue-err)",
+                  color: "var(--hue-err)",
+                  background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
+                }}
+                title="Jump to next error entry"
+              >
+                <span>⚠️</span>
+                <span>{counts.errors === 1 ? "1 error" : `${counts.errors} errors`}</span>
+                {activeErrorIdx !== null && (
+                  <span className="mono text-[10px] opacity-75">
+                    ({(activeErrorIdx % counts.errors) + 1}/{counts.errors})
+                  </span>
+                )}
+              </button>
+            )}
+
             <div className="flex items-center gap-1 rounded border border-(--border) bg-(--surface-0) px-1.5 py-0.5 text-[11px]">
               <input
                 value={search}
@@ -766,7 +825,10 @@ export function RunTrace({
             </div>
             <button
               type="button"
-              onClick={() => setExpandAll((v) => !v)}
+              onClick={() => {
+                setExpandAll((v) => !v);
+                if (expandAll) setExpandedSeqs(new Set());
+              }}
               className="text-[11px] text-(--text-faint) hover:text-(--text-dim)"
             >
               {expandAll ? "Collapse details" : "Expand details"}
@@ -799,6 +861,10 @@ export function RunTrace({
             {shown.map((e, i) => {
               const isMatch = searchMatches.includes(i);
               const isActiveMatch = searchMatches.length > 0 && searchMatches[activeMatch % searchMatches.length] === i;
+              const isActiveError =
+                activeErrorIdx !== null &&
+                allErrorEntries.length > 0 &&
+                allErrorEntries[activeErrorIdx % allErrorEntries.length]?.seq === e.seq;
               return (
                 <Fragment key={e.seq}>
                   {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
@@ -809,7 +875,13 @@ export function RunTrace({
                   <div
                     data-trace-idx={i}
                     className={`flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0 transition-colors ${
-                      isActiveMatch ? "bg-(--surface-2) -mx-2 px-2 rounded" : isMatch ? "bg-(--surface-1) -mx-2 px-2 rounded" : ""
+                      isActiveError
+                        ? "bg-(--surface-2) -mx-2 px-2 rounded ring-1 ring-(--hue-err)"
+                        : isActiveMatch
+                          ? "bg-(--surface-2) -mx-2 px-2 rounded"
+                          : isMatch
+                            ? "bg-(--surface-1) -mx-2 px-2 rounded"
+                            : ""
                     }`}
                   >
                     <span className="mono w-[64px] shrink-0 text-(--text-faint)" title={e.ts}>
@@ -818,7 +890,7 @@ export function RunTrace({
                     <TraceBody
                       kind={e.kind}
                       p={e.payload ?? {}}
-                      forceOpen={expandAll}
+                      forceOpen={expandAll || expandedSeqs.has(e.seq)}
                       durationMs={durations.get(e.seq)}
                       maxMs={maxDurationMs}
                     />
