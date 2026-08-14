@@ -17,7 +17,7 @@
  * best-effort — an unparseable or unrecognized line is ignored, never fatal.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, readFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { FACTORY_ROOT } from "../config.mjs";
@@ -30,7 +30,10 @@ const TEXT_PREVIEW_CHARS = 4000;
 export const PROMPT_SUFFIX =
   "\n\n---\nInput is at ./input.json. Write ./result.json per the factory.agent-result/v1 contract. Work only inside this directory.";
 
-export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
+// `mutating: false` means no durable mutation beyond the run's declared
+// workspace output; it does not mean a model cannot use the shell to inspect
+// that workspace. The per-run Claude policy below enforces the boundary.
+export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash", "Write", "Edit"];
 export const WRITE_TOOLS = new Set([
   "Write",
   "Edit",
@@ -43,20 +46,50 @@ export const WRITE_TOOLS = new Set([
 ]);
 
 /**
- * Derive allowed tools from definition capabilities and mutating flag (OPS-407).
- * When mutating is false, write tools are strictly forbidden.
+ * Derive allowed tools from a definition (OPS-407).
+ *
+ * A non-mutating model needs Bash to inspect a repository and Write/Edit for
+ * its required `result.json`. The actual write boundary is the generated
+ * settings policy and the worker's post-run repository integrity gate; a
+ * tool-name ban cannot distinguish safe workspace output from repo mutation.
  */
 export function deriveAllowedTools(def) {
-  if (def?.mutating === false) {
-    if (Array.isArray(def?.capabilities?.tools)) {
-      return def.capabilities.tools.filter((t) => !WRITE_TOOLS.has(t));
-    }
-    return [...READ_ONLY_TOOLS];
-  }
-  if (Array.isArray(def?.capabilities?.tools)) {
-    return [...def.capabilities.tools];
-  }
+  if (def?.mutating === false) return [...READ_ONLY_TOOLS];
+  if (Array.isArray(def?.capabilities?.tools)) return [...def.capabilities.tools];
   return [...READ_ONLY_TOOLS];
+}
+
+/** Generate a per-run settings file; absolute paths cannot drift with cwd. */
+export function buildClaudeSettings({ spec, def, workspaceDir }) {
+  if (def?.mutating !== false) return null;
+  const checkoutDir = spec?.workspace?.type === "repository"
+    ? path.resolve(workspaceDir, spec.workspace.checkoutDir ?? "repo")
+    : null;
+  return {
+    permissions: {
+      allow: [...READ_ONLY_TOOLS],
+      // Claude's file permission matcher uses `//` for filesystem-absolute
+      // paths. `Edit` covers both the Edit and Write tools.
+      deny: checkoutDir ? [`Edit(//${checkoutDir.replace(/^\/+/, "")}/**)`] : [],
+    },
+    sandbox: {
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      filesystem: checkoutDir ? { denyWrite: [checkoutDir] } : {},
+    },
+  };
+}
+
+/** Keep untrusted model subprocesses from inheriting the worker's authority. */
+export function safeChildEnvironment(env = {}) {
+  const inherited = ["HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM", "TMPDIR", "USER", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"];
+  const childEnv = Object.fromEntries(inherited.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  Object.assign(childEnv, env);
+  delete childEnv.ANTHROPIC_API_KEY;
+  delete childEnv.CLAUDECODE;
+  delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+  return childEnv;
 }
 
 /**
@@ -67,11 +100,12 @@ export function deriveAllowedTools(def) {
  * notional API-equivalent units on subscription auth, not money). The
  * dispatch design (§6) requires it before the first tier-2 mutating run.
  */
-export function buildClaudeArgv({ prompt, def, allowedTools = deriveAllowedTools(def), mcpConfig }) {
+export function buildClaudeArgv({ prompt, def, allowedTools = deriveAllowedTools(def), mcpConfig, settingsPath }) {
   const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
   if (allowedTools && allowedTools.length > 0) {
     args.push("--allowedTools", allowedTools.join(","));
   }
+  if (settingsPath) args.push("--settings", settingsPath);
   const budget = def?.limits?.budget_usd;
   if (typeof budget === "number" && Number.isFinite(budget) && budget > 0) {
     args.push("--max-budget-usd", String(budget));
@@ -119,7 +153,7 @@ export function mapStreamEvent(msg) {
       if (block?.type === "text" && block.text) {
         events.push({ kind: "assistant_text", payload: { text: clip(block.text) } });
       } else if (block?.type === "tool_use") {
-        events.push({ kind: "tool_use", payload: { name: block.name, input: block.input } });
+        events.push({ kind: "tool_use", payload: { id: block.id ?? null, name: block.name, input: block.input } });
       }
     }
     return events;
@@ -131,7 +165,7 @@ export function mapStreamEvent(msg) {
     const events = [];
     for (const block of blocks) {
       if (block?.type !== "tool_result") continue;
-      const payload = { content: clip(contentText(block.content)) };
+      const payload = { content: clip(contentText(block.content)), toolUseId: block.tool_use_id ?? null };
       if (block.is_error === true) payload.isError = true;
       events.push({ kind: "tool_result", payload });
     }
@@ -174,14 +208,13 @@ export async function execute({
   signal,
 }) {
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
-
-  const childEnv = { ...process.env, ...env };
-  delete childEnv.ANTHROPIC_API_KEY;
-  delete childEnv.CLAUDECODE;
-  delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+  const childEnv = safeChildEnvironment(env);
 
   const mcpConfig = path.join(FACTORY_ROOT, "config", "mcp", "claude.json");
-  const argv = buildClaudeArgv({ prompt, def, mcpConfig });
+  const settings = buildClaudeSettings({ spec, def, workspaceDir });
+  const settingsPath = settings ? path.join(workspaceDir, ".claude-policy.json") : null;
+  if (settingsPath) writeFileSync(settingsPath, `${JSON.stringify(settings)}\n`, "utf8");
+  const argv = buildClaudeArgv({ prompt, def, mcpConfig, settingsPath });
 
   return new Promise((resolve, reject) => {
     const child = spawn("claude", argv, {
@@ -201,18 +234,30 @@ export async function execute({
       child.stdout.pipe(transcript);
     }
 
-    // Live trace: same stdout, line by line. Every failure mode here is
-    // swallowed — the agent must not be able to crash the worker via output.
-    if (typeof onTrace === "function" && child.stdout) {
+    // Live trace: same stdout, line by line. It is observational only: a
+    // trace recorder must never race execution by terminating the child.
+    const policyDenials = [];
+    let lastTool = null;
+    const toolNames = new Map();
+    if (child.stdout) {
       const lines = createInterface({ input: child.stdout });
       lines.on("line", (line) => {
         try {
           const parsed = JSON.parse(line);
           for (const event of mapStreamEvent(parsed)) {
-            if (def?.mutating === false && event.kind === "tool_use" && WRITE_TOOLS.has(event.payload?.name)) {
-              child.kill("SIGTERM");
+            if (event.kind === "tool_use") {
+              lastTool = event.payload?.name ?? null;
+              if (event.payload?.id) toolNames.set(event.payload.id, lastTool);
             }
-            onTrace(event.kind, event.payload);
+            onTrace?.(event.kind, event.payload);
+            const content = typeof event.payload?.content === "string" ? event.payload.content : "";
+            if (event.kind === "tool_result" && event.payload?.isError && /(?:permission|sandbox).{0,80}(?:denied|blocked)|(?:denied|blocked).{0,80}(?:permission|sandbox)/i.test(content)) {
+              const denial = { tool: toolNames.get(event.payload?.toolUseId) ?? lastTool ?? "unknown", rule: clip(content) };
+              policyDenials.push(denial);
+              // Keep the registry's closed trace-kind set. The payload turns
+              // this existing lifecycle event into an operator-visible denial.
+              onTrace?.("lifecycle", { note: "policy_denial", ...denial });
+            }
           }
         } catch {
           // not JSON, or a recorder failure — ignore
@@ -256,7 +301,7 @@ export async function execute({
       clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
       if (abortSig) abortSig.removeEventListener?.("abort", onAbort);
-      resolve({ exitCode, timedOut });
+      resolve({ exitCode, timedOut, policyDenials });
     });
   });
 }

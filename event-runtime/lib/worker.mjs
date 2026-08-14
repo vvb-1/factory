@@ -10,6 +10,7 @@
  * mid-flight surfaces here as IllegalTransition; the worker stops quietly,
  * publishing nothing.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { storeCollected } from "./artifacts.mjs";
 import { canonicalJson, hashJson, sha256Hex } from "./canonical.mjs";
@@ -47,6 +48,19 @@ function finishAttempt(db, runId, attempt, terminalState, reasonCode, now) {
     `UPDATE attempts SET terminal_state = ?, reason_code = ?, finished_at = ?
      WHERE run_id = ? AND attempt = ?`,
   ).run(terminalState, reasonCode, iso(now), runId, attempt);
+}
+
+/** Include ignored files: an agent must not be able to hide a repository write. */
+export function repositoryStatus(checkoutPath) {
+  const result = spawnSync("git", ["-C", checkoutPath, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"], {
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout : null;
+}
+
+/** Fail closed: a read-only repository workspace is acceptable only if clean. */
+export function repositoryIsClean(checkoutPath) {
+  return repositoryStatus(checkoutPath)?.trim() === "";
 }
 
 function assertCurrentToken(db, runId, fencingToken) {
@@ -163,6 +177,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
   const retain = spec.workspace?.retainOnFailure === true;
   let workspaceDir = null;
   let checkoutPath = null;
+  let checkoutBaseline = null;
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
 
   const nowFn = typeof now === "function" ? now : () => (now ?? Date.now());
@@ -233,6 +248,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     });
     workspaceDir = created.dir;
     checkoutPath = created.checkout?.path ?? null;
+    checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
     db.query(`UPDATE attempts SET workspace_path = ? WHERE run_id = ? AND attempt = ?`)
       .run(workspaceDir, runId, attempt);
 
@@ -339,7 +355,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       return { cancelled: true };
     }
 
-    const { exitCode, timedOut } = outcome ?? {};
+    const { exitCode, timedOut, policyDenials = [] } = outcome ?? {};
 
     if (timedOut) {
       const res = failTerminal("TIMED_OUT", "timeout", "timeout");
@@ -347,10 +363,28 @@ export async function executeClaimed(db, registry, adapters, claim, {
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "TIMED_OUT", reasonCode: "timeout" };
     }
+    const denial = policyDenials[0];
+    if (denial) {
+      const reasonCode = `policy_denied:${denial.tool}`;
+      const res = failTerminal("FAILED", reasonCode, reasonCode);
+      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      if (res?.fenced) return { fenced: true };
+      return { runId, attempt, terminalState: "FAILED", reasonCode };
+    }
     if (exitCode !== 0) {
       const reasonCode = `agent_exit_${exitCode}`;
       const res = failTerminal("FAILED", reasonCode, reasonCode, { requeue: true });
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      if (res?.fenced) return { fenced: true };
+      return { runId, attempt, terminalState: "FAILED", reasonCode };
+    }
+
+    // The settings policy is preventative; this is the independent, durable
+    // check before a repository-read run's output can be accepted or emitted.
+    if (checkoutPath && (checkoutBaseline === null || repositoryStatus(checkoutPath) !== checkoutBaseline)) {
+      const reasonCode = "workspace_integrity_violation";
+      const res = failTerminal("FAILED", reasonCode, reasonCode);
+      destroyWorkspace(workspaceDir, { retain: true, checkout: checkoutPath, repoName });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }

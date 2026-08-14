@@ -143,11 +143,16 @@ export interface TracePayload {
   /** assistant_text */
   text?: string;
   /** tool_use */
+  id?: string | null;
   name?: string;
   input?: unknown;
   /** tool_result */
+  toolUseId?: string | null;
   content?: unknown;
   isError?: boolean;
+  /** lifecycle policy_denial */
+  tool?: string;
+  rule?: string;
   /** usage */
   durationMs?: number | null;
   numTurns?: number | null;

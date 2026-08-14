@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
@@ -11,7 +12,7 @@ import { createRun, lifecycleOf, runState, transition, IllegalTransition } from 
 import { computeDefHash } from "./receipts.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
 import {
-  cancelRun, claimNext, executeClaimed, reapExpiredLeases, retryRun, runOnce,
+  cancelRun, claimNext, executeClaimed, reapExpiredLeases, repositoryIsClean, repositoryStatus, retryRun, runOnce,
 } from "./worker.mjs";
 
 const registry = loadRegistry();
@@ -74,6 +75,38 @@ function opts(extra = {}) {
 }
 
 describe("worker", () => {
+  test("repository integrity gate rejects any checkout dirt before output acceptance", () => {
+    const repo = mkdtempSync(path.join(os.tmpdir(), "evrt-clean-repo-"));
+    const git = (args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+    expect(git(["init", "--quiet"]).status).toBe(0);
+    writeFileSync(path.join(repo, "tracked.txt"), "clean\n");
+    writeFileSync(path.join(repo, ".gitignore"), "ignored.log\n");
+    expect(git(["add", "tracked.txt", ".gitignore"]).status).toBe(0);
+    expect(git(["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "initial"]).status).toBe(0);
+    expect(repositoryIsClean(repo)).toBe(true);
+    writeFileSync(path.join(repo, "ignored.log"), "dirty\n");
+    expect(repositoryIsClean(repo)).toBe(false);
+    rmSync(path.join(repo, "ignored.log"));
+    writeFileSync(path.join(repo, "agent-wrote.txt"), "dirty\n");
+    expect(repositoryIsClean(repo)).toBe(false);
+  });
+
+  test("repository integrity baseline permits pre-existing ignored state but detects later writes", () => {
+    const repo = mkdtempSync(path.join(os.tmpdir(), "evrt-baseline-repo-"));
+    const git = (args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+    expect(git(["init", "--quiet"]).status).toBe(0);
+    writeFileSync(path.join(repo, ".gitignore"), "generated/*.log\n");
+    expect(git(["add", ".gitignore"]).status).toBe(0);
+    expect(git(["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "initial"]).status).toBe(0);
+    mkdirSync(path.join(repo, "generated"));
+    writeFileSync(path.join(repo, "generated", "setup.log"), "pre-existing\n");
+    const baseline = repositoryStatus(repo);
+    expect(baseline).toContain("!! generated/setup.log");
+    expect(repositoryStatus(repo)).toBe(baseline);
+    writeFileSync(path.join(repo, "generated", "agent-write.log"), "new\n");
+    expect(repositoryStatus(repo)).not.toBe(baseline);
+  });
+
   test("happy path: COMPLETED, results row, receipt, one completion outbox event, workspace destroyed", async () => {
     const db = openDb(":memory:");
     const spec = queueRun(db, makeSpec());
@@ -110,6 +143,27 @@ describe("worker", () => {
     expect(attempt.started_at).toBeTruthy();
     expect(attempt.finished_at).toBeTruthy();
     expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+  });
+
+  test("policy denial is terminal and is never retried as an opaque agent exit", async () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(db, makeSpec({ adapter: "policy" }));
+    const policyAdapter = {
+      execute: async () => ({
+        // A model could recover after the denial; accepting its output would
+        // erase evidence of a policy breach, so exit 0 must still fail.
+        exitCode: 0,
+        timedOut: false,
+        policyDenials: [{ tool: "Bash", rule: "Sandbox denied write" }],
+      }),
+    };
+
+    const summary = await runOnce(db, registry, { policy: policyAdapter }, opts());
+    expect(summary).toMatchObject({ terminalState: "FAILED", reasonCode: "policy_denied:Bash" });
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ?`).get(spec.runId).reason_code).toBe("policy_denied:Bash");
+    expect(db.query(`SELECT * FROM results WHERE run_id = ?`).get(spec.runId)).toBeNull();
+    expect(db.query(`SELECT * FROM outbox`).all()).toHaveLength(0);
   });
 
   test("refuse: REFUSED, results row stored, no outbox row, workspace destroyed", async () => {

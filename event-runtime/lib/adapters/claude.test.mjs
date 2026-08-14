@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   buildClaudeArgv,
+  buildClaudeSettings,
   deriveAllowedTools,
   execute,
   KILL_GRACE_MS,
@@ -37,7 +38,7 @@ describe("mapStreamEvent", () => {
     });
     expect(events).toEqual([
       { kind: "assistant_text", payload: { text: "Running the query." } },
-      { kind: "tool_use", payload: { name: "Bash", input: { command: "ls" } } },
+      { kind: "tool_use", payload: { id: "toolu_1", name: "Bash", input: { command: "ls" } } },
     ]);
   });
 
@@ -46,7 +47,7 @@ describe("mapStreamEvent", () => {
       type: "user",
       message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file.txt" }] },
     });
-    expect(plain).toEqual([{ kind: "tool_result", payload: { content: "file.txt" } }]);
+    expect(plain).toEqual([{ kind: "tool_result", payload: { content: "file.txt", toolUseId: "toolu_1" } }]);
 
     const blocks = mapStreamEvent({
       type: "user",
@@ -60,7 +61,7 @@ describe("mapStreamEvent", () => {
       },
     });
     expect(blocks).toEqual([
-      { kind: "tool_result", payload: { content: "line 1\nline 2", isError: true } },
+      { kind: "tool_result", payload: { content: "line 1\nline 2", toolUseId: "toolu_2", isError: true } },
     ]);
   });
 
@@ -126,18 +127,16 @@ describe("deriveAllowedTools (OPS-407)", () => {
     expect(deriveAllowedTools(def)).toEqual(READ_ONLY_TOOLS);
   });
 
-  test("filters out write tools when mutating is false even if requested in capabilities", () => {
+  test("uses the workspace policy instead of a narrower tool declaration for mutating:false", () => {
     const def = {
       mutating: false,
-      capabilities: {
-        tools: ["Read", "Write", "Edit", "Grep", "Bash"],
-      },
+      capabilities: { tools: ["Read", "Grep"] },
     };
-    const tools = deriveAllowedTools(def);
-    expect(tools).toEqual(["Read", "Grep"]);
-    for (const tool of tools) {
-      expect(WRITE_TOOLS.has(tool)).toBe(false);
-    }
+    expect(deriveAllowedTools(def)).toEqual(READ_ONLY_TOOLS);
+  });
+
+  test("permits shell inspection and workspace-local output for non-mutating agents", () => {
+    expect(deriveAllowedTools({ mutating: false })).toEqual(["Read", "Grep", "Glob", "Bash", "Write", "Edit"]);
   });
 
   test("allows requested tools when mutating is true", () => {
@@ -152,6 +151,22 @@ describe("deriveAllowedTools (OPS-407)", () => {
 });
 
 describe("buildClaudeArgv (OPS-407, WM-62)", () => {
+  test("generates a sandbox policy that permits output but denies repository writes", () => {
+    const settings = buildClaudeSettings({
+      spec: { workspace: { type: "repository", checkoutDir: "repo" } },
+      def: { mutating: false },
+      workspaceDir: "/private/tmp/run-a1",
+    });
+    expect(settings.permissions.allow).toEqual(READ_ONLY_TOOLS);
+    expect(settings.permissions.deny).toEqual(["Edit(//private/tmp/run-a1/repo/**)"]);
+    expect(settings.sandbox).toEqual({
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      filesystem: { denyWrite: ["/private/tmp/run-a1/repo"] },
+    });
+  });
+
   test("constructs argv with --allowedTools, --mcp-config, and --strict-mcp-config", () => {
     const def = { mutating: false };
     const prompt = "Do a status check.";
@@ -163,7 +178,7 @@ describe("buildClaudeArgv (OPS-407, WM-62)", () => {
     expect(argv).toContain("stream-json");
     expect(argv).toContain("--verbose");
     expect(argv).toContain("--allowedTools");
-    expect(argv).toContain("Read,Grep,Glob");
+    expect(argv).toContain("Read,Grep,Glob,Bash,Write,Edit");
     expect(argv).toContain("--mcp-config");
     expect(argv).toContain("/path/to/mcp.json");
     expect(argv).toContain("--strict-mcp-config");
@@ -238,17 +253,36 @@ if (behavior === "ignore_sigterm") {
   setInterval(() => {}, 10_000);
 }
 
-if (behavior === "emit_write_tool") {
+if (behavior === "emit_bash_then_success") {
+  process.stdout.write(
+    JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_bash", name: "Bash", input: { command: "pwd" } }] },
+    }) + "\\n",
+  );
+  setTimeout(() => {
+    process.stdout.write(JSON.stringify({ type: "result", usage: {} }) + "\\n");
+    process.exit(0);
+  }, 150);
+}
+
+if (behavior === "emit_policy_denial") {
   process.stdout.write(
     JSON.stringify({
       type: "assistant",
       message: {
         role: "assistant",
-        content: [{ type: "tool_use", id: "toolu_1", name: "Write", input: { path: "forbidden.txt" } }],
+        content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "touch repo/nope" } }],
       },
     }) + "\\n",
   );
-  setInterval(() => {}, 10_000);
+  process.stdout.write(
+    JSON.stringify({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", is_error: true, content: "Sandbox denied write to repo/nope" }] },
+    }) + "\\n",
+  );
+  process.exit(1);
 }
 `;
   writeFileSync(stubClaudePath, stubScript, { mode: 0o755 });
@@ -294,7 +328,7 @@ if (behavior === "emit_write_tool") {
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
 
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false });
+    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
 
     // 1. Workspace confinement: cwd is workspaceDir
     expect(existsSync(recordFile)).toBe(true);
@@ -315,7 +349,12 @@ if (behavior === "emit_write_tool") {
     expect(record.argv).toContain("stream-json");
     expect(record.argv).toContain("--verbose");
     expect(record.argv).toContain("--allowedTools");
-    expect(record.argv).toContain("Read,Grep");
+    expect(record.argv).toContain("Read,Grep,Glob,Bash,Write,Edit");
+    expect(record.argv).toContain("--settings");
+    const policyPath = record.argv[record.argv.indexOf("--settings") + 1];
+    const policy = JSON.parse(readFileSync(policyPath, "utf8"));
+    expect(policy.sandbox.allowUnsandboxedCommands).toBe(false);
+    expect(policy.permissions.allow).toEqual(READ_ONLY_TOOLS);
     expect(record.argv).toContain("--strict-mcp-config");
 
     // 4. .transcript.json artifact capture
@@ -424,7 +463,24 @@ if (behavior === "emit_write_tool") {
     expect(outcome.timedOut).toBe(false);
   });
 
-  test("mutating: false kills child with SIGTERM when write tool is attempted", async () => {
+  test("does not turn a permitted Bash inspection into agent_exit_143", async () => {
+    const traceEvents = [];
+    const outcome = await execute({
+      spec: defaultSpec,
+      def: defaultDef,
+      workspaceDir: ws(),
+      timeoutMs: 5000,
+      env: {
+        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+        FACTORY_TEST_BEHAVIOR: "emit_bash_then_success",
+      },
+      onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
+    });
+    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(traceEvents.some((e) => e.kind === "tool_use" && e.payload.name === "Bash")).toBe(true);
+  });
+
+  test("records a policy denial without terminating the child from the trace observer", async () => {
     const workspaceDir = ws();
     const traceEvents = [];
     const outcome = await execute({
@@ -435,13 +491,31 @@ if (behavior === "emit_write_tool") {
       killGraceMs: 500,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "emit_write_tool",
+        FACTORY_TEST_BEHAVIOR: "emit_policy_denial",
       },
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
 
-    expect(outcome.timedOut).toBe(false);
-    expect(traceEvents.some((e) => e.kind === "tool_use" && e.payload.name === "Write")).toBe(true);
+    expect(outcome).toEqual({
+      exitCode: 1,
+      timedOut: false,
+      policyDenials: [{ tool: "Bash", rule: "Sandbox denied write to repo/nope" }],
+    });
+    expect(traceEvents.some((e) => e.kind === "lifecycle" && e.payload.note === "policy_denial" && e.payload.tool === "Bash")).toBe(true);
+  });
+
+  test("returns a policy denial even when no trace sink is attached", async () => {
+    const outcome = await execute({
+      spec: defaultSpec,
+      def: defaultDef,
+      workspaceDir: ws(),
+      timeoutMs: 5000,
+      env: {
+        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+        FACTORY_TEST_BEHAVIOR: "emit_policy_denial",
+      },
+    });
+    expect(outcome.policyDenials).toEqual([{ tool: "Bash", rule: "Sandbox denied write to repo/nope" }]);
   });
 
   test("spawn error (e.g. claude not on PATH) rejects promise", async () => {
