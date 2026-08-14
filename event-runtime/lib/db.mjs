@@ -203,6 +203,19 @@ export function txImmediate(db, fn) {
   return db.transaction(fn).immediate();
 }
 
+/**
+ * Test whether an error represents a transient SQLite lock collision
+ * (SQLITE_BUSY / SQLITE_LOCKED) that is safe to retry.
+ */
+export function isBusyError(err) {
+  if (!err) return false;
+  if (err.code === "SQLITE_BUSY" || err.code === "SQLITE_LOCKED" || err.code === "SQLITE_BUSY_RECOVERY") return true;
+  if (typeof err.errno === "number" && (err.errno === 5 || err.errno === 6)) return true;
+  const msg = String(err.message ?? err);
+  return /database is locked|database table is locked|resource temporarily unavailable|\bSQLITE_BUSY\b|\bSQLITE_LOCKED\b/i.test(msg);
+}
+
+
 /** Monotonic named counter — fencing tokens come from here (§8). */
 export function nextCounter(db, name) {
   const row = db

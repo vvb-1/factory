@@ -153,7 +153,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
   /** Terminal failure-shaped write: transition + attempts row, one tx. */
   const failTerminal = (to, journalReason, reasonCode, { requeue = false } = {}) =>
-    tx(db, () => {
+    txImmediate(db, () => {
       transition(db, {
         runId, to, expectFrom: "RUNNING",
         actor: owner, reason: journalReason, attempt, policyVersion, now,
@@ -168,7 +168,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     });
 
   try {
-    tx(db, () => {
+    txImmediate(db, () => {
       transition(db, {
         runId, to: "RUNNING", expectFrom: "LEASED",
         actor: owner, reason: "started", attempt, policyVersion, now,
@@ -257,7 +257,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       if (!(err instanceof ContractViolation)) throw err;
       // Invalid output is a typed contract failure and emits no completion
       // event (§15) — no results row, no outbox row.
-      tx(db, () => {
+      txImmediate(db, () => {
         transition(db, {
           runId, to: "FAILED", expectFrom: "VERIFYING",
           actor: owner, reason: `contract_violation: ${err.violations.join(", ")}`,
@@ -278,7 +278,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     if (verified.kind === "refused") {
       // Refusal is not failure (§5.3): store the typed result, publish no
       // completion event, clean the workspace normally.
-      tx(db, () => {
+      txImmediate(db, () => {
         transition(db, {
           runId, to: "REFUSED", expectFrom: "VERIFYING",
           actor: owner, reason: verified.reasonCode, attempt, policyVersion, now,
@@ -307,7 +307,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     // Completed: fencing check, result, receipt, outbox event, and the
     // COMPLETED transition are one transaction.
-    const published = tx(db, () => {
+    const published = txImmediate(db, () => {
       const maxToken = db
         .query(`SELECT MAX(fencing_token) AS m FROM attempts WHERE run_id = ?`)
         .get(runId).m;
@@ -378,7 +378,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
  * it is fenced out. Respects maxAttempts and dead-letters beyond it.
  */
 export function reapExpiredLeases(db, { now = Date.now(), policyVersion = "unknown" } = {}) {
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const rows = db
       .query(
         `SELECT r.run_id, r.attempts, r.spec_json, r.state FROM runs r
@@ -435,7 +435,7 @@ export async function runOnce(db, registry, adapters, opts = {}) {
  * A still-open proposal for the run is closed in the same transaction.
  */
 export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = Date.now(), policyVersion } = {}) {
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new Error(`unknown run ${runId}`);
     let result;
@@ -461,7 +461,7 @@ export function cancelRun(db, runId, { actor, reason = "operator_cancel", now = 
  * Force-fail a stranded or non-terminal run with a journaled transition.
  */
 export function forceFailRun(db, runId, { actor = "operator", reason = "operator_force_fail", now = Date.now(), policyVersion = "unknown" } = {}) {
-  return tx(db, () => {
+  return txImmediate(db, () => {
     const run = db.query(`SELECT state, attempts FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new Error(`unknown run ${runId}`);
     let result;
@@ -492,7 +492,7 @@ export function retryRun(db, runId, { actor, force = false, now = Date.now(), po
   const spec = JSON.parse(row.spec_json);
   if (!force && row.attempts >= spec.maxAttempts) throw new Error("attempts_exhausted");
   if (row.state === "VERIFYING") {
-    return tx(db, () => {
+    return txImmediate(db, () => {
       transition(db, { runId, to: "FAILED", actor, reason: "operator_retry_verifying", policyVersion, now });
       finishAttempt(db, runId, row.attempts, "FAILED", "operator_retry", now);
       return transition(db, {
