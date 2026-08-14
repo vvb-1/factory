@@ -151,11 +151,11 @@ describe("deriveAllowedTools (OPS-407)", () => {
   });
 });
 
-describe("buildClaudeArgv (OPS-407)", () => {
-  test("constructs argv with --allowedTools and --strict-mcp-config", () => {
+describe("buildClaudeArgv (OPS-407, WM-62)", () => {
+  test("constructs argv with --allowedTools, --mcp-config, and --strict-mcp-config", () => {
     const def = { mutating: false };
     const prompt = "Do a status check.";
-    const argv = buildClaudeArgv({ prompt, def });
+    const argv = buildClaudeArgv({ prompt, def, mcpConfig: "/path/to/mcp.json" });
 
     expect(argv).toContain("-p");
     expect(argv).toContain(prompt);
@@ -164,6 +164,8 @@ describe("buildClaudeArgv (OPS-407)", () => {
     expect(argv).toContain("--verbose");
     expect(argv).toContain("--allowedTools");
     expect(argv).toContain("Read,Grep,Glob");
+    expect(argv).toContain("--mcp-config");
+    expect(argv).toContain("/path/to/mcp.json");
     expect(argv).toContain("--strict-mcp-config");
   });
 });

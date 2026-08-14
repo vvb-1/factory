@@ -6,8 +6,8 @@
  * subscription auth (docs/architecture.md §2.9), and confines tool access:
  *   - passes `--allowedTools` derived from `def.capabilities`, denying write tools
  *     when `mutating: false`
- *   - passes `--strict-mcp-config` and sets `CLAUDE_CONFIG_DIR` to an isolated
- *     runtime directory with no ambient MCP servers or global memory
+ *   - passes `--mcp-config config/mcp/claude.json` and `--strict-mcp-config` so
+ *     only git-declared factory MCP servers are loaded
  *
  * Output is `--output-format stream-json` (NDJSON; the CLI requires
  * `--verbose` with it in -p mode): the full raw stream is captured to
@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { createWriteStream, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { FACTORY_ROOT } from "../config.mjs";
 
 const KILL_GRACE_MS = 30_000;
 
@@ -59,13 +60,16 @@ export function deriveAllowedTools(def) {
 }
 
 /**
- * Build argv for spawning claude (OPS-407).
- * Enforces --allowedTools and --strict-mcp-config.
+ * Build argv for spawning claude (OPS-407, WM-62).
+ * Enforces --allowedTools and --strict-mcp-config with the repo's declared MCP servers.
  */
-export function buildClaudeArgv({ prompt, def, allowedTools = deriveAllowedTools(def) }) {
+export function buildClaudeArgv({ prompt, def, allowedTools = deriveAllowedTools(def), mcpConfig }) {
   const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
   if (allowedTools && allowedTools.length > 0) {
     args.push("--allowedTools", allowedTools.join(","));
+  }
+  if (mcpConfig) {
+    args.push("--mcp-config", mcpConfig);
   }
   args.push("--strict-mcp-config");
   return args;
@@ -152,13 +156,14 @@ export function mapStreamEvent(msg) {
  */
 export async function execute({ spec, def, workspaceDir, timeoutMs, env = {}, onTrace }) {
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
-  const configDir = path.join(workspaceDir, ".claude-config");
-  mkdirSync(configDir, { recursive: true });
 
-  const childEnv = { ...process.env, ...env, CLAUDE_CONFIG_DIR: configDir };
+  const childEnv = { ...process.env, ...env };
   delete childEnv.ANTHROPIC_API_KEY;
+  delete childEnv.CLAUDECODE;
+  delete childEnv.CLAUDE_CODE_ENTRYPOINT;
 
-  const argv = buildClaudeArgv({ prompt, def });
+  const mcpConfig = path.join(FACTORY_ROOT, "config", "mcp", "claude.json");
+  const argv = buildClaudeArgv({ prompt, def, mcpConfig });
 
   return new Promise((resolve, reject) => {
     const child = spawn("claude", argv, {
