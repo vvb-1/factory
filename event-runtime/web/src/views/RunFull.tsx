@@ -228,6 +228,7 @@ export function RunFull({
               ? "The running attempt is stopped with TERM, then KILL, and terminates as cancelled."
               : "The run is cancelled before execution; the operator is recorded as actor."}
           </div>
+          <VerbError error={cancel.error} />
           <input
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
