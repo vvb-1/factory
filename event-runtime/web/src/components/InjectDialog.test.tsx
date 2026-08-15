@@ -663,3 +663,38 @@ describe("InjectDialog invalid-payload confirm is distinct (WM-85)", () => {
       expect(r.queryAllByRole("button", { name: /inject anyway/i })).toHaveLength(0);
     }));
 });
+
+describe("InjectDialog last-used template (WM-81)", () => {
+  test("preselects the last injected template on the next open; blank remains one click", () =>
+    withSchemaApi(async (r) => {
+      const origReplay = api.replay;
+      api.replay = async () => ({ admitted: true, duplicate: false, eventId: "e-last" });
+      try {
+        await selectTemplate(r, /disk\.diagnose/i);
+        act(() => {
+          changeInput(r.getByLabelText("mount"), "/var");
+        });
+        act(() => {
+          fireEvent.click(r.getByRole("button", { name: /inject/i }));
+        });
+        await act(async () => {
+          fireEvent.click(r.getByRole("button", { name: /^confirm inject$/i }));
+        });
+        r.unmount();
+        const r2 = renderWithClient(<InjectDialog onClose={() => {}} />);
+        const chip = await r2.findByRole("radio", {
+          name: (n) => n.includes("disk.diagnose") && n.includes("disk@1"),
+        });
+        expect(chip.getAttribute("aria-checked")).toBe("true");
+        expect(r2.getByRole("tab", { name: /form/i }).getAttribute("aria-selected")).toBe("true");
+        expect(r2.getByLabelText("usedPct")).toBeTruthy();
+        act(() => {
+          fireEvent.click(r2.getByRole("radio", { name: /blank envelope/i }));
+        });
+        expect(r2.getByRole("radio", { name: /blank envelope/i }).getAttribute("aria-checked")).toBe("true");
+        expect(r2.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
+      } finally {
+        api.replay = origReplay;
+      }
+    }));
+});

@@ -40,6 +40,7 @@ const REQUIRED = ["schemaVersion", "eventId", "type", "source", "occurredAt"];
 
 export const INJECT_DRAFT_KEY = "factory.injectDraft";
 export const INJECT_RECENT_STORAGE_KEY = "factory.injectRecent";
+export const INJECT_LAST_TEMPLATE_KEY = "factory.injectLastTemplate";
 export const MAX_RECENT_EVENTS = 5;
 
 export interface InjectDraft {
@@ -166,6 +167,31 @@ export function clearRecentEvents() {
   } catch {}
 }
 
+export function loadLastTemplate(): string | null {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(INJECT_LAST_TEMPLATE_KEY);
+    if (raw === null) return null;
+    if (raw === "") return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastTemplate(eventType: string | null) {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) return;
+    if (eventType === null || eventType === "" || eventType.startsWith("__")) {
+      storage.setItem(INJECT_LAST_TEMPLATE_KEY, "");
+      return;
+    }
+    storage.setItem(INJECT_LAST_TEMPLATE_KEY, eventType);
+  } catch {}
+}
+
 function summarizePayload(env: Record<string, unknown> | undefined): string {
   if (!env || !isPlainObject(env.payload)) return "no payload";
   const payload = env.payload as Record<string, unknown>;
@@ -259,10 +285,11 @@ export function InjectDialog({
   );
 
   const [search, setSearch] = useState("");
+  const lastTemplateRef = useRef(false);
   const [selected, setSelected] = useState<string | null>(() => {
     if (initialEnvelope) return "__given__";
     if (initialDraft?.selected !== undefined) return initialDraft.selected;
-    return null;
+    return loadLastTemplate();
   });
   const [text, setText] = useState<string>(() => {
     if (initialEnvelope) return pretty(initialEnvelope);
@@ -393,6 +420,7 @@ export function InjectDialog({
 
   function choose(template: TriggerTemplate) {
     setSelected(template.eventType);
+    saveLastTemplate(template.eventType);
     setText(pretty(template.envelope));
     const fields = schemaFields(schemaFor(template.eventType));
     initFormFromEnvelope(template.envelope, fields);
@@ -427,6 +455,7 @@ export function InjectDialog({
     if (next === null) {
       const env = blankEnvelope(openedAt);
       setSelected(null);
+      saveLastTemplate(null);
       setText(pretty(env));
       initFormFromEnvelope(env, null);
       setTab("json");
@@ -457,6 +486,16 @@ export function InjectDialog({
     const t = templates.find((x) => x.eventType === next);
     if (t) choose(t);
   }
+
+  useLayoutEffect(() => {
+    if (initialEnvelope || initialDraft) return;
+    if (lastTemplateRef.current) return;
+    if (!selected) return;
+    const t = templates.find((x) => x.eventType === selected);
+    if (!t) return;
+    lastTemplateRef.current = true;
+    choose(t);
+  }, [templates, selected, initialEnvelope, initialDraft]);
 
   function templateIds(): Array<string | null> {
     return [
