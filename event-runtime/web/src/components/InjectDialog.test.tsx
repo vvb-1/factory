@@ -574,3 +574,39 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
       expect(view.queryAllByLabelText("mount")).toHaveLength(0);
     }));
 });
+
+describe("InjectDialog humanized errors and hidden planner fields (WM-86)", () => {
+  test("pattern field errors do not leak the raw regex", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /disk\.diagnose/i);
+      const mount = r.getByLabelText("mount") as HTMLInputElement;
+      act(() => {
+        changeInput(mount, "not-a-path");
+        fireEvent.blur(mount);
+      });
+      expect(r.queryAllByText(/\^\/\[A-Za-z0-9/).length).toBe(0);
+      expect(r.getAllByText(/expected format/i).length).toBeGreaterThan(0);
+    }));
+
+  test("hidden planner-field errors name the JSON tab", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /triage\.scan\.requested/i);
+      act(() => {
+        fireEvent.click(r.getByRole("tab", { name: /json/i }));
+      });
+      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const parsed = JSON.parse(textarea.value);
+      parsed.payload.repo = "factory";
+      parsed.payload.repoPin = { repo: "factory", sha: "not-a-sha" };
+      act(() => {
+        changeInput(textarea, JSON.stringify(parsed, null, 2));
+      });
+      act(() => {
+        fireEvent.click(r.getByRole("tab", { name: /form/i }));
+      });
+      const banner = r.container.textContent ?? "";
+      expect(banner).toMatch(/repoPin/i);
+      expect(banner).toMatch(/JSON tab/i);
+      expect(banner).not.toMatch(/\^\[0-9a-f\]\{40\}/);
+    }));
+});

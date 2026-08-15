@@ -12,6 +12,7 @@ import { api } from "../api";
 import { buildTemplates, triggerId, type TriggerTemplate } from "../templates";
 import { validate } from "../lib/schema";
 import {
+  PLANNER_FIELDS,
   errorsByField,
   fieldErrorVisible,
   isAtField,
@@ -510,13 +511,21 @@ export function InjectDialog({
     () => (formSchema ? validate(formSchema, formPayload) : { valid: true, errors: [] as string[] }),
     [formSchema, formPayload],
   );
-  const fieldErrors = useMemo(() => errorsByField(formValidation.errors), [formValidation]);
+  const fieldErrors = useMemo(
+    () => errorsByField(formValidation.errors, formFields),
+    [formValidation, formFields],
+  );
   const knownNames = useMemo(() => new Set(formFields.map((f) => f.name)), [formFields]);
   const formLevelErrors = useMemo(() => {
     const out: string[] = [];
     for (const [k, msgs] of fieldErrors) {
       if (k === "") out.push(...msgs);
-      else if (!knownNames.has(k)) out.push(...msgs.map((m) => `${k}: ${m}`));
+      else if (!knownNames.has(k)) {
+        const where = PLANNER_FIELDS.has(k)
+          ? ` — ${k} is a planner field; edit it in the JSON tab`
+          : " — edit in the JSON tab";
+        out.push(...msgs.map((m) => `${k}: ${m}${where}`));
+      }
     }
     return out;
   }, [fieldErrors, knownNames]);
