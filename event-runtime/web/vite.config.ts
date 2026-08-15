@@ -68,6 +68,9 @@ function vendorChunk(id: string): string | undefined {
 // 1–N status-tab keys, and Projects mode tabs) measured 531.86 kB. The xyflow
 // vendor chunk is byte-identical to develop's and every lazy route chunk is still
 // split out, so this is app code, not a chunking regression.
+// Same 540 kB ceiling reached independently by WM-235 (context strip fast jump
+// chords and armed badges, 531.28 kB on CI Linux) and by WM-233's copy chords;
+// the merged hotkey wave still fits under it with the vendor split intact.
 const ENTRY_CHUNK_BUDGET_BYTES = 540 * 1000;
 
 function entryChunkBudget(): Plugin {

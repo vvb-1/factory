@@ -26,6 +26,18 @@ describe("ShortcutsDialog", () => {
     expect(contextStrip.textContent).toContain("Delete / ⌫");
   });
 
+  test("documents context chords under Navigation chords (g 0, g 1–9, g i)", () => {
+    const r = render(<ShortcutsDialog onClose={() => {}} />);
+
+    const navChords = r.getByRole("region", { name: "Navigation chords" });
+    expect(navChords.textContent).toContain("g 0");
+    expect(navChords.textContent).toContain("All context");
+    expect(navChords.textContent).toContain("g 1–9");
+    expect(navChords.textContent).toContain("1st–9th repo tab");
+    expect(navChords.textContent).toContain("g i");
+    expect(navChords.textContent).toContain("In flight context");
+  });
+
   test("documents universal copy chords (WM-233)", () => {
     const r = render(<ShortcutsDialog onClose={() => {}} />);
     const actions = r.getByRole("region", { name: "Actions" });
