@@ -4,7 +4,7 @@ import { NAV } from "../nav";
 const ACTIONS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
   { keys: "⌘K", does: "copy link to this page" },
-  { keys: "⌘K · footer Theme", does: "cycle theme (dark → light → contrast)" },
+  { keys: "⌘K · footer theme", does: "cycle theme (dark → light → contrast)" },
   { keys: "i", does: "inject event" },
   { keys: "/", does: "focus filter (Events, if none on this view)" },
   { keys: "j k  ↑↓", does: "move list (or graph) selection" },
