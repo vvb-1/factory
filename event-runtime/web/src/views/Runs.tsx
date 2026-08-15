@@ -414,6 +414,7 @@ export function Runs({
   };
   useTabKeys(RUN_TABS, tab, selectTab);
 
+  const pendingC = useRef<number>(0);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -444,9 +445,44 @@ export function Runs({
     keys: {
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
       x: () => sel && connected && isCancellable(sel.state) && setConfirm("cancel"),
-      c: () => sel && copyText(sel.runId, "run id"),
+      c: () => {
+        if (!sel) return;
+        const now = Date.now();
+        if (pendingC.current > 0 && now - pendingC.current < 800) {
+          copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command");
+          pendingC.current = 0;
+        } else {
+          copyText(sel.runId, "run id");
+          pendingC.current = now;
+        }
+      },
+      l: () => {
+        if (sel && pendingC.current > 0 && Date.now() - pendingC.current < 800) {
+          copyLink();
+          pendingC.current = 0;
+        }
+      },
     },
   });
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (goPrefixActive()) return;
+      if (!sel) return;
+      const now = Date.now();
+      if (pendingC.current > 0 && now - pendingC.current < 800) {
+        if (e.key === "i" || e.key === "I") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command");
+          pendingC.current = 0;
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [sel]);
 
   const d = detail.data;
   const attemptsExhausted = d ? d.run.attempts >= d.run.spec.maxAttempts : false;
@@ -470,7 +506,12 @@ export function Runs({
         { label: "Open in tab", run: () => pinRun(sel.runId) },
         { label: "Open full view", hint: "o", run: () => onOpenFull(sel.runId) },
         { label: "Copy run id", hint: "c", run: () => copyText(sel.runId, "run id") },
-        { label: "Copy link", run: copyLink },
+        {
+          label: "Copy CLI inspect command",
+          hint: "c i",
+          run: () => copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command"),
+        },
+        { label: "Copy link", hint: "c l", run: copyLink },
       ];
       if (!d || !connected) {
         setContextActions(copy);
@@ -805,7 +846,7 @@ export function Runs({
                 onClick={() => copyText(sel.runId, "run id")}
                 className="cursor-pointer hover:text-(--text)"
               >
-                id
+                id <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c</span>
               </button>
               <span>·</span>
               <button
@@ -813,11 +854,11 @@ export function Runs({
                 onClick={() => copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command")}
                 className="cursor-pointer hover:text-(--text)"
               >
-                CLI
+                CLI <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c i</span>
               </button>
               <span>·</span>
               <button type="button" onClick={copyLink} className="cursor-pointer hover:text-(--text)">
-                link
+                link <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c l</span>
               </button>
             </>
           }
