@@ -133,4 +133,33 @@ describe("RunTrace a11y (WM-143)", () => {
     expect(onCancelShortcut).toHaveBeenCalledTimes(1);
     expect(search.value).toBe("too");
   });
+
+  test("x on search of a COMPLETED run types the letter — cancel does not apply", async () => {
+    const r = renderTrace({ state: "COMPLETED" });
+    await waitForChrome(r);
+
+    const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
+    search.focus();
+    fireEvent.keyDown(search, { key: "x" });
+    expect(document.activeElement).toBe(search);
+  });
+
+  test("x on search of a RUNNING run with no callback redispatches on a non-input target", async () => {
+    const seen: EventTarget[] = [];
+    const onWin = (e: KeyboardEvent) => {
+      if (e.key === "x") seen.push(e.target as EventTarget);
+    };
+    window.addEventListener("keydown", onWin);
+    try {
+      const r = renderTrace();
+      await waitForChrome(r);
+      const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
+      search.focus();
+      fireEvent.keyDown(search, { key: "x" });
+      expect(document.activeElement).not.toBe(search);
+      expect(seen.some((t) => t instanceof HTMLElement && !t.closest("input"))).toBe(true);
+    } finally {
+      window.removeEventListener("keydown", onWin);
+    }
+  });
 });

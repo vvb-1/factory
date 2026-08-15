@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { RunState, TraceEntry, TracePayload } from "../types";
+import { isCancellable } from "./RunDetailBlocks";
 import { humanSize, JsonBlock, Section, notify } from "./ui";
 
 function copyText(text: string, label: string = "text") {
@@ -649,6 +650,7 @@ export function RunTrace({
 
   const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "x" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!isCancellable(state)) return;
     e.preventDefault();
     e.stopPropagation();
     if (onCancelShortcut) {
