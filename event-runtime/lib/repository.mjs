@@ -45,18 +45,29 @@ export function mirrorPath(repoName, root = mirrorsRoot()) {
   return path.join(root, `${repoName}.git`);
 }
 
+/** Turn the configured owner/repo slug into a clone URL. Full URLs are
+ * accepted as-is so tests and self-hosted mirrors can remain network-free. */
+function githubRemote(github) {
+  if (!github) return null;
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(github)) return github;
+  return `https://github.com/${github.replace(/\.git$/, "")}.git`;
+}
+
 /**
- * Create the mirror if absent, otherwise fetch it. The source is the local
- * checkout's path (fast, offline-friendly); it is only ever *read*.
+ * Create the mirror if absent, otherwise fetch it. Prefer the local checkout
+ * (fast, offline-friendly), falling back to the configured GitHub remote.
  */
 export function syncMirror(repo, { root = mirrorsRoot() } = {}) {
   const mirror = mirrorPath(repo.name, root);
   if (!existsSync(mirror)) {
-    if (!existsSync(repo.path)) {
-      throw new RepositoryWorkspaceError(`repo ${repo.name}: no checkout at ${repo.path} to mirror from`);
+    const source = existsSync(repo.path) ? repo.path : githubRemote(repo.github);
+    if (!source) {
+      throw new RepositoryWorkspaceError(
+        `repo ${repo.name}: no checkout at ${repo.path} and no github remote configured to mirror from`,
+      );
     }
     mkdirSync(root, { recursive: true });
-    git(["clone", "--mirror", "--quiet", repo.path, mirror]);
+    git(["clone", "--mirror", "--quiet", source, mirror]);
   } else {
     git(["fetch", "--prune", "--quiet", "origin"], mirror);
   }
@@ -80,7 +91,7 @@ export function pinRepo(repoName, ref, { reposRoot, mirrors = mirrorsRoot() } = 
     const { sha } = resolveRef(repo, ref ?? repo.base, { root: mirrors });
     return { repo: repo.name, ref: ref ?? repo.base, sha, github: repo.github };
   } catch (err) {
-    if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+    if (!repo.github && !existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
       return { repo: repo.name, ref: ref ?? repo.base, sha: "0000000000000000000000000000000000000000", github: repo.github };
     }
     throw err;
@@ -100,7 +111,7 @@ export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "rep
   if (!target.startsWith(path.resolve(workspaceDir) + path.sep)) {
     throw new RepositoryWorkspaceError(`checkout subdir "${subdir}" escapes the workspace`);
   }
-  if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+  if (!repo.github && !existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
     mkdirSync(target, { recursive: true });
     // The worker's integrity gate must be able to inspect every repository
     // workspace, including a CI/demo fallback with no local source checkout.
