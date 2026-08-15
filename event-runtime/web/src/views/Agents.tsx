@@ -7,11 +7,13 @@ import {
   cycleColumnSort,
   flattenSections,
   grouped,
+  removeCustomColumn,
   toggleCollapsed,
   visibleColumns,
   type DisplayConfig,
 } from "../displayOptions";
-import { DisplayOptions } from "../components/DisplayOptions";
+import { DisplayOptions, exportJson } from "../components/DisplayOptions";
+import { CustomCell } from "../components/CustomCell";
 import type { AgentDef, AgentEventRoute } from "../types";
 import type { OperatorContext } from "../context";
 import {
@@ -222,6 +224,8 @@ export function Agents({
     return () => setContextActions([]);
   }, [sel?.ref]);
 
+  const handleExport = () => exportJson("agents.json", visible);
+
   return (
     <div className="flex h-full min-w-0">
       <ListPane
@@ -231,7 +235,13 @@ export function Agents({
         <ScopeCaption context={context} surface="registry" />
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="ml-auto">
-            <DisplayOptions config={AGENTS_DISPLAY} state={display} onChange={setDisplay} />
+            <DisplayOptions
+              config={AGENTS_DISPLAY}
+              state={display}
+              onChange={setDisplay}
+              onExport={visible.length > 0 ? handleExport : undefined}
+              rows={rows}
+            />
           </span>
           <FilterInput
             value={filter}
@@ -249,13 +259,17 @@ export function Agents({
             <tr className="text-left text-[11px] text-(--text-faint)">
               {cols.map((c) => {
                 const sort = AGENTS_DISPLAY.sorts.find((s) => s.column === c.key);
+                const isCustom = c.isCustom || c.key.startsWith("custom:");
+                const customPath = c.key.replace(/^custom:/, "");
+                const isCurrentSort = isCustom ? display.sortBy === c.key : (sort && display.sortBy === sort.key);
                 return (
                   <Th
                     key={c.key}
                     label={c.label}
-                    dir={sort && display.sortBy === sort.key ? display.sortDir : null}
-                    naturalDir={sort?.defaultDir}
-                    onSort={sort ? () => setDisplay((s) => cycleColumnSort(AGENTS_DISPLAY, s, c.key)) : undefined}
+                    dir={isCurrentSort ? display.sortDir : null}
+                    naturalDir={sort?.defaultDir ?? "asc"}
+                    onSort={sort || isCustom ? () => setDisplay((s) => cycleColumnSort(AGENTS_DISPLAY, s, c.key)) : undefined}
+                    onRemove={isCustom ? () => setDisplay((s) => removeCustomColumn(s, customPath)) : undefined}
                   />
                 );
               })}
@@ -322,6 +336,9 @@ export function Agents({
                       {a.limits.attempts ?? "-"}
                     </td>
                   )}
+                  {cols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
+                    <CustomCell key={c.key} row={a} path={c.key.replace(/^custom:/, "")} />
+                  ))}
                 </tr>
               );
               if (!grouped(display)) return sections[0]?.rows.map(renderRow);
