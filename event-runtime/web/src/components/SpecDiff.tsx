@@ -120,7 +120,7 @@ export function SpecDiff({ before, after }: { before: unknown; after: unknown })
           Copy diff
         </Button>
       </div>
-      <div className="p-3 leading-relaxed">
+      <div data-testid="spec-diff-body" className="whitespace-pre-wrap p-3 leading-relaxed">
         {lines.map((l, idx) => (
           <div
             key={idx}

@@ -117,6 +117,17 @@ describe("SpecDiff component", () => {
     expect(r.getByText(/\d+ more lines below/)).toBeDefined();
   });
 
+  test("preserves JSON indent after dropping pre (whitespace-pre-wrap on body)", () => {
+    const before = { maxAttempts: 3 };
+    const after = { maxAttempts: 5 };
+    const r = render(<SpecDiff before={before} after={after} />);
+
+    const body = r.getByTestId("spec-diff-body");
+    expect(body.className).toContain("whitespace-pre-wrap");
+    const indented = [...body.querySelectorAll("[data-diff-line]")].map((el) => el.textContent ?? "");
+    expect(indented.some((t) => t.startsWith("-   \"maxAttempts\"") || t.startsWith("+   \"maxAttempts\""))).toBe(true);
+  });
+
   test("keeps changed-line header sticky while scrolling diff body", () => {
     const before = { maxAttempts: 3 };
     const after = { maxAttempts: 5 };
