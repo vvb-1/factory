@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
+import { contextFromProject, type OperatorContext } from "../context";
+import { hashProject } from "../hash";
 import { useListKeys } from "../hooks";
 import { setContextActions } from "../palette";
 import type { JanitorResult } from "../types";
+import { ScopeCaption } from "../components/ContextTabs";
 import {
   Button,
   DetailPane,
@@ -18,6 +21,11 @@ import {
   copyText,
   notify,
 } from "../components/ui";
+
+/** Live operator context from the hash — same source App uses. Read on every render: context-tab switches replaceState and do not fire hashchange. Do not read sessionStorage: stale `active` must not caption All. */
+function operatorContext(): OperatorContext {
+  return contextFromProject(hashProject(typeof window === "undefined" ? "" : window.location.hash));
+}
 
 const TEAM_HUES: Record<string, string> = {
   CLNT: "var(--hue-ok)",
@@ -38,6 +46,7 @@ export function Projects({
   onSelectRepo: (name: string | null) => void;
 }) {
   const queryClient = useQueryClient();
+  const context = operatorContext();
   const [filter, setFilter] = useState("");
   const [filterMode, setFilterMode] = useState<"ALL" | "DISPATCHABLE" | "REPORT_ONLY">("ALL");
 
@@ -233,6 +242,7 @@ export function Projects({
         chrome={
           <>
             <h1 className="display mb-4 text-lg font-semibold">Projects</h1>
+            <ScopeCaption context={context} surface="registry" />
             <div className="mb-3">
               <FilterInput
                 value={filter}
@@ -550,15 +560,20 @@ export function Projects({
                       dryMutation.isPending ||
                       applyMutation.isPending ||
                       !dryResult ||
+                      dryResult.reclaimable.length === 0 ||
                       (sel.reportOnly && !sel.hasWorktreeDown)
                     }
                     onClick={() => {
+                      if (!dryResult?.reclaimable.length) return;
                       setConfirmInput("");
                       setConfirmOpen(true);
                     }}
                   >
                     Clean Reclaimable Worktrees…
                   </Button>
+                  {dryResult && dryResult.reclaimable.length === 0 && (
+                    <span className="text-[11px] text-(--text-faint)">Nothing to reclaim</span>
+                  )}
 
                   <Button
                     disabled={!connected || quickDispatchMutation.isPending}
@@ -769,7 +784,7 @@ export function Projects({
         </DetailPane>
       )}
 
-      {confirmOpen && sel && (
+      {confirmOpen && sel && (dryResult?.reclaimable.length ?? 0) > 0 && (
         <Dialog
           title={`Clean Worktrees for ${sel.name}`}
           onClose={() => {
