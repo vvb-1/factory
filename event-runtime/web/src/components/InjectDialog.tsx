@@ -860,6 +860,10 @@ export function InjectDialog({
             id={fid}
             type="number"
             step="any"
+            min={typeof f.schema.minimum === "number" ? f.schema.minimum : undefined}
+            max={typeof f.schema.maximum === "number" ? f.schema.maximum : undefined}
+            aria-valuemin={typeof f.schema.minimum === "number" ? f.schema.minimum : undefined}
+            aria-valuemax={typeof f.schema.maximum === "number" ? f.schema.maximum : undefined}
             value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
             onChange={(e) => {
               const raw = e.target.value;

@@ -192,6 +192,8 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       expect([...host.querySelectorAll("option")].map((o) => o.value)).toContain("web");
       const usedPct = r.getByLabelText("usedPct") as HTMLInputElement;
       expect(usedPct.getAttribute("type")).toBe("number");
+      expect(usedPct.getAttribute("min")).toBe("0");
+      expect(usedPct.getAttribute("max")).toBe("100");
       expect(r.getByLabelText("mount")).toBeTruthy();
       expect(r.getByLabelText("alertId")).toBeTruthy();
       // Envelope preview disclosure is present in Form mode.
