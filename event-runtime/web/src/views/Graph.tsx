@@ -10,7 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { keyGuard, useNow } from "../hooks";
 import { buildCapabilityGraph, type GraphNode } from "../graph/model";
@@ -232,11 +232,33 @@ export function Graph({
 
   const pendingC = useRef<number>(0);
 
+  const revealSelected = useCallback(() => {
+    if (!focusNodeId || !flowRef.current) return;
+    const zoom = flowRef.current.getZoom();
+    flowRef.current.fitView({
+      nodes: [{ id: focusNodeId }],
+      padding: 0.45,
+      duration: 180,
+      minZoom: zoom,
+      maxZoom: zoom,
+    });
+  }, [focusNodeId]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
         onSelectNode(null);
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const enterActivatesControl =
+        e.key === "Enter" &&
+        Boolean(target?.closest("button, a, [role=button], [role=link]")) &&
+        !target?.closest(".react-flow__node");
+      if ((e.key === "z" || (e.key === "Enter" && !enterActivatesControl)) && focusNodeId) {
+        e.preventDefault();
+        revealSelected();
         return;
       }
       if (e.key === "c" && focusNodeId) {
@@ -274,19 +296,7 @@ export function Graph({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onSelectNode, focusNodeId, graph, positioned]);
-
-  const revealSelected = () => {
-    if (!focusNodeId || !flowRef.current) return;
-    const zoom = flowRef.current.getZoom();
-    flowRef.current.fitView({
-      nodes: [{ id: focusNodeId }],
-      padding: 0.45,
-      duration: 180,
-      minZoom: zoom,
-      maxZoom: zoom,
-    });
-  };
+  }, [onSelectNode, focusNodeId, graph, positioned, revealSelected]);
 
   // Initial view (WM-99): fit the largest connected component with a zoom
   // floor instead of squeezing every island on screen at label-illegible zoom.
@@ -492,7 +502,11 @@ export function Graph({
         <DetailPane
           widthClass="w-[420px]"
           title={selected.label}
-          actions={<Button onClick={revealSelected}>Show on canvas</Button>}
+          actions={
+            <Button onClick={revealSelected}>
+              Show on canvas <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">z</span>
+            </Button>
+          }
           utility={
             <CopyActions
               id={selected.label}

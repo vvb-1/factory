@@ -27,6 +27,8 @@ const ACTIONS: { keys: string; does: string }[] = [
   { keys: "* n / Esc", does: "clear proposal selection" },
   { keys: "A / X", does: "approve / reject selected proposals" },
   { keys: "q", does: "requeue event (Events)" },
+  { keys: "p", does: "pin / unpin selected run (Runs)" },
+  { keys: "z / Enter", does: "reveal selected node on canvas (Graph)" },
   { keys: "c", does: "copy selected id / name / ref" },
   { keys: "c l", does: "copy link to clipboard" },
   { keys: "c i / c c", does: "copy CLI inspect command (Runs)" },
