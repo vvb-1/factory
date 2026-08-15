@@ -152,6 +152,22 @@ describe("bottom status bar", () => {
 
     const themeButton = within(statusBar).getByRole("button", { name: /Theme:/i });
     expect(themeButton).toBeTruthy();
+    expect(themeButton.getAttribute("aria-label")).toBe("Theme: dark. Switch to light.");
+
+    act(() => {
+      themeButton.click();
+    });
+    expect(themeButton.getAttribute("aria-label")).toBe("Theme: light. Switch to contrast.");
+
+    act(() => {
+      themeButton.click();
+    });
+    expect(themeButton.getAttribute("aria-label")).toBe("Theme: contrast. Switch to dark.");
+
+    act(() => {
+      themeButton.click();
+    });
+    expect(themeButton.getAttribute("aria-label")).toBe("Theme: dark. Switch to light.");
   });
 });
 
