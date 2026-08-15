@@ -49,6 +49,7 @@ export function scheduleFilterTokens(s: ScheduleItem): string[] {
  * next due countdown, and stopped clocks, with an ad-hoc trigger modal.
  */
 export function Schedules({
+  connected,
   context,
   focusScheduleLoop,
   onSelectSchedule,
@@ -161,7 +162,7 @@ export function Schedules({
     },
     keys: {
       c: () => sel && copyText(sel.loop, "schedule loop"),
-      r: () => sel && setConfirmLoop(sel),
+      r: () => sel && connected !== false && setConfirmLoop(sel),
     },
   });
 
@@ -169,14 +170,18 @@ export function Schedules({
     if (!sel) {
       setContextActions([]);
     } else {
-      setContextActions([
-        { label: `Run ${sel.loop} now…`, hint: "r", run: () => setConfirmLoop(sel) },
+      const copy = [
         { label: `Copy ${sel.loop}`, hint: "c", run: () => copyText(sel.loop, "schedule loop") },
         { label: "Copy link to this schedule", run: copyLink },
-      ]);
+      ];
+      setContextActions(
+        connected === false
+          ? copy
+          : [{ label: `Run ${sel.loop} now…`, hint: "r", run: () => setConfirmLoop(sel) }, ...copy],
+      );
     }
     return () => setContextActions([]);
-  }, [sel]);
+  }, [sel, connected]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -228,6 +233,7 @@ export function Schedules({
                 <tr
                   key={s.loop}
                   onClick={() => onSelectSchedule(s.loop)}
+                  aria-selected={isSel}
                   className={`cursor-pointer border-b border-(--border) text-[13px] hover:bg-(--surface-2) ${
                     isSel ? "row-selected bg-(--surface-3)" : ""
                   }`}
@@ -331,6 +337,7 @@ export function Schedules({
                   </td>
                   <td className="border-b border-(--border) px-3 py-2 text-right">
                     <Button
+                      disabled={connected === false}
                       onClick={() => setConfirmLoop(s)}
                     >
                       Run now…
@@ -381,7 +388,11 @@ export function Schedules({
           }
           actions={
             <>
-              <Button variant="primary" onClick={() => setConfirmLoop(sel)}>
+              <Button
+                variant="primary"
+                disabled={connected === false}
+                onClick={() => setConfirmLoop(sel)}
+              >
                 Run now…
               </Button>
               <Button onClick={() => copyText(sel.loop, "schedule loop")}>Copy loop</Button>
@@ -676,7 +687,7 @@ export function Schedules({
               </Button>
               <Button
                 variant="primary"
-                disabled={triggerMut.isPending}
+                disabled={triggerMut.isPending || connected === false}
                 onClick={() => triggerMut.mutate(confirmLoop.loop)}
               >
                 {triggerMut.isPending ? "Triggering…" : "Trigger Run"}
