@@ -3,7 +3,7 @@ import { GO_CHORD_MS, goSequence } from "./goSequence";
 import { NAV } from "./nav";
 
 /** Every `g`-chord suffix registered in nav — single source for the matrix. */
-const NAV_SUFFIXES = NAV.map((n) => n.go);
+const NAV_SUFFIXES: string[] = NAV.map((n) => n.go);
 
 /** A stepper over the real nav suffixes, with a clock the test drives. */
 function chord(targets = NAV_SUFFIXES) {
