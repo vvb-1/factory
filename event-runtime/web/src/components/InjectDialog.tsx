@@ -418,8 +418,10 @@ export function InjectDialog({
   function applySelection(next: string | null) {
     if (next === checkedId) return;
     if (next === null) {
+      const env = blankEnvelope(openedAt);
       setSelected(null);
-      setText(pretty(blankEnvelope(openedAt)));
+      setText(pretty(env));
+      initFormFromEnvelope(env, null);
       setTab("json");
       setTabNotice(null);
       resetAcks();
@@ -427,8 +429,10 @@ export function InjectDialog({
       return;
     }
     if (next === "__given__" && initialEnvelope) {
+      const type = typeof initialEnvelope.type === "string" ? initialEnvelope.type : "";
       setSelected("__given__");
       setText(pretty(initialEnvelope));
+      initFormFromEnvelope(initialEnvelope, schemaFields(schemaFor(type)));
       setTab("json");
       setTabNotice(null);
       resetAcks();
@@ -640,6 +644,12 @@ export function InjectDialog({
     setClientError(null);
     if (invalidSubs.length > 0) {
       setClientError(`field ${invalidSubs.join(", ")}: not valid JSON`);
+      setConfirming(false);
+      return;
+    }
+    const missing = REQUIRED.filter((k) => typeof formEnvelope[k] !== "string" || !formEnvelope[k]);
+    if (missing.length) {
+      setClientError(`missing required string field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
       setConfirming(false);
       return;
     }

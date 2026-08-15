@@ -9,6 +9,10 @@ import { changeInput } from "../test-render";
 
 afterEach(() => {
   cleanup();
+  try {
+    sessionStorage.clear();
+    localStorage.clear();
+  } catch {}
 });
 
 function renderWithClient(ui: React.ReactElement) {
@@ -463,4 +467,70 @@ describe("InjectDialog template selection sync (OPS-344)", () => {
       api.agents = origAgents;
     }
   });
+});
+
+describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => {
+  test("submitForm reports missing required envelope fields instead of confirming", () =>
+    withSchemaApi(async (r) => {
+      const origReplay = api.replay;
+      const sent: unknown[] = [];
+      api.replay = async (envelope: unknown) => {
+        sent.push(envelope);
+        return { admitted: true, duplicate: false, eventId: "e1" };
+      };
+      try {
+        await selectTemplate(r, /disk\.diagnose/i);
+        act(() => {
+          fireEvent.click(r.getByRole("tab", { name: /json/i }));
+        });
+        const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+        const parsed = JSON.parse(textarea.value);
+        delete parsed.eventId;
+        act(() => {
+          changeInput(textarea, JSON.stringify(parsed, null, 2));
+        });
+        act(() => {
+          fireEvent.click(r.getByRole("tab", { name: /form/i }));
+        });
+        act(() => {
+          fireEvent.click(r.getByRole("button", { name: /inject/i }));
+        });
+        expect(sent.length).toBe(0);
+        expect(r.getByText(/missing required string field/i)).toBeTruthy();
+        expect(r.getByText(/eventId/i)).toBeTruthy();
+        expect(r.queryByRole("button", { name: /confirm inject/i })).toBeNull();
+      } finally {
+        api.replay = origReplay;
+      }
+    }));
+
+  test("picking blank envelope resets stale Form state", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /disk\.diagnose/i);
+      expect(r.getByLabelText("usedPct")).toBeTruthy();
+      await selectTemplate(r, /blank envelope/i);
+      expect(r.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
+      expect(r.queryByLabelText("usedPct")).toBeNull();
+      expect(r.queryByLabelText("mount")).toBeNull();
+    }));
+
+  test("picking this envelope resets Form state from the given payload", () =>
+    withSchemaApi(async (r) => {
+      cleanup();
+      const given = {
+        schemaVersion: "factory.event/v1",
+        eventId: "given-1",
+        type: "triage.scan.requested",
+        source: "web-trigger",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+        payload: { repo: "factory" },
+      };
+      const view = renderWithClient(<InjectDialog onClose={() => {}} initialEnvelope={given} />);
+      await selectTemplate(view, /disk\.diagnose/i);
+      expect(view.getByLabelText("usedPct")).toBeTruthy();
+      await selectTemplate(view, /this envelope/i);
+      expect(view.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
+      expect(view.queryByLabelText("usedPct")).toBeNull();
+      expect(view.queryByLabelText("mount")).toBeNull();
+    }));
 });
