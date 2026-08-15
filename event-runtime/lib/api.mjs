@@ -29,12 +29,12 @@ import {
 } from "./inbox.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { MetricsQueryError, metricsBreakdownView, metricsView } from "./metrics.mjs";
-import { planEvent, requeueEvent } from "./planner.mjs";
+import { archiveDeadLetteredEvent, planEvent, requeueEvent } from "./planner.mjs";
 import { ambiguousOpenProposalRuns, approveProposal, openProposals, rejectProposal } from "./proposals.mjs";
 import { resolveModel } from "./registry.mjs";
 import { loadRepos, RepoError, reposRoot, reposView } from "./repos.mjs";
 import { traceOf } from "./trace.mjs";
-import { cancelRun, retryRun } from "./worker.mjs";
+import { cancelRun, releaseStalledWorkerLease, retryRun } from "./worker.mjs";
 import { parseCadence, proposalsPilingUp, scheduleView } from "./schedules.mjs";
 import { notifyCommand, sendNotification } from "./notify.mjs";
 import { listWorkers, loadWorkerPolicy, satisfiesPlacement, stalledWorkers } from "./workers.mjs";
@@ -259,7 +259,7 @@ function statusView(db, registry, nowMs, { secret, githubSecret, policyVersion, 
     .query(`SELECT COUNT(*) AS n FROM outbox WHERE published_at IS NULL`)
     .get().n;
   const deadLettered = db
-    .query(`SELECT source, event_id, last_plan_error FROM events WHERE status = 'dead_lettered'`)
+    .query(`SELECT source, event_id, last_plan_error FROM events WHERE status = 'dead_lettered' AND archived_at IS NULL`)
     .all()
     .map((row) => ({ source: row.source, eventId: row.event_id, lastError: row.last_plan_error }));
 
@@ -1199,15 +1199,39 @@ export function createApi({
         return send(res, 200, { outbox: outboxView(db, limit) });
       }
 
-      if (route === "POST /events/requeue") {
+      if (route === "POST /events/requeue" || route === "POST /events/archive") {
         const body = parseJson(await readBody(req)).value ?? {};
         if (!body.source || !body.eventId) return send(res, 422, { error: "source and eventId required" });
         try {
+          if (route === "POST /events/archive") {
+            return send(
+              res,
+              200,
+              archiveDeadLetteredEvent(db, { source: body.source, eventId: body.eventId }, { now: nowMs }),
+            );
+          }
           requeueEvent(db, { source: body.source, eventId: body.eventId }, { actor: ACTOR, now: nowMs });
           onEvent("requeued"); // plan again right away, like a fresh admission
           return send(res, 200, { requeued: true });
         } catch (err) {
           const status = String(err.message).startsWith("unknown event") ? 404 : 409;
+          return send(res, status, { error: err.message });
+        }
+      }
+
+      const workerRelease = url.pathname.match(/^\/workers\/([^/]+)\/release$/);
+      if (req.method === "POST" && workerRelease) {
+        const workerId = decodeURIComponent(workerRelease[1]);
+        const body = parseJson(await readBody(req)).value ?? {};
+        if (!body.runId) return send(res, 422, { error: "runId required" });
+        try {
+          return send(
+            res,
+            200,
+            releaseStalledWorkerLease(db, { workerId, runId: body.runId }, { actor: ACTOR, now: nowMs, policyVersion }),
+          );
+        } catch (err) {
+          const status = String(err.message).startsWith("unknown worker") ? 404 : 409;
           return send(res, status, { error: err.message });
         }
       }

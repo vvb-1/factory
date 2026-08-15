@@ -465,6 +465,64 @@ describe("Overview anomaly deck (WM-95)", () => {
     }
   });
 
+  test("archives dead letters and releases stalled worker leases, removing both rows (WM-326)", async () => {
+    const mutableApi = api as typeof api & {
+      archive: (source: string, eventId: string) => Promise<{ archived: boolean }>;
+      releaseWorker: (workerId: string, runId: string) => Promise<{ released: boolean; runId: string }>;
+    };
+    const originals = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+      archive: mutableApi.archive,
+      releaseWorker: mutableApi.releaseWorker,
+    };
+    let deadLettered = true;
+    let stalled = true;
+    api.status = async () =>
+      baseStatus({
+        deadLettered: deadLettered
+          ? [{ source: "github", eventId: "dead-1", lastError: "historical failure" }]
+          : [],
+        stalledWorkers: stalled
+          ? [{ workerId: "worker-1", runId: "run-1", host: "lab", lastSeen: new Date(0).toISOString() }]
+          : [],
+      });
+    api.proposals = async () => ({ proposals: [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+    mutableApi.archive = async (source, eventId) => {
+      expect({ source, eventId }).toEqual({ source: "github", eventId: "dead-1" });
+      deadLettered = false;
+      return { archived: true };
+    };
+    mutableApi.releaseWorker = async (workerId, runId) => {
+      expect({ workerId, runId }).toEqual({ workerId: "worker-1", runId: "run-1" });
+      stalled = false;
+      return { released: true, runId };
+    };
+
+    try {
+      const view = renderOverview();
+      await waitFor(() => view.getByRole("button", { name: "Archive" }));
+
+      view.getByRole("button", { name: "Archive" }).click();
+      await waitFor(() => expect(view.queryByText(/dead-lettered \(github, dead-1\)/)).toBeNull());
+
+      view.getByRole("button", { name: "Release lease" }).click();
+      await waitFor(() => view.getByText(/Doctor: All systems nominal/));
+      expect(view.queryByText(/stalled worker worker-1/)).toBeNull();
+    } finally {
+      api.status = originals.status;
+      api.proposals = originals.proposals;
+      api.outbox = originals.outbox;
+      api.journal = originals.journal;
+      mutableApi.archive = originals.archive;
+      mutableApi.releaseWorker = originals.releaseWorker;
+    }
+  });
+
   test("other anomaly kinds (stale leases, unpublished outbox) render unchanged", async () => {
     const origStatus = api.status;
     const origProposals = api.proposals;
@@ -782,7 +840,9 @@ describe("buildAnomalyRows (WM-205)", () => {
     expect(rows[1]!.text).toMatch(/stale leases: 2/);
     expect(rows[2]!.text).toMatch(/unpublished outbox rows: 1/);
     expect(rows[3]!.requeue).toEqual({ source: "github", eventId: "e99" });
+    expect(rows[3]!.archive).toEqual({ source: "github", eventId: "e99" });
     expect(rows[4]!.text).toMatch(/stalled worker w1 still holds run r1/);
+    expect(rows[4]!.releaseWorker).toEqual({ workerId: "w1", runId: "r1" });
     expect(rows[5]!.text).toMatch(/ambiguous open proposals: 3/);
     expect(rows[6]!.text).toMatch(/4 queued runs and no live worker/);
   });

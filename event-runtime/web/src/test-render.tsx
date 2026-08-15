@@ -313,6 +313,8 @@ export function createDefaultApiMocks(): Record<ApiKey, any> {
       outbox: [],
     })),
     requeue: mock(async (_source: string, _eventId: string) => ({ requeued: true })),
+    archive: mock(async (_source: string, _eventId: string) => ({ archived: true })),
+    releaseWorker: mock(async (_workerId: string, runId: string) => ({ released: true, runId })),
     agents: mock(async () => createAgentsFixture()),
     repos: mock(async (): Promise<{ repos: RepoItem[] }> => ({ repos: [] })),
     janitor: mock(async (name: string, apply = false): Promise<JanitorResult> => ({
