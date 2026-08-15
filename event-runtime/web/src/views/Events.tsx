@@ -42,6 +42,7 @@ import {
   VerbError,
   copyText,
   copyLink,
+  shortId,
 } from "../components/ui";
 
 function toggleFacetInQuery(filter: string, key: "type" | "source", value: string): string {
@@ -505,6 +506,11 @@ export function Events({
           <>
         <h1 className="display mb-4 text-lg font-semibold">Events</h1>
         {context.kind === "inflight" && <ScopeCaption context={context} surface="fleet" />}
+        {context.kind === "repo" && (
+          <p className="mb-3 text-[11px] text-(--text-faint)">
+            Scoped to <span className="mono">{context.name}</span> — only rows naming this repo.
+          </p>
+        )}
 
         <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Event status">
           {STATUS_TABS.map((t) => {
@@ -644,7 +650,9 @@ export function Events({
                     aria-selected={isSelected}
                     className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(e.status)} ${isSelected ? "row-selected" : ""}`}
                   >
-                    <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5">{e.eventId}</td>
+                    <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5" title={e.eventId}>
+                      {shortId(e.eventId)}
+                    </td>
                     {show.has("source") && (
                       <td className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
                         {e.source}
