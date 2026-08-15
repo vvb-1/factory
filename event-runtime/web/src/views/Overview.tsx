@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { hashPath } from "../hash";
 import { useNow, useRequeuePoll } from "../hooks";
 import type { JournalEntry, EventFocus, Proposal, RunState } from "../types";
 import type { OperatorContext } from "../context";
-import { ScopeCaption } from "../components/ContextTabs";
+import { scopedCount, scopedTally } from "../context";
 import {
   Ago,
   Button,
@@ -77,6 +77,45 @@ export function groupJournalEntries(entries: JournalEntry[]): ActivityGroup[] {
     }
   }
   return groups;
+}
+
+function OverviewTile({
+  label,
+  value,
+  hue,
+  onClick,
+  factoryWide = false,
+}: {
+  label: string;
+  value: ReactNode;
+  hue?: string;
+  onClick?: () => void;
+  factoryWide?: boolean;
+}) {
+  return (
+    <div className={factoryWide ? "opacity-70" : undefined}>
+      <StatTile
+        label={factoryWide ? `${label} · factory-wide` : label}
+        value={value}
+        hue={factoryWide ? undefined : hue}
+        onClick={onClick}
+      />
+    </div>
+  );
+}
+
+function OverviewScopeNotice({ context }: { context: OperatorContext }) {
+  if (context.kind === "all") return null;
+  return (
+    <div
+      role="status"
+      className="mb-4 rounded-md border border-(--border) bg-(--surface-2) px-3 py-2 text-[13px] text-(--text)"
+    >
+      {context.kind === "inflight"
+        ? "In flight filters Runs to leased and running. Other Overview counts are factory-wide."
+        : `Showing ${context.name} on Events, Proposals, and Runs. Workers, artifacts, and the feeds below are factory-wide.`}
+    </div>
+  );
 }
 
 /**
@@ -154,6 +193,21 @@ export function Overview({
     queryKey: ["proposals"],
     queryFn: api.proposals,
     refetchInterval: 2000,
+  });
+  // Same lists the destination views fetch when scoped, so tile counts match
+  // what a click would show (WM-147). Events/Proposals only filter on a repo
+  // tab; In flight only scopes Runs (LEASED / RUNNING).
+  const eventsQ = useQuery({
+    queryKey: ["events", "all"],
+    queryFn: () => api.events(),
+    refetchInterval: 2000,
+    enabled: context.kind === "repo",
+  });
+  const runsQ = useQuery({
+    queryKey: ["runs", "ALL"],
+    queryFn: () => api.runs(),
+    refetchInterval: 2000,
+    enabled: context.kind !== "all",
   });
   const feed = useJournalFeed();
 
@@ -262,6 +316,37 @@ export function Overview({
 
   const activeRunStates: RunState[] = ["QUEUED", "LEASED", "RUNNING", "VERIFYING"];
   const terminalRunStates: RunState[] = ["COMPLETED", "FAILED", "REFUSED", "TIMED_OUT", "CANCELLED"];
+  const factoryWide = context.kind !== "all";
+  const feedsUnscoped = context.kind === "repo";
+  const eventTally =
+    context.kind === "repo"
+      ? scopedTally(eventsQ.data?.events ?? [], context, {
+          repos: (e) => e.repos,
+          key: (e) => e.status,
+        })
+      : null;
+  const runTally = factoryWide
+    ? scopedTally(runsQ.data?.runs ?? [], context, {
+        repos: (r) => r.repos,
+        state: (r) => r.state,
+        key: (r) => r.state,
+      })
+    : null;
+  const openProposals = proposalsForDeck.data?.proposals ?? [];
+  const proposalOpen =
+    context.kind === "repo"
+      ? scopedCount(openProposals, context, { repos: (p) => p.repos })
+      : (s?.proposals.open ?? 0);
+  const proposalExpired =
+    context.kind === "repo"
+      ? scopedCount(
+          openProposals.filter((p) => p.expired),
+          context,
+          { repos: (p) => p.repos },
+        )
+      : (s?.proposals.expired ?? 0);
+  const eventValue = (k: string, factory: number) => (eventTally ? (eventTally[k] ?? 0) : factory);
+  const runValue = (k: RunState) => (runTally ? (runTally[k] ?? 0) : (s?.runs.byState[k] ?? 0));
 
   return (
     <div className="h-full min-w-0 overflow-auto p-5">
@@ -276,7 +361,7 @@ export function Overview({
           </button>
         </div>
       </div>
-      <ScopeCaption context={context} surface="overview" />
+      <OverviewScopeNotice context={context} />
 
       {/* Promoted Doctor Deck when anomalies exist */}
       {hasAnomalies && (
@@ -285,6 +370,7 @@ export function Overview({
             <div className="flex items-center gap-2 text-[12px] font-semibold text-[color:var(--hue-warn)] uppercase tracking-wide">
               <span className="size-2 rounded-full bg-[color:var(--hue-warn)] animate-pulse" />
               Doctor Anomaly Deck · {anomalyRows.length} active issue{anomalyRows.length === 1 ? "" : "s"}
+              {feedsUnscoped ? " · factory-wide" : ""}
             </div>
           </div>
           <div className="rounded-md border border-(--border) bg-(--surface-1)">
@@ -377,16 +463,19 @@ export function Overview({
               <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
                 1. Event Intake & Triage
               </div>
-              <div className="grid grid-cols-5 gap-2">
-                {Object.entries(s.events).map(([k, v]) => (
-                  <StatTile
-                    key={k}
-                    label={`events · ${k}`}
-                    value={v}
-                    hue={v > 0 ? EVENT_STATUS_HUES[k] : undefined}
-                    onClick={() => onJumpEvents({ status: k })}
-                  />
-                ))}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                {Object.entries(s.events).map(([k, v]) => {
+                  const value = eventValue(k, v);
+                  return (
+                    <OverviewTile
+                      key={k}
+                      label={`events · ${k}`}
+                      value={value}
+                      hue={value > 0 ? EVENT_STATUS_HUES[k] : undefined}
+                      onClick={() => onJumpEvents({ status: k })}
+                    />
+                  );
+                })}
               </div>
             </div>
 
@@ -395,16 +484,16 @@ export function Overview({
                 2. Watched Approval Gate
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <StatTile
+                <OverviewTile
                   label="proposals · open"
-                  value={s.proposals.open}
-                  hue={s.proposals.open > 0 ? "var(--hue-info)" : undefined}
+                  value={proposalOpen}
+                  hue={proposalOpen > 0 ? "var(--hue-info)" : undefined}
                   onClick={() => onNavigate("proposals")}
                 />
-                <StatTile
+                <OverviewTile
                   label="proposals · expired"
-                  value={s.proposals.expired}
-                  hue={s.proposals.expired > 0 ? "var(--hue-warn)" : undefined}
+                  value={proposalExpired}
+                  hue={proposalExpired > 0 ? "var(--hue-warn)" : undefined}
                   onClick={onJumpExpired}
                 />
               </div>
@@ -416,42 +505,51 @@ export function Overview({
             <div className="mb-1.5 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
               3. Execution Fleet & Capacity
             </div>
-            <div className="grid grid-cols-4 gap-2 xl:grid-cols-8">
-              {activeRunStates.map((k) => (
-                <StatTile
-                  key={k}
-                  label={`active · ${k.toLowerCase()}`}
-                  value={s.runs.byState[k] ?? 0}
-                  hue={(s.runs.byState[k] ?? 0) > 0 ? "var(--hue-warn)" : undefined}
-                  onClick={() => onJumpRuns(k)}
-                />
-              ))}
-              {terminalRunStates.map((k) => (
-                <StatTile
-                  key={k}
-                  label={`runs · ${k.toLowerCase()}`}
-                  value={s.runs.byState[k] ?? 0}
-                  hue={k === "FAILED" && (s.runs.byState[k] ?? 0) > 0 ? "var(--hue-err)" : undefined}
-                  onClick={() => onJumpRuns(k)}
-                />
-              ))}
-              <StatTile
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+              {activeRunStates.map((k) => {
+                const value = runValue(k);
+                return (
+                  <OverviewTile
+                    key={k}
+                    label={`active · ${k.toLowerCase()}`}
+                    value={value}
+                    hue={value > 0 ? "var(--hue-warn)" : undefined}
+                    onClick={() => onJumpRuns(k)}
+                  />
+                );
+              })}
+              {terminalRunStates.map((k) => {
+                const value = runValue(k);
+                return (
+                  <OverviewTile
+                    key={k}
+                    label={`runs · ${k.toLowerCase()}`}
+                    value={value}
+                    hue={k === "FAILED" && value > 0 ? "var(--hue-err)" : undefined}
+                    onClick={() => onJumpRuns(k)}
+                  />
+                );
+              })}
+              <OverviewTile
                 label="workers · live"
                 value={s.workers.live}
                 hue={s.workers.live > 0 ? "var(--hue-ok)" : undefined}
                 onClick={() => onNavigate("workers")}
+                factoryWide={factoryWide}
               />
-              <StatTile
+              <OverviewTile
                 label="workers · busy"
                 value={s.workers.busy}
                 hue={s.workers.busy > 0 ? "var(--hue-info)" : undefined}
                 onClick={() => onNavigate("workers")}
+                factoryWide={factoryWide}
               />
-              <StatTile
+              <OverviewTile
                 label="workers · stale"
                 value={s.workers.stale}
                 hue={s.workers.stale > 0 ? "var(--hue-warn)" : undefined}
                 onClick={() => onNavigate("workers")}
+                factoryWide={factoryWide}
               />
             </div>
           </div>
@@ -462,12 +560,13 @@ export function Overview({
               4. Artifact Store
             </div>
             <div className="grid grid-cols-3 gap-2 lg:max-w-md">
-              <StatTile label="artifacts · files" value={s.artifacts.files} />
-              <StatTile label="artifacts · size" value={humanSize(s.artifacts.bytes)} />
-              <StatTile
+              <OverviewTile label="artifacts · files" value={s.artifacts.files} factoryWide={factoryWide} />
+              <OverviewTile label="artifacts · size" value={humanSize(s.artifacts.bytes)} factoryWide={factoryWide} />
+              <OverviewTile
                 label="artifacts · orphans"
                 value={s.artifacts.orphans}
                 hue={s.artifacts.orphanBytes > 0 ? "var(--hue-warn)" : undefined}
+                factoryWide={factoryWide}
               />
             </div>
           </div>
@@ -487,7 +586,14 @@ export function Overview({
       )}
 
       <div className="grid gap-x-5 xl:grid-cols-2">
-        <Section title={`Activity · latest ${Math.min(feed.entries.length, FEED_CAP)}`} card={false}>
+        <Section
+          title={
+            feedsUnscoped
+              ? `Activity · latest ${Math.min(feed.entries.length, FEED_CAP)} · factory-wide`
+              : `Activity · latest ${Math.min(feed.entries.length, FEED_CAP)}`
+          }
+          card={false}
+        >
           {feed.entries.length === 0 ? (
             <div className="text-(--text-faint)">
               {feed.isPending
@@ -529,7 +635,10 @@ export function Overview({
           )}
         </Section>
 
-        <Section title="Outbox — published results" card={false}>
+        <Section
+          title={feedsUnscoped ? "Outbox — published results · factory-wide" : "Outbox — published results"}
+          card={false}
+        >
           <div id="outbox">
           {(outbox.data?.outbox ?? []).length === 0 ? (
             <div className="text-(--text-faint)">

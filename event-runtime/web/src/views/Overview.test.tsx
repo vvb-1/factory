@@ -4,7 +4,9 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Overview, groupJournalEntries } from "./Overview";
 import { api } from "../api";
-import type { JournalEntry, Proposal, StatusView } from "../types";
+import type { OperatorContext } from "../context";
+import { scopedCount, scopedTally } from "../context";
+import type { AdmittedEvent, JournalEntry, Proposal, RunListItem, StatusView } from "../types";
 
 afterEach(() => {
   cleanup();
@@ -40,6 +42,41 @@ function baseStatus(overrides: Partial<StatusView["anomalies"]> = {}): StatusVie
   };
 }
 
+function stubEvent(overrides: Partial<AdmittedEvent> & Pick<AdmittedEvent, "eventId" | "status" | "repos">): AdmittedEvent {
+  const now = new Date().toISOString();
+  return {
+    source: "github",
+    type: "pull_request.opened",
+    subject: null,
+    occurredAt: now,
+    receivedAt: now,
+    correlationId: null,
+    planFailures: 0,
+    lastPlanError: null,
+    admittedAt: now,
+    proposalId: null,
+    runId: null,
+    envelope: {},
+    ...overrides,
+  };
+}
+
+function stubRun(overrides: Partial<RunListItem> & Pick<RunListItem, "runId" | "state" | "repos">): RunListItem {
+  const now = new Date().toISOString();
+  return {
+    attempts: 1,
+    maxAttempts: 3,
+    agent: "triage-scan",
+    adapter: "fake",
+    reasonCode: null,
+    eventId: null,
+    eventSource: null,
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
+
 const stubProposal: Proposal = {
   id: "prop_abc123def456",
   decision: "human_needed",
@@ -58,11 +95,11 @@ const stubProposal: Proposal = {
   repos: [],
 };
 
-function renderOverview() {
+function renderOverview(context: OperatorContext = { kind: "all" }) {
   return renderWithClient(
     <Overview
       connected={true}
-      context={{ kind: "all" }}
+      context={context}
       onJumpRun={noop}
       onJumpProposal={noop}
       onJumpEvents={noop}
@@ -262,6 +299,260 @@ describe("Overview anomaly deck (WM-95)", () => {
       api.proposals = origProposals;
       api.outbox = origOutbox;
       api.journal = origJournal;
+    }
+  });
+});
+
+describe("scopedCount / scopedTally (WM-147)", () => {
+  const repo = { kind: "repo" as const, name: "bj29" };
+  const rows = [
+    { repos: ["bj29"], state: "LEASED" },
+    { repos: ["ok"], state: "LEASED" },
+    { repos: ["bj29"], state: "QUEUED" },
+    { repos: [], state: "RUNNING" },
+  ];
+
+  test("repo tab counts named-repo rows only; unscoped rows stay out", () => {
+    expect(scopedCount(rows, repo, { repos: (r) => r.repos })).toBe(2);
+    expect(scopedCount(rows, { kind: "all" }, { repos: (r) => r.repos })).toBe(4);
+    expect(scopedTally(rows, repo, { repos: (r) => r.repos, key: (r) => r.state })).toEqual({
+      LEASED: 1,
+      QUEUED: 1,
+    });
+  });
+
+  test("in flight keeps LEASED/RUNNING and drops QUEUED even when repos match", () => {
+    expect(
+      scopedTally(rows, { kind: "inflight" }, {
+        repos: (r) => r.repos,
+        state: (r) => r.state,
+        key: (r) => r.state,
+      }),
+    ).toEqual({ LEASED: 2, RUNNING: 1 });
+    expect(
+      scopedCount(rows, { kind: "inflight" }, { repos: (r) => r.repos, state: (r) => r.state }),
+    ).toBe(3);
+  });
+});
+
+describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
+  function stubApis(opts: {
+    status: StatusView;
+    events?: AdmittedEvent[];
+    runs?: RunListItem[];
+    proposals?: Proposal[];
+  }) {
+    const restore = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+      events: api.events,
+      runs: api.runs,
+    };
+    api.status = async () => opts.status;
+    api.proposals = async () => ({ proposals: opts.proposals ?? [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+    api.events = async () => ({ events: opts.events ?? [] });
+    api.runs = async () => ({ runs: opts.runs ?? [] });
+    return () => {
+      api.status = restore.status;
+      api.proposals = restore.proposals;
+      api.outbox = restore.outbox;
+      api.journal = restore.journal;
+      api.events = restore.events;
+      api.runs = restore.runs;
+    };
+  }
+
+  test("repo tab: event tiles show scoped counts, not factory-wide GET /status totals", async () => {
+    const restore = stubApis({
+      status: {
+        ...baseStatus(),
+        events: { human_needed: 4, dead_lettered: 2 },
+        proposals: { open: 5, expired: 2 },
+        workers: { live: 3, busy: 1, stale: 0 },
+      },
+      events: [
+        stubEvent({ eventId: "e1", status: "human_needed", repos: ["bj29"] }),
+        stubEvent({ eventId: "e2", status: "human_needed", repos: ["ok"] }),
+        stubEvent({ eventId: "e3", status: "human_needed", repos: [] }),
+        stubEvent({ eventId: "e4", status: "dead_lettered", repos: ["ok"] }),
+      ],
+      proposals: [
+        { ...stubProposal, id: "p1", repos: ["bj29"], expired: false },
+        { ...stubProposal, id: "p2", repos: ["ok"], expired: false },
+        { ...stubProposal, id: "p3", repos: ["bj29"], expired: true },
+      ],
+    });
+
+    try {
+      const { getByRole, queryByRole } = renderOverview({ kind: "repo", name: "bj29" });
+
+      await waitFor(() => getByRole("button", { name: "events · human_needed: 1" }));
+
+      // Negative: factory-wide totals must not appear as the clickable count.
+      expect(queryByRole("button", { name: "events · human_needed: 4" })).toBeNull();
+      expect(queryByRole("button", { name: "events · dead_lettered: 2" })).toBeNull();
+      expect(getByRole("button", { name: "events · dead_lettered: 0" })).toBeTruthy();
+      expect(getByRole("button", { name: "proposals · open: 2" })).toBeTruthy();
+      expect(queryByRole("button", { name: "proposals · open: 5" })).toBeNull();
+      expect(getByRole("button", { name: "proposals · expired: 1" })).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  test("repo tab: worker tiles keep factory-wide counts but are marked before click", async () => {
+    const restore = stubApis({
+      status: {
+        ...baseStatus(),
+        events: { admitted: 1 },
+        workers: { live: 3, busy: 1, stale: 2 },
+      },
+      events: [stubEvent({ eventId: "e1", status: "admitted", repos: ["bj29"] })],
+    });
+
+    try {
+      const { getByRole, queryByRole } = renderOverview({ kind: "repo", name: "bj29" });
+
+      await waitFor(() => getByRole("button", { name: /workers · live/ }));
+
+      expect(getByRole("button", { name: "workers · live · factory-wide: 3" })).toBeTruthy();
+      expect(getByRole("button", { name: "workers · busy · factory-wide: 1" })).toBeTruthy();
+      expect(getByRole("button", { name: "workers · stale · factory-wide: 2" })).toBeTruthy();
+      expect(queryByRole("button", { name: "workers · live: 3" })).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test("repo tab: Activity and Outbox state they are factory-wide; All does not", async () => {
+    const restore = stubApis({
+      status: { ...baseStatus(), events: { admitted: 0 } },
+    });
+
+    try {
+      const repo = renderOverview({ kind: "repo", name: "bj29" });
+      await waitFor(() => repo.getByText(/Activity · latest/));
+      expect(repo.getByText(/Activity · latest/).textContent?.toLowerCase()).toMatch(/factory-wide/);
+      expect(repo.getByText(/Outbox/).textContent?.toLowerCase()).toMatch(/factory-wide/);
+      expect(repo.container.textContent).not.toMatch(/\/journal|\/outbox|GET \//);
+      repo.unmount();
+
+      const all = renderOverview({ kind: "all" });
+      await waitFor(() => all.getByText(/Activity · latest/));
+      expect(all.getByText(/Activity · latest/).textContent?.toLowerCase()).not.toMatch(/factory-wide/);
+      expect(all.getByText(/Outbox/).textContent?.toLowerCase()).not.toMatch(/factory-wide/);
+      expect(all.queryByRole("status")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test("in-flight: run-state tiles match Runs list filtering (LEASED/RUNNING only)", async () => {
+    const restore = stubApis({
+      status: {
+        ...baseStatus(),
+        runs: {
+          byState: {
+            QUEUED: 5,
+            LEASED: 2,
+            RUNNING: 3,
+            COMPLETED: 9,
+          },
+        },
+      },
+      runs: [
+        stubRun({ runId: "r1", state: "QUEUED", repos: ["bj29"] }),
+        stubRun({ runId: "r2", state: "LEASED", repos: ["ok"] }),
+        stubRun({ runId: "r3", state: "LEASED", repos: [] }),
+        stubRun({ runId: "r4", state: "RUNNING", repos: ["bj29"] }),
+        stubRun({ runId: "r5", state: "COMPLETED", repos: ["bj29"] }),
+      ],
+    });
+
+    try {
+      const { getByRole, queryByRole } = renderOverview({ kind: "inflight" });
+
+      await waitFor(() => getByRole("button", { name: "active · leased: 2" }));
+
+      // Negative: factory-wide queued/completed totals must not appear.
+      expect(queryByRole("button", { name: "active · queued: 5" })).toBeNull();
+      expect(getByRole("button", { name: "active · queued: 0" })).toBeTruthy();
+      expect(getByRole("button", { name: "active · leased: 2" })).toBeTruthy();
+      expect(getByRole("button", { name: "active · running: 1" })).toBeTruthy();
+      expect(queryByRole("button", { name: "runs · completed: 9" })).toBeNull();
+      expect(getByRole("button", { name: "runs · completed: 0" })).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  test("repo tab: anomaly deck heading is marked factory-wide; All is not", async () => {
+    const restore = stubApis({
+      status: baseStatus({ staleLeases: 1 }),
+    });
+
+    try {
+      const repo = renderOverview({ kind: "repo", name: "bj29" });
+      await waitFor(() => repo.getByText(/Doctor Anomaly Deck/));
+      expect(repo.getByText(/Doctor Anomaly Deck/).textContent?.toLowerCase()).toMatch(/factory-wide/);
+      repo.unmount();
+
+      const all = renderOverview({ kind: "all" });
+      await waitFor(() => all.getByText(/Doctor Anomaly Deck/));
+      expect(all.getByText(/Doctor Anomaly Deck/).textContent?.toLowerCase()).not.toMatch(/factory-wide/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("scope notice is glanceable when context ≠ All", async () => {
+    const restore = stubApis({
+      status: { ...baseStatus(), events: { admitted: 0 } },
+    });
+
+    try {
+      const repo = renderOverview({ kind: "repo", name: "bj29" });
+      await waitFor(() => repo.getByRole("status"));
+      const notice = repo.getByRole("status");
+      expect(notice.textContent).toMatch(/bj29/);
+      expect(notice.className).not.toMatch(/text-\[11px\]/);
+      repo.unmount();
+
+      const inflight = renderOverview({ kind: "inflight" });
+      await waitFor(() => inflight.getByRole("status"));
+      expect(inflight.getByRole("status").textContent).toMatch(/in flight/i);
+    } finally {
+      restore();
+    }
+  });
+
+  test("event and run grids are 2–4 columns below sm, not 5/8", async () => {
+    const restore = stubApis({
+      status: {
+        ...baseStatus(),
+        events: { admitted: 1 },
+        runs: { byState: { QUEUED: 1 } },
+      },
+    });
+
+    try {
+      const { getByText } = renderOverview();
+      await waitFor(() => getByText(/1\. Event Intake/));
+
+      const eventGrid = getByText(/1\. Event Intake/).nextElementSibling;
+      expect(eventGrid?.className).toMatch(/\bgrid-cols-2\b/);
+      expect(eventGrid?.className).not.toMatch(/^grid grid-cols-5 /);
+
+      const runGrid = getByText(/3\. Execution Fleet/).nextElementSibling;
+      expect(runGrid?.className).toMatch(/\bgrid-cols-2\b/);
+      expect(runGrid?.className).not.toMatch(/^grid grid-cols-4 /);
+      expect(runGrid?.className).toMatch(/xl:grid-cols-8/);
+    } finally {
+      restore();
     }
   });
 });
