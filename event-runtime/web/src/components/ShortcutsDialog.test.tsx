@@ -26,6 +26,16 @@ describe("ShortcutsDialog", () => {
     expect(contextStrip.textContent).toContain("Delete / ⌫");
   });
 
+  test("documents 'v' for display options and '1–N' for status tabs (WM-234)", () => {
+    const r = render(<ShortcutsDialog onClose={() => {}} />);
+    const actions = r.getByRole("region", { name: "Actions" });
+
+    expect(actions.textContent).toContain("v");
+    expect(actions.textContent).toContain("display options");
+    expect(actions.textContent).toContain("1–N");
+    expect(actions.textContent).toContain("switch status tab");
+  });
+
   test("documents view-specific actions and dialog hotkeys (WM-236)", () => {
     const r = render(<ShortcutsDialog onClose={() => {}} />);
     const actionsSection = r.getByRole("region", { name: "Actions" });
