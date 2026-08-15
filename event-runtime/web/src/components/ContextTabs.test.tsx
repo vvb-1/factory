@@ -55,7 +55,7 @@ describe("ContextTabs", () => {
     expect(closeBtn.getAttribute("tabindex")).toBe("-1");
   });
 
-  test("toolbar is in sequential tab order and forwards focus to the roving tab stop", () => {
+  test("active context tab is the sequential tab stop; the toolbar is not", () => {
     const r = render(
       <ContextTabs
         repos={[repo("factory")]}
@@ -69,13 +69,11 @@ describe("ContextTabs", () => {
     );
 
     const toolbar = r.getByRole("toolbar", { name: "Context" });
-    expect(toolbar.getAttribute("tabindex")).toBe("0");
+    expect(toolbar.hasAttribute("tabindex")).toBe(false);
 
-    act(() => {
-      toolbar.focus();
-    });
-    expect(document.activeElement?.getAttribute("data-context-tab")).toBe("all");
-    expect(r.getByRole("button", { name: "All" }).className).toContain("focus-visible:ring-2");
+    const all = r.getByRole("button", { name: "All" });
+    expect(all.getAttribute("tabindex")).toBe("0");
+    expect(all.className).toContain("focus-visible:ring-2");
   });
 
   test("focuses the remaining active context button after closing a tab when activeElement is body (Chromium recovery)", () => {

@@ -296,13 +296,6 @@ export function ContextTabs({
         className="flex min-w-0 flex-1 items-stretch gap-0.5 outline-none"
         role="toolbar"
         aria-label="Context"
-        tabIndex={0}
-        onFocus={(e) => {
-          if (e.target !== e.currentTarget) return;
-          stripRef.current
-            ?.querySelector<HTMLButtonElement>(`[data-context-tab="${effectiveTabStop}"]`)
-            ?.focus();
-        }}
         onKeyDown={handleKeyDown}
         {...{ [CONTEXT_TABS_ATTR]: "" }}
       >
