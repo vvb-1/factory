@@ -405,8 +405,16 @@ describe("ScopeCaption", () => {
     expect(fleet.container.textContent?.toLowerCase()).not.toContain("fleet");
     cleanup();
 
+    // Empty hash is not Agents/Schedules — keep the factory-wide registry copy (WM-157 Projects).
     const registry = render(<ScopeCaption context={repoCtx} surface="registry" />);
-    expect(registry.container.textContent).toContain("Agents are not scoped to factory");
-    expect(registry.container.textContent?.toLowerCase()).not.toContain("registry");
+    expect(registry.container.textContent).toContain("registry is not scoped to factory");
+    expect(registry.container.textContent).not.toContain("Agents");
+  });
+
+  test("Projects hash keeps factory-wide registry copy, not Agents", () => {
+    window.location.hash = "#/projects";
+    const r = render(<ScopeCaption context={repoCtx} surface="registry" />);
+    expect(r.container.textContent).toContain("registry is not scoped to factory");
+    expect(r.container.textContent).not.toContain("Agents");
   });
 });

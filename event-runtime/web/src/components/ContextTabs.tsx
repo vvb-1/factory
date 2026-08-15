@@ -33,7 +33,8 @@ type CaptionSurface = "fleet" | "registry" | "graph" | "overview";
 
 const SURFACE_SUBJECT: Record<CaptionSurface, { subject: string; plural: boolean }> = {
   fleet: { subject: "Workers", plural: true },
-  registry: { subject: "Agents", plural: true },
+  // Projects also passes surface="registry"; only agents/schedules hashes map to view names below.
+  registry: { subject: "registry", plural: false },
   graph: { subject: "Graph", plural: false },
   overview: { subject: "Overview counts", plural: true },
 };
