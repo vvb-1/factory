@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { acquireClaimLock } from "./tick.mjs";
+import { acquireClaimLock, observeChildTermination } from "./tick.mjs";
 
 const NOW = 1_750_000_000_000;
 
@@ -16,6 +18,52 @@ function withLock(content, run) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+describe("observeChildTermination", () => {
+  test("handles an asynchronous spawn error and settles only once", async () => {
+    const child = new EventEmitter();
+    const spawnError = Object.assign(new Error("spawn agent ENOENT"), {
+      code: "ENOENT",
+    });
+    const outcomes = [];
+
+    observeChildTermination(child, async (outcome) => {
+      outcomes.push(outcome);
+    });
+
+    expect(() => child.emit("error", spawnError)).not.toThrow();
+    await Promise.resolve();
+    child.emit("close", -2);
+    await Promise.resolve();
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toEqual({ error: spawnError, code: null });
+  });
+
+  test("handles a real failed spawn without an uncaught exception", async () => {
+    const child = spawn("/definitely-not-a-factory-agent-binary", []);
+    const outcome = await new Promise((resolve) => {
+      observeChildTermination(child, resolve);
+    });
+
+    expect(outcome.code).toBeNull();
+    expect(outcome.error?.code).toBe("ENOENT");
+  });
+
+  test("settles normal child closure without an error", async () => {
+    const child = new EventEmitter();
+    const outcomes = [];
+
+    observeChildTermination(child, async (outcome) => {
+      outcomes.push(outcome);
+    });
+
+    child.emit("close", 0);
+    await Promise.resolve();
+
+    expect(outcomes).toEqual([{ error: null, code: 0 }]);
+  });
+});
 
 describe("acquireClaimLock", () => {
   test.each([
