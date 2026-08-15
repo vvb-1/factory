@@ -30,6 +30,7 @@ function renderPalette(actions: PaletteAction[] = ACTIONS) {
       <button type="button" data-testid="outside">
         nav
       </button>
+      <input data-testid="view-filter" data-view-filter />
       <CommandPalette
         actions={actions}
         onJumpRun={NOOP}
@@ -151,6 +152,22 @@ describe("CommandPalette", () => {
     expect(ran).toBe(true);
     expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
     expect(document.activeElement).toBe(outside);
+  });
+
+  test("selecting an item that focuses another element keeps that focus", () => {
+    const r = renderPalette([
+      {
+        label: "Focus filter",
+        run: () => {
+          document.querySelector<HTMLElement>("[data-view-filter]")?.focus();
+        },
+      },
+    ]);
+    r.getByTestId("outside").focus();
+    chordK();
+    fireEvent.click(r.getByText("Focus filter"));
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(document.activeElement).toBe(r.getByTestId("view-filter"));
   });
 
   test("search input uses an accent focus border and no outline", () => {

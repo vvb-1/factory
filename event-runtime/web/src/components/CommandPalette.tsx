@@ -114,6 +114,10 @@ export function CommandPalette({
     return () => {
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
+      const active = document.activeElement;
+      const claimed =
+        active instanceof HTMLElement && active !== document.body && active.isConnected;
+      if (claimed) return;
       const previous = previousFocusRef.current;
       if (previous && (previous.isConnected ?? document.contains(previous))) {
         try {
