@@ -213,16 +213,16 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
     withSchemaApi(async (r) => {
       await selectTemplate(r, /triage\.scan\.requested/i);
       const optionsOf = (input: HTMLInputElement) => {
-        const listId = input.getAttribute("list");
-        expect(listId).toBeTruthy();
-        const list = document.getElementById(listId!);
-        expect(list).toBeTruthy();
-        return [...list!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
+        act(() => {
+          fireEvent.focus(input);
+        });
+        return r.getAllByRole("option").map((o) => o.textContent);
       };
       const repo = r.getByLabelText("repo") as HTMLInputElement;
       let options = optionsOf(repo);
       expect(options).toContain("bj29");
       expect(options).toContain("factory");
+      expect(repo.getAttribute("list")).toBeNull();
 
       await selectTemplate(r, /ci\.run\.failed/i);
       options = optionsOf(r.getByLabelText("repo") as HTMLInputElement);

@@ -1214,7 +1214,7 @@ export function Pill({ children, title }: { children: ReactNode; title?: string 
   );
 }
 
-/** Text input with datalist suggestions and free write-in (WM-76 repo picker). */
+/** Text input with a token-styled suggestion popover and free write-in (WM-79). */
 export function SuggestInput({
   id,
   value,
@@ -1231,27 +1231,112 @@ export function SuggestInput({
   ariaLabel?: string;
 }) {
   const listId = useId();
+  const listRef = useRef<HTMLUListElement>(null);
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+
+  const items = useMemo(() => {
+    if (!suggestions || suggestions.length === 0) return [];
+    const q = value.trim().toLowerCase();
+    if (!q) return suggestions;
+    const filtered = suggestions.filter((s) => s.toLowerCase().includes(q));
+    return filtered.length > 0 ? filtered : suggestions;
+  }, [suggestions, value]);
+
+  const show = open && items.length > 0;
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [items]);
+
+  useEffect(() => {
+    if (!show || !listRef.current) return;
+    listRef.current.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [highlight, show]);
+
+  const pick = (s: string) => {
+    onChange(s);
+    setOpen(false);
+  };
+
   return (
-    <>
+    <span className="relative block">
       <input
         id={id}
         type="text"
+        role="combobox"
+        aria-expanded={show}
+        aria-autocomplete="list"
+        aria-controls={show ? listId : undefined}
+        aria-activedescendant={show && items[highlight] ? `${listId}-opt-${highlight}` : undefined}
         value={value}
-        list={suggestions && suggestions.length > 0 ? listId : undefined}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            if (items.length === 0) return;
+            e.preventDefault();
+            setOpen(true);
+            if (show) setHighlight((i) => (i + 1) % items.length);
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            if (!show || items.length === 0) return;
+            e.preventDefault();
+            setHighlight((i) => (i - 1 + items.length) % items.length);
+            return;
+          }
+          if (e.key === "Enter" && show && items[highlight]) {
+            e.preventDefault();
+            e.stopPropagation();
+            pick(items[highlight]);
+            return;
+          }
+          if (e.key === "Escape" && show) {
+            e.preventDefault();
+            e.stopPropagation();
+            setOpen(false);
+          }
+        }}
         placeholder={placeholder}
         aria-label={ariaLabel}
         spellCheck={false}
         className="mono w-full rounded-md border border-(--border) bg-(--surface-0) px-2 py-1 text-[12px] text-(--text) outline-none focus:border-(--border-strong)"
       />
-      {suggestions && suggestions.length > 0 && (
-        <datalist id={listId}>
-          {suggestions.map((s) => (
-            <option key={s} value={s} />
+      {show && (
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          aria-label="Suggestions"
+          className="absolute top-full left-0 z-30 mt-1 max-h-60 w-full overflow-auto rounded-md border border-(--border-strong) bg-(--surface-1) p-1 text-[12px] shadow-xl outline-none"
+        >
+          {items.map((s, idx) => (
+            <li
+              key={s}
+              id={`${listId}-opt-${idx}`}
+              role="option"
+              aria-selected={idx === highlight}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(s);
+              }}
+              className={`mono cursor-pointer truncate rounded px-2 py-1 select-none ${
+                idx === highlight
+                  ? "bg-(--surface-3) text-(--text)"
+                  : "text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+              }`}
+            >
+              {s}
+            </li>
           ))}
-        </datalist>
+        </ul>
       )}
-    </>
+    </span>
   );
 }
 
