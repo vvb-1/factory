@@ -543,7 +543,7 @@ export function InjectDialog({
   const optionalFields = formFields.filter((f) => !f.required);
 
   const formEnvelope = useMemo(
-    () => ({ ...formBase, payload: formPayload }),
+    (): Record<string, unknown> => ({ ...formBase, payload: formPayload }),
     [formBase, formPayload],
   );
 

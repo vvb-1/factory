@@ -559,7 +559,7 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
     }));
 
   test("picking this envelope resets Form state from the given payload", () =>
-    withSchemaApi(async (r) => {
+    withSchemaApi(async () => {
       cleanup();
       const given = {
         schemaVersion: "factory.event/v1",
