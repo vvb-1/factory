@@ -190,9 +190,36 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "human_inbox_ledger",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS inbox_items (
+          id            TEXT PRIMARY KEY,
+          kind          TEXT NOT NULL,
+          severity      TEXT NOT NULL DEFAULT 'normal',
+          title         TEXT NOT NULL,
+          body          TEXT,
+          refs_json     TEXT NOT NULL DEFAULT '{}',
+          source        TEXT NOT NULL,
+          created_at    TEXT NOT NULL,
+          acked_at      TEXT,
+          resolved_at   TEXT,
+          resolved_by   TEXT,
+          delivery_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_inbox_items_status
+          ON inbox_items (resolved_at, acked_at, created_at);
+        CREATE INDEX IF NOT EXISTS idx_inbox_items_kind
+          ON inbox_items (kind, resolved_at);
+      `);
+    },
+  },
 ];
 
-export const CURRENT_SCHEMA_VERSION = MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 1;
+export const CURRENT_SCHEMA_VERSION =
+  MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 1;
 
 export const CORE_TABLES = [
   "events",
@@ -206,6 +233,7 @@ export const CORE_TABLES = [
   "counters",
   "attempt_trace",
   "run_usage",
+  "inbox_items",
 ];
 
 /** Read current database schema version from PRAGMA user_version. */
@@ -224,7 +252,10 @@ export function setSchemaVersion(db, version) {
  * Fails loudly when the database's user_version is newer than the code knows,
  * preventing silent drift or query-time failures during runtime execution.
  */
-export function migrateDb(db, { migrations = MIGRATIONS, targetVersion = CURRENT_SCHEMA_VERSION } = {}) {
+export function migrateDb(
+  db,
+  { migrations = MIGRATIONS, targetVersion = CURRENT_SCHEMA_VERSION } = {},
+) {
   const currentVersion = getSchemaVersion(db);
   if (currentVersion > targetVersion) {
     const msg = `Database schema version (${currentVersion}) is newer than code version (${targetVersion}). Please upgrade the runtime.`;
@@ -246,7 +277,13 @@ export function migrateDb(db, { migrations = MIGRATIONS, targetVersion = CURRENT
 /**
  * Assert that all required tables exist and user_version matches current code expectation.
  */
-export function assertSchema(db, { expectedTables = CORE_TABLES, expectedVersion = CURRENT_SCHEMA_VERSION } = {}) {
+export function assertSchema(
+  db,
+  {
+    expectedTables = CORE_TABLES,
+    expectedVersion = CURRENT_SCHEMA_VERSION,
+  } = {},
+) {
   const tables = new Set(
     db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -255,7 +292,9 @@ export function assertSchema(db, { expectedTables = CORE_TABLES, expectedVersion
   );
   for (const table of expectedTables) {
     if (!tables.has(table)) {
-      throw new Error(`Database schema drift detected: missing table "${table}"`);
+      throw new Error(
+        `Database schema drift detected: missing table "${table}"`,
+      );
     }
   }
   const version = getSchemaVersion(db);
@@ -340,23 +379,38 @@ export function txImmediate(db, fn) {
  */
 export function isBusyError(err) {
   if (!err) return false;
-  if (err.code === "SQLITE_BUSY" || err.code === "SQLITE_LOCKED" || err.code === "SQLITE_BUSY_RECOVERY") return true;
-  if (typeof err.errno === "number" && (err.errno === 5 || err.errno === 6)) return true;
+  if (
+    err.code === "SQLITE_BUSY" ||
+    err.code === "SQLITE_LOCKED" ||
+    err.code === "SQLITE_BUSY_RECOVERY"
+  )
+    return true;
+  if (typeof err.errno === "number" && (err.errno === 5 || err.errno === 6))
+    return true;
   const msg = String(err.message ?? err);
-  return /database is locked|database table is locked|resource temporarily unavailable|\bSQLITE_BUSY\b|\bSQLITE_LOCKED\b/i.test(msg);
+  return /database is locked|database table is locked|resource temporarily unavailable|\bSQLITE_BUSY\b|\bSQLITE_LOCKED\b/i.test(
+    msg,
+  );
 }
-
 
 /** Normalize adapter-supplied usage into durable, non-negative values. */
 function normalizedUsage(usage = {}) {
-  const tokens = (value) => Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
-  const money = (value) => Number.isFinite(value) && value >= 0 ? value : 0;
+  const tokens = (value) =>
+    Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
+  const money = (value) => (Number.isFinite(value) && value >= 0 ? value : 0);
   return {
-    model: typeof usage.model === "string" && usage.model !== "" ? usage.model : null,
+    model:
+      typeof usage.model === "string" && usage.model !== ""
+        ? usage.model
+        : null,
     inputTokens: tokens(usage.inputTokens ?? usage.input_tokens),
     outputTokens: tokens(usage.outputTokens ?? usage.output_tokens),
-    cacheCreationInputTokens: tokens(usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens),
-    cacheReadInputTokens: tokens(usage.cacheReadInputTokens ?? usage.cache_read_input_tokens),
+    cacheCreationInputTokens: tokens(
+      usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens,
+    ),
+    cacheReadInputTokens: tokens(
+      usage.cacheReadInputTokens ?? usage.cache_read_input_tokens,
+    ),
     costUSD: money(usage.costUSD ?? usage.cost_usd),
   };
 }
@@ -371,13 +425,19 @@ function usageTimestamp(value) {
  * cancellation can first record zero, then the aborting adapter can report the
  * tokens it consumed before stopping.
  */
-export function recordRunUsage(db, {
-  runId, attempt, adapter, recordedAt = Date.now(), ...rawUsage
-}) {
+export function recordRunUsage(
+  db,
+  { runId, attempt, adapter, recordedAt = Date.now(), ...rawUsage },
+) {
   const usage = normalizedUsage(rawUsage.usage ?? rawUsage);
-  const actualAdapter = adapter ?? db
-    .query(`SELECT json_extract(spec_json, '$.adapter') AS adapter FROM runs WHERE run_id = ?`)
-    .get(runId)?.adapter ?? "unknown";
+  const actualAdapter =
+    adapter ??
+    db
+      .query(
+        `SELECT json_extract(spec_json, '$.adapter') AS adapter FROM runs WHERE run_id = ?`,
+      )
+      .get(runId)?.adapter ??
+    "unknown";
   db.query(
     `INSERT INTO run_usage
        (run_id, attempt, adapter, model, input_tokens, output_tokens,
@@ -393,8 +453,15 @@ export function recordRunUsage(db, {
        cost_usd = excluded.cost_usd,
        recorded_at = excluded.recorded_at`,
   ).run(
-    runId, attempt, actualAdapter, usage.model, usage.inputTokens, usage.outputTokens,
-    usage.cacheCreationInputTokens, usage.cacheReadInputTokens, usage.costUSD,
+    runId,
+    attempt,
+    actualAdapter,
+    usage.model,
+    usage.inputTokens,
+    usage.outputTokens,
+    usage.cacheCreationInputTokens,
+    usage.cacheReadInputTokens,
+    usage.costUSD,
     usageTimestamp(recordedAt),
   );
 }
@@ -409,18 +476,24 @@ function usageRow(row) {
     outputTokens,
     cacheCreationInputTokens,
     cacheReadInputTokens,
-    totalTokens: inputTokens + outputTokens + cacheCreationInputTokens + cacheReadInputTokens,
+    totalTokens:
+      inputTokens +
+      outputTokens +
+      cacheCreationInputTokens +
+      cacheReadInputTokens,
     costUSD: Number(row.cost_usd ?? 0),
   };
 }
 
 /** Persisted attempt usage plus a per-run total for inspect. */
 export function runUsage(db, runId) {
-  const rows = db.query(
-    `SELECT attempt, adapter, model, input_tokens, output_tokens,
+  const rows = db
+    .query(
+      `SELECT attempt, adapter, model, input_tokens, output_tokens,
             cache_creation_input_tokens, cache_read_input_tokens, cost_usd, recorded_at
      FROM run_usage WHERE run_id = ? ORDER BY attempt`,
-  ).all(runId);
+    )
+    .all(runId);
   const attempts = rows.map((row) => ({
     attempt: row.attempt,
     adapter: row.adapter,
@@ -429,23 +502,28 @@ export function runUsage(db, runId) {
     recordedAt: row.recorded_at,
   }));
   return {
-    totals: attempts.reduce((totals, row) => ({
-      attempts: totals.attempts + 1,
-      inputTokens: totals.inputTokens + row.inputTokens,
-      outputTokens: totals.outputTokens + row.outputTokens,
-      cacheCreationInputTokens: totals.cacheCreationInputTokens + row.cacheCreationInputTokens,
-      cacheReadInputTokens: totals.cacheReadInputTokens + row.cacheReadInputTokens,
-      totalTokens: totals.totalTokens + row.totalTokens,
-      costUSD: totals.costUSD + row.costUSD,
-    }), {
-      attempts: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationInputTokens: 0,
-      cacheReadInputTokens: 0,
-      totalTokens: 0,
-      costUSD: 0,
-    }),
+    totals: attempts.reduce(
+      (totals, row) => ({
+        attempts: totals.attempts + 1,
+        inputTokens: totals.inputTokens + row.inputTokens,
+        outputTokens: totals.outputTokens + row.outputTokens,
+        cacheCreationInputTokens:
+          totals.cacheCreationInputTokens + row.cacheCreationInputTokens,
+        cacheReadInputTokens:
+          totals.cacheReadInputTokens + row.cacheReadInputTokens,
+        totalTokens: totals.totalTokens + row.totalTokens,
+        costUSD: totals.costUSD + row.costUSD,
+      }),
+      {
+        attempts: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        totalTokens: 0,
+        costUSD: 0,
+      },
+    ),
     attempts,
   };
 }
@@ -472,12 +550,18 @@ export function usageSpend(db, { now = Date.now() } = {}) {
   const nowMs = typeof now === "function" ? now() : now;
   const nowIso = new Date(nowMs).toISOString();
   const since = (milliseconds) => new Date(nowMs - milliseconds).toISOString();
-  const totalSince = (cutoff) => spendRow(db.query(
-    `SELECT ${USAGE_TOTALS_SQL} FROM run_usage WHERE recorded_at >= ? AND recorded_at <= ?`,
-  ).get(cutoff, nowIso));
+  const totalSince = (cutoff) =>
+    spendRow(
+      db
+        .query(
+          `SELECT ${USAGE_TOTALS_SQL} FROM run_usage WHERE recorded_at >= ? AND recorded_at <= ?`,
+        )
+        .get(cutoff, nowIso),
+    );
   const cutoff24h = since(24 * 60 * 60 * 1000);
-  const byAgent24h = db.query(
-    `SELECT COALESCE(json_extract(r.spec_json, '$.agent'), 'unknown') AS agent,
+  const byAgent24h = db
+    .query(
+      `SELECT COALESCE(json_extract(r.spec_json, '$.agent'), 'unknown') AS agent,
             ${USAGE_TOTALS_SQL.replaceAll("run_id", "u.run_id")}
      FROM run_usage u JOIN runs r ON r.run_id = u.run_id
      WHERE u.recorded_at >= ? AND u.recorded_at <= ?
@@ -485,7 +569,9 @@ export function usageSpend(db, { now = Date.now() } = {}) {
      ORDER BY (SUM(u.input_tokens) + SUM(u.output_tokens) +
                SUM(u.cache_creation_input_tokens) + SUM(u.cache_read_input_tokens)) DESC,
               agent`,
-  ).all(cutoff24h, nowIso).map((row) => ({ agent: row.agent, ...spendRow(row) }));
+    )
+    .all(cutoff24h, nowIso)
+    .map((row) => ({ agent: row.agent, ...spendRow(row) }));
   return {
     rolling1h: totalSince(since(60 * 60 * 1000)),
     rolling24h: totalSince(cutoff24h),
