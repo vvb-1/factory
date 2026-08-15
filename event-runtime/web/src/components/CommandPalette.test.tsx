@@ -57,7 +57,7 @@ function appendExtra(dialog: HTMLElement): HTMLButtonElement {
 
 beforeEach(() => {
   modal.depth = 0;
-  globalThis.fetch = (async () =>
+  globalThis.fetch = (async (_input: RequestInfo | URL) =>
     jsonResponse({
       runs: [],
       proposals: [],
