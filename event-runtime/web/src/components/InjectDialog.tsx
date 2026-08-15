@@ -274,6 +274,7 @@ export function InjectDialog({
   const [schemaAck, setSchemaAck] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // WM-76 Form view state. The base is the envelope minus payload (generated
   // exactly as templates do); the form edits payload only. Nested object /
@@ -727,9 +728,7 @@ export function InjectDialog({
   tabRef.current = tab;
 
   useLayoutEffect(() => {
-    listRef.current
-      ?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
-      ?.setAttribute("autofocus", "");
+    searchRef.current?.setAttribute("autofocus", "");
   }, []);
 
   useEffect(() => {
@@ -968,10 +967,19 @@ export function InjectDialog({
         <div className="md:col-span-5 flex flex-col min-h-0 border-b md:border-b-0 md:border-r border-(--border) pb-3 md:pb-0 md:pr-3">
           <div className="mb-2">
             <input
+              ref={searchRef}
               type="text"
               placeholder="Search event types / agents…"
               value={search}
+              aria-label="Search event types"
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "ArrowDown") return;
+                const first = listRef.current?.querySelector<HTMLElement>('[role="radio"]');
+                if (!first) return;
+                e.preventDefault();
+                first.focus();
+              }}
               className="w-full rounded-md border border-(--border) bg-(--surface-0) px-2.5 py-1.5 text-[12px] text-(--text) outline-none focus:border-(--border-strong)"
             />
           </div>

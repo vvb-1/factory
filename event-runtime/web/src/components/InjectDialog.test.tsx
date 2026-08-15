@@ -613,6 +613,29 @@ describe("InjectDialog humanized errors and hidden planner fields (WM-86)", () =
     }));
 });
 
+describe("InjectDialog keyboard search (WM-80)", () => {
+  test("template search is the autofocus target when the dialog opens", () =>
+    withSchemaApi(async (r) => {
+      const search = r.getByPlaceholderText(/search event types/i);
+      expect(search.getAttribute("autofocus")).not.toBeNull();
+      expect(document.activeElement).toBe(search);
+    }));
+
+  test("ArrowDown from search focuses the first template result", () =>
+    withSchemaApi(async (r) => {
+      const search = r.getByPlaceholderText(/search event types/i) as HTMLInputElement;
+      act(() => {
+        search.focus();
+      });
+      act(() => {
+        fireEvent.keyDown(search, { key: "ArrowDown" });
+      });
+      const radios = r.getAllByRole("radio");
+      expect(radios.length).toBeGreaterThan(0);
+      expect(document.activeElement).toBe(radios[0]);
+    }));
+});
+
 describe("InjectDialog invalid-payload confirm is distinct (WM-85)", () => {
   test("schema-invalid confirm is labeled Inject anyway, not Confirm inject", () =>
     withSchemaApi(async (r) => {
