@@ -246,12 +246,13 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       expect((r.getByLabelText("scheduledAt") as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }));
 
-  test("validation flags a bad payload with a field-level error", () =>
+  test("validation flags a bad payload with a field-level error after blur", () =>
     withSchemaApi(async (r) => {
       await selectTemplate(r, /disk\.diagnose/i);
       const usedPct = r.getByLabelText("usedPct") as HTMLInputElement;
       act(() => {
         changeInput(usedPct, "150");
+        fireEvent.blur(usedPct);
       });
       expect(r.getByText(/above maximum 100/i)).toBeTruthy();
     }));
@@ -342,13 +343,17 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       expect(logArtifact.getAttribute("placeholder") ?? "").not.toContain("^");
     }));
 
-  test("string arrays with minItems seed zero chips; the minItems warning covers the ask (critique r1)", () =>
+  test("string arrays with minItems seed zero chips; the minItems warning waits until submit (WM-78)", () =>
     withSchemaApi(async (r) => {
       await selectTemplate(r, /factory\.status\.requested/i);
       // No bare unlabeled "×" chip from a seeded empty string.
       expect(r.queryAllByRole("button", { name: /^remove/i }).length).toBe(0);
-      // The requirement is still surfaced, as a validation warning.
-      expect(r.getByText(/fewer than minItems 1/i)).toBeTruthy();
+      // Fresh form must not look broken (WM-78).
+      expect(r.queryAllByText(/fewer than minItems 1/i)).toHaveLength(0);
+      act(() => {
+        fireEvent.click(r.getByRole("button", { name: /inject/i }));
+      });
+      expect(r.getAllByText(/fewer than minItems 1/i).length).toBeGreaterThan(0);
     }));
 
   test("array-of-objects field renders a JSON sub-editor with parse indicator", () =>
@@ -469,6 +474,41 @@ describe("InjectDialog template selection sync (OPS-344)", () => {
   });
 });
 
+describe("InjectDialog field errors wait until blur or submit (WM-78)", () => {
+  test("required empty strings do not show minLength errors on template select", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /triage\.scan\.requested/i);
+      expect(r.getByLabelText("repo")).toBeTruthy();
+      expect(r.queryAllByText(/shorter than minLength/i)).toHaveLength(0);
+      expect(r.queryAllByText(/missing required/i)).toHaveLength(0);
+    }));
+
+  test("blurring an invalid field reveals its error", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /triage\.scan\.requested/i);
+      const repo = r.getByLabelText("repo") as HTMLInputElement;
+      expect(r.queryAllByText(/shorter than minLength/i)).toHaveLength(0);
+      act(() => {
+        fireEvent.blur(repo);
+      });
+      expect(r.getByText(/shorter than minLength/i)).toBeTruthy();
+    }));
+
+  test("a submit attempt reveals field errors without changing the ack flow", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /disk\.diagnose/i);
+      const mount = r.getByLabelText("mount") as HTMLInputElement;
+      expect(mount.value).toBe("");
+      expect(r.queryAllByText(/does not match pattern/i)).toHaveLength(0);
+      act(() => {
+        fireEvent.click(r.getByRole("button", { name: /inject/i }));
+      });
+      expect(r.getAllByText(/does not match pattern/i).length).toBeGreaterThan(0);
+      expect(r.getByText(/does not validate/i)).toBeTruthy();
+      expect(r.getByRole("button", { name: /confirm inject/i })).toBeTruthy();
+    }));
+});
+
 describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => {
   test("submitForm reports missing required envelope fields instead of confirming", () =>
     withSchemaApi(async (r) => {
@@ -510,8 +550,8 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
       expect(r.getByLabelText("usedPct")).toBeTruthy();
       await selectTemplate(r, /blank envelope/i);
       expect(r.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
-      expect(r.queryByLabelText("usedPct")).toBeNull();
-      expect(r.queryByLabelText("mount")).toBeNull();
+      expect(r.queryAllByLabelText("usedPct")).toHaveLength(0);
+      expect(r.queryAllByLabelText("mount")).toHaveLength(0);
     }));
 
   test("picking this envelope resets Form state from the given payload", () =>
@@ -530,7 +570,7 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
       expect(view.getByLabelText("usedPct")).toBeTruthy();
       await selectTemplate(view, /this envelope/i);
       expect(view.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
-      expect(view.queryByLabelText("usedPct")).toBeNull();
-      expect(view.queryByLabelText("mount")).toBeNull();
+      expect(view.queryAllByLabelText("usedPct")).toHaveLength(0);
+      expect(view.queryAllByLabelText("mount")).toHaveLength(0);
     }));
 });

@@ -155,6 +155,15 @@ export function errorsByField(errors: string[]): Map<string, string[]> {
   return out;
 }
 
+/** Field-level errors stay hidden until the control is touched or submit is attempted. */
+export function fieldErrorVisible(
+  name: string,
+  touched: Record<string, boolean>,
+  submitAttempted: boolean,
+): boolean {
+  return submitAttempted || !!touched[name];
+}
+
 /** Payload keys the schema does not declare — kept, surfaced, never dropped. */
 export function unknownKeys(schema: unknown, payload: Record<string, unknown>): string[] {
   if (!isPlainObject(schema)) return [];

@@ -13,6 +13,7 @@ import { buildTemplates, triggerId, type TriggerTemplate } from "../templates";
 import { validate } from "../lib/schema";
 import {
   errorsByField,
+  fieldErrorVisible,
   isAtField,
   isIdField,
   placeholderFor,
@@ -295,6 +296,8 @@ export function InjectDialog({
     return {};
   });
   const [tabNotice, setTabNotice] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const fieldIdBase = useId();
 
   // Autosave draft to sessionStorage (OPS-507)
@@ -375,6 +378,8 @@ export function InjectDialog({
       if (f.kind === "json") sub[f.name] = f.name in pay ? JSON.stringify(pay[f.name], null, 2) : "";
     }
     setSubJson(sub);
+    setTouched({});
+    setSubmitAttempted(false);
   }
 
   function resetAcks() {
@@ -642,6 +647,7 @@ export function InjectDialog({
 
   function submitForm() {
     setClientError(null);
+    setSubmitAttempted(true);
     if (invalidSubs.length > 0) {
       setClientError(`field ${invalidSubs.join(", ")}: not valid JSON`);
       setConfirming(false);
@@ -758,7 +764,8 @@ export function InjectDialog({
   function renderField(f: FieldSpec) {
     const fid = `${fieldIdBase}-${f.name}`;
     const value = formPayload[f.name];
-    const errs = fieldErrors.get(f.name) ?? [];
+    const errs =
+      fieldErrorVisible(f.name, touched, submitAttempted) ? (fieldErrors.get(f.name) ?? []) : [];
     const suggestions = repoSuggestions(f.name, f.schema, f.kind, repoItems);
 
     let control: React.ReactNode;
@@ -887,7 +894,11 @@ export function InjectDialog({
     }
 
     return (
-      <div key={f.name} className="mb-2.5 last:mb-0">
+      <div
+        key={f.name}
+        className="mb-2.5 last:mb-0"
+        onBlur={() => setTouched((t) => (t[f.name] ? t : { ...t, [f.name]: true }))}
+      >
         <div className="mb-0.5 flex items-center gap-2">
           <label
             htmlFor={f.kind === "const" ? undefined : fid}
