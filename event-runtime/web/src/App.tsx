@@ -336,6 +336,12 @@ export function App() {
         setHelpOpen((open) => !open);
       } else if (e.key === "/") {
         e.preventDefault();
+        const traceSearch = document.querySelector<HTMLInputElement>("[data-trace-search]");
+        if (traceSearch) {
+          traceSearch.focus();
+          traceSearch.select();
+          return;
+        }
         const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
         if (el) el.focus();
         else {
@@ -394,6 +400,12 @@ export function App() {
       label: "Focus filter",
       hint: "/",
       run: () => {
+        const traceSearch = document.querySelector<HTMLInputElement>("[data-trace-search]");
+        if (traceSearch) {
+          traceSearch.focus();
+          traceSearch.select();
+          return;
+        }
         const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
         if (el) el.focus();
         else {

@@ -24,6 +24,14 @@ describe("ShortcutsDialog", () => {
     expect(contextStrip.textContent).toContain("Tab");
     expect(contextStrip.textContent).toContain("Home / End");
     expect(contextStrip.textContent).toContain("Delete / ⌫");
+
+    const runTrace = r.getByRole("region", { name: "Run & Trace" });
+    expect(runTrace.textContent).toContain("1–5");
+    expect(runTrace.textContent).toContain("switch trace kind");
+    expect(runTrace.textContent).toContain("toggle expand / collapse trace details");
+    expect(runTrace.textContent).toContain("toggle follow live trace");
+    expect(runTrace.textContent).toContain("c i");
+    expect(runTrace.textContent).toContain("copy CLI inspect command");
   });
 
   test("documents context chords under Navigation chords (g 0, g 1–9, g i)", () => {
