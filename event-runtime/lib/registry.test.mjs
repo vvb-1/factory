@@ -104,7 +104,12 @@ describe("registry", () => {
     const defFile = path.join(root, "agents", "factory-status-report.json");
     const def = JSON.parse(readFileSync(defFile, "utf8"));
     writeFileSync(defFile, JSON.stringify({ ...def, model_tier: "standard" }));
-    const registry = loadRegistry({ root, modelTiers: { claude: { strong: "default", standard: "sonnet" } } });
+    // Also covers pi-smoke@1's own event-type-declared tier (OPS-517, adapter
+    // "pi") — event types outside this test's own agent are validated too.
+    const registry = loadRegistry({
+      root,
+      modelTiers: { claude: { strong: "default", standard: "sonnet" }, pi: { light: "openai-codex/gpt-5.6-luna" } },
+    });
     expect(getAgent(registry, "factory-status-report@1").model_tier).toBe("standard");
     // A definition that declares nothing is untouched — adapter default.
     expect(getAgent(registry, "reconcile@1").model_tier).toBeUndefined();
@@ -142,7 +147,10 @@ describe("registry", () => {
     writeFileSync(defFile, JSON.stringify({ ...def, model_tier: "light" }));
     // reconcile routes via the command adapter — "light" needs no mapping
     // there, even though the map below deliberately lacks it.
-    const registry = loadRegistry({ root, modelTiers: { claude: { strong: "default", standard: "sonnet" } } });
+    const registry = loadRegistry({
+      root,
+      modelTiers: { claude: { strong: "default", standard: "sonnet" }, pi: { light: "openai-codex/gpt-5.6-luna" } },
+    });
     expect(resolveModel(getAgent(registry, "reconcile@1"), "command", registry.modelTiers)).toBeNull();
   });
 
@@ -150,7 +158,7 @@ describe("registry", () => {
     const root = tempRegistry();
     const defFile = path.join(root, "agents", "factory-status-report.json");
     const def = JSON.parse(readFileSync(defFile, "utf8"));
-    const tiers = { claude: { strong: "default", standard: "sonnet" } };
+    const tiers = { claude: { strong: "default", standard: "sonnet" }, pi: { light: "openai-codex/gpt-5.6-luna" } };
     writeFileSync(defFile, JSON.stringify({ ...def, model: "" }));
     expect(() => loadRegistry({ root, modelTiers: tiers })).toThrow(/"model"/);
     writeFileSync(defFile, JSON.stringify({ ...def, model: 42 }));

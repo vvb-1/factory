@@ -237,5 +237,13 @@
       "correlationId"
     ],
     "proposalTtlSeconds": 3600
+  },
+  "factory.pi-smoke.requested": {
+    "agent": "pi-smoke@1",
+    "adapter": "pi",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
   }
 }

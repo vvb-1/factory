@@ -277,6 +277,145 @@ describe("cli", () => {
     verifyDb.close();
   });
 
+  test("work --adapter-override pi is accepted at the work call site (OPS-517)", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-work-pi-"));
+    const child = spawn("bun", [CLI, "work", "--adapter-override", "pi"], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("adapter override")) {
+      await Bun.sleep(100);
+    }
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+
+    expect(out).not.toContain('unknown --adapter-override "pi"');
+    expect(out).toContain('adapter override: executing every run with "pi"');
+  });
+
+  test("serve --adapter-override pi is accepted at the serve call site (OPS-517)", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-serve-pi-"));
+    const port = String(59800 + (process.pid % 150));
+    const child = spawn("bun", [CLI, "serve", "--adapter-override", "pi", "--port", port], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("control API on")) {
+      await Bun.sleep(100);
+    }
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+
+    expect(out).not.toContain('unknown --adapter-override "pi"');
+    expect(out).toContain('adapter override: all new run specs use "pi"');
+    expect(out).toContain("control API on");
+  });
+
+  test("pi-smoke@1 routes end-to-end through the pi adapter via a fake shim (OPS-517)", async () => {
+    const { createRun, transition } = await import("./lib/lifecycle.mjs");
+    const { canonicalJson, hashJson } = await import("./lib/canonical.mjs");
+    const { loadRegistry } = await import("./lib/registry.mjs");
+    const { claimNext, executeClaimed } = await import("./lib/worker.mjs");
+
+    const db = openDb(":memory:");
+    const registry = loadRegistry();
+
+    // Same shape the planner produces for a real factory.pi-smoke.requested
+    // event (agent pi-smoke@1, adapter "pi", per event-types.json) — proves
+    // the registered agent/event-type/schema route reaches the worker and
+    // resolves to the "pi" key in the adapters map, not just that the map
+    // has that key. spec.adapter carries "pi" with no --adapter-override,
+    // so worker.mjs's `adapterOverride ?? spec.adapter` must pick "pi".
+    const input = { message: "hello from OPS-517" };
+    const spec = {
+      schemaVersion: "factory.run-spec/v1",
+      runId: "run_pi_smoke_test",
+      agent: "pi-smoke@1",
+      input,
+      inputHash: hashJson(input),
+      workspace: { type: "ephemeral", retainOnFailure: true },
+      adapter: "pi",
+      promptVersion: "git:test",
+      policyVersion: "git:test",
+      outputContract: "factory.pi-smoke/v1",
+      capabilities: [],
+      timeoutSeconds: 5,
+      maxAttempts: 1,
+      idempotencyKey: "idem_pi_smoke_test",
+    };
+
+    createRun(db, {
+      runId: spec.runId,
+      idempotencyKey: spec.idempotencyKey,
+      spec,
+      specJson: canonicalJson(spec),
+      specHash: hashJson(spec),
+      actor: "test",
+      policyVersion: "test",
+      now: Date.now(),
+    });
+    transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now: Date.now() });
+    transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now: Date.now() });
+
+    // A shim standing in for the real pi CLI spawn (lib/adapters/pi.mjs,
+    // already covered by pi.test.mjs) — it only has to prove the route: read
+    // the input the workspace provider staged and write a result shaped to
+    // pi-smoke's own output schema.
+    let piCalled = false;
+    const mockAdapters = {
+      pi: {
+        execute: async ({ spec: runSpec, workspaceDir }) => {
+          piCalled = true;
+          const { readFileSync, writeFileSync } = await import("node:fs");
+          const { default: path } = await import("node:path");
+          const staged = JSON.parse(readFileSync(path.join(workspaceDir, "input.json"), "utf8"));
+          writeFileSync(
+            path.join(workspaceDir, "result.json"),
+            JSON.stringify({
+              schemaVersion: "factory.agent-result/v1",
+              terminalState: "completed",
+              reasonCode: "ok",
+              artifact: { echo: staged.message },
+              evidence: { commands: [] },
+            }),
+            "utf8",
+          );
+          return { exitCode: 0, timedOut: false };
+        },
+      },
+    };
+
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-pi-smoke-"));
+    const claim = claimNext(db, { owner: "w1" });
+    expect(claim).toBeTruthy();
+
+    const summary = await executeClaimed(db, registry, mockAdapters, claim, {
+      workspacesRoot: home,
+    });
+
+    expect(piCalled).toBe(true);
+    expect(summary.terminalState).toBe("COMPLETED");
+
+    const row = db.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_pi_smoke_test");
+    expect(row?.state).toBe("COMPLETED");
+  });
+
   test("tick runs notify as an isolated subsystem (WM-65): a throwing notifier step cannot break the tick", async () => {
     const { tick, TICK_SUBSYSTEMS } = await import("./cli.mjs");
     const { loadRegistry } = await import("./lib/registry.mjs");
