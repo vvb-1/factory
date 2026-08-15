@@ -492,7 +492,7 @@ export function RunDetailBlocks({
                   )}
                   <span className="relative mt-[7px] size-1.5 shrink-0 rounded-full" style={{ background: hue }} />
                 </span>
-                <span className="flex min-w-0 flex-1 items-center gap-x-2">
+                <span className="flex min-w-0 flex-1 items-start gap-x-2">
                   {/* Fixed-width badge column, badge's own dot dropped in favor
                       of the rail's: with it, every actor started at whatever x
                       its state name happened to end at, and each row carried
@@ -505,7 +505,11 @@ export function RunDetailBlocks({
                     )}
                     <StateBadge state={e.to_state} dot={false} />
                   </span>
-                  <span className="min-w-0 truncate text-[11.5px] text-(--text-faint)" title={e.actor}>
+                  {/* WM-145: wrap the reason; title includes it, not actor alone. */}
+                  <span
+                    className="min-w-0 flex-1 break-words whitespace-pre-wrap text-[11.5px] leading-relaxed text-(--text-faint)"
+                    title={e.reason ? `${e.actor} · ${e.reason}` : e.actor}
+                  >
                     <ActorRef actor={e.actor} className="text-[11.5px]" />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
