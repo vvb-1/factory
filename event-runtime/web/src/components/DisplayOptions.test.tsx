@@ -89,11 +89,13 @@ describe("DisplayOptions panel", () => {
     // Relative to whatever depth other test files leaked: only the delta is ours.
     const base = modal.depth;
     const r = render(<Harness />);
-    fireEvent.click(r.getByRole("button", { name: /display/i }));
+    const trigger = r.getByRole("button", { name: /display/i });
+    fireEvent.click(trigger);
     expect(modal.depth).toBe(base + 1);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(r.queryByRole("dialog", { name: "Display options" })).toBeNull();
     expect(modal.depth).toBe(base);
+    expect(document.activeElement).toBe(trigger);
   });
 
   test("reset appears only once customized and restores defaults", () => {
@@ -104,6 +106,32 @@ describe("DisplayOptions panel", () => {
     fireEvent.change(r.getByLabelText("Group by"), { target: { value: "state" } });
     fireEvent.click(r.getByRole("button", { name: /reset/i }));
     expect(latest?.groupBy).toBe("none");
+  });
+
+  test("default sort option uses operator-facing label", () => {
+    const r = render(<Harness />);
+    fireEvent.click(r.getByRole("button", { name: /display/i }));
+    const orderSelect = r.getByLabelText("Order by") as HTMLSelectElement;
+    const defaultOption = [...orderSelect.options].find((o) => o.value === "default");
+    expect(defaultOption?.textContent).toBe("Default order");
+    expect(defaultOption?.textContent).not.toBe("API order");
+  });
+
+  test("opening moves focus to the first interactive control", () => {
+    const r = render(<Harness />);
+    const trigger = r.getByRole("button", { name: /display/i });
+    fireEvent.click(trigger);
+    expect(document.activeElement).toBe(r.getByLabelText("Group by"));
+  });
+
+  test("outside-click dismiss restores focus to the Display trigger", () => {
+    const r = render(<Harness />);
+    const trigger = r.getByRole("button", { name: /display/i });
+    fireEvent.click(trigger);
+    expect(r.getByRole("dialog", { name: "Display options" })).toBeTruthy();
+    fireEvent.pointerDown(window, { target: document.body });
+    expect(r.queryByRole("dialog", { name: "Display options" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });
 
