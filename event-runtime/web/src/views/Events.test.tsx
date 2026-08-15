@@ -66,7 +66,7 @@ describe("Events component harness: selection & detail view", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const { getByText, container } = renderEvents({ onSelectEvent });
+        const { container } = renderEvents({ onSelectEvent });
 
         const cell = await waitFor(() => {
           const el = container.querySelector('td[title="evt_click_test"]');
