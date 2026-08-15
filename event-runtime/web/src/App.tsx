@@ -599,8 +599,8 @@ export function App() {
 
         <div className="flex items-center gap-3">
           <div className="text-(--text-faint)">
-            <span className="mono">⌘K</span> commands · <span className="mono">g</span> go ·{" "}
-            <span className="mono">?</span> keys
+            <span className="mono">⌘K</span> commands · <span className="mono">i</span> inject ·{" "}
+            <span className="mono">g</span> go · <span className="mono">?</span> keys
           </div>
           <button
             type="button"
