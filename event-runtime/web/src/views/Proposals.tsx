@@ -211,6 +211,7 @@ export function Proposals({
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
   const [bulkRejecting, setBulkRejecting] = useState(false);
   const [bulkReason, setBulkReason] = useState("");
@@ -282,29 +283,44 @@ export function Proposals({
   );
 
   const handleBulkApprove = async () => {
-    if (!approvableSelected.length) return;
+    if (!connected || !approvableSelected.length) return;
+    setBulkConfirmOpen(false);
     setBulkApproving(true);
     let ok = 0;
-    let replanned = 0;
     let err = 0;
+    const processed = new Set<string>();
+    let haltedOnReplan: { before: Proposal; after: Proposal } | null = null;
     for (const p of approvableSelected) {
       try {
         const o = await api.approve(p.id);
+        processed.add(p.id);
         if (o.approved && o.runId) {
           ok++;
           onRunQueued(o.runId);
         } else if (o.replanned && o.proposal) {
-          replanned++;
+          haltedOnReplan = { before: p, after: o.proposal };
+          break;
         }
       } catch {
         err++;
+        processed.add(p.id);
       }
     }
     invalidate();
-    setSelectedIds(new Set());
     setBulkApproving(false);
+    if (haltedOnReplan) {
+      setReplan(haltedOnReplan);
+      onSelectProposal(haltedOnReplan.after.id);
+      notify(`Proposal expired — re-planned new spec`, "info");
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of processed) next.delete(id);
+        return next;
+      });
+    } else {
+      setSelectedIds(new Set());
+    }
     if (ok) notify(`Approved ${ok} proposal${ok === 1 ? "" : "s"}`, "ok");
-    if (replanned) notify(`${replanned} proposal${replanned === 1 ? "" : "s"} expired and re-planned`, "info");
     if (err) notify(`Failed to approve ${err} proposal${err === 1 ? "" : "s"}`, "err");
   };
 
@@ -466,7 +482,11 @@ export function Proposals({
   });
 
   const reject = useMutation({
-    mutationFn: ({ id, why }: { id: string; why?: string }) => api.reject(id, why),
+    mutationFn: ({ id, why }: { id: string; why: string }) => {
+      const trimmed = why.trim();
+      if (!trimmed) return Promise.reject(new Error("Rejection reason required"));
+      return api.reject(id, trimmed);
+    },
     onSuccess: (_, { id }) => {
       invalidate();
       notify(`Rejected proposal ${id}`, "info");
@@ -545,6 +565,11 @@ export function Proposals({
           <>
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
         {context.kind === "inflight" && <ScopeCaption context={context} surface="fleet" />}
+        {context.kind === "repo" && (
+          <p className="mb-3 text-[11px] text-(--text-faint)">
+            {`Showing proposals that name ${context.name}.`}
+          </p>
+        )}
 
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="flex gap-1" role="tablist" aria-label="Proposal status">
@@ -700,11 +725,11 @@ export function Proposals({
                     </td>
                   )}
                   {show.has("origin") && (
-                    <td className={`mono max-w-40 truncate ${tdCls} text-(--text-faint)`} title={originType(p) ?? undefined}>
+                    <td className={`mono max-w-40 truncate ${tdCls} text-(--text-faint)`} title={p.eventId ?? undefined}>
                       {p.eventId && p.eventSource ? (
                         <JumpLink
                           onClick={() => onJumpEvent(p.eventSource!, p.eventId!)}
-                          title={originType(p) ?? "Open origin event"}
+                          title={p.eventId}
                         >
                           {p.eventId}
                         </JumpLink>
@@ -719,7 +744,9 @@ export function Proposals({
                     </td>
                   )}
                   {show.has("reason") && (
-                    <td className={`max-w-64 truncate ${tdCls} text-(--text-dim)`}>{p.reason ?? "-"}</td>
+                    <td className={`max-w-64 truncate ${tdCls} text-(--text-dim)`} title={p.reason ?? undefined}>
+                      {p.reason ?? "-"}
+                    </td>
                   )}
                 </tr>
               );
@@ -929,13 +956,6 @@ export function Proposals({
                   Approve… <span className="mono ml-1 opacity-70">a</span>
                 </Button>
               )}
-              <Button
-                variant="danger"
-                disabled={!connected || reject.isPending}
-                onClick={() => reject.mutate({ id: sel.id })}
-              >
-                Dismiss
-              </Button>
               <Button variant="danger" disabled={!connected || reject.isPending} onClick={openReject}>
                 Reject… <span className="mono ml-1 opacity-70">x</span>
               </Button>
@@ -1006,12 +1026,15 @@ export function Proposals({
             <KV k="attempts" v={String(sel.spec?.maxAttempts)} />
             <KV k="ttl" v={<Countdown createdAt={sel.created_at} ttlSeconds={sel.ttl_seconds} />} />
           </div>
-          {sel.spec && <JsonBlock value={sel.spec} />}
+          {sel.spec && (
+            <div className="mb-3 max-h-[50vh] overflow-auto">
+              <JsonBlock value={sel.spec} />
+            </div>
+          )}
           <div className="mt-3 flex justify-end gap-2">
             <Button onClick={() => setConfirmApprove(false)}>Not yet</Button>
             <Button
               variant="primary"
-              autoFocus
               disabled={!connected || approve.isPending}
               onClick={() => {
                 setConfirmApprove(false);
@@ -1032,7 +1055,7 @@ export function Proposals({
           </div>
           <SpecDiff before={replan.before.spec} after={replan.after.spec} />
           <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={() => setReplan(null)}>Not now</Button>
+            <Button onClick={() => setReplan(null)}>Not yet</Button>
             <Button
               variant="primary"
               disabled={!connected || approve.isPending}
@@ -1053,9 +1076,9 @@ export function Proposals({
           <Button
             variant="primary"
             disabled={!connected || bulkApproving || approvableSelected.length === 0}
-            onClick={handleBulkApprove}
+            onClick={() => setBulkConfirmOpen(true)}
           >
-            {bulkApproving ? "Approving…" : `Approve selected (${selectedIds.size})`}
+            {bulkApproving ? "Approving…" : `Approve selected (${approvableSelected.length})`}
           </Button>
           <Button
             variant="danger"
@@ -1068,6 +1091,44 @@ export function Proposals({
             Reject selected ({selectedIds.size})
           </Button>
         </BulkActionBar>
+      )}
+
+      {bulkConfirmOpen && approvableSelected.length > 0 && (
+        <Dialog
+          title={`Approve and queue ${approvableSelected.length} run${approvableSelected.length === 1 ? "" : "s"}?`}
+          onClose={() => setBulkConfirmOpen(false)}
+          wide
+        >
+          <div className="mb-3 text-[12px] text-(--text-dim)">
+            You are approving {approvableSelected.length === 1 ? "this exact immutable spec" : "these exact immutable specs"}{" "}
+            — each agent below runs with these capabilities the moment you confirm. Stale and non-run
+            rows are skipped.
+          </div>
+          <div className="flex max-h-[60vh] flex-col gap-4 overflow-auto">
+            {approvableSelected.map((p) => (
+              <div key={p.id} className="rounded-md border border-(--border) bg-(--surface-0) p-2.5">
+                <div className="mb-2 font-medium text-[12px]">{p.agent ?? p.id}</div>
+                <KV k="agent" v={p.spec?.agent} />
+                <KV k="capabilities" v={p.spec?.capabilities.join(", ") || "none"} />
+                <KV k="timeout" v={`${p.spec?.timeoutSeconds}s`} />
+                {p.spec && <JsonBlock value={p.spec} />}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button onClick={() => setBulkConfirmOpen(false)}>Not yet</Button>
+            <Button
+              variant="primary"
+              autoFocus
+              disabled={!connected || bulkApproving}
+              onClick={() => {
+                void handleBulkApprove();
+              }}
+            >
+              Approve and queue
+            </Button>
+          </div>
+        </Dialog>
       )}
 
       {bulkRejectOpen && (
