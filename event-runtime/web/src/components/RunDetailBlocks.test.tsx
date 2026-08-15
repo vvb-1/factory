@@ -145,3 +145,33 @@ describe("Lifecycle timeline (WM-136)", () => {
     expect(r.getByText("LEASED→")).toBeTruthy();
   });
 });
+
+describe("Lifecycle reason readability (WM-145)", () => {
+  const LONG_REASON =
+    "planner refused: the worker exceeded the attempt budget after waiting on a hung adapter handshake that never completed";
+
+  test("exposes a long lifecycle reason via title, not actor-only, and does not truncate it", () => {
+    const now = new Date().toISOString();
+    const lifecycle = [
+      createLifecycleEventFixture(1, "run_x", null, "QUEUED", null, now),
+      createLifecycleEventFixture(2, "run_x", "QUEUED", "FAILED", LONG_REASON, now),
+    ];
+    const d = createRunDetailFixture({ run: { state: "FAILED" } as RunDetail["run"], lifecycle });
+    const r = renderBlocks(d);
+
+    const failedRow = Array.from(r.container.querySelectorAll("li")).find((li) =>
+      li.textContent?.includes(LONG_REASON),
+    );
+    expect(failedRow).toBeTruthy();
+
+    const titled = Array.from(failedRow!.querySelectorAll("[title]")).filter((el) =>
+      (el.getAttribute("title") ?? "").includes(LONG_REASON),
+    );
+    expect(titled.length).toBeGreaterThan(0);
+
+    const truncated = Array.from(failedRow!.querySelectorAll(".truncate")).filter((el) =>
+      el.textContent?.includes(LONG_REASON),
+    );
+    expect(truncated.length).toBe(0);
+  });
+});

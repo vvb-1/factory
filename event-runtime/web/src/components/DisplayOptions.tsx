@@ -5,7 +5,7 @@
  * via `useDisplayOptions` and passes it down, so the panel never touches
  * storage and the table never re-derives what the panel showed.
  */
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { modal } from "../hooks";
 import {
   DEFAULT_ORDER,
@@ -29,6 +29,7 @@ function OptionRow({ label, htmlFor, children }: { label: string; htmlFor?: stri
 
 function Select({
   id,
+  ref,
   value,
   onChange,
   options,
@@ -36,6 +37,7 @@ function Select({
   label,
 }: {
   id?: string;
+  ref?: RefObject<HTMLSelectElement | null>;
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
@@ -44,6 +46,7 @@ function Select({
 }) {
   return (
     <select
+      ref={ref}
       id={id}
       value={value}
       disabled={disabled}
@@ -145,6 +148,7 @@ export function DisplayOptions<T>({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const firstFocusRef = useRef<HTMLSelectElement>(null);
   const groupId = useId();
   const subId = useId();
   const orderId = useId();
@@ -161,7 +165,10 @@ export function DisplayOptions<T>({
       triggerRef.current?.focus();
     };
     const onPointer = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("pointerdown", onPointer);
@@ -170,6 +177,10 @@ export function DisplayOptions<T>({
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("pointerdown", onPointer);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) firstFocusRef.current?.focus();
   }, [open]);
 
   const customized = !isDefaultDisplayState(config, state);
@@ -209,6 +220,7 @@ export function DisplayOptions<T>({
           <OptionRow label="Grouping" htmlFor={groupId}>
             <Select
               id={groupId}
+              ref={firstFocusRef}
               label="Group by"
               value={state.groupBy}
               onChange={(groupBy) =>
@@ -257,7 +269,7 @@ export function DisplayOptions<T>({
                   }))
                 }
                 options={[
-                  { value: DEFAULT_ORDER, label: "API order" },
+                  { value: DEFAULT_ORDER, label: "Default order" },
                   ...config.sorts.map((f) => ({ value: f.key, label: f.label })),
                 ]}
               />
