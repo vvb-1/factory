@@ -389,14 +389,14 @@ no shared set. Every rule below is checkable in review.
 Where an icon or glyph may sit, relative to the text it belongs to. Anything
 not in this table is not a placement.
 
-| Context                    | Position                        | Rule                                                                                                           |
-| -------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| State badge / status label | leading, `gap-1.5`              | Icon then word. Never trailing, never alone.                                                                   |
-| Button                     | leading only                    | A trailing glyph is reserved for one meaning: `…` = "opens a dialog". Nothing else trails.                     |
-| Table cell                 | leading, baseline-aligned       | Same column as its text; a cell is never icon-only unless the header names the meaning and `title` repeats it. |
-| Section / group header     | between chevron and label       | Chevron → dot/icon → label → count, in that order (`GroupHeaderRow`).                                          |
-| Nav rail                   | none                            | Text-only until the rail outgrows its labels; a leading icon column is the _only_ shape it may take then.      |
-| Keyboard hint              | trailing, in `<kbd>` or `.mono` | Right-aligned in its row (`FilterInput` `/`, palette rows). Never inline in prose.                             |
+| Context                    | Position                  | Rule                                                                                                           |
+| -------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| State badge / status label | leading, `gap-1.5`        | Icon then word. Never trailing, never alone.                                                                   |
+| Button                     | leading only              | A trailing glyph is reserved for one meaning: `…` = "opens a dialog". Nothing else trails.                     |
+| Table cell                 | leading, baseline-aligned | Same column as its text; a cell is never icon-only unless the header names the meaning and `title` repeats it. |
+| Section / group header     | between chevron and label | Chevron → dot/icon → label → count, in that order (`GroupHeaderRow`).                                          |
+| Nav rail                   | none                      | Text-only until the rail outgrows its labels; a leading icon column is the _only_ shape it may take then.      |
+| Keyboard hint              | trailing                  | Style depends on container — see "Keyboard hints" under §5.3. Never inline in prose.                           |
 
 Icons and glyphs sit **on the text baseline** and take the text color of
 their label (`currentColor`); an icon lighter or brighter than its own label
@@ -562,6 +562,47 @@ a time); `danger` is text-in-`--hue-err` on a neutral fill — never a red
 fill. Verb labels are verbs ("Approve", "Cancel run"), sentence case; a verb
 that opens a dialog ends in `…`. Verb failure renders inline via `VerbError`
 under the buttons (404/409 are normal, §6), never as a toast alone.
+
+#### Keyboard hints (WM-209)
+
+Two idioms exist and each has exactly one home:
+
+| Where the hint sits                                                                            | Style                                                         | Why                                                                        |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Inside a control that has its own border — button, nav item, tab, chip                         | faint mono subtext: `mono ml-1 text-(--text-faint)`, trailing | a box inside a box is noise; the control's border is already the container |
+| Standalone or on an unbordered surface — input placeholder, ⌘K rows, `?` dialog, footer legend | `<kbd>` box, 10px, `border-(--border)`                        | there is no container, so the box supplies one                             |
+| Prose or body copy                                                                             | never                                                         | a shortcut is shown next to its control, not described                     |
+
+Behaviour: the hint is `aria-hidden` (the accessible name is "Cancel", not
+"Cancel x"); it appears **iff** the control has a single-key or `g` chord
+binding — no invented hints, none omitted. A verb reachable only through ⌘K
+shows no hint. Because hints are per-binding, grouping bound verbs together
+(next rule) is what makes them read as deliberate rather than random.
+
+#### DetailPane header actions (WM-209)
+
+The pane header is three rows, and each row holds one kind of thing:
+
+```
+Runs / [● STATE]  run_xxxx                          [Close]
+[Cancel x]                            [Expand o]  [Open in tab]
+copy: id · CLI · link
+```
+
+1. **Title row** — breadcrumb (`view / StateBadge id`) and the single
+   `close` slot (WM-97).
+2. **Verb row** — bordered `Button`s, **≤ 3**: lifecycle verbs on the left
+   (`danger` leftmost, hidden — not disabled — when the state does not admit
+   it), navigation verbs (Expand, Open in tab) on the right. This is where a
+   lifecycle verb lives; it never floats between content sections.
+3. **Utility row** — copy/share verbs as a quiet text line, `text-[11px]
+text-(--text-faint)`, `JumpLink` idiom (hover → `--text`), no borders.
+   Anything here is also registered in ⌘K. Do not add a copy verb for a value
+   that `KV` already copies on click or that the breadcrumb already shows.
+
+Bordered buttons all carry equal visual weight, so five in a row is five
+things claiming priority; the row split is what expresses hierarchy without
+adding a fourth `Button` variant.
 
 #### Dialogs (modals) and side panels
 
