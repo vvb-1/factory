@@ -647,7 +647,7 @@ export function InjectDialog({
     if (errs.length === 0 || schemaAck) return false;
     const summary = errs.slice(0, 3).join("; ") + (errs.length > 3 ? ` (+${errs.length - 3} more)` : "");
     setClientError(
-      `payload does not validate against the "${type}" input schema: ${summary}. Intake will admit it, but planning will park it human_needed. Confirm inject to proceed.`,
+      `payload does not validate against the "${type}" input schema: ${summary}. Intake will admit it, but planning will park it human_needed. Inject anyway to proceed.`,
     );
     setSchemaAck(true);
     setConfirming(true);
@@ -1236,8 +1236,13 @@ export function InjectDialog({
             {confirming ? (
               <>
                 <Button onClick={() => setConfirming(false)}>Back</Button>
-                <Button variant="primary" onClick={submit} disabled={inject.isPending} autoFocus>
-                  Confirm inject
+                <Button
+                  variant={schemaAck ? "danger" : "primary"}
+                  onClick={submit}
+                  disabled={inject.isPending}
+                  autoFocus
+                >
+                  {schemaAck ? "Inject anyway" : "Confirm inject"}
                 </Button>
               </>
             ) : (

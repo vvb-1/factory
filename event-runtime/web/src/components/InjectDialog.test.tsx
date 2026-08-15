@@ -318,7 +318,9 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
         // Not submitted yet: warned and waiting on explicit acknowledgement.
         expect(sent.length).toBe(0);
         expect(r.getByText(/does not validate/i)).toBeTruthy();
-        const confirm = r.getByRole("button", { name: /confirm inject/i });
+        expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
+        expect(r.queryByRole("button", { name: /^confirm inject$/i })).toBeNull();
+        const confirm = r.getByRole("button", { name: /inject anyway/i });
         await act(async () => {
           fireEvent.click(confirm);
         });
@@ -505,7 +507,7 @@ describe("InjectDialog field errors wait until blur or submit (WM-78)", () => {
       });
       expect(r.getAllByText(/does not match pattern/i).length).toBeGreaterThan(0);
       expect(r.getByText(/does not validate/i)).toBeTruthy();
-      expect(r.getByRole("button", { name: /confirm inject/i })).toBeTruthy();
+      expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
     }));
 });
 
@@ -608,5 +610,33 @@ describe("InjectDialog humanized errors and hidden planner fields (WM-86)", () =
       expect(banner).toMatch(/repoPin/i);
       expect(banner).toMatch(/JSON tab/i);
       expect(banner).not.toMatch(/\^\[0-9a-f\]\{40\}/);
+    }));
+});
+
+describe("InjectDialog invalid-payload confirm is distinct (WM-85)", () => {
+  test("schema-invalid confirm is labeled Inject anyway, not Confirm inject", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /disk\.diagnose/i);
+      act(() => {
+        changeInput(r.getByLabelText("usedPct"), "150");
+      });
+      act(() => {
+        fireEvent.click(r.getByRole("button", { name: /inject/i }));
+      });
+      expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
+      expect(r.queryAllByRole("button", { name: /^confirm inject$/i })).toHaveLength(0);
+    }));
+
+  test("valid payload still confirms with Confirm inject", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /disk\.diagnose/i);
+      act(() => {
+        changeInput(r.getByLabelText("mount"), "/var");
+      });
+      act(() => {
+        fireEvent.click(r.getByRole("button", { name: /inject/i }));
+      });
+      expect(r.getByRole("button", { name: /^confirm inject$/i })).toBeTruthy();
+      expect(r.queryAllByRole("button", { name: /inject anyway/i })).toHaveLength(0);
     }));
 });
