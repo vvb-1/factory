@@ -4,7 +4,6 @@ import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard } from "../hooks";
 import type { RunState, TraceEntry, TracePayload } from "../types";
-import { isCancellable } from "./RunDetailBlocks";
 import { humanSize, JsonBlock, Section, notify } from "./ui";
 
 function copyText(text: string, label: string = "text") {
@@ -502,14 +501,11 @@ export function RunTrace({
   state,
   variant = "panel",
   onExpand,
-  onCancelShortcut,
 }: {
   runId: string;
   state: RunState;
   variant?: "panel" | "full";
   onExpand?: () => void;
-  /** Opens the parent's cancel confirm. Search `x` calls this instead of typing. */
-  onCancelShortcut?: () => void;
 }) {
   const full = variant === "full";
   const live = LIVE_STATES.includes(state);
@@ -684,16 +680,6 @@ export function RunTrace({
         return;
       }
     }
-    if (e.key !== "x" || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (!isCancellable(state)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (onCancelShortcut) {
-      onCancelShortcut();
-      return;
-    }
-    e.currentTarget.blur();
-    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true }));
   };
 
   // Single-key shortcuts for trace navigation: 1-5 for kind tabs, [ / ] to cycle,
