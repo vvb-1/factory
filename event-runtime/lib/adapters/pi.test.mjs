@@ -521,7 +521,19 @@ process.stdin.on("end", () => {
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
 
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+      usage: {
+        model: "openai-codex/gpt-5.6-terra",
+        inputTokens: 15,
+        outputTokens: 25,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        costUSD: 0.001,
+      },
+    });
 
     // 1. Workspace confinement: cwd is workspaceDir
     expect(existsSync(recordFile)).toBe(true);
@@ -666,7 +678,9 @@ process.stdin.on("end", () => {
       },
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.policyDenials).toEqual([]);
     expect(traceEvents.some((e) => e.kind === "tool_use" && e.payload.name === "read")).toBe(true);
     expect(traceEvents.some((e) => e.kind === "tool_result" && e.payload.content === "hello world")).toBe(true);
 
@@ -674,6 +688,35 @@ process.stdin.on("end", () => {
     expect(usageEvent.payload.numTurns).toBe(2);
     expect(usageEvent.payload.costUSD).toBeCloseTo(0.0007, 6);
     expect(usageEvent.payload.usage.input).toBe(150);
+  });
+
+  test("delivers normalized usage to onUsage callback and returns usage in outcome (WM-260)", async () => {
+    let receivedUsage = null;
+    const outcome = await execute({
+      spec: { ...defaultSpec, model: "openai-codex/gpt-5.6-terra" },
+      def: defaultDef,
+      workspaceDir: ws(),
+      timeoutMs: 5000,
+      env: {
+        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+        FACTORY_TEST_BEHAVIOR: "emit_tool_then_success",
+      },
+      onUsage: (usage) => {
+        receivedUsage = usage;
+      },
+    });
+
+    const expectedUsage = {
+      model: "openai-codex/gpt-5.6-terra",
+      inputTokens: 150,
+      outputTokens: 15,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      costUSD: 0.0007,
+    };
+
+    expect(receivedUsage).toEqual(expectedUsage);
+    expect(outcome.usage).toEqual(expectedUsage);
   });
 
   test("a tool_execution_end error that reads exactly like a permission denial is never classified as policy_denied (WM-127)", async () => {
