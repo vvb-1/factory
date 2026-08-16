@@ -521,6 +521,71 @@ describe("Events component harness: facet chips synchronization with FilterInput
     );
   });
 
+  test("replacing multiple Type facet tokens preserves the rest of the query", async () => {
+    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
+    const e2 = stubEvent("evt_2", "admitted", { type: "release.published", source: "github" });
+    const e3 = stubEvent("evt_3", "admitted", { type: "issue_comment.created", source: "gitlab" });
+
+    await withApi(
+      {
+        events: async () => ({ events: [e1, e2, e3] }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByRole, getByLabelText } = renderEvents({});
+        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
+        const filterInput = getByLabelText("Filter events") as HTMLInputElement;
+
+        act(() => {
+          changeInput(
+            filterInput,
+            "  type:pull_request.opened   source:github type:release.published",
+          );
+        });
+
+        const issueButton = Array.from(typeGroup.querySelectorAll("button")).find((button) =>
+          button.textContent?.includes("issue_comment.created"),
+        );
+        expect(issueButton).toBeTruthy();
+        fireEvent.click(issueButton!);
+
+        expect(filterInput.value).toBe("source:github type:issue_comment.created");
+      },
+    );
+  });
+
+  test("removing duplicate active Type facet tokens preserves the rest of the query", async () => {
+    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
+    const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created", source: "gitlab" });
+
+    await withApi(
+      {
+        events: async () => ({ events: [e1, e2] }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByRole, getByLabelText } = renderEvents({});
+        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
+        const filterInput = getByLabelText("Filter events") as HTMLInputElement;
+
+        act(() => {
+          changeInput(
+            filterInput,
+            "  type:pull_request.opened   source:github type:pull_request.opened",
+          );
+        });
+
+        const pullRequestButton = Array.from(typeGroup.querySelectorAll("button")).find((button) =>
+          button.textContent?.includes("pull_request.opened"),
+        );
+        expect(pullRequestButton?.getAttribute("aria-pressed")).toBe("true");
+        fireEvent.click(pullRequestButton!);
+
+        expect(filterInput.value).toBe("source:github");
+      },
+    );
+  });
+
   test("typing type:<val> or source:<val> in FilterInput updates facet chips active state", async () => {
     const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
     const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created", source: "gitlab" });
@@ -710,13 +775,12 @@ describe("Events copy chords and hints (WM-233)", () => {
       },
       async () => {
         const r = renderEvents({ focusEvent: { source: "github", eventId } });
-        await r.findByText("copy:");
+        const idBtn = await r.findByRole("button", { name: "Copy event id (c)" });
 
-        // Verify utility hint badges
-        const idBtn = r.getByRole("button", { name: "id" });
-        expect(idBtn.textContent).toContain("c");
-        const linkBtn = r.getByRole("button", { name: "link" });
-        expect(linkBtn.textContent).toContain("c l");
+        // Verify icon-action tooltips preserve shortcut discoverability.
+        expect(idBtn.getAttribute("title")).toBe("Copy event id · c");
+        const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
+        expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
 
         // 1. Press 'c' -> copies eventId
         fireEvent.keyDown(document.body, { key: "c" });

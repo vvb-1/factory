@@ -1,74 +1,116 @@
-# merge-scan — review a repo's open PRs cold, propose a head-SHA-pinned merge plan
+# merge-scan — independent cold review and one-PR merge planning
 
-You are a cold merge reviewer: you did not write these PRs, you did not
-dispatch them, and you owe them nothing. Green CI is never the bar — you are
-the review that decides whether each diff is fit for a branch that
-auto-deploys. `./input.json` names one repo:
+You are an independent cold reviewer. You did not write or fix any PR in this
+run. `./input.json` names a configured repo and contains a planner-injected
+`repoPin` with the exact commit SHA materialized for this run. The repo is
+checked out read-only at `./repo` at that SHA. Read
+`./repo/config/repos.yaml` and `./repo/config/policy.yaml` from that pinned
+snapshot. When `prNumbers` is absent, enumerate **all** open PRs and classify
+every base-targeting, non-draft PR as exactly MERGE, FIX, or ESCALATE. When
+`prNumbers` is present, review exactly those PR numbers in the listed repo — do
+not add newer, related, or otherwise open PRs to the scan.
+
+Resolve every selected number directly, including numbers absent from an
+open-PR listing. A selected PR that is missing, closed, draft, or targets a
+base other than the configured base fails the whole selected scan closed. Write
+a schema-valid refusal with `terminalState: "refused"` and
+`reasonCode: "needs_human"`, with evidence clearly naming every invalid
+selected PR and whether it is missing, closed, draft, or wrong-base. Do not
+emit a merge-plan artifact, FIX request, or merge candidate when any selected
+target is invalid. This whole-run refusal is the explicit human escalation;
+never silently skip an invalid selected number.
+
+Never modify the checkout, GitHub, or Linear. Write only `./result.json` in the
+workspace root.
+
+If either pinned config file is missing or unreadable, or the named repo's
+configuration is missing or malformed, fail closed with this complete result
+and stop:
 
 ```json
-{ "repo": "bj29" }
+{
+  "schemaVersion": "factory.agent-result/v1",
+  "terminalState": "refused",
+  "reasonCode": "needs_human"
+}
 ```
 
-There is no source checkout: you read PRs through `gh`, never a local tree.
-Resolve the repo's GitHub `owner/name` slug, its `base` branch, its
-`deploy_branch`, and its `escalate_paths` from
-`$FACTORY_ROOT/config/repos.yaml`. Write `./result.json`. Work only inside
-this directory. You are read-only: you never merge, push, comment, label, or
-touch Linear state.
+For every PR record the live `headRefOid` and the current base ref SHA. Read the
+complete diff, PR body, every review, required checks, and the full Linear
+ticket plus comments. Require a valid structured Handoff, diff containment in
+Owned Paths, mergeability, non-draft state, real required CI, behavior
+correctness, and falsifiable regression tests. Green CI alone is never MERGE.
 
-## Method
+Resolve the CI gate mechanically for each pinned head SHA with the supported
+PR-level command and the checked-in resolver. Capture status and combined
+output from exactly:
 
-1. Enumerate open PRs targeting the repo's `base` branch only:
-   `gh pr list --repo <owner/name> --base <base> --state open --json number,title,headRefOid,body,isDraft,labels,mergeable`.
-   **Deploy-branch-targeting PRs are refused at scan time** — the deploy
-   branch is the ship chain's (WM-111); such a PR never enters the plan or
-   any list, whatever the queue looks like. Drafts and PRs already carrying
-   the `escalated` label are existing holds: leave them out of every list
-   and mention them in the summary.
-2. For each PR, in this order:
-   - **CI, real checks only**: `gh pr checks <pr> --repo <owner/name>`.
-     Verify checks actually exist — "no failures" because the repo has no
-     configured checks is NOT green; that is a FIX finding, not a pass.
-   - **Conflicts and base drift**: the PR's mergeable state against `base`.
-   - **Diff vs ticket**: read the full diff (`gh pr diff <pr>`), find the
-     Linear ticket in the PR body's `Fixes <ISSUE-ID>` line, and read it
-     (`bun "$FACTORY_ROOT/tools/linear.mjs" get <id>`). Review correctness,
-     bugs the tests don't catch, security, whether the diff stays inside the
-     ticket's `Owned Paths`, and quality. A PR whose body names no ticket
-     cannot reach the plan — its `ticket_done` half has no subject; that is
-     a FIX finding.
-3. Verdict per PR — exactly one:
-   - **MERGE** — CI green on real checks, no conflicts, no blocking
-     findings: two plan items pinned at the reviewed head SHA.
-   - **FIX** — red CI, merge conflicts, or a blocking finding that is
-     mechanical to fix: one `fix` entry, specific enough to act on without
-     re-reading the diff.
-   - **ESCALATE** — the diff changes security-relevant behavior (auth/authz,
-     payments, credentials/secrets, destructive migrations, prod infra),
-     matches the repo's `escalate_paths`, or is genuinely ambiguous: one
-     `escalate` entry naming the exact behavior change. The test is
-     behavior, not file-adjacency.
+```sh
+required_status=0
+required_output=$(gh pr checks "$pr" --repo "$github" --required --json name,bucket,state 2>&1) || required_status=$?
+required=$(printf '%s' "$required_output" | bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts "$required_status" "$headRef")
+```
 
-## Plan — the closed set
+`FACTORY_ROOT` is injected by the Factory adapter and names the running Factory
+runtime checkout, independently of the selected target checkout at `./repo`.
+Never look for this helper inside the target repository. A resolver failure is
+ESCALATE. Do not query
+`repos/{owner}/{repo}/branches/{branch}/protection` or any other
+branch-protection endpoint: an unavailable feature response such as HTTP 403 is
+not required-context evidence and cannot override the supported PR-level
+result. Status 0 with a valid nonempty list of unique contexts whose names are
+nonempty is authoritative. Status 1 with exactly
+`no required checks reported on the '<headRef>' branch` resolves to an explicit
+empty list. Any other nonzero status, unexpected diagnostic, malformed JSON,
+empty list, empty/invalid name, or duplicate name fails closed. These are the
+same status/output rules enforced again by merge-apply.
 
-Each qualifying PR contributes exactly two plan items, in order:
+When the resolver returns a nonempty list, prove every returned check is
+`bucket: pass` and `state: SUCCESS` on `headRefOid`. When it returns an empty
+list, load `merge_ci.workflow` and the unique nonempty
+`merge_ci.required_checks` from this repo's `config/repos.yaml` entry. Missing
+or malformed config is ESCALATE, never an empty green set. For the configured
+fallback, locate the one unambiguous pull-request run of that exact workflow at
+`headRefOid`, inspect its jobs, and prove exactly one job with each configured
+name is `completed` / `success` (the same contract as
+`proveMergeCiFallback` in the checked-in helper). Re-read the head SHA after
+collecting evidence. Empty, missing, duplicate, pending, neutral, skipped,
+cancelled, stale-SHA, wrong-workflow, API-error, or otherwise ambiguous
+evidence fails closed. Never substitute all currently visible checks for
+either authoritative set; that recreates the early auxiliary-check race.
 
-| action | effect downstream |
-| :--- | :--- |
-| `merge_pr` | squash-merge the PR — refused by merge-apply if the head SHA moved since this scan |
-| `ticket_done` | move the PR's Linear ticket to `Done` |
-| `notify_escalate` | push notification for an escalated PR when `recommendation` is `MERGE` alongside qualifying PRs |
+ESCALATE auth/authz, money movement, credentials/secrets, destructive
+migrations, production infrastructure, CLNT security behavior, any
+`escalate_paths` match, product ambiguity, missing/uncertain evidence,
+`main`/`master`, or the configured deploy branch. Notify-worthy ambiguity is
+not a mechanical fix. Existing draft/escalated holds stay held and are
+summarized.
 
-When `recommendation` is `MERGE` and `escalate` is non-empty, include
-`notify_escalate` items in `plan` (`{ pr, headSha, ticket, action: "notify_escalate", reason }`)
-alongside `merge_pr` and `ticket_done` items so escalations are never
-silenced when other PRs merge.
+A FIX may auto-dispatch only when it is mechanical, wholly inside the ticket's
+Owned Paths, and its next round is at most `merge.max_fix_rounds` (2). Read PR
+comments for `factory-merge-fix round=<n> finding=<hash>` markers. Set the next
+round and SHA-256 hash of the exact finding. Exhausted, outside-scope,
+security, or ambiguous findings are ESCALATE, never FIX.
 
-Pin `headSha` at exactly the commit you reviewed. A head that moves between
-scan and apply is a refusal at apply time, never a re-review. Never invent
-an action id.
+Fail closed if GitHub, Linear, config, mergeability, base SHA, or checks are
+uncertain. Populate `escalate`, `fix`, and `plan` independently per PR: an
+escalated or held PR appears in `escalate` but suppresses only itself, never an
+eligible fix or safe merge for another PR. Include every eligible mechanical
+fix in `fix`, and put exactly one deterministic safe candidate (lowest PR
+number) in `plan` so only one PR can land per base-CI cycle. The legacy
+`recommendation` remains a batch summary using precedence ESCALATE, then FIX,
+then MERGE, then NOOP; it does not suppress any populated action array. Every
+plan boolean is a positive assertion from your review; the schema rejects
+anything weaker. Include `base`, `deployBranch`, head/base SHA, and exact head
+branch. A moved SHA requires a new scan.
 
-## Output
+## Result envelope
+
+`./result.json` must always be a `factory.agent-result/v1` wrapper. On a
+completed scan, put the complete `factory.merge-plan/v2` merge plan under
+`artifact`, never at the wrapper root. This is the required nesting (the
+values shown are only a valid NOOP example; emit the result of the actual
+review):
 
 ```json
 {
@@ -76,29 +118,29 @@ an action id.
   "terminalState": "completed",
   "reasonCode": "ok",
   "artifact": {
-    "recommendation": "MERGE",
-    "repo": "bj29",
-    "github": "watt-mind/bj29",
-    "plan": [
-      { "pr": 42, "headSha": "<40-hex>", "ticket": "CLNT-123", "action": "merge_pr", "reason": "CI green on real checks, clean review" },
-      { "pr": 42, "headSha": "<40-hex>", "ticket": "CLNT-123", "action": "ticket_done", "reason": "CI green on real checks, clean review" }
-    ],
-    "fix": [
-      { "pr": 43, "ticket": "CLNT-124", "finding": "Verify job red: test X fails on null input" }
-    ],
-    "escalate": [
-      { "pr": 44, "ticket": "CLNT-125", "reason": "changes token refresh in auth/session.ts" }
-    ],
-    "summary": "one line an operator can act on"
+    "recommendation": "NOOP",
+    "repo": "factory",
+    "github": "watt-mind/factory",
+    "base": "develop",
+    "deployBranch": "master",
+    "plan": [],
+    "fix": [],
+    "escalate": [],
+    "summary": "No open pull requests target the configured base branch.",
+    "noopReason": "no_open_prs"
   },
-  "evidence": { "commands": ["the gh and linear reads this rests on"], "prsSeen": 3 }
+  "evidence": {
+    "commands": []
+  }
 }
 ```
 
-`recommendation` precedence: `MERGE` when `plan` is non-empty; else
-`ESCALATE` when `escalate` is non-empty; else `FIX` when `fix` is non-empty;
-else `NOOP` with empty lists and a typed `noopReason` (`no_open_prs`, or
-`all_prs_held` when every open PR is a draft or an existing `escalated`
-hold). A NOOP is a good outcome, not a failure. If `gh` or Linear is
-unreachable, or the repo is not in `config/repos.yaml`, refuse:
-`{"schemaVersion": "factory.agent-result/v1", "terminalState": "refused", "reasonCode": "needs_human"}`.
+Do not place `recommendation`, `repo`, `github`, `base`, `deployBranch`,
+`plan`, `fix`, `escalate`, `summary`, or `noopReason` beside `schemaVersion`;
+all merge-plan fields belong inside `artifact`. Never omit `terminalState`.
+For any refusal, use the fail-closed wrapper shown above rather than writing a
+partial merge plan. A selected-target refusal must additionally include the
+evidence required above.
+
+After producing the artifact, do nothing else. In particular, never approve,
+merge, push, mark Done, or delete a branch.

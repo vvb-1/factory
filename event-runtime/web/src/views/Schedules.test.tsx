@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Schedules, scheduleFilterTokens, type ScheduleItem } from "./Schedules";
 import { api } from "../api";
 import { useContextActions } from "../palette";
+import { changeInput } from "../test-render";
 
 afterEach(() => {
   cleanup();
@@ -22,6 +23,7 @@ const noop = () => {};
 
 function schedule(overrides: Partial<ScheduleItem> & Pick<ScheduleItem, "loop">): ScheduleItem {
   return {
+    repo: null,
     every: "5m",
     cadenceSeconds: 300,
     eventType: "tick.test",
@@ -51,6 +53,7 @@ const rows: ScheduleItem[] = [
 const origFetch = globalThis.fetch;
 const origAgents = api.agents;
 const origEvents = api.events;
+const origTriggerSchedule = api.triggerSchedule;
 
 beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -71,6 +74,7 @@ afterEach(() => {
   globalThis.fetch = origFetch;
   api.agents = origAgents;
   api.events = origEvents;
+  api.triggerSchedule = origTriggerSchedule;
 });
 
 function scheduleViewProps(
@@ -333,13 +337,12 @@ describe("Schedules copy chords and hints (WM-233)", () => {
       focusScheduleLoop: "loop-enabled-running",
     });
 
-    await r.findByText("copy:");
+    const loopBtn = await r.findByRole("button", { name: "Copy schedule loop (c)" });
 
-    // Verify utility hint badges
-    const loopBtn = r.getByRole("button", { name: "loop" });
-    expect(loopBtn.textContent).toContain("c");
-    const linkBtn = r.getByRole("button", { name: "link" });
-    expect(linkBtn.textContent).toContain("c l");
+    // Verify icon-action tooltips preserve shortcut discoverability.
+    expect(loopBtn.getAttribute("title")).toBe("Copy schedule loop · c");
+    const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
+    expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
 
     // 1. Press 'c' -> copies loop
     fireEvent.keyDown(document.body, { key: "c" });
@@ -371,6 +374,109 @@ describe("Schedules action shortcut badge (WM-236)", () => {
     expect(badge).toBeTruthy();
     expect(badge!.textContent).toBe("r");
     expect(badge!.getAttribute("aria-hidden")).toBe("true");
+  });
+});
+
+describe("Schedules manual merge targeting (WM-426)", () => {
+  const mergeSchedule = schedule({
+    loop: "merge-factory",
+    eventType: "factory.merge.requested",
+    approval: "auto",
+    repo: "factory",
+  });
+
+  function serveMergeSchedule() {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith("/api/schedules")) {
+        return new Response(JSON.stringify({ schedules: [mergeSchedule] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return origFetch(input, init);
+    }) as typeof fetch;
+  }
+
+  test("submits explicit PR numbers from the merge confirmation", async () => {
+    serveMergeSchedule();
+    const calls: Array<{ loop: string; prNumbers?: number[] }> = [];
+    api.triggerSchedule = async (loop, prNumbers) => {
+      calls.push({ loop, prNumbers });
+      return {
+        admitted: true,
+        duplicate: false,
+        eventId: "manual:merge-factory:test",
+        proposalId: null,
+        runId: "run-test",
+        decision: "run",
+        reason: null,
+        disabled: false,
+        loop,
+      };
+    };
+
+    const view = renderWithClient(
+      <StatefulSchedules connected={true} initialLoop="merge-factory" />,
+    );
+    await waitFor(() => expect(view.getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    fireEvent.click(view.getAllByRole("button", { name: "Run now…" })[0]!);
+
+    const input = await view.findByRole("textbox", { name: "PR numbers (optional)" });
+    expect(view.getByText(/Leave blank to review all open PRs in factory/)).toBeTruthy();
+    expect(view.getByText("Autonomous merge automation")).toBeTruthy();
+    expect(view.getByText(/mutating downstream automation without another confirmation/)).toBeTruthy();
+    expect(input.getAttribute("aria-describedby")).toBe("schedule-pr-numbers-help");
+    act(() => changeInput(input, "411, 426"));
+    fireEvent.click(view.getByRole("button", { name: "Trigger Run" }));
+
+    await waitFor(() => expect(calls).toEqual([{ loop: "merge-factory", prNumbers: [411, 426] }]));
+  });
+
+  test("invalid merge selection exposes an input-associated error", async () => {
+    serveMergeSchedule();
+    const view = renderWithClient(
+      <StatefulSchedules connected={true} initialLoop="merge-factory" />,
+    );
+    await waitFor(() => expect(view.getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    fireEvent.click(view.getAllByRole("button", { name: "Run now…" })[0]!);
+    const input = await view.findByRole("textbox", { name: "PR numbers (optional)" });
+    act(() => changeInput(input, "426, 426"));
+    fireEvent.click(view.getByRole("button", { name: "Trigger Run" }));
+
+    const error = await view.findByRole("alert");
+    expect(error.textContent).toContain("only once");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toContain(error.id);
+  });
+
+  test("blank merge selection submits no override and means all open PRs", async () => {
+    serveMergeSchedule();
+    const calls: Array<{ loop: string; prNumbers?: number[] }> = [];
+    api.triggerSchedule = async (loop, prNumbers) => {
+      calls.push({ loop, prNumbers });
+      return {
+        admitted: true,
+        duplicate: false,
+        eventId: "manual:merge-factory:all",
+        proposalId: null,
+        runId: "run-all",
+        decision: "run",
+        reason: null,
+        disabled: false,
+        loop,
+      };
+    };
+
+    const view = renderWithClient(
+      <StatefulSchedules connected={true} initialLoop="merge-factory" />,
+    );
+    await waitFor(() => expect(view.getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    fireEvent.click(view.getAllByRole("button", { name: "Run now…" })[0]!);
+    await view.findByRole("textbox", { name: "PR numbers (optional)" });
+    fireEvent.click(view.getByRole("button", { name: "Trigger Run" }));
+
+    await waitFor(() => expect(calls).toEqual([{ loop: "merge-factory", prNumbers: undefined }]));
   });
 });
 

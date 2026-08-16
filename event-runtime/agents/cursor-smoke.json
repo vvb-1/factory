@@ -1,0 +1,27 @@
+{
+  "id": "cursor-smoke",
+  "version": 1,
+  "prompt": "agents/cursor-smoke.md",
+  "input_schema": "schemas/cursor-smoke.input.json",
+  "output_schema": "schemas/cursor-smoke.output.json",
+  "output_contract": "factory.cursor-smoke/v1",
+  "model_tier": "light",
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": []
+  },
+  "limits": {
+    "timeout_seconds": 120,
+    "attempts": 1
+  },
+  "mutating": false,
+  "pins": {
+    "agents/cursor-smoke.md": "sha256:e5bab010bf6286de88bf9d54334569955d4fcd9fb60574970e9e442f0a6b9424",
+    "schemas/cursor-smoke.input.json": "sha256:d15fc6c2c98f1ba5cffbee88c399d5854a9c0a4f10b7ad696c051d4d82499e95",
+    "schemas/cursor-smoke.output.json": "sha256:766f8f600e1324d59ae5947a605394fa519f576d38d267d243c1c852a8fae60f"
+  }
+}

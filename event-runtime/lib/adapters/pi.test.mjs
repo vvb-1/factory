@@ -2,6 +2,7 @@ import { describe, expect, test, afterAll, afterEach } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { FACTORY_ROOT } from "../config.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV as CLAUDE_PUSH_CREDENTIAL_ENV } from "./claude.mjs";
 import {
   buildPiArgv,
@@ -13,6 +14,7 @@ import {
   mapStreamEvent,
   PUSH_CREDENTIAL_ENV,
   MUTATING_TOOLS,
+  piExtensions,
   piTools,
   READ_ONLY_TOOLS,
   resolvePiCommand,
@@ -179,6 +181,33 @@ describe("buildPiArgv", () => {
     expect(piTools(undefined)).toEqual(MUTATING_TOOLS);
   });
 
+  test("declared extensions are loaded per run with repeatable -e flags (WM-335)", () => {
+    const argv = buildPiArgv({
+      def: {
+        mutating: false,
+        extensions: ["npm:@narumitw/pi-chrome-devtools", "./local-extension.ts"],
+      },
+      model: null,
+    });
+    expect(argv).toEqual([
+      "-p", "--mode", "json",
+      "-e", "npm:@narumitw/pi-chrome-devtools",
+      "-e", "./local-extension.ts",
+      "--tools", READ_ONLY_TOOLS.join(","),
+    ]);
+  });
+
+  test("extensions are scoped to definitions that declare them and deduplicated", () => {
+    expect(piExtensions(undefined)).toEqual([]);
+    expect(piExtensions({})).toEqual([]);
+    expect(piExtensions({ extensions: "npm:@narumitw/pi-chrome-devtools" })).toEqual([]);
+    expect(piExtensions({ extensions: ["", "  ", "npm:a", "npm:a", "npm:b"] })).toEqual([
+      "npm:a",
+      "npm:b",
+    ]);
+    expect(buildPiArgv({ def: { mutating: false }, model: null })).not.toContain("-e");
+  });
+
   test("planner-pinned model → --model verbatim; default sentinel, null, or absent → no flag (WM-135)", () => {
     const withModel = buildPiArgv({ def: { mutating: false }, model: "openai-codex/gpt-5.6-terra" });
     const i = withModel.indexOf("--model");
@@ -296,6 +325,14 @@ describe("safeChildEnvironment", () => {
     expect(safeChildEnvironment({}, true).SSH_AUTH_SOCK).toBe("/tmp/inherited.sock");
   });
 
+  test("injects the stable Factory runtime path and refuses caller overrides (WM-433)", () => {
+    expect(safeChildEnvironment({}).FACTORY_ROOT).toBe(FACTORY_ROOT);
+    expect(
+      safeChildEnvironment({ FACTORY_ROOT: "/tmp/untrusted-target" })
+        .FACTORY_ROOT,
+    ).toBe(FACTORY_ROOT);
+  });
+
   test("shares one push-credential list with the claude adapter (no drift)", () => {
     expect(PUSH_CREDENTIAL_ENV).toBe(CLAUDE_PUSH_CREDENTIAL_ENV);
   });
@@ -349,6 +386,15 @@ process.stdin.on("end", () => {
 
   if (behavior === "ignore_sigterm") {
     process.on("SIGTERM", () => {});
+    setInterval(() => {}, 10_000);
+  }
+
+  if (behavior === "spawn_long_lived_grandchild") {
+    const grandchild = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 10_000)"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    writeFileSync(process.env.FACTORY_TEST_GRANDCHILD_PID_FILE, String(grandchild.pid), "utf8");
     setInterval(() => {}, 10_000);
   }
 
@@ -419,6 +465,41 @@ process.stdin.on("end", () => {
     agent: "test-pi-agent@1",
     input: { repos: ["bj29"] },
   };
+  const testProcessGroup = process.platform === "win32" ? test.skip : test;
+
+  async function waitForGrandchildPid(pidFile) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (existsSync(pidFile)) return Number(readFileSync(pidFile, "utf8"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("stub did not report its grandchild PID");
+  }
+
+  function processExists(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return error?.code !== "ESRCH";
+    }
+  }
+
+  async function expectProcessExit(pid) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (!processExists(pid)) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(processExists(pid)).toBe(false);
+  }
+
+  function killIfRunning(pid) {
+    if (!pid || !processExists(pid)) return;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process exited between the existence check and cleanup.
+    }
+  }
 
   test("executes stub binary in workspaceDir, strips API keys, pipes prompt on stdin, captures transcript + trace", async () => {
     const workspaceDir = ws();
@@ -492,20 +573,37 @@ process.stdin.on("end", () => {
     expect(outcome.timedOut).toBe(false);
   });
 
-  test("timeout sends SIGTERM and returns timedOut: true", async () => {
-    const outcome = await execute({
+  testProcessGroup("timeout kills a real long-lived grandchild (WM-263)", async () => {
+    const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
+    const ac = new AbortController();
+    const runPromise = execute({
       spec: defaultSpec,
       def: defaultDef,
-      workspaceDir: ws(),
-      timeoutMs: 150,
+      workspaceDir,
+      timeoutMs: 6_000,
       killGraceMs: 5000,
+      abortSignal: ac.signal,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "sleep_sigterm",
+        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
       },
     });
-    expect(outcome.timedOut).toBe(true);
-  });
+    let grandchildPid;
+
+    try {
+      grandchildPid = await waitForGrandchildPid(pidFile);
+      expect(processExists(grandchildPid)).toBe(true);
+      const outcome = await runPromise;
+      expect(outcome.timedOut).toBe(true);
+      await expectProcessExit(grandchildPid);
+    } finally {
+      ac.abort();
+      await runPromise;
+      killIfRunning(grandchildPid);
+    }
+  }, { timeout: 12_000 });
 
   test("timeout escalates to SIGKILL when child ignores SIGTERM", async () => {
     const outcome = await execute({
@@ -522,23 +620,37 @@ process.stdin.on("end", () => {
     expect(outcome.timedOut).toBe(true);
   });
 
-  test("abortSignal terminates child process promptly with timedOut: false", async () => {
+  testProcessGroup("abort kills a real long-lived grandchild (WM-263)", async () => {
+    const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
     const ac = new AbortController();
     const runPromise = execute({
       spec: defaultSpec,
       def: defaultDef,
-      workspaceDir: ws(),
+      workspaceDir,
       timeoutMs: 10_000,
       killGraceMs: 500,
       abortSignal: ac.signal,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "sleep_sigterm",
+        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
       },
     });
-    setTimeout(() => ac.abort(), 100);
-    const outcome = await runPromise;
-    expect(outcome.timedOut).toBe(false);
+    let grandchildPid;
+
+    try {
+      grandchildPid = await waitForGrandchildPid(pidFile);
+      expect(processExists(grandchildPid)).toBe(true);
+      ac.abort();
+      const outcome = await runPromise;
+      expect(outcome.timedOut).toBe(false);
+      await expectProcessExit(grandchildPid);
+    } finally {
+      ac.abort();
+      await runPromise;
+      killIfRunning(grandchildPid);
+    }
   });
 
   test("multiple assistant turns accumulate into one combined usage trace event", async () => {

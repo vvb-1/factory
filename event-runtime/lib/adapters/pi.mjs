@@ -41,6 +41,7 @@ import { spawn } from "node:child_process";
 import { createWriteStream, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { FACTORY_ROOT } from "../config.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
 
 // PUSH_CREDENTIAL_ENV is imported, not redeclared: the WM-128 carve-out is one
@@ -48,6 +49,21 @@ import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
 export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
 
 export const KILL_GRACE_MS = 30_000;
+
+/** Terminate a detached CLI and every subprocess it started (WM-263). */
+export function killProcessGroup(child, signal = "SIGTERM", kill = process.kill) {
+  const pid = child?.pid;
+  if (!pid) return;
+  try {
+    kill(-pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // already terminated
+    }
+  }
+}
 
 /** Trace events preview text; the recorder's byte bound is the real limit. */
 const TEXT_PREVIEW_CHARS = 4000;
@@ -126,6 +142,10 @@ export function buildPiArgv({ def, model }) {
   if (typeof model === "string" && model !== "" && model !== "default") {
     args.push("--model", model);
   }
+  // Extensions are definition-scoped and loaded explicitly for this process.
+  // Never `pi install` here: that writes global settings and would expose an
+  // extension's tools to unrelated agents (WM-335).
+  for (const extension of piExtensions(def)) args.push("-e", extension);
   // Always allowlist (WM-336). Omitting `--tools` does not mean "no tools", it
   // means "every tool pi currently ships" — a set that grows without review.
   args.push("--tools", piTools(def).join(","));
@@ -146,6 +166,19 @@ export function piTools(def) {
   const base = def?.mutating === false ? READ_ONLY_TOOLS : MUTATING_TOOLS;
   const extra = Array.isArray(def?.tools) ? def.tools : [];
   return [...new Set([...base, ...extra])];
+}
+
+/** Repeatable `-e` sources declared by this definition, normalized for argv. */
+export function piExtensions(def) {
+  if (!Array.isArray(def?.extensions)) return [];
+  return [
+    ...new Set(
+      def.extensions
+        .filter((extension) => typeof extension === "string")
+        .map((extension) => extension.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 export const BASE_INHERITED_ENV = [
@@ -178,6 +211,11 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
   const inherited = isMutating ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV] : BASE_INHERITED_ENV;
   const childEnv = Object.fromEntries(inherited.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   Object.assign(childEnv, env);
+  // Read-only repository workspaces contain the selected target checkout, not
+  // Factory's runtime support code. Expose the running Factory checkout through
+  // one adapter-owned, non-overridable path so pinned agent procedures can call
+  // shared helpers without assuming the target repo is Factory (WM-433).
+  childEnv.FACTORY_ROOT = FACTORY_ROOT;
   // Subscription auth (Codex/ChatGPT OAuth) is the point of routing through
   // pi at all — an inherited key would silently switch a run to per-token
   // billing (same rationale as run-agent.sh's UNSET_KEYS, all providers pi
@@ -316,6 +354,7 @@ export async function execute({
       cwd: workspaceDir,
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     child.stdin.on("error", () => {}); // a child that exits before reading stdin must not crash the worker
@@ -379,15 +418,15 @@ export async function execute({
     let killTimer = null;
     const termTimer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+      killProcessGroup(child, "SIGTERM");
+      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
       killTimer.unref?.();
     }, timeoutMs);
 
     const onAbort = () => {
-      child.kill("SIGTERM");
+      killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
         killTimer.unref?.();
       }
     };

@@ -12,7 +12,7 @@ const COMMON = path.resolve(import.meta.dir, "worktree-common.sh");
 // fixtures bind is free, and pass the band to the scripts via
 // FACTORY_PORT_BASE / FACTORY_PORT_SPAN. No absolute ports below.
 const PORT_SPAN = 200;
-const FIXTURE_OFFSETS = [352, 360, 362, 364, 366, 372, 374, 396];
+const FIXTURE_OFFSETS = [352, 353, 360, 361, 362, 363, 364, 365, 366, 367, 372, 373, 374, 375, 396, 397];
 
 function offsetsBindable(base) {
   for (const off of FIXTURE_OFFSETS) {
@@ -104,6 +104,123 @@ test("write_ports / read_ports round-trip", () => {
     expect(written.status).toBe(0);
     expect(written.stdout.trim()).toBe(`${P(352)} ${P(353)}`);
   } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("resolve_worktree_ports reuses free recorded ports for --here", () => {
+  const wt = mkdtempSync(path.join(tmpdir(), "wm-176-recorded-"));
+  try {
+    const r = sh([
+      `write_ports "${wt}" ${P(352)} ${P(353)}`,
+      `resolve_worktree_ports "${wt}" ${P(360)} "${wt}/.factory/event-runtime"`,
+      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+      `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
+    ].join("\n"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`resolved=${P(352)} ${P(353)}`);
+    expect(r.stdout).toContain(`recorded=${P(352)} ${P(353)}`);
+  } finally {
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("resolve_worktree_ports falls back when the preferred --here port is occupied", async () => {
+  const wt = mkdtempSync(path.join(tmpdir(), "wm-176-collision-"));
+  const preferred = P(360);
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: preferred,
+    fetch(req) {
+      if (new URL(req.url).pathname === "/health") {
+        return Response.json({ ok: true, env: { home: "/other/checkout/.factory/event-runtime" } });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  try {
+    const r = await shAsync([
+      `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
+      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+      `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
+    ].join("\n"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`resolved=${P(362)} ${P(363)}`);
+    expect(r.stdout).toContain(`recorded=${P(362)} ${P(363)}`);
+  } finally {
+    server.stop(true);
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("resolve_worktree_ports skips a preferred pair whose web port is occupied", async () => {
+  const wt = mkdtempSync(path.join(tmpdir(), "wm-176-web-collision-"));
+  const preferred = P(360);
+  const listener = Bun.listen({
+    hostname: "127.0.0.1",
+    port: P(361),
+    socket: { data() {} },
+  });
+  try {
+    const r = await shAsync([
+      `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
+      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+    ].join("\n"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`resolved=${P(362)} ${P(363)}`);
+  } finally {
+    listener.stop(true);
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("resolve_worktree_ports replaces recorded ports when the web port is occupied", async () => {
+  const wt = mkdtempSync(path.join(tmpdir(), "wm-176-recorded-web-collision-"));
+  const listener = Bun.listen({
+    hostname: "127.0.0.1",
+    port: P(365),
+    socket: { data() {} },
+  });
+  try {
+    const r = await shAsync([
+      `write_ports "${wt}" ${P(364)} ${P(365)}`,
+      `resolve_worktree_ports "${wt}" ${P(372)} "${wt}/.factory/event-runtime"`,
+      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+      `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
+    ].join("\n"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`resolved=${P(372)} ${P(373)}`);
+    expect(r.stdout).toContain(`recorded=${P(372)} ${P(373)}`);
+  } finally {
+    listener.stop(true);
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("resolve_worktree_ports reuses recorded ports owned by this checkout", async () => {
+  const wt = mkdtempSync(path.join(tmpdir(), "wm-176-owned-"));
+  const home = `${wt}/.factory/event-runtime`;
+  const api = P(374);
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: api,
+    fetch(req) {
+      if (new URL(req.url).pathname === "/health") {
+        return Response.json({ ok: true, env: { home } });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  try {
+    const r = await shAsync([
+      `write_ports "${wt}" ${api} ${P(375)}`,
+      `resolve_worktree_ports "${wt}" ${P(360)} "${home}"`,
+      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+    ].join("\n"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`resolved=${api} ${P(375)}`);
+  } finally {
+    server.stop(true);
     rmSync(wt, { recursive: true, force: true });
   }
 });
@@ -226,6 +343,39 @@ test("allocate_api_port reuses port when /health reports matching expected home"
     expect(r.stdout.trim()).toBe(String(P(374)));
   } finally {
     server.stop(true);
+  }
+});
+
+test("daemon health reads the recorded API/web pair", async () => {
+  const wt = mkdtempSync(path.join(tmpdir(), "wm-176-daemon-ports-"));
+  const home = `${wt}/.factory/event-runtime`;
+  const runDir = path.join(wt, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+  for (const daemon of ["serve", "worker", "web"]) {
+    writeFileSync(path.join(runDir, `${daemon}.pid`), String(process.pid));
+  }
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: P(396),
+    fetch(req) {
+      if (new URL(req.url).pathname === "/health") {
+        return Response.json({ ok: true, env: { home } });
+      }
+      return new Response("not found", { status: 404 });
+    },
+  });
+  try {
+    const r = await shAsync([
+      `write_ports "${wt}" ${P(396)} ${P(397)}`,
+      `check_daemon_health "${wt}"`,
+    ].join("\n"));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`serve:   running (pid ${process.pid}, port ${P(396)})`);
+    expect(r.stdout).toContain(`web:     running (pid ${process.pid}, port ${P(397)})`);
+    expect(r.stdout).toContain("anomalies: none");
+  } finally {
+    server.stop(true);
+    rmSync(wt, { recursive: true, force: true });
   }
 });
 

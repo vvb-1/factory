@@ -18,6 +18,7 @@ import type { AgentDef, AgentEventRoute } from "../types";
 import type { OperatorContext } from "../context";
 import {
   Button,
+  CopyActions,
   DetailPane,
   Disclosure,
   FilterInput,
@@ -314,9 +315,9 @@ export function Agents({
                   aria-selected={a.ref === selectedRef}
                   className={`cursor-pointer hover:bg-(--surface-1) ${a.ref === selectedRef ? "row-selected" : ""}`}
                 >
-                  <td className="mono border-b border-(--border) px-3 py-1.5">{a.ref}</td>
+                  <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap">{a.ref}</td>
                   {show.has("contract") && (
-                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim)">{a.outputContract}</td>
+                    <td className="border-b border-(--border) px-3 py-1.5 text-(--text-dim) whitespace-nowrap">{a.outputContract}</td>
                   )}
                   {show.has("adapter") && (
                     <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
@@ -338,31 +339,31 @@ export function Agents({
                   )}
                   {show.has("model") && (
                     <td
-                      className="mono max-w-56 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)"
+                      className="mono max-w-56 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim) whitespace-nowrap"
                       title={modelText(a)}
                     >
                       {modelText(a)}
                     </td>
                   )}
                   {show.has("mutating") && (
-                    <td className="border-b border-(--border) px-3 py-1.5">
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
                       <span style={{ color: a.mutating ? "var(--hue-err)" : "var(--text-faint)" }}>
                         {a.mutating ? "mutating" : "read-only"}
                       </span>
                     </td>
                   )}
                   {show.has("capabilities") && (
-                    <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)">
+                    <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim) whitespace-nowrap">
                       {caps(a)}
                     </td>
                   )}
                   {show.has("timeout") && (
-                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim) whitespace-nowrap">
                       {a.limits.timeout_seconds != null ? `${a.limits.timeout_seconds}s` : "-"}
                     </td>
                   )}
                   {show.has("attempts") && (
-                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim) whitespace-nowrap">
                       {a.limits.attempts ?? "-"}
                     </td>
                   )}
@@ -435,29 +436,12 @@ export function Agents({
         <DetailPane
           widthClass="w-[520px]"
           title={
-            <span className="mono" title={sel.ref}>
-              {sel.ref}
-            </span>
-          }
-          utility={
-            <>
-              <span>copy:</span>
-              <button
-                type="button"
-                onClick={() => copyText(sel.ref, "agent ref")}
-                className="cursor-pointer hover:text-(--text)"
-              >
-                ref <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c</span>
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={copyLink}
-                className="cursor-pointer hover:text-(--text)"
-              >
-                link <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c l</span>
-              </button>
-            </>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="mono truncate" title={sel.ref}>
+                {sel.ref}
+              </span>
+              <CopyActions id={sel.ref} idLabel="agent ref" />
+            </div>
           }
           close={<Button onClick={() => onSelectAgent(null)}>Close</Button>}
         >

@@ -16,8 +16,9 @@ import {
 import { DisplayOptions } from "../components/DisplayOptions";
 import { CustomCell } from "../components/CustomCell";
 import { setContextActions } from "../palette";
-import type { Worker, WorkerCapacity } from "../types";
+import type { RunListItem, Worker, WorkerCapacity } from "../types";
 import type { OperatorContext } from "../context";
+import { pinnedModelText } from "../components/RunDetailBlocks";
 import {
   dur,
   heartbeatHue,
@@ -30,6 +31,7 @@ import { ScopeCaption } from "../components/ContextTabs";
 import {
   Ago,
   Button,
+  CopyActions,
   DetailPane,
   FilterInput,
   JsonBlock,
@@ -131,9 +133,9 @@ export function fleetBanner(rows: Worker[]): FleetBanner | null {
 }
 
 /** Split the registry into live and stopped, preserving order within each group. */
-export function partitionWorkers(rows: Worker[]): { live: Worker[]; stopped: Worker[] } {
-  const live: Worker[] = [];
-  const stopped: Worker[] = [];
+export function partitionWorkers<T extends Worker>(rows: T[]): { live: T[]; stopped: T[] } {
+  const live: T[] = [];
+  const stopped: T[] = [];
   for (const w of rows) (isLive(w) ? live : stopped).push(w);
   return { live, stopped };
 }
@@ -146,8 +148,34 @@ export function partitionWorkers(rows: Worker[]): { live: Worker[]; stopped: Wor
 export const defaultWorkerTab = (rows: Worker[]): WorkerTab =>
   rows.some(isLive) ? "LIVE" : "ALL";
 
-/** Grouping/ordering/columns for the fleet table (OPS-493). */
-const WORKERS_DISPLAY: DisplayConfig<Worker> = {
+export interface EnrichedWorker extends Worker {
+  activeAgent: string;
+  activeTarget: string;
+  activeModel: string;
+  runItem: RunListItem | null;
+}
+
+export function enrichWorker(w: Worker, runMap: Map<string, RunListItem>): EnrichedWorker {
+  const r = w.currentRun ? (runMap.get(w.currentRun) ?? null) : null;
+  const activeAgent = r?.agent ?? "-";
+  const repos = r?.repos?.length ? r.repos.join(", ") : "";
+  const ticketMatch = r?.eventId?.match(/\b([A-Z]{2,10}-\d+|PR-\d+)\b/)?.[0] ?? "";
+  const activeTarget =
+    repos && ticketMatch && !repos.includes(ticketMatch)
+      ? `${repos} · ${ticketMatch}`
+      : repos || ticketMatch || (r?.eventId ? shortId(r.eventId) : "-");
+  const activeModel = r ? pinnedModelText(r.adapter, r.model) : "-";
+  return {
+    ...w,
+    activeAgent,
+    activeTarget,
+    activeModel,
+    runItem: r,
+  };
+}
+
+/** Grouping/ordering/columns for the fleet table (OPS-493, WM-463). */
+const WORKERS_DISPLAY: DisplayConfig<EnrichedWorker> = {
   view: "workers",
   groups: [
     {
@@ -157,14 +185,18 @@ const WORKERS_DISPLAY: DisplayConfig<Worker> = {
       order: ["busy", "draining", "idle", "stale", "stopped"],
       hue: WORKER_STATE_HUES,
     },
+    { key: "agent", label: "Agent", get: (w) => w.activeAgent },
     { key: "host", label: "Host", get: (w) => w.host },
   ],
-  subGroups: ["host", "state"],
+  subGroups: ["agent", "host", "state"],
   sorts: [
     { key: "worker", label: "Worker", get: (w) => w.workerId, column: "worker" },
     { key: "host", label: "Host", get: (w) => w.host, column: "host" },
     { key: "pid", label: "PID", get: (w) => w.pid, column: "pid" },
     { key: "state", label: "State", get: workerDisplayState, column: "state" },
+    { key: "agent", label: "Agent", get: (w) => w.activeAgent, column: "agent" },
+    { key: "target", label: "Target", get: (w) => w.activeTarget, column: "target" },
+    { key: "activeModel", label: "Active Model", get: (w) => w.activeModel, column: "activeModel" },
     { key: "labels", label: "Labels", get: (w) => labelText(w.labels), column: "labels" },
     { key: "adapters", label: "Adapters", get: (w) => w.adapters.join(", "), column: "adapters" },
     { key: "run", label: "Current run", get: (w) => w.currentRun ?? "", column: "run" },
@@ -176,9 +208,12 @@ const WORKERS_DISPLAY: DisplayConfig<Worker> = {
     { key: "host", label: "Host" },
     { key: "pid", label: "PID" },
     { key: "state", label: "State" },
-    { key: "labels", label: "Labels" },
-    { key: "adapters", label: "Adapters" },
+    { key: "agent", label: "Agent" },
+    { key: "target", label: "Target" },
+    { key: "activeModel", label: "Active Model" },
     { key: "run", label: "Current run" },
+    { key: "adapters", label: "Adapters" },
+    { key: "labels", label: "Labels" },
     { key: "uptime", label: "Uptime" },
     { key: "heartbeat", label: "Heartbeat" },
   ],
@@ -384,11 +419,16 @@ export function Workers({
 }) {
   const now = useNow();
   const query = useQuery({ queryKey: ["workers"], queryFn: api.workers, refetchInterval: 2000 });
+  const runsQuery = useQuery({ queryKey: ["runs"], queryFn: () => api.runs(), refetchInterval: 2000 });
+  const runs = runsQuery.data?.runs ?? [];
+  const runMap = useMemo(() => new Map<string, RunListItem>(runs.map((r) => [r.runId, r])), [runs]);
+
   // GET /workers gained capacity without changing the legacy client method's
   // minimum response contract; older servers simply exercise the fallback.
   const response = query.data as ({ workers: Worker[]; capacity?: WorkerCapacity } | undefined);
-  const rows = response?.workers ?? [];
-  const capacity = response?.capacity ?? capacityFromWorkers(rows);
+  const rawRows = response?.workers ?? [];
+  const rows = useMemo(() => rawRows.map((w) => enrichWorker(w, runMap)), [rawRows, runMap]);
+  const capacity = response?.capacity ?? capacityFromWorkers(rawRows);
 
   const parts = useMemo(() => partitionWorkers(rows), [rows]);
   const banner = useMemo(() => fleetBanner(rows), [rows]);
@@ -446,7 +486,18 @@ export function Workers({
     const q = filter.trim().toLowerCase();
     if (!q) return byHealth;
     return byHealth.filter((w) =>
-      [w.workerId, w.host, String(w.pid), workerDisplayState(w), labelText(w.labels), w.adapters.join(","), w.currentRun].some(
+      [
+        w.workerId,
+        w.host,
+        String(w.pid),
+        workerDisplayState(w),
+        labelText(w.labels),
+        w.adapters.join(","),
+        w.currentRun,
+        w.activeAgent,
+        w.activeTarget,
+        w.activeModel,
+      ].some(
         (v) => (v ?? "").toLowerCase().includes(q),
       ),
     );
@@ -648,7 +699,7 @@ export function Workers({
           </thead>
           <tbody>
             {(() => {
-              const renderRow = (w: Worker) => (
+              const renderRow = (w: EnrichedWorker) => (
                 <tr
                   key={w.workerId}
                   onClick={() => onSelectWorker(w.workerId)}
@@ -683,9 +734,59 @@ export function Workers({
                       </span>
                     </td>
                   )}
-                  {show.has("labels") && (
-                    <td className="max-w-48 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)" title={labelText(w.labels)}>
-                      {labelText(w.labels)}
+                  {show.has("agent") && (
+                    <td
+                      className="max-w-36 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)"
+                      title={w.activeAgent !== "-" ? w.activeAgent : undefined}
+                    >
+                      {w.activeAgent !== "-" ? (
+                        <span className="mono font-medium text-(--text)">{w.activeAgent}</span>
+                      ) : (
+                        <span className="text-(--text-faint)">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show.has("target") && (
+                    <td
+                      className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)"
+                      title={w.activeTarget !== "-" ? w.activeTarget : undefined}
+                    >
+                      {w.activeTarget !== "-" ? (
+                        <span>{w.activeTarget}</span>
+                      ) : (
+                        <span className="text-(--text-faint)">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show.has("activeModel") && (
+                    <td
+                      className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)"
+                      title={w.activeModel !== "-" ? w.activeModel : undefined}
+                    >
+                      {w.activeModel !== "-" ? (
+                        <span>{w.activeModel}</span>
+                      ) : (
+                        <span className="text-(--text-faint)">-</span>
+                      )}
+                    </td>
+                  )}
+                  {show.has("run") && (
+                    <td className="mono max-w-56 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
+                      {w.currentRun ? (
+                        <div className="flex items-baseline gap-1.5 truncate">
+                          {w.runItem?.agent && (
+                            <span className="truncate text-(--text-dim) text-[11px]" title={`Agent: ${w.runItem.agent}`}>
+                              {w.runItem.agent}
+                            </span>
+                          )}
+                          {w.runItem?.agent && <span className="text-(--text-faint)">·</span>}
+                          <JumpLink onClick={() => openRun(w.currentRun!)} title={`Open ${w.currentRun}`}>
+                            {shortId(w.currentRun)}
+                          </JumpLink>
+                        </div>
+                      ) : (
+                        "-"
+                      )}
                     </td>
                   )}
                   {show.has("adapters") && (
@@ -696,15 +797,9 @@ export function Workers({
                       {w.adapters.join(", ") || "-"}
                     </td>
                   )}
-                  {show.has("run") && (
-                    <td className="mono max-w-52 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                      {w.currentRun ? (
-                        <JumpLink onClick={() => openRun(w.currentRun!)} title={`Open ${w.currentRun}`}>
-                          {shortId(w.currentRun)}
-                        </JumpLink>
-                      ) : (
-                        "-"
-                      )}
+                  {show.has("labels") && (
+                    <td className="max-w-48 truncate border-b border-(--border) px-3 py-1.5 text-(--text-dim)" title={labelText(w.labels)}>
+                      {labelText(w.labels)}
                     </td>
                   )}
                   {show.has("uptime") && (
@@ -762,7 +857,7 @@ export function Workers({
               <ListEmpty
                 colSpan={cols.length}
                 query={query}
-                filtered={Boolean(focusHealth || (filter.trim() && byTab.length > 0))}
+                filtered={Boolean(focusHealth || filter.trim())}
                 onClear={
                   focusHealth || filter.trim()
                     ? () => {
@@ -772,7 +867,13 @@ export function Workers({
                     : undefined
                 }
                 noun="workers"
-                empty="No workers have registered — start one with bun event-runtime/cli.mjs work"
+                empty={
+                  tab === "LIVE"
+                    ? "No live workers"
+                    : tab === "STOPPED"
+                      ? "No stopped workers"
+                      : "No workers have registered — start one with bun event-runtime/cli.mjs work"
+                }
               />
             )}
           </tbody>
@@ -797,26 +898,7 @@ export function Workers({
               </Button>
             ) : undefined
           }
-          utility={
-            <>
-              <span>copy:</span>
-              <button
-                type="button"
-                onClick={() => copyText(sel.workerId, "worker id")}
-                className="cursor-pointer hover:text-(--text)"
-              >
-                id <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c</span>
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={copyLink}
-                className="cursor-pointer hover:text-(--text)"
-              >
-                link <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">c l</span>
-              </button>
-            </>
-          }
+          utility={<CopyActions id={sel.workerId} idLabel="worker id" />}
           close={<Button onClick={() => onSelectWorker(null)}>Close</Button>}
         >
           {selHeartbeat.kind === "stale" && (
@@ -830,6 +912,31 @@ export function Workers({
               Heartbeat went stale {dur(selHeartbeat.overdueMs)} ago — this process is gone, whatever it last reported
               {sel.currentRun ? ` (it still holds ${sel.currentRun}; the run is reclaimed when its lease expires)` : ""}.
             </div>
+          )}
+
+          {sel.currentRun && (
+            <Section title="Active Run">
+              <KV
+                k="runId"
+                v={
+                  <JumpLink onClick={() => openRun(sel.currentRun!)} title={`Open ${sel.currentRun}`}>
+                    {shortId(sel.currentRun)}
+                  </JumpLink>
+                }
+              />
+              {sel.runItem?.agent && (
+                <KV k="agent" v={<span className="mono font-medium">{sel.runItem.agent}</span>} />
+              )}
+              {sel.activeTarget !== "-" && <KV k="target" v={sel.activeTarget} />}
+              {sel.runItem && (
+                <KV
+                  k="model"
+                  v={<span className="mono">{pinnedModelText(sel.runItem.adapter, sel.runItem.model)}</span>}
+                />
+              )}
+              {sel.runItem && <KV k="adapter" v={<span className="mono">{sel.runItem.adapter}</span>} />}
+              {sel.runItem?.state && <KV k="state" v={<StateBadge state={sel.runItem.state} />} />}
+            </Section>
           )}
 
           <Section title="Heartbeat" card={false}>

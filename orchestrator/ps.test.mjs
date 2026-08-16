@@ -1,4 +1,6 @@
 import { test, expect, describe } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   parsePs,
@@ -8,6 +10,8 @@ import {
   extractAdapterOverride,
   extractWorktreePath,
   categorizeProcess,
+  isPidAlive,
+  scanWorktrees,
   collectFactoryPsSnapshot,
   formatFactoryPsReport,
 } from "../lib/ps.mjs";
@@ -66,6 +70,48 @@ describe("lsof parser", () => {
     expect(ports[2].host).toBe("*");
   });
 
+  test("parseLsof handles process names containing spaces", () => {
+    const ports = parseLsof(`
+COMMAND          PID     USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Google Chrome   1234 hdkiller   42u  IPv4 0x3ef0e58c7a3caa5c      0t0  TCP 127.0.0.1:9222 (LISTEN)
+Electron Helper 5678 hdkiller   18u  IPv6 0x2e2a667e702cda4a      0t0  TCP *:5173 (LISTEN)
+`);
+
+    expect(ports).toEqual([
+      {
+        command: "Google Chrome",
+        pid: 1234,
+        port: 9222,
+        host: "127.0.0.1",
+        raw: "Google Chrome   1234 hdkiller   42u  IPv4 0x3ef0e58c7a3caa5c      0t0  TCP 127.0.0.1:9222 (LISTEN)",
+      },
+      {
+        command: "Electron Helper",
+        pid: 5678,
+        port: 5173,
+        host: "*",
+        raw: "Electron Helper 5678 hdkiller   18u  IPv6 0x2e2a667e702cda4a      0t0  TCP *:5173 (LISTEN)",
+      },
+    ]);
+  });
+
+  test("parseLsof preserves numeric words in command names and still picks PID", () => {
+    const ports = parseLsof(`
+COMMAND          PID     USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Google 2024 Chrome 1234 hdkiller   42u  IPv4 0x3ef0e58c7a3caa5c      0t0  TCP 127.0.0.1:9222 (LISTEN)
+`);
+
+    expect(ports).toEqual([
+      {
+        command: "Google 2024 Chrome",
+        pid: 1234,
+        port: 9222,
+        host: "127.0.0.1",
+        raw: "Google 2024 Chrome 1234 hdkiller   42u  IPv4 0x3ef0e58c7a3caa5c      0t0  TCP 127.0.0.1:9222 (LISTEN)",
+      },
+    ]);
+  });
+
   test("parseLsof handles empty input", () => {
     expect(parseLsof("")).toEqual([]);
     expect(parseLsof(null)).toEqual([]);
@@ -122,6 +168,43 @@ describe("process categorization", () => {
 
     const helper = { pid: 401, ppid: 1, cpu: 0, mem: 0, etime: "10:00", command: "/Applications/Claude.app/Contents/Frameworks/Claude Helper" };
     expect(categorizeProcess(helper).kind).toBe("ignored");
+  });
+});
+
+describe("worktree daemon liveness", () => {
+  test("isPidAlive rejects zombie and defunct daemon processes", () => {
+    const inspectPid = () => "Z+   [bun] <defunct>";
+
+    expect(isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid })).toBe(false);
+  });
+
+  test("isPidAlive rejects a recycled PID whose command does not match the daemon", () => {
+    const inspectPid = () => "S+   unrelated-system-process --background";
+
+    expect(isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid })).toBe(false);
+  });
+
+  test("isPidAlive accepts a non-zombie process with the expected daemon signature", () => {
+    const inspectPid = () => "S+   bun event-runtime/cli.mjs work --adapter-override fake";
+
+    expect(isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid })).toBe(true);
+  });
+
+  test("scanWorktrees does not mark a worktree active when its PID was recycled", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "factory-ps-"));
+    const worktree = path.join(root, "factory", "WM-277");
+    const runDir = path.join(worktree, ".factory", "run");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(path.join(runDir, "worker.pid"), String(process.pid));
+
+    try {
+      const result = scanWorktrees({ worktreeRootFallback: root });
+      expect(result.worktrees).toHaveLength(1);
+      expect(result.worktrees[0].pids).toEqual({});
+      expect(result.worktrees[0].active).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

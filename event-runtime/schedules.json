@@ -142,6 +142,15 @@
     "approval": "watched",
     "enabled": false
   },
+  "merge-factory": {
+    "every": "30m",
+    "eventType": "factory.merge.requested",
+    "payload": { "repo": "factory" },
+    "catchUp": "none",
+    "singleton": true,
+    "approval": "auto",
+    "enabled": true
+  },
   "ship-cashsaas": {
     "every": "7d",
     "eventType": "factory.ship.requested",

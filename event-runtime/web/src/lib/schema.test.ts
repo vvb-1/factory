@@ -79,4 +79,11 @@ describe("validate (web port of lib/schema.mjs)", () => {
     };
     expect(validate(schema, { a: "x", toString: "evil" }).valid).toBe(false);
   });
+
+  test("pattern validation error does not expose raw regex", () => {
+    const { valid, errors } = validate({ type: "string", pattern: "^[0-9a-f]{40}$" }, "invalid");
+    expect(valid).toBe(false);
+    expect(errors[0]).toBe("$: does not match pattern");
+    expect(errors[0]).not.toContain("^[0-9a-f]{40}$");
+  });
 });

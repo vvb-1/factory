@@ -1,6 +1,6 @@
 import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Workers,
@@ -12,6 +12,7 @@ import {
   workerDisplayState,
 } from "./Workers";
 import { api } from "../api";
+import { changeInput } from "../test-render";
 import type { Worker, WorkerCapacity, WorkerState } from "../types";
 
 afterEach(() => {
@@ -162,6 +163,36 @@ describe("Workers responsive state control (WM-163)", () => {
   });
 });
 
+describe("Workers empty tab copy (WM-162)", () => {
+  test("names an empty Stopped tab without suggesting Esc clears a filter", async () => {
+    await withWorkers([stubWorker("w_idle", "idle")], async () => {
+      const { findByText, getByRole, queryByText } = renderWorkers();
+      await findByText("w_idle");
+
+      fireEvent.click(getByRole("tab", { name: /Stopped/ }));
+
+      expect(await findByText("No stopped workers")).toBeTruthy();
+      expect(queryByText("Esc clears the filter")).toBeNull();
+    });
+  });
+
+  test("names an empty Live tab, then shows the Esc hint when text is entered", async () => {
+    await withWorkers([stubWorker("w_stopped", "stopped")], async () => {
+      const { findByText, getByRole } = renderWorkers();
+      await findByText("w_stopped");
+
+      fireEvent.click(getByRole("tab", { name: /Live/ }));
+      expect(await findByText("No live workers")).toBeTruthy();
+
+      act(() => {
+        changeInput(getByRole("combobox", { name: "Filter workers" }), "missing");
+      });
+      expect(await findByText("No workers match this filter.")).toBeTruthy();
+      expect(await findByText("Esc clears the filter")).toBeTruthy();
+    });
+  });
+});
+
 describe("Workers view default visibility (WM-98)", () => {
   test("stopped workers are hidden by default when a live worker exists", async () => {
     const workers = [
@@ -266,13 +297,12 @@ describe("Workers copy chords and hints (WM-233)", () => {
       const r = renderWithClient(
         <Workers context={{ kind: "all" }} focusWorkerId="worker-copy-test" onSelectWorker={noop} />,
       );
-      await r.findByText("copy:");
+      const idBtn = await r.findByRole("button", { name: "Copy worker id (c)" });
 
-      // Verify utility hint badges
-      const idBtn = r.getByRole("button", { name: "id" });
-      expect(idBtn.textContent).toContain("c");
-      const linkBtn = r.getByRole("button", { name: "link" });
-      expect(linkBtn.textContent).toContain("c l");
+      // Verify icon-action tooltips preserve shortcut discoverability.
+      expect(idBtn.getAttribute("title")).toBe("Copy worker id · c");
+      const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
+      expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
 
       // 1. Press 'c' -> copies workerId
       fireEvent.keyDown(document.body, { key: "c" });
@@ -329,4 +359,116 @@ describe("Workers Open run action shortcut badge (WM-236)", () => {
     });
   });
 });
+
+describe("Active agent, target, and model columns in Workers view (WM-463)", () => {
+  const stubRun = {
+    runId: "run_active_463",
+    state: "RUNNING" as const,
+    attempts: 1,
+    maxAttempts: 1,
+    agent: "dispatch@1",
+    adapter: "pi",
+    reasonCode: null,
+    eventId: "chain-run_b1023018-WM-253",
+    eventSource: "chain",
+    created_at: NOW,
+    updated_at: NOW,
+    modelTier: "strong",
+    model: "openai-codex/gpt-5.6-sol",
+    repos: ["factory"],
+  };
+
+  function withRunsAndWorkers(workers: Worker[], runs: typeof stubRun[], fn: () => Promise<void>) {
+    const origWorkers = api.workers;
+    const origRuns = api.runs;
+    api.workers = async () => ({ workers, capacity: capacityFromWorkers(workers) });
+    api.runs = async () => ({ runs });
+    return fn().finally(() => {
+      api.workers = origWorkers;
+      api.runs = origRuns;
+    });
+  }
+
+  test("renders Agent, Target, Active Model columns by default with run details and inline agent", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+    };
+    const workerIdle: Worker = stubWorker("w_idle_free", "idle");
+
+    await withRunsAndWorkers([workerBusy, workerIdle], [stubRun], async () => {
+      const { getByText, getByRole, getAllByText } = renderWorkers();
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+      });
+
+      // Verify Column headers exist
+      expect(getByRole("columnheader", { name: "Agent" })).toBeTruthy();
+      expect(getByRole("columnheader", { name: "Target" })).toBeTruthy();
+      expect(getByRole("columnheader", { name: "Active Model" })).toBeTruthy();
+
+      // Verify busy worker displays agent, target, active model, and inline agent with run
+      expect(getAllByText("dispatch@1").length).toBeGreaterThanOrEqual(1);
+      expect(getByText("factory · WM-253")).toBeTruthy();
+      expect(getByText("openai-codex/gpt-5.6-sol")).toBeTruthy();
+
+      // Verify idle worker displays dashes for active columns
+      expect(getByText("w_idle_free")).toBeTruthy();
+    });
+  });
+
+  test("filters workers by active agent name and target", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+    };
+    const workerIdle: Worker = stubWorker("w_idle_free", "idle");
+
+    await withRunsAndWorkers([workerBusy, workerIdle], [stubRun], async () => {
+      const { getByRole, getByText, queryByText } = renderWorkers();
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+      });
+
+      act(() => {
+        changeInput(getByRole("combobox", { name: "Filter workers" }), "dispatch");
+      });
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+        expect(queryByText("w_idle_free")).toBeNull();
+      });
+
+      act(() => {
+        changeInput(getByRole("combobox", { name: "Filter workers" }), "WM-253");
+      });
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+        expect(queryByText("w_idle_free")).toBeNull();
+      });
+    });
+  });
+
+  test("detail pane shows rich Active Run section with Agent, Target, Model when worker has currentRun", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+    };
+
+    await withRunsAndWorkers([workerBusy], [stubRun], async () => {
+      const { findByText, getAllByText } = renderWithClient(
+        <Workers context={{ kind: "all" }} focusWorkerId="w_busy_active" onSelectWorker={noop} />,
+      );
+
+      await findByText("Active Run");
+      expect(getAllByText("dispatch@1").length).toBeGreaterThanOrEqual(2);
+      expect(getAllByText("factory · WM-253").length).toBeGreaterThanOrEqual(1);
+      expect(getAllByText("openai-codex/gpt-5.6-sol").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+});
+
 

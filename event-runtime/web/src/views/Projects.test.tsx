@@ -236,13 +236,12 @@ describe("Projects copy chords and hints (WM-233)", () => {
       },
       async () => {
         const r = renderProjects("factory");
-        await r.findByText("copy:");
+        const pathBtn = await r.findByRole("button", { name: "Copy repo path (c p)" });
 
-        // Verify utility hint badges
-        const pathBtn = r.getByRole("button", { name: "path" });
-        expect(pathBtn.textContent).toContain("c p");
-        const linkBtn = r.getByRole("button", { name: "link" });
-        expect(linkBtn.textContent).toContain("c l");
+        // Verify icon-action tooltips preserve shortcut discoverability.
+        expect(pathBtn.getAttribute("title")).toBe("Copy repo path · c p");
+        const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
+        expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
 
         // 1. Press 'c' -> copies repo name
         fireEvent.keyDown(document.body, { key: "c" });
@@ -258,6 +257,97 @@ describe("Projects copy chords and hints (WM-233)", () => {
         expect(written).toBe(window.location.href);
       },
     );
+  });
+});
+
+describe("Projects quick dispatch and GitHub chords (WM-294)", () => {
+  test("d t, d s, and d j open the matching dispatch confirmations within 800ms", async () => {
+    await withApi({ repos: async () => ({ repos: [repo()] }) }, async () => {
+      const r = renderProjects("factory");
+      await r.findByText("Quick Dispatch (Agent Tasks)");
+
+      for (const [suffix, eventType] of [
+        ["t", "factory.triage.requested"],
+        ["s", "factory.status-report.requested"],
+        ["j", "factory.janitor-scan.requested"],
+      ] as const) {
+        fireEvent.keyDown(document.body, { key: "d" });
+        fireEvent.keyDown(document.body, { key: suffix });
+        expect(r.getByRole("dialog").textContent).toContain(eventType);
+        fireEvent.click(r.getByRole("button", { name: "Cancel" }));
+      }
+    });
+  });
+
+  test("dispatch chords expire after 800ms and are ignored while typing", async () => {
+    const originalNow = Date.now;
+    let now = 1_000;
+    Date.now = () => now;
+    try {
+      await withApi({ repos: async () => ({ repos: [repo()] }) }, async () => {
+        const r = renderProjects("factory");
+        await r.findByText("Quick Dispatch (Agent Tasks)");
+
+        fireEvent.keyDown(document.body, { key: "d" });
+        now += 800;
+        fireEvent.keyDown(document.body, { key: "t" });
+        expect(r.queryByRole("dialog")).toBeNull();
+
+        const input = r.getByPlaceholderText(/Filter repo/i);
+        fireEvent.keyDown(input, { key: "d" });
+        fireEvent.keyDown(input, { key: "t" });
+        expect(r.queryByRole("dialog")).toBeNull();
+      });
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  test("g h opens the selected repository on GitHub and action buttons show chord hints", async () => {
+    const originalOpen = window.open;
+    const opened: unknown[][] = [];
+    window.open = ((...args: unknown[]) => {
+      opened.push(args);
+      return null;
+    }) as typeof window.open;
+    try {
+      await withApi({ repos: async () => ({ repos: [repo()] }) }, async () => {
+        const r = renderProjects("factory");
+        await r.findByText("Quick Dispatch (Agent Tasks)");
+
+        expect(r.getByRole("button", { name: "Triage Scan" }).textContent).toContain("d t");
+        expect(r.getByRole("button", { name: "Status Report" }).textContent).toContain("d s");
+        expect(r.getByRole("button", { name: "Janitor Scan" }).textContent).toContain("d j");
+        expect(r.getByRole("link", { name: "GitHub" }).textContent).toContain("g h");
+
+        fireEvent.keyDown(document.body, { key: "g" });
+        fireEvent.keyDown(document.body, { key: "h" });
+        expect(opened).toEqual([["https://github.com/watt-mind/factory", "_blank"]]);
+      });
+    } finally {
+      window.open = originalOpen;
+    }
+  });
+
+  test("g h is inert when the selected repository has no GitHub target", async () => {
+    const originalOpen = window.open;
+    let opens = 0;
+    window.open = (() => {
+      opens += 1;
+      return null;
+    }) as typeof window.open;
+    try {
+      await withApi({ repos: async () => ({ repos: [repo({ github: null })] }) }, async () => {
+        const r = renderProjects("factory");
+        await r.findByText("Quick Dispatch (Agent Tasks)");
+        fireEvent.keyDown(document.body, { key: "g" });
+        fireEvent.keyDown(document.body, { key: "h" });
+        expect(opens).toBe(0);
+        expect(r.queryByRole("link", { name: "GitHub" })).toBeNull();
+      });
+    } finally {
+      window.open = originalOpen;
+    }
   });
 });
 

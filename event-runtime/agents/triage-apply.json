@@ -28,6 +28,15 @@
         "Todo"
       ]
     },
+    "write-detail": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "detail",
+        "{issueId}",
+        "{detail}"
+      ]
+    },
     "needs-detail": {
       "argv": [
         "bun",
@@ -72,8 +81,8 @@
   },
   "mutating": true,
   "pins": {
-    "agents/triage-apply.md": "sha256:4ff7a95e86abb5bbc82bdff3202090673a87347e256e40c03bd1d963b2499992",
-    "schemas/triage-apply.input.json": "sha256:db490430a3794775aa33263b12c8a91af1a8b5e5fcb532aa4e66a91788ff68a4",
+    "agents/triage-apply.md": "sha256:88872839dbb90b8803b1ba0a64bd5bfdf83033c0f17311ffa2400ad2bae14639",
+    "schemas/triage-apply.input.json": "sha256:96c9ac46d4bbbef1818cbcd1d16fe5e0ac80804422ffa591628d68c3dd914c8d",
     "schemas/triage-applied.output.json": "sha256:5e4d4a2e59423a2aab88357521ff1e37889d50d658bee7278d599400f5dc3365"
   }
 }

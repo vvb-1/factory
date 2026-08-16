@@ -4,6 +4,7 @@ import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { ApiError } from "../api";
 import { RunFull } from "./RunFull";
 import {
+  createEventFixture,
   createRunDetailFixture,
   createRunListItemFixture,
   renderWithClient,
@@ -103,7 +104,7 @@ describe("RunFull cancel dialog (WM-144)", () => {
 });
 
 describe("RunFull header copy verbs and hints (WM-218)", () => {
-  test("renders trailing keyboard hints on ← Runs, Copy id, Copy CLI, Copy link", async () => {
+  test("renders shortcut tooltips on the back and copy icon actions", async () => {
     const runId = "run_header_hints";
     const detail = createRunDetailFixture({
       run: { runId, state: "RUNNING" } as RunDetail["run"],
@@ -122,15 +123,15 @@ describe("RunFull header copy verbs and hints (WM-218)", () => {
         expect(getByRole("button", { name: /← Runs/ }).textContent).toContain(
           "Esc",
         );
-        expect(getByRole("button", { name: /Copy id/ }).textContent).toContain(
-          "c",
+        expect(getByRole("button", { name: "Copy run id (c)" }).getAttribute("title")).toBe(
+          "Copy run id · c",
         );
-        expect(getByRole("button", { name: /Copy CLI/ }).textContent).toContain(
-          "c i",
+        expect(getByRole("button", { name: "Copy CLI inspect command (c i)" }).getAttribute("title")).toBe(
+          "Copy CLI inspect command · c i",
         );
-        expect(
-          getByRole("button", { name: /Copy link/ }).textContent,
-        ).toContain("c l");
+        expect(getByRole("button", { name: "Copy link (c l)" }).getAttribute("title")).toBe(
+          "Copy link · c l",
+        );
       },
     );
   });
@@ -161,7 +162,7 @@ describe("RunFull header copy verbs and hints (WM-218)", () => {
       },
       async () => {
         const { getByRole } = renderRunFull(runId);
-        await waitFor(() => getByRole("button", { name: /Copy id/ }));
+        await waitFor(() => getByRole("button", { name: "Copy run id (c)" }));
 
         // Single 'c' copies run ID
         document.body.dispatchEvent(
@@ -219,6 +220,133 @@ describe("RunFull model rows (WM-221)", () => {
         expect(getByText("strong")).toBeTruthy();
         expect(getByText("default (CLI)")).toBeTruthy();
         expect(getByText("claude-opus-5[1m]")).toBeTruthy();
+      },
+    );
+  });
+});
+
+describe("RunFull causal follow-up events and chained runs (WM-420)", () => {
+  test("renders empty-state copy when no follow-up event was emitted", async () => {
+    const runId = "run_no_follow_ups";
+    const detail = createRunDetailFixture({
+      run: {
+        runId,
+        state: "COMPLETED",
+        spec: { agent: "merge-scan@1", adapter: "pi" },
+      } as RunDetail["run"],
+    });
+
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [createRunListItemFixture({ runId, state: "COMPLETED" })],
+        }),
+        events: async () => ({
+          events: [
+            createEventFixture({
+              eventId: "unrelated-event-1",
+              causationId: "run_other",
+            }),
+          ],
+        }),
+      },
+      async () => {
+        const { getByText } = renderRunFull(runId);
+        await waitFor(() => getByText("Follow-up Events"));
+        expect(getByText("No follow-up event was emitted.")).toBeTruthy();
+      },
+    );
+  });
+
+  test("renders exact merge-scan → merge-escalate → merge-notify causal chain fixture", async () => {
+    const parentRunId = "run_74681439-530c-4301-bd9c-baa17d8b92d5";
+    const childRunId = "run_a07fde5a-ee51-46ae-9945-3b38cd87e180";
+    const eventId = "chain-run_74681439-530c-4301-bd9c-baa17d8b92d5";
+    const proposalId = "prop_escalate_7468";
+
+    const detail = createRunDetailFixture({
+      run: {
+        runId: parentRunId,
+        state: "COMPLETED",
+        spec: { agent: "merge-scan@1", adapter: "pi" },
+      } as RunDetail["run"],
+    });
+
+    const emittedEvent = createEventFixture({
+      source: "factory.chain",
+      eventId,
+      type: "factory.merge-escalate.requested",
+      subject: "merge-scan@1",
+      status: "planned",
+      causationId: parentRunId,
+      proposalId,
+      runId: childRunId,
+      envelope: { causationId: parentRunId },
+    });
+
+    const childRun = createRunListItemFixture({
+      runId: childRunId,
+      agent: "merge-notify@1",
+      state: "COMPLETED",
+      adapter: "pi",
+    });
+
+    let jumpedAgent = "";
+    let jumpedEvent = "";
+
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [
+            createRunListItemFixture({ runId: parentRunId, state: "COMPLETED" }),
+            childRun,
+          ],
+        }),
+        events: async () => ({
+          events: [emittedEvent],
+        }),
+      },
+      async () => {
+        const { getByText, getAllByText, getByTitle } = renderWithClient(
+          <RunFull
+            runId={parentRunId}
+            connected={true}
+            onBack={noop}
+            onJumpAgent={(ref) => {
+              jumpedAgent = ref;
+            }}
+            onJumpEvent={(source, id) => {
+              jumpedEvent = `${source}:${id}`;
+            }}
+          />,
+        );
+
+        await waitFor(() => getByText("Follow-up Events"));
+        // Event type and planning status
+        expect(getByText("factory.merge-escalate.requested")).toBeTruthy();
+        expect(getByText("planned")).toBeTruthy();
+
+        // Linked proposal
+        expect(getByTitle(proposalId)).toBeTruthy();
+
+        // Follow-up Run agent, state badge, and run link
+        expect(getByText("Follow-up Run")).toBeTruthy();
+        expect(getAllByText("COMPLETED").length).toBeGreaterThanOrEqual(1);
+        expect(getByText("merge-notify@1")).toBeTruthy();
+
+        const runLink = getByTitle(`Open run ${childRunId}`);
+        expect(runLink).toBeTruthy();
+        expect(runLink.getAttribute("href")).toContain(childRunId);
+
+        // Clicking agent jumps to agent
+        fireEvent.click(getByText("merge-notify@1"));
+        expect(jumpedAgent).toBe("merge-notify@1");
+
+        // Clicking event jumps to event
+        fireEvent.click(getByTitle(eventId));
+        expect(jumpedEvent).toBe(`factory.chain:${eventId}`);
       },
     );
   });

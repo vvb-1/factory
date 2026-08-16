@@ -17,7 +17,7 @@ import path from "node:path";
 import { findArtifact, listArtifacts, pruneArtifacts, storeStats } from "./artifacts.mjs";
 import { API_HOST, DEFAULT_PORT, artifactsRoot, environmentName, runtimeHome, webhookSecret } from "./config.mjs";
 import { runUsage, usageSpend } from "./db.mjs";
-import { admitEvent, githubWebhookSecret, translateGitHubEvent, verifyGitHubWebhook, verifyWebhook } from "./intake.mjs";
+import { admitEvent, admitExternalEvent, githubWebhookSecret, translateGitHubEvent, verifyGitHubWebhook, verifyWebhook } from "./intake.mjs";
 import { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 import {
   ackInboxItem,
@@ -652,7 +652,7 @@ export { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 function admit(db, registry, res, buffer, nowMs, onEvent) {
   const parsed = parseJson(buffer);
   if (parsed.error) return send(res, 422, { errors: [parsed.error] });
-  const outcome = admitEvent(db, registry, parsed.value, { now: nowMs });
+  const outcome = admitExternalEvent(db, registry, parsed.value, { now: nowMs });
   if (!outcome.admitted && !outcome.duplicate) return send(res, 422, { errors: outcome.errors });
   if (outcome.admitted) onEvent("admitted");
   return send(res, 200, {
@@ -830,7 +830,7 @@ export function createApi({
           if (translated.ignored) return send(res, 200, { admitted: false, ignored: true, reason: translated.reason });
           return send(res, 422, { errors: [translated.reason] });
         }
-        const outcome = admitEvent(db, registry, translated.envelope, { now: nowMs });
+        const outcome = admitExternalEvent(db, registry, translated.envelope, { now: nowMs });
         if (!outcome.admitted && !outcome.duplicate) return send(res, 422, { errors: outcome.errors });
         if (outcome.admitted) onEvent("admitted");
         return send(res, 200, {
@@ -950,7 +950,11 @@ export function createApi({
       }
 
       if (route === "GET /schedules") {
-        return send(res, 200, { schedules: scheduleView(db, registry, { now: nowMs }) });
+        const schedules = scheduleView(db, registry, { now: nowMs }).map((item) => {
+          const repo = registry.schedules?.[item.loop]?.payload?.repo;
+          return { ...item, repo: typeof repo === "string" && repo !== "" ? repo : null };
+        });
+        return send(res, 200, { schedules });
       }
 
       // Ad-hoc loop trigger (OPS-401): distinct from slot ticks (source="operator",
@@ -965,6 +969,45 @@ export function createApi({
             schedules: Object.keys(registry.schedules ?? {}),
           });
         }
+        const raw = await readBody(req);
+        const parsed = raw.length === 0 ? { value: {} } : parseJson(raw);
+        if (parsed.error) return send(res, 422, { error: parsed.error });
+        const triggerInput = parsed.value;
+        if (!triggerInput || typeof triggerInput !== "object" || Array.isArray(triggerInput)) {
+          return send(res, 422, { error: "trigger body must be an object" });
+        }
+
+        const isMergeSchedule = schedule.eventType === "factory.merge.requested";
+        const inputKeys = Object.keys(triggerInput);
+        if (!isMergeSchedule && inputKeys.length > 0) {
+          return send(res, 422, { error: `schedule "${loop}" does not accept trigger input` });
+        }
+        const unknownKeys = inputKeys.filter((key) => key !== "prNumbers");
+        if (isMergeSchedule && unknownKeys.length > 0) {
+          return send(res, 422, {
+            error: `merge schedule trigger accepts only prNumbers; unexpected: ${unknownKeys.join(", ")}`,
+          });
+        }
+
+        const schedulePayload = { ...(schedule.payload ?? {}) };
+        // Manual selection is operator input only. A static schedule payload
+        // cannot turn recurring or blank manual scans into targeted scans.
+        delete schedulePayload.prNumbers;
+
+        let prNumbers;
+        if (isMergeSchedule && triggerInput.prNumbers !== undefined) {
+          prNumbers = triggerInput.prNumbers;
+          if (!Array.isArray(prNumbers) || prNumbers.length === 0) {
+            return send(res, 422, { error: "prNumbers must be a nonempty array" });
+          }
+          if (!prNumbers.every((number) => Number.isInteger(number) && number > 0)) {
+            return send(res, 422, { error: "prNumbers must contain only positive integers" });
+          }
+          if (new Set(prNumbers).size !== prNumbers.length) {
+            return send(res, 422, { error: "prNumbers must not contain duplicates" });
+          }
+        }
+
         let cadenceSeconds;
         try {
           cadenceSeconds = parseCadence(schedule.every);
@@ -988,10 +1031,12 @@ export function createApi({
           correlationId: eventId,
           causationId: null,
           payload: {
+            ...schedulePayload,
             loop,
             slot: isoNow,
             ...(cadenceSeconds ? { cadenceSeconds } : {}),
             skippedSlots: 0,
+            ...(prNumbers ? { prNumbers } : {}),
           },
         };
         const outcome = admitEvent(db, registry, envelope, { now: nowMs });

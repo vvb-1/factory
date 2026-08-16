@@ -63,7 +63,7 @@ beforeAll(() => {
       `  - name: wt29\n    path: ${repoDir}\n    github: watt-mind/wt29\n    base: develop\n` +
       `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
       `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-      `    worktree_root: ${wtRoot}\n    verify: echo verified\n`,
+      `    worktree_root: ${wtRoot}\n    verify: echo verified\n    escalate_paths: []\n`,
   );
   writeFileSync(path.join(root, "config", "policy.yaml"), `concurrency:\n  max_in_flight_per_repo: 2\n`);
 
@@ -149,7 +149,10 @@ async function dispatchTo(outcome, eventId, ticket) {
   expect(proposal).toBeTruthy();
   const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
   const summary = await runOnce(db, registry, { pi: dispatchFake(outcome) }, {
-    workspacesRoot: workspaces, owner: "w-test", policyVersion: PV,
+    workspacesRoot: workspaces,
+    owner: "w-test",
+    policyVersion: PV,
+    dispatch: openWorld,
   });
   expect(summary.terminalState).toBe("COMPLETED");
   return { db, planAll, runId: approved.runId };
@@ -219,46 +222,54 @@ describe("dispatch-completion edge: a finished dispatch re-fires the work-scan (
 
 // ---------------------------------------------------------------------------
 // The heartbeat half (WM-112): work/merge/ship loop schedules per dispatchable
-// repo, every one shipped disabled — switching a loop on stays a deliberate
-// operator act, and `approval: auto` appears nowhere (WM-107 §7).
+// repo, work and ship stay disabled. WM-417 deliberately limits autonomous
+// merge discovery to Factory while the new merge loop proves itself live.
 // ---------------------------------------------------------------------------
 
-/** The repos in config/repos.yaml that are NOT report_only, enumerated by hand
- *  from the actual file — dispatch doc §5: report_only repos are never loop
- *  targets. coach-wattz, watts-mobile, proxies, hdkiller and eslint-config
- *  are report_only. factory is dispatchable since OPS-463 but its loop
- *  schedules are deliberate follow-up scope, so it is asserted absent below
- *  alongside the report_only set rather than listed here. */
+/** Product repos that remain configured for watched/manual loops. Factory is
+ *  the sole autonomous merge target during the bootstrap period (WM-417). */
 const DISPATCHABLE = ["bj29", "wm-home", "legalease", "cashsaas"];
 
-const loopEntry = (eventType, repo, every) => ({
+const loopEntry = (eventType, repo, every, { approval = "watched", enabled = false } = {}) => ({
   every,
   eventType,
   payload: { repo },
   catchUp: "none",
   singleton: true,
-  approval: "watched",
-  enabled: false,
+  approval,
+  enabled,
 });
 
-describe("loop schedules ship disabled (WM-112)", () => {
-  test("every dispatchable repo gets work/merge every 30m and ship weekly — all off, all watched, all singleton", () => {
+describe("loop schedule autonomy scope (WM-112/WM-417)", () => {
+  test("Factory alone has autonomous merge discovery while every other loop remains watched and disabled", () => {
     for (const repo of DISPATCHABLE) {
       expect(registry.schedules[`work-${repo}`]).toEqual(loopEntry("factory.work.requested", repo, "30m"));
       expect(registry.schedules[`merge-${repo}`]).toEqual(loopEntry("factory.merge.requested", repo, "30m"));
       expect(registry.schedules[`ship-${repo}`]).toEqual(loopEntry("factory.ship.requested", repo, "7d"));
     }
+    expect(registry.schedules["merge-factory"]).toEqual(
+      loopEntry("factory.merge.requested", "factory", "30m", { approval: "auto", enabled: true }),
+    );
   });
 
-  test("no loop targets a report_only repo (nor factory, whose loops are follow-up scope), and no loop anywhere declares approval auto", () => {
-    for (const repo of ["coach-wattz", "watts-mobile", "proxies", "hdkiller", "eslint-config", "factory"]) {
+  test("the exact enabled autonomous merge set is merge-factory", () => {
+    for (const repo of ["coach-wattz", "watts-mobile", "proxies", "hdkiller", "eslint-config"]) {
       expect(registry.schedules[`work-${repo}`]).toBeUndefined();
       expect(registry.schedules[`merge-${repo}`]).toBeUndefined();
       expect(registry.schedules[`ship-${repo}`]).toBeUndefined();
     }
+    expect(registry.schedules["work-factory"]).toBeUndefined();
+    expect(registry.schedules["ship-factory"]).toBeUndefined();
+
+    const enabledAutonomous = Object.entries(registry.schedules)
+      .filter(([, schedule]) => schedule.enabled && schedule.approval === "auto")
+      .map(([loop]) => loop);
+    expect(enabledAutonomous).toEqual(["merge-factory"]);
+
     for (const [loop, schedule] of Object.entries(registry.schedules)) {
-      expect({ loop, approval: schedule.approval }).toEqual({ loop, approval: "watched" });
-      expect({ loop, enabled: schedule.enabled }).toEqual({ loop, enabled: false });
+      if (loop !== "merge-factory") {
+        expect({ approval: schedule.approval, enabled: schedule.enabled }).toEqual({ approval: "watched", enabled: false });
+      }
     }
   });
 
@@ -289,10 +300,11 @@ describe("loop schedules ship disabled (WM-112)", () => {
     // below proves each tick now plans a real run.
   });
 
-  test("a disabled loop never fires — the shipped default is silence", () => {
+  test("the shipped clock fires only Factory merge discovery", () => {
     const db = openDb(":memory:");
-    expect(emitDueTicks(db, registry, { now: Date.now() }).emitted).toEqual([]);
-    expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(0);
+    const emitted = emitDueTicks(db, registry, { now: Date.now() }).emitted;
+    expect(emitted.map((row) => row.loop)).toEqual(["merge-factory"]);
+    expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(1);
     db.close();
   });
 });
@@ -319,7 +331,7 @@ describe("an enabled loop's tick plans a real scan run (WM-123)", () => {
 
   const cases = [
     ["work-wt29", "factory.work.requested", "work-scan@1"],
-    ["merge-wt29", "factory.merge.requested", "merge-scan@1"],
+    ["merge-wt29", "factory.merge.requested", "merge-scan@2"],
     ["ship-wt29", "factory.ship.requested", "ship-scan@1"],
   ];
 

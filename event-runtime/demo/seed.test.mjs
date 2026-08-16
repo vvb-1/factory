@@ -1,13 +1,18 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validate } from "../lib/schema.mjs";
 
 const CLI = fileURLToPath(new URL("../cli.mjs", import.meta.url));
 const SEED = fileURLToPath(new URL("./seed.mjs", import.meta.url));
 const VERIFY = fileURLToPath(new URL("./verify.mjs", import.meta.url));
+const TRIAGE_SCAN_OUTPUT_SCHEMA = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../schemas/triage-scan.output.json", import.meta.url)), "utf8"),
+);
+const SEED_TIMEOUT_MS = 10_000;
 
 const redact = (text) => String(text ?? "")
   .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/g, "[REDACTED]")
@@ -22,11 +27,71 @@ function expectSuccess(label, result) {
   expect(result.status, diagnostic).toBe(0);
 }
 
+async function waitForPublishedOutbox(port) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/status`);
+      const status = await response.json();
+      if (response.ok && status.anomalies?.unpublishedOutbox === 0) return;
+    } catch {}
+    await Bun.sleep(50);
+  }
+  expect.fail("seeded runtime did not publish its outbox within 5 seconds");
+}
+
+describe("triage-scan write-detail contract (WM-352)", () => {
+  const artifactWithDetail = (detail) => ({
+    recommendation: "TRIAGE",
+    repo: "factory",
+    plan: [{ issueId: "WM-352", action: "write-detail", reason: "fixture", detail }],
+    summary: "fixture",
+  });
+
+  test("accepts canonical multi-section detail and rejects unrelated headings", () => {
+    const canonical = [
+      "## Acceptance Criteria",
+      "",
+      "- The behavior is covered.",
+      "",
+      "## Owned Paths",
+      "",
+      "- `event-runtime/demo/seed.test.mjs`",
+      "",
+      "## Verification",
+      "",
+      "```",
+      "bun test event-runtime/demo/seed.test.mjs",
+      "```",
+    ].join("\n");
+
+    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail(canonical))).toEqual({ valid: true, errors: [] });
+    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail("## Rollout\n\n- Deploy globally."))).toEqual({
+      valid: false,
+      errors: [
+        "$.plan[0].detail: does not match pattern ^\\s*## (Acceptance Criteria|Owned Paths|Verification)",
+      ],
+    });
+  });
+
+  test("continues to accept Owned Paths and Verification as the first section", () => {
+    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail("## Owned Paths\n\n- `README.md`"))).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail("## Verification\n\n```\nbun test\n```"))).toEqual({
+      valid: true,
+      errors: [],
+    });
+  });
+});
+
 describe("seed & re-seed deduplication (OPS-464)", () => {
   let home;
   let port;
   let serveChild;
   let workerChild;
+  let initialTriageApplyRun;
 
   beforeAll(async () => {
     home = mkdtempSync(path.join(os.tmpdir(), "evrt-seed-test-"));
@@ -94,14 +159,22 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     }
   });
 
-  test("initial seed succeeds and verify passes", () => {
+  test("initial seed succeeds and verify passes", async () => {
     const t0 = Date.now();
     const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t1", "--poll-ms", "40"], {
       encoding: "utf8",
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
     expectSuccess("initial seed", seedRes);
-    expect(Date.now() - t0).toBeLessThan(8_000);
+    expect(seedRes.stdout).toContain("merge-apply@2 watched");
+    expect(seedRes.stdout).not.toContain("merge-verify@1 exact landed lifecycle");
+    // The triage chain now waits for its auto-approved apply run to finish.
+    expect(Date.now() - t0).toBeLessThan(SEED_TIMEOUT_MS);
+    initialTriageApplyRun = seedRes.stdout.match(
+      /^seed: (\S+) → COMPLETED \(triage-apply@1 chain auto-approved/m,
+    )?.[1];
+    expect(initialTriageApplyRun).toBeTruthy();
+    await waitForPublishedOutbox(port);
 
     const verifyRes = spawnSync("bun", [VERIFY, "--port", port], {
       encoding: "utf8",
@@ -123,14 +196,24 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     expect(output).toContain("duplicate prefix \"t1\"");
   }, 10_000);
 
-  test("re-seeding with a NEW prefix cleans up hang runs and allows verify to pass", () => {
+  test("re-seeding with a NEW prefix cleans up hang runs and allows verify to pass", async () => {
     const t0 = Date.now();
     const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t2", "--poll-ms", "40"], {
       encoding: "utf8",
       env: { ...process.env, FACTORY_EVENT_HOME: home },
     });
     expectSuccess("re-seed", seedRes);
-    expect(Date.now() - t0).toBeLessThan(8_000);
+    expect(seedRes.stdout).toContain("merge-apply@2 watched");
+    expect(seedRes.stdout).not.toContain("merge-verify@1 exact landed lifecycle");
+    // A fresh prefix must follow the new scan's causal edge, never reuse the
+    // prior terminal triage-apply proposal while waiting for that edge.
+    expect(Date.now() - t0).toBeLessThan(SEED_TIMEOUT_MS);
+    const reseedTriageApplyRun = seedRes.stdout.match(
+      /^seed: (\S+) → COMPLETED \(triage-apply@1 chain auto-approved/m,
+    )?.[1];
+    expect(reseedTriageApplyRun).toBeTruthy();
+    expect(reseedTriageApplyRun).not.toBe(initialTriageApplyRun);
+    await waitForPublishedOutbox(port);
 
     const verifyRes = spawnSync("bun", [VERIFY, "--port", port], {
       encoding: "utf8",

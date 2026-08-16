@@ -576,6 +576,30 @@ describe("worker", () => {
     expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
   });
 
+  test("post-VERIFYING exception finalizes the attempt and re-queues instead of stranding it (WM-261)", async () => {
+    const db = openDb(":memory:");
+    const blockedStoreParent = path.join(freshRoot(), "not-a-directory");
+    writeFileSync(blockedStoreParent, "blocks artifact store creation\n");
+    const spec = queueRun(db, makeSpec({
+      maxAttempts: 2,
+      workspace: { type: "ephemeral", retainOnFailure: false },
+    }));
+    const o = opts({ artifactStore: path.join(blockedStoreParent, "artifacts") });
+
+    const summary = await runOnce(db, registry, adapters, o);
+
+    expect(summary).toMatchObject({ terminalState: "FAILED", reasonCode: "adapter_error" });
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(lifecycleOf(db, spec.runId).slice(-3).map((event) => event.to_state)).toEqual([
+      "VERIFYING", "FAILED", "QUEUED",
+    ]);
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.terminal_state).toBe("FAILED");
+    expect(attempt.reason_code).toBe("adapter_error");
+    expect(attempt.finished_at).toBeTruthy();
+    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+  });
+
   test("reapExpiredLeases dead-letters when maxAttempts is reached (OPS-405)", () => {
     const db = openDb(":memory:");
     const spec = queueRun(db, makeSpec({ maxAttempts: 1 }));
@@ -1009,17 +1033,18 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     );
 
     mkdirSync(path.join(factoryRoot, "config"), { recursive: true });
+    writeFileSync(path.join(factoryRoot, "config", "policy.yaml"), "{}\n");
     writeFileSync(
       path.join(factoryRoot, "config", "repos.yaml"),
       `repos:\n` +
         `  - name: wt-worker\n    path: ${repoDir}\n    github: watt-mind/wt-worker\n    base: develop\n` +
         `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
         `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-        `    worktree_root: ${wtRoot}\n    verify: echo repo_verified\n` +
+        `    worktree_root: ${wtRoot}\n    verify: echo repo_verified\n    escalate_paths: []\n` +
         `  - name: wt-failing-verify\n    path: ${repoDir}\n    github: watt-mind/wt-failing-verify\n    base: develop\n` +
         `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
         `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-        `    worktree_root: ${wtRoot}\n    verify: exit 42\n`,
+        `    worktree_root: ${wtRoot}\n    verify: exit 42\n    escalate_paths: []\n`,
     );
     previousReposRoot = process.env.FACTORY_REPOS_ROOT;
     process.env.FACTORY_REPOS_ROOT = factoryRoot;

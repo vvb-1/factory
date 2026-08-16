@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { modal, useFocusReturn, useNow } from "../hooks";
 import type { Section, SortDir } from "../displayOptions";
 import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
@@ -100,6 +101,93 @@ export function copyText(text: string, label: string) {
 export function copyLink() {
   flushHash();
   copyText(window.location.href, "link");
+}
+
+type CopyActionButtonProps = {
+  label: string;
+  chord: string;
+  onClick: () => void;
+  children: ReactNode;
+};
+
+function CopyActionButton({ label, chord, onClick, children }: CopyActionButtonProps) {
+  return (
+    <button
+      type="button"
+      title={`${label} · ${chord}`}
+      aria-label={`${label} (${chord})`}
+      onClick={onClick}
+      className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-(--text-faint) transition-colors hover:text-(--text) focus-visible:text-(--text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent) focus-visible:ring-offset-1 focus-visible:ring-offset-(--surface-1)"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Compact, accessible copy/share actions shared by every detail surface. */
+export function CopyActions({
+  id,
+  idLabel,
+  idChord = "c",
+  cli,
+  cliLabel = "CLI command",
+}: {
+  id: string;
+  idLabel: string;
+  idChord?: string;
+  cli?: string;
+  cliLabel?: string;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1" role="group" aria-label="Copy actions">
+      <CopyActionButton label={`Copy ${idLabel}`} chord={idChord} onClick={() => copyText(id, idLabel)}>
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          aria-hidden="true"
+          className="size-3.5"
+        >
+          <path d="M5 2.5 4 11.5M10 2.5 9 11.5M2.5 5.5h9M2 8.5h9" />
+        </svg>
+      </CopyActionButton>
+      {cli !== undefined && (
+        <CopyActionButton label={`Copy ${cliLabel}`} chord="c i" onClick={() => copyText(cli, cliLabel)}>
+          <svg
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="size-3.5"
+          >
+            <polyline points="2.5,3.5 5.5,6.5 2.5,9.5" />
+            <line x1="7" y1="10" x2="11.5" y2="10" />
+          </svg>
+        </CopyActionButton>
+      )}
+      <CopyActionButton label="Copy link" chord="c l" onClick={copyLink}>
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          className="size-3.5"
+        >
+          <path d="M5.2 9.8 4 11a2.1 2.1 0 0 1-3-3l2.1-2.1a2.1 2.1 0 0 1 3-.1" />
+          <path d="m8.8 4.2 1.2-1.2a2.1 2.1 0 1 1 3 3l-2.1 2.1a2.1 2.1 0 0 1-3 .1" />
+          <line x1="5" y1="9" x2="9" y2="5" />
+        </svg>
+      </CopyActionButton>
+    </div>
+  );
 }
 
 /**
@@ -1342,8 +1430,9 @@ export function Dialog({
   onCloseRef.current = onClose;
   useEffect(() => {
     modal.depth += 1;
+    const depth = modal.depth;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key === "Escape" && depth === modal.depth) onCloseRef.current();
       else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
     };
     window.addEventListener("keydown", onKey);
@@ -1358,7 +1447,7 @@ export function Dialog({
   }, []);
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[10vh]"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && onCloseRef.current()}
     >
       <div
@@ -1367,7 +1456,7 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[80vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl outline-none`}
+        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[85vh] overflow-y-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 sm:p-5 shadow-2xl outline-none`}
       >
         <div id={titleId} className="display mb-3 text-[15px] font-semibold">
           {title}
@@ -1569,12 +1658,49 @@ export function ChipInput({
   placeholder?: string;
 }) {
   const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const [popoverRect, setPopoverRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const listId = useId();
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const items = useMemo(() => {
+    if (!suggestions || suggestions.length === 0) return [];
+    const q = draft.trim().toLowerCase();
+    return suggestions.filter((s) => !values.includes(s) && (!q || s.toLowerCase().includes(q)));
+  }, [draft, suggestions, values]);
+  const show = open && items.length > 0;
+
+  useEffect(() => {
+    if (!show || !anchorRef.current) {
+      setPopoverRect(null);
+      return;
+    }
+    const position = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (rect) setPopoverRect({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
+  }, [show]);
+
+  useEffect(() => {
+    if (!show || !listRef.current) return;
+    listRef.current.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [highlight, show]);
+
   const add = (raw: string) => {
     const v = raw.trim();
     if (!v) return;
     if (!values.includes(v)) onChange([...values, v]);
     setDraft("");
+    setOpen(false);
   };
   return (
     <div className="rounded-md border border-(--border) bg-(--surface-0) p-1.5">
@@ -1597,32 +1723,85 @@ export function ChipInput({
           ))}
         </div>
       )}
-      <div className="flex items-center gap-1">
+      <div ref={anchorRef} className="relative flex items-center gap-1">
         <input
           id={id}
           type="text"
+          role="combobox"
+          aria-expanded={show}
+          aria-autocomplete="list"
+          aria-controls={show ? listId : undefined}
+          aria-activedescendant={show && items[highlight] ? `${listId}-opt-${highlight}` : undefined}
           value={draft}
-          list={suggestions && suggestions.length > 0 ? listId : undefined}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setHighlight(0);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
           onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              if (items.length === 0) return;
+              e.preventDefault();
+              setOpen(true);
+              if (show) setHighlight((i) => (i + 1) % items.length);
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              if (!show || items.length === 0) return;
+              e.preventDefault();
+              setHighlight((i) => (i - 1 + items.length) % items.length);
+              return;
+            }
+            if (e.key === "Escape" && show) {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpen(false);
+              return;
+            }
             if (e.key !== "Enter") return;
             e.preventDefault();
             e.stopPropagation();
-            add(draft);
+            add(show && items[highlight] ? items[highlight] : draft);
           }}
           placeholder={placeholder ?? "add…"}
           spellCheck={false}
           className="mono w-full rounded border-0 bg-transparent px-1 py-0.5 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint)"
         />
-        {suggestions && suggestions.length > 0 && (
-          <datalist id={listId}>
-            {suggestions
-              .filter((s) => !values.includes(s))
-              .map((s) => (
-                <option key={s} value={s} />
+        {show &&
+          popoverRect &&
+          createPortal(
+            <ul
+              ref={listRef}
+              id={listId}
+              role="listbox"
+              aria-label="Suggestions"
+              style={popoverRect}
+              className="fixed z-50 max-h-60 overflow-auto rounded-md border border-(--border-strong) bg-(--surface-1) p-1 text-[12px] shadow-xl outline-none"
+            >
+              {items.map((s, idx) => (
+                <li
+                  key={s}
+                  id={`${listId}-opt-${idx}`}
+                  role="option"
+                  aria-selected={idx === highlight}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    add(s);
+                  }}
+                  className={`mono cursor-pointer truncate rounded px-2 py-1 select-none ${
+                    idx === highlight
+                      ? "bg-(--surface-3) text-(--text)"
+                      : "text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+                  }`}
+                >
+                  {s}
+                </li>
               ))}
-          </datalist>
-        )}
+            </ul>,
+            document.body,
+          )}
         <button
           type="button"
           onClick={() => add(draft)}

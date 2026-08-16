@@ -1,12 +1,30 @@
 # Limits the dispatcher enforces. Changing these changes how much autonomy the
 # factory has, so they live in git and move by PR — not by editing a running box.
 
+chain_auto_approval:
+  # Only internally admitted chain events in this closed set may be approved
+  # unattended. Every other proposal remains watched by default.
+  allowed_event_types:
+    - factory.work.requested
+    - factory.triage.requested
+    - factory.triage-apply.requested
+    - factory.dispatch.requested
+    # Autonomous merge lifecycle. Mutating stages are independently rechecked.
+    - factory.merge.requested
+    - factory.merge-fix.requested
+    - factory.merge-apply.requested
+    - factory.merge-landed
+    - factory.merge-verify.requested
+    - factory.merge-escalate.requested
+
+merge:
+  max_fix_rounds: 2
+
 concurrency:
-  # Per repo, not global. The ceiling isn't tooling, it's dependency structure:
-  # when ticket B needs A's output you cannot parallelize it, and that's most
-  # real work. 3-5 genuinely independent streams is realistic.
+  # Per-repo admission ceiling. Actual execution remains bounded by worker
+  # availability, ticket claims, and Owned Paths collision checks.
   # This is the FALLBACK; a repo's own max_in_flight in repos.yaml wins.
-  max_in_flight_per_repo: 3
+  max_in_flight_per_repo: 50
   # Merging is never parallel. Two PRs landing in one base within seconds
   # produce a base-CI failure that belongs to neither.
   max_concurrent_merges: 1
@@ -23,11 +41,10 @@ workers:
   # concurrent agent runs on this machine and should be read that way.
   min: 1                    # never zero: something has to notice the next
                             # queued run and grow the pool back
-  max: 3                    # same argument as max_in_flight_per_repo above —
-                            # beyond ~3 concurrent agent runs the constraint is
-                            # the subscription usage window, which nothing here
-                            # can observe yet (WM-66 is the prerequisite for a
-                            # budget-aware ceiling)
+  max: 20                   # operator-selected throughput ceiling; the host
+                            # has capacity for a wider pool, while subscription
+                            # usage remains unobservable until WM-66 provides a
+                            # budget-aware ceiling
 
 actions_cache:
   # GitHub's cache API reports decimal bytes. The initial 73 GB quota is
@@ -87,6 +104,17 @@ models:
     strong: openai-codex/gpt-5.6-sol
     standard: openai-codex/gpt-5.6-terra
     light: openai-codex/gpt-5.6-luna
+  # agy (WM-424, WM-428), Antigravity/Gemini subscription window.
+  agy:
+    strong: gemini-3.7-flash
+    standard: gemini-3.7-flash
+    light: gemini-3.7-flash
+  # cursor (WM-440), Cursor Agent CLI login/subscription window.
+  # IDs from `agent --list-models` on 2026.08.11.
+  cursor:
+    strong: composer-2.5
+    standard: composer-2.5
+    light: composer-2.5-fast
 
 limits:
   # Hard wall-clock cap the FACTORY enforces, independent of whatever the
