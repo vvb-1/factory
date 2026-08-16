@@ -2,6 +2,7 @@ import { describe, expect, test, afterAll, afterEach } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { FACTORY_ROOT } from "../config.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV as CLAUDE_PUSH_CREDENTIAL_ENV } from "./claude.mjs";
 import {
   buildPiArgv,
@@ -322,6 +323,14 @@ describe("safeChildEnvironment", () => {
     expect(safeChildEnvironment({}, { mutating: undefined }).SSH_AUTH_SOCK).toBeUndefined();
     expect(safeChildEnvironment({}, false).SSH_AUTH_SOCK).toBeUndefined();
     expect(safeChildEnvironment({}, true).SSH_AUTH_SOCK).toBe("/tmp/inherited.sock");
+  });
+
+  test("injects the stable Factory runtime path and refuses caller overrides (WM-433)", () => {
+    expect(safeChildEnvironment({}).FACTORY_ROOT).toBe(FACTORY_ROOT);
+    expect(
+      safeChildEnvironment({ FACTORY_ROOT: "/tmp/untrusted-target" })
+        .FACTORY_ROOT,
+    ).toBe(FACTORY_ROOT);
   });
 
   test("shares one push-credential list with the claude adapter (no drift)", () => {

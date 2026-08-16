@@ -48,10 +48,13 @@ output from exactly:
 ```sh
 required_status=0
 required_output=$(gh pr checks "$pr" --repo "$github" --required --json name,bucket,state 2>&1) || required_status=$?
-required=$(printf '%s' "$required_output" | bun ./repo/event-runtime/lib/merge-ci-proof.mjs resolve-required-contexts "$required_status" "$headRef")
+required=$(printf '%s' "$required_output" | bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts "$required_status" "$headRef")
 ```
 
-A resolver failure is ESCALATE. Do not query
+`FACTORY_ROOT` is injected by the Factory adapter and names the running Factory
+runtime checkout, independently of the selected target checkout at `./repo`.
+Never look for this helper inside the target repository. A resolver failure is
+ESCALATE. Do not query
 `repos/{owner}/{repo}/branches/{branch}/protection` or any other
 branch-protection endpoint: an unavailable feature response such as HTTP 403 is
 not required-context evidence and cannot override the supported PR-level

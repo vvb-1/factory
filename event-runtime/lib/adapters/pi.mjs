@@ -41,6 +41,7 @@ import { spawn } from "node:child_process";
 import { createWriteStream, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { FACTORY_ROOT } from "../config.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
 
 // PUSH_CREDENTIAL_ENV is imported, not redeclared: the WM-128 carve-out is one
@@ -195,6 +196,11 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
   const inherited = isMutating ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV] : BASE_INHERITED_ENV;
   const childEnv = Object.fromEntries(inherited.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
   Object.assign(childEnv, env);
+  // Read-only repository workspaces contain the selected target checkout, not
+  // Factory's runtime support code. Expose the running Factory checkout through
+  // one adapter-owned, non-overridable path so pinned agent procedures can call
+  // shared helpers without assuming the target repo is Factory (WM-433).
+  childEnv.FACTORY_ROOT = FACTORY_ROOT;
   // Subscription auth (Codex/ChatGPT OAuth) is the point of routing through
   // pi at all — an inherited key would silently switch a run to per-token
   // billing (same rationale as run-agent.sh's UNSET_KEYS, all providers pi

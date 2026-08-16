@@ -380,7 +380,10 @@ describe("merge-scan required-context resolution (WM-433)", () => {
       'gh pr checks "$pr" --repo "$github" --required --json name,bucket,state',
     );
     expect(prompt).toContain(
-      "./repo/event-runtime/lib/merge-ci-proof.mjs resolve-required-contexts",
+      'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts',
+    );
+    expect(prompt).not.toContain(
+      "./repo/event-runtime/lib/merge-ci-proof.mjs",
     );
     expect(prompt).toMatch(
       /Status 1 with exactly\s+`no required checks reported on the '<headRef>' branch`/,
@@ -391,6 +394,35 @@ describe("merge-scan required-context resolution (WM-433)", () => {
     expect(prompt).not.toContain(
       "First query GitHub's branch-protection required contexts",
     );
+  });
+
+  test("the resolver executes when the selected non-Factory repo has no event-runtime tree", () => {
+    const fixture = mkdtempSync(path.join(os.tmpdir(), "merge-scan-cross-repo-"));
+    const target = path.join(fixture, "repo");
+    mkdirSync(target);
+    writeFileSync(path.join(target, "README.md"), "# non-Factory fixture\n");
+
+    try {
+      const output = execFileSync(
+        "sh",
+        [
+          "-c",
+          'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts 1 "feat/WM-243"',
+        ],
+        {
+          cwd: fixture,
+          encoding: "utf8",
+          env: { ...process.env, FACTORY_ROOT: process.cwd() },
+          input:
+            "no required checks reported on the 'feat/WM-243' branch",
+        },
+      );
+
+      expect(output).toBe("[]\n");
+      expect(existsSync(path.join(target, "event-runtime"))).toBe(false);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 });
 
