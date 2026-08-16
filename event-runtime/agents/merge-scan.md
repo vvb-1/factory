@@ -55,11 +55,12 @@ A resolver failure is ESCALATE. Do not query
 `repos/{owner}/{repo}/branches/{branch}/protection` or any other
 branch-protection endpoint: an unavailable feature response such as HTTP 403 is
 not required-context evidence and cannot override the supported PR-level
-result. Status 0 with valid unique nonempty context names is authoritative.
-Status 1 with exactly `no required checks reported on the <headRef> branch`
-resolves to an explicit empty list. Any other nonzero status, unexpected
-diagnostic, malformed JSON, empty/invalid name, or duplicate name fails closed.
-These are the same status/output rules enforced again by merge-apply.
+result. Status 0 with a valid nonempty list of unique contexts whose names are
+nonempty is authoritative. Status 1 with exactly
+`no required checks reported on the '<headRef>' branch` resolves to an explicit
+empty list. Any other nonzero status, unexpected diagnostic, malformed JSON,
+empty list, empty/invalid name, or duplicate name fails closed. These are the
+same status/output rules enforced again by merge-apply.
 
 When the resolver returns a nonempty list, prove every returned check is
 `bucket: pass` and `state: SUCCESS` on `headRefOid`. When it returns an empty

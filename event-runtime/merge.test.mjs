@@ -114,7 +114,9 @@ function installMergeCommandFakes(fixture) {
       "      green) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
       "      pending) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pending\",\"state\":\"PENDING\"}]\\n' ;;",
       "      duplicate) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"},{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
-      "      *) printf '[]\\n' ;;",
+      "      status-zero-empty) printf '[]\\n' ;;",
+      "      unquoted) printf 'no required checks reported on the %s branch\\n' \"$FAKE_HEAD_REF\"; exit 1 ;;",
+      "      *) printf \"no required checks reported on the '%s' branch\\n\" \"$FAKE_HEAD_REF\"; exit 1 ;;",
       '    esac ;;',
       '  *"pr merge"*) : ;;',
       "  *\"pr view\"*\"--json headRefOid --jq .headRefOid\"*) printf '%s\\n' \"$FAKE_HEAD_SHA\" ;;",
@@ -380,8 +382,8 @@ describe("merge-scan required-context resolution (WM-433)", () => {
     expect(prompt).toContain(
       "./repo/event-runtime/lib/merge-ci-proof.mjs resolve-required-contexts",
     );
-    expect(prompt).toContain(
-      "Status 1 with exactly `no required checks reported on the <headRef> branch`",
+    expect(prompt).toMatch(
+      /Status 1 with exactly\s+`no required checks reported on the '<headRef>' branch`/,
     );
     expect(prompt).toContain("`proveMergeCiFallback`");
     expect(prompt).toContain("Do not query");
@@ -582,6 +584,26 @@ describe("executable merge command safety (WM-412)", () => {
       expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
       const log = readFileSync(fixture.log, "utf8");
       expect(log).toContain("--event pull_request");
+      expect(log.includes("gh pr merge")).toBe(shouldMerge);
+    }
+  });
+
+  test("merge-apply accepts only the exact quoted no-required-checks diagnostic", () => {
+    for (const [mode, shouldMerge] of [
+      ["empty", true],
+      ["unquoted", false],
+      ["status-zero-empty", false],
+    ]) {
+      const fixture = commandFixture(`merge-apply-empty-${mode}-`);
+      installMergeCommandFakes(fixture);
+      installBunGateFake(fixture);
+      const result = runCommand(
+        applyCommand(applyPayload()),
+        fixture,
+        commandEnv({ FAKE_REQUIRED_MODE: mode }),
+      );
+      expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
+      const log = readFileSync(fixture.log, "utf8");
       expect(log.includes("gh pr merge")).toBe(shouldMerge);
     }
   });

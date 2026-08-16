@@ -4,7 +4,7 @@ export function noRequiredChecksDiagnostic(headRef) {
   if (typeof headRef !== "string" || headRef.length === 0) {
     throw new Error("head ref must be a nonempty string");
   }
-  return `no required checks reported on the ${headRef} branch`;
+  return `no required checks reported on the '${headRef}' branch`;
 }
 
 /**
@@ -36,6 +36,9 @@ export function resolveRequiredContexts({ status, output, headRef }) {
   }
   if (!Array.isArray(contexts)) {
     throw new Error("required contexts must be a JSON array");
+  }
+  if (contexts.length === 0) {
+    throw new Error("status-zero required contexts must be nonempty");
   }
 
   const names = [];

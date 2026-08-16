@@ -28,10 +28,13 @@ describe("required-context resolver", () => {
   test("the exact GitHub CLI no-required-checks result resolves to an empty list", () => {
     const diagnostic = noRequiredChecksDiagnostic(HEAD_REF);
     expect(diagnostic).toBe(
-      "no required checks reported on the feat/WM-243 branch",
+      "no required checks reported on the 'feat/WM-243' branch",
     );
     expect(resolve(1, diagnostic)).toEqual([]);
     expect(() => resolve(1, `${diagnostic}\n`)).toThrow();
+    expect(() =>
+      resolve(1, "no required checks reported on the feat/WM-243 branch"),
+    ).toThrow();
     expect(() => resolve(2, diagnostic)).toThrow();
   });
 
@@ -39,7 +42,7 @@ describe("required-context resolver", () => {
     for (const output of [
       "HTTP 403: Upgrade to GitHub Pro or make this repository public",
       "HTTP 502: upstream unavailable",
-      "no required checks reported on another branch",
+      "no required checks reported on the 'another' branch",
     ]) {
       expect(() => resolve(1, output), output).toThrow(
         "required-context lookup failed",
@@ -51,6 +54,7 @@ describe("required-context resolver", () => {
     for (const output of [
       "not-json",
       "{}",
+      "[]",
       JSON.stringify([{ name: "", bucket: "pass", state: "SUCCESS" }]),
       JSON.stringify([{ name: "Verify", bucket: "", state: "SUCCESS" }]),
       JSON.stringify([
@@ -75,7 +79,7 @@ describe("required-context resolver", () => {
     );
     expect(apply).toContain('[ "$required_status" -eq 1 ]');
     expect(apply).toContain(
-      'no required checks reported on the $expected_ref branch',
+      'no required checks reported on the \'$expected_ref\' branch',
     );
     expect(apply).not.toContain("/protection");
   });
