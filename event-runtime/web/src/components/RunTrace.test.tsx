@@ -49,6 +49,36 @@ async function waitForChrome(r: ReturnType<typeof renderTrace>) {
   return r.getByRole("tablist", { name: "Trace kind" });
 }
 
+describe("RunTrace feed", () => {
+  test("resets accumulated entries and cursor when runId changes (WM-245)", async () => {
+    const requests: Array<{ runId: string; since: number }> = [];
+    const firstRunEntry = entry(41, "assistant_text", { text: "first run trace" });
+    const secondRunEntry = entry(1, "assistant_text", { text: "second run trace" });
+    const r = renderWithClient(
+      <RunTrace runId="run_first" state="COMPLETED" variant="full" />,
+      {
+        apiMocks: {
+          trace: async (runId, since = 0) => {
+            requests.push({ runId, since });
+            const entries = runId === "run_first" ? [firstRunEntry] : [secondRunEntry];
+            return { head: entries[0].seq, entries };
+          },
+        },
+      },
+    );
+
+    await waitFor(() => expect(r.getByText("first run trace")).toBeTruthy());
+
+    r.rerender(<RunTrace runId="run_second" state="COMPLETED" variant="full" />);
+
+    await waitFor(() => expect(r.getByText("second run trace")).toBeTruthy());
+    expect(r.queryByText("first run trace")).toBeNull();
+    expect(requests.filter((request) => request.runId === "run_second")).toEqual([
+      { runId: "run_second", since: 0 },
+    ]);
+  });
+});
+
 describe("RunTrace a11y (WM-143)", () => {
   test("renders no emoji in trace chrome (tools, tokens, errors, jump, clear)", async () => {
     const r = renderTrace();
