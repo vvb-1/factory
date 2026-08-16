@@ -89,6 +89,29 @@
         "input": {
           "repo": "$.artifact.repo"
         }
+      },
+      "LOW_SUPPLY": {
+        "eventType": "factory.triage.requested",
+        "input": {
+          "repo": "$.artifact.repo"
+        }
+      }
+    }
+  },
+  "triage-apply@1": {
+    "recommendationField": "outcome",
+    "edges": {
+      "SUPPLY_CHANGED": {
+        "eventType": "factory.work.requested",
+        "input": {
+          "repo": "$.artifact.repo"
+        }
+      },
+      "DETAIL_CHANGED": {
+        "eventType": "factory.triage.requested",
+        "input": {
+          "repo": "$.artifact.repo"
+        }
       }
     }
   },

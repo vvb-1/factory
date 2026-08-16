@@ -175,6 +175,27 @@ function parseProbeBytes(raw) {
   return match ? Number(match[1]) : null;
 }
 
+/** `LOW_SUPPLY` in work-scan must carry exact candidate-count semantics. */
+function checkWorkPlan(candidate) {
+  const artifact = candidate?.artifact;
+  if (artifact?.recommendation !== "LOW_SUPPLY") return [];
+  const violations = [];
+
+  if (!Number.isInteger(artifact.readyCandidates) || artifact.readyCandidates < 0) {
+    violations.push("readyCandidates_required_for_low_supply");
+  } else if (artifact.readyCandidates !== 0) {
+    violations.push(`low_supply_readyCandidates_must_be_0 (got ${artifact.readyCandidates})`);
+  }
+
+  if (!Number.isInteger(artifact.triageBacklog) || artifact.triageBacklog < 0) {
+    violations.push("triageBacklog_required_for_low_supply");
+  } else if (artifact.triageBacklog < 1) {
+    violations.push(`low_supply_triage_backlog_must_be_at_least_1 (got ${artifact.triageBacklog})`);
+  }
+
+  return violations;
+}
+
 /**
  * Semantic verification (§9, slice 2 / OPS-208): closed, data-only predicates
  * keyed by output contract. These check *truth*, not form — the claimed
@@ -211,6 +232,7 @@ const SEMANTIC_CHECKS = {
     }
     return violations;
   },
+  "factory.work-plan/v1": (candidate) => checkWorkPlan(candidate),
 };
 
 function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts = [], worktreeRecord = null }) {
