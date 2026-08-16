@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
@@ -1007,6 +1007,14 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       path.join(repoDir, "bin", "worktree-down.sh"),
       `#!/bin/bash\nset -e\necho "down $1" >> "${callsLog}"\nrm -rf "${wtRoot}/$1"\n`,
     );
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-up-red-baseline.sh"),
+      `#!/bin/bash\nset -e\necho "up-red $1" >> "${callsLog}"\nmkdir -p "${wtRoot}/$1"\nprintf '%s\\n' '{"status":"red","check":"web_build","command":"bun run build:fast","exitCode":1,"output":"entry chunk exceeds budget"}' > "$FACTORY_WORKTREE_REPORT"\n`,
+    );
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-up-broken.sh"),
+      `#!/bin/bash\necho "dependency install failed" >&2\nexit 12\n`,
+    );
 
     mkdirSync(path.join(factoryRoot, "config"), { recursive: true });
     writeFileSync(
@@ -1019,7 +1027,15 @@ describe("execute-side dispatch hardening (WM-115)", () => {
         `  - name: wt-failing-verify\n    path: ${repoDir}\n    github: watt-mind/wt-failing-verify\n    base: develop\n` +
         `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
         `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-        `    worktree_root: ${wtRoot}\n    verify: exit 42\n`,
+        `    worktree_root: ${wtRoot}\n    verify: exit 42\n` +
+        `  - name: wt-baseline-red\n    path: ${repoDir}\n    github: watt-mind/wt-baseline-red\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up-red-baseline.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: printf 'entry chunk exceeds budget\\n' >&2; exit 9\n` +
+        `  - name: wt-broken-up\n    path: ${repoDir}\n    github: watt-mind/wt-broken-up\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up-broken.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: echo never\n`,
     );
     previousReposRoot = process.env.FACTORY_REPOS_ROOT;
     process.env.FACTORY_REPOS_ROOT = factoryRoot;
@@ -1277,6 +1293,64 @@ describe("execute-side dispatch hardening (WM-115)", () => {
 
     expect(summary.terminalState).toBe("FAILED");
     expect(summary.reasonCode).toBe("contract_violation");
+  });
+
+  test("a deliberately red baseline still reaches the agent with failure context, then terminates baseline_red", async () => {
+    const db = openDb(":memory:");
+    const lockDir = mkdtempSync(path.join(os.tmpdir(), "evrt-baseline-locks-"));
+    const leaseDir = mkdtempSync(path.join(os.tmpdir(), "evrt-baseline-leases-"));
+    let executionInput = null;
+    const observingAdapter = {
+      async execute({ spec, workspaceDir }) {
+        executionInput = JSON.parse(readFileSync(path.join(workspaceDir, "input.json"), "utf8"));
+        return dispatchFakeAdapter.execute({ spec, workspaceDir });
+      },
+    };
+
+    const spec = queueRun(db, makeDispatchSpec({ input: { repo: "wt-baseline-red", ticket: "WM-731" } }));
+    const summary = await runOnce(db, registry, { fake: observingAdapter }, opts({
+      dispatch: {
+        locksDir: lockDir,
+        leasesDir: leaseDir,
+        fetchTicket: () => ({ identifier: "WM-731", state: { name: "Todo" }, assignee: null, labels: { nodes: [{ name: "ai:agent-ready" }] } }),
+        fetchInFlight: () => [],
+        countLeases: () => 0,
+        claimTicket: () => ({ ok: true }),
+      },
+    }));
+
+    expect(executionInput).toMatchObject({
+      repo: "wt-baseline-red",
+      ticket: "WM-731",
+      baseline: { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+    });
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("baseline_red");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ?`).get(spec.runId).reason_code).toBe("baseline_red");
+  });
+
+  test("worktree provisioning failure is not misclassified as adapter_error and never reaches execution", async () => {
+    const db = openDb(":memory:");
+    const lockDir = mkdtempSync(path.join(os.tmpdir(), "evrt-provision-locks-"));
+    let executed = false;
+    const observingAdapter = { async execute() { executed = true; return { exitCode: 0, timedOut: false }; } };
+
+    const spec = queueRun(db, makeDispatchSpec({ input: { repo: "wt-broken-up", ticket: "WM-732" } }));
+    const summary = await runOnce(db, registry, { fake: observingAdapter }, opts({
+      dispatch: {
+        locksDir: lockDir,
+        fetchTicket: () => ({ identifier: "WM-732", state: { name: "Todo" }, assignee: null, labels: { nodes: [{ name: "ai:agent-ready" }] } }),
+        fetchInFlight: () => [],
+        countLeases: () => 0,
+        claimTicket: () => ({ ok: true }),
+      },
+    }));
+
+    expect(executed).toBe(false);
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("workspace_provisioning_error");
+    expect(summary.error).toContain("dependency install failed");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ?`).get(spec.runId).reason_code).toBe("workspace_provisioning_error");
   });
 
   test("rollback Linear ticket state to Todo on crash, timeout, and contract violation", async () => {

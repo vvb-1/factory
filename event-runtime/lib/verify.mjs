@@ -34,11 +34,33 @@ export const REFUSAL_REASONS = [
 ];
 
 export class ContractViolation extends Error {
-  constructor(violations) {
+  constructor(violations, { reasonCode = "contract_violation" } = {}) {
     super(`contract violation: ${violations.join("; ")}`);
     this.name = "ContractViolation";
     this.violations = violations;
+    this.reasonCode = reasonCode;
   }
+}
+
+function failureSignatureLines(output) {
+  return String(output ?? "")
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 8)
+    // Runners repeat these for unrelated failures; they are not evidence that
+    // the same underlying check remains red.
+    .filter((line) => !/^(\$ |bun test|error: script |error: ".*" exited|exited with code)/i.test(line));
+}
+
+/** Conservative evidence that post-agent verification hit the recorded red baseline. */
+function matchesRedBaseline(baseline, verifyOutput) {
+  if (baseline?.status !== "red") return false;
+  const finalLines = new Set(failureSignatureLines(verifyOutput));
+  if (finalLines.size === 0) return false;
+  return failureSignatureLines(baseline.output)
+    .slice(-20)
+    .some((line) => finalLines.has(line));
 }
 
 /**
@@ -49,7 +71,7 @@ export class ContractViolation extends Error {
  *         | { kind: "completed", result: object, receipt: object }}
  * @throws {ContractViolation} on any contract failure — fail closed.
  */
-export function verifyResult({ spec, def, registry, workspaceDir, attempt, journalHead = null, extraArtifacts = [] }) {
+export function verifyResult({ spec, def, registry, workspaceDir, attempt, journalHead = null, extraArtifacts = [], worktreeRecord = null }) {
   let raw;
   try {
     raw = readFileSync(path.join(workspaceDir, "result.json"), "utf8");
@@ -68,7 +90,7 @@ export function verifyResult({ spec, def, registry, workspaceDir, attempt, journ
   if (!shape.valid) throw new ContractViolation(shape.errors);
 
   if (candidate.terminalState === "refused") return verifyRefused({ spec, def, candidate, attempt });
-  return verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts });
+  return verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts, worktreeRecord });
 }
 
 /**
@@ -178,7 +200,7 @@ const SEMANTIC_CHECKS = {
   },
 };
 
-function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts = [] }) {
+function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts = [], worktreeRecord = null }) {
   if (candidate.artifact === undefined) throw new ContractViolation(["missing_artifact"]);
 
   const artifactCheck = validate(def.outputSchema, candidate.artifact);
@@ -192,8 +214,7 @@ function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalH
 
   // Execute repo's declared verify command for tier-2 mutating runs (docs/event-runtime-dispatch.md §5, §9, WM-115)
   const markerPath = path.join(workspaceDir, ".worktree.json");
-  let worktreeRecord = null;
-  if (existsSync(markerPath)) {
+  if (!worktreeRecord && existsSync(markerPath)) {
     try {
       worktreeRecord = JSON.parse(readFileSync(markerPath, "utf8"));
     } catch {}
@@ -206,8 +227,13 @@ function verifyCompleted({ spec, def, candidate, workspaceDir, attempt, journalH
       : path.join(workspaceDir, "repo");
     const vres = spawnSync("/bin/bash", ["-c", worktreeRecord.verify], { cwd: worktreePath, encoding: "utf8" });
     if (vres.status !== 0) {
-      const why = (vres.stderr || vres.stdout || "").trim().split("\n").pop() || `exit ${vres.status}`;
-      throw new ContractViolation([`repo_verify_failed: ${why}`]);
+      const output = [vres.stdout, vres.stderr].filter(Boolean).join("\n").trim();
+      const why = output.split("\n").filter(Boolean).pop() || `exit ${vres.status}`;
+      const baselineStillRed = matchesRedBaseline(worktreeRecord.baseline, output);
+      throw new ContractViolation(
+        [`repo_verify_failed: ${why}`],
+        { reasonCode: baselineStillRed ? "baseline_red" : "contract_violation" },
+      );
     }
     repoVerifyPassed = true;
   }

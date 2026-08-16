@@ -394,6 +394,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
   let workspaceDir = null;
   let checkoutPath = null;
   let checkoutBaseline = null;
+  let worktreeRecord = null;
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
   const ticketId = spec.input?.ticket ?? null;
   const isWorktree = spec.workspace?.type === "worktree";
@@ -591,6 +592,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     workspaceDir = created.dir;
     checkoutPath = created.checkout?.path ?? null;
     checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
+    worktreeRecord = created.worktree ?? null;
     db.query(`UPDATE attempts SET workspace_path = ? WHERE run_id = ? AND attempt = ?`)
       .run(workspaceDir, runId, attempt);
 
@@ -727,14 +729,20 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     let verified;
     try {
-      verified = verifyResult({ spec, def, registry, workspaceDir, attempt, extraArtifacts: RUNTIME_ARTIFACTS });
+      verified = verifyResult({
+        spec, def, registry, workspaceDir, attempt, extraArtifacts: RUNTIME_ARTIFACTS, worktreeRecord,
+      });
     } catch (err) {
       if (!(err instanceof ContractViolation)) throw err;
+      const reasonCode = err.reasonCode === "baseline_red" ? "baseline_red" : "contract_violation";
+      const failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
       if (ticketClaimed) {
-        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `contract_violation: ${err.violations.join(", ")}`, log: null }); } catch {}
+        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: failureReason, log: null }); } catch {}
       }
       // Invalid output is a typed contract failure and emits no completion
-      // event (§15) — no results row, no outbox row.
+      // event (§15) — no results row, no outbox row. A matching pre-existing
+      // red baseline is equally non-admissible, but is named separately and
+      // not retried as though the agent caused an ordinary contract failure.
       const res = txImmediate(db, () => {
         const currentNow = nowFn();
         if (!assertCurrentToken(db, runId, fencingToken)) {
@@ -743,11 +751,11 @@ export async function executeClaimed(db, registry, adapters, claim, {
         }
         transition(db, {
           runId, to: "FAILED", expectFrom: "VERIFYING",
-          actor: owner, reason: `contract_violation: ${err.violations.join(", ")}`,
+          actor: owner, reason: failureReason,
           attempt, policyVersion, now: currentNow,
         });
-        finishAttempt(db, runId, attempt, "FAILED", "contract_violation", currentNow, attemptUsage);
-        if (attempt < spec.maxAttempts) {
+        finishAttempt(db, runId, attempt, "FAILED", reasonCode, currentNow, attemptUsage);
+        if (reasonCode !== "baseline_red" && attempt < spec.maxAttempts) {
           transition(db, {
             runId, to: "QUEUED", expectFrom: "FAILED",
             actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
@@ -757,7 +765,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       });
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
       if (res?.fenced) return { fenced: true };
-      return { runId, attempt, terminalState: "FAILED", reasonCode: "contract_violation" };
+      return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
 
     if (verified.kind === "refused") {
@@ -906,13 +914,16 @@ export async function executeClaimed(db, registry, adapters, claim, {
     // lib/adapters/pi.mjs's CliNotFoundError) before ever spawning a child.
     // No `requeue`: retrying on the same worker just fails the same way.
     const isCliNotFound = err?.code === "cli_not_found";
-    const reasonCode = isCliNotFound ? "cli_not_found" : "adapter_error";
-    const journalReason = isCliNotFound
-      ? `cli_not_found: ${err.message}`
-      : `adapter_error: ${err?.message ?? String(err)}`;
+    const isWorkspaceProvisioning = err?.code === "workspace_provisioning_error";
+    const reasonCode = isCliNotFound
+      ? "cli_not_found"
+      : isWorkspaceProvisioning
+        ? "workspace_provisioning_error"
+        : "adapter_error";
+    const journalReason = `${reasonCode}: ${err?.message ?? String(err)}`;
     let res;
     try {
-      res = failTerminal("FAILED", journalReason, reasonCode, { requeue: !isCliNotFound });
+      res = failTerminal("FAILED", journalReason, reasonCode, { requeue: !isCliNotFound && !isWorkspaceProvisioning });
     } catch {
       // if failTerminal could not transition, continue
     }
