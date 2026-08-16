@@ -40,6 +40,60 @@ const RUNTIME_ARTIFACTS = [{ kind: "transcript", path: ".transcript.json" }];
 /** Grace added to the spec timeout before a lease is considered abandoned. */
 const LEASE_GRACE_SECONDS = 120;
 
+/** Infrastructure retries are independent from the agent-error attempt budget. */
+export const DEFAULT_MAX_ENVIRONMENT_RETRIES = 3;
+
+const ENVIRONMENT_FAILURES = new Set(["adapter_error", "lease_expired"]);
+const AGENT_FAILURES = new Set(["contract_violation"]);
+const FATAL_FAILURES = new Set([
+  "cli_not_found",
+  "unknown_adapter",
+  "agent_definition_mismatch",
+  "workspace_integrity_violation",
+]);
+
+/** Closed failure taxonomy: unknown reasons fail safe as fatal and never retry. */
+export function classifyFailureCause(reasonCode) {
+  if (ENVIRONMENT_FAILURES.has(reasonCode)) return "environment";
+  if (AGENT_FAILURES.has(reasonCode) || String(reasonCode).startsWith("agent_exit_")) {
+    return "agent_error";
+  }
+  if (FATAL_FAILURES.has(reasonCode) || String(reasonCode).startsWith("policy_denied:")) {
+    return "fatal";
+  }
+  return "fatal";
+}
+
+function maxEnvironmentRetries(spec) {
+  return Number.isInteger(spec.maxEnvironmentRetries) && spec.maxEnvironmentRetries >= 0
+    ? spec.maxEnvironmentRetries
+    : DEFAULT_MAX_ENVIRONMENT_RETRIES;
+}
+
+function failureCount(db, runId, cause) {
+  return db
+    .query(`SELECT reason_code FROM attempts WHERE run_id = ? AND finished_at IS NOT NULL`)
+    .all(runId)
+    .filter((row) => classifyFailureCause(row.reason_code) === cause)
+    .length;
+}
+
+/** Called after the current attempt is finalized, so counts include this failure. */
+function retryDecision(db, runId, spec, reasonCode) {
+  const cause = classifyFailureCause(reasonCode);
+  if (cause === "environment") {
+    return { cause, retry: failureCount(db, runId, cause) <= maxEnvironmentRetries(spec) };
+  }
+  if (cause === "agent_error") {
+    return { cause, retry: failureCount(db, runId, cause) < spec.maxAttempts };
+  }
+  return { cause, retry: false };
+}
+
+function typedFailureReason(reasonCode, detail = reasonCode) {
+  return `failure:${classifyFailureCause(reasonCode)}:${detail}`;
+}
+
 function resolveNow(now) {
   return typeof now === "function" ? now() : (now ?? Date.now());
 }
@@ -512,8 +566,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
   }, 250);
   cancelPoll?.unref?.();
 
-  /** Terminal failure-shaped write: transition + attempts row, one tx. */
-  const failTerminal = (to, journalReason, reasonCode, { requeue = false } = {}) =>
+  /** Terminal failure-shaped write: classify, finalize, and budget any retry atomically. */
+  const failTerminal = (to, journalReason, reasonCode) =>
     txImmediate(db, () => {
       const currentNow = nowFn();
       if (!assertCurrentToken(db, runId, fencingToken)) {
@@ -523,16 +577,17 @@ export async function executeClaimed(db, registry, adapters, claim, {
       const expectFrom = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId)?.state;
       transition(db, {
         runId, to, expectFrom,
-        actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
+        actor: owner, reason: typedFailureReason(reasonCode, journalReason), attempt, policyVersion, now: currentNow,
       });
       finishAttempt(db, runId, attempt, to, reasonCode, currentNow, attemptUsage);
-      if (requeue && attempt < spec.maxAttempts) {
+      const decision = retryDecision(db, runId, spec, reasonCode);
+      if (decision.retry) {
         transition(db, {
           runId, to: "QUEUED", expectFrom: "FAILED",
-          actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
+          actor: owner, reason: `retry:${decision.cause}`, attempt, policyVersion, now: nowFn(),
         });
       }
-      return { ok: true };
+      return { ok: true, cause: decision.cause, requeued: decision.retry };
     });
 
   let def = null;
@@ -540,20 +595,21 @@ export async function executeClaimed(db, registry, adapters, claim, {
     def = getAgent(registry, spec.agent);
   } catch {}
 
-  const refuseTerminal = (reasonCode, checks = ["dispatch_gate"]) =>
+  const refuseTerminal = (reasonCode, checks = ["dispatch_gate"], { causeTyped = false } = {}) =>
     txImmediate(db, () => {
       const currentNow = nowFn();
       if (!assertCurrentToken(db, runId, fencingToken)) {
         recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
         return { fenced: true };
       }
+      const journalReason = causeTyped ? typedFailureReason(reasonCode) : reasonCode;
       transition(db, {
         runId, to: "VERIFYING", expectFrom: "RUNNING",
-        actor: owner, reason: reasonCode, attempt, policyVersion, now: currentNow,
+        actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
       });
       transition(db, {
         runId, to: "REFUSED", expectFrom: "VERIFYING",
-        actor: owner, reason: reasonCode, attempt, policyVersion, now: currentNow,
+        actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
       });
       const receipt = createReceipt({
         runId,
@@ -673,7 +729,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     if (!def) def = getAgent(registry, spec.agent);
 
     if (!verifyDefHash(spec, def)) {
-      const refusedRes = refuseTerminal("agent_definition_mismatch", ["def_hash_mismatch"]);
+      const refusedRes = refuseTerminal("agent_definition_mismatch", ["def_hash_mismatch"], { causeTyped: true });
       destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
       if (refusedRes?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "REFUSED", reasonCode: "agent_definition_mismatch", receipt: refusedRes.receipt };
@@ -759,7 +815,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
         try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `agent_exit_${exitCode}`, log: null }); } catch {}
       }
       const reasonCode = `agent_exit_${exitCode}`;
-      const res = failTerminal("FAILED", reasonCode, reasonCode, { requeue: true });
+      const res = failTerminal("FAILED", reasonCode, reasonCode);
       destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
@@ -829,14 +885,15 @@ export async function executeClaimed(db, registry, adapters, claim, {
         }
         transition(db, {
           runId, to: "FAILED", expectFrom: "VERIFYING",
-          actor: owner, reason: failureReason,
+          actor: owner, reason: typedFailureReason(reasonCode, failureReason),
           attempt, policyVersion, now: currentNow,
         });
         finishAttempt(db, runId, attempt, "FAILED", reasonCode, currentNow, attemptUsage);
-        if (reasonCode !== "baseline_red" && attempt < spec.maxAttempts) {
+        const decision = retryDecision(db, runId, spec, reasonCode);
+        if (decision.retry) {
           transition(db, {
             runId, to: "QUEUED", expectFrom: "FAILED",
-            actor: owner, reason: "retry", attempt, policyVersion, now: nowFn(),
+            actor: owner, reason: `retry:${decision.cause}`, attempt, policyVersion, now: nowFn(),
           });
         }
         return { ok: true };
@@ -1001,7 +1058,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     const journalReason = `${reasonCode}: ${err?.message ?? String(err)}`;
     let res;
     try {
-      res = failTerminal("FAILED", journalReason, reasonCode, { requeue: !isCliNotFound && !isWorkspaceProvisioning });
+      res = failTerminal("FAILED", journalReason, reasonCode);
     } catch {
       // if failTerminal could not transition, continue
     }
@@ -1021,7 +1078,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 /**
  * Re-queue LEASED/RUNNING/VERIFYING runs whose current attempt's lease expired.
  * The stale attempt keeps its (now lower) fencing token, so a late publish from
- * it is fenced out. Respects maxAttempts and dead-letters beyond it.
+ * it is fenced out. Lease loss spends only the dedicated environment budget.
  */
 export function reapExpiredLeases(db, { now = () => Date.now(), policyVersion = "unknown" } = {}) {
   const currentNow = resolveNow(now);
@@ -1035,34 +1092,39 @@ export function reapExpiredLeases(db, { now = () => Date.now(), policyVersion = 
       .all(iso(currentNow));
     for (const row of rows) {
       const spec = JSON.parse(row.spec_json);
-      if (row.attempts < spec.maxAttempts) {
-        if (row.state === "VERIFYING") {
-          transition(db, {
-            runId: row.run_id, to: "FAILED",
-            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now: currentNow,
-          });
-          transition(db, {
-            runId: row.run_id, to: "QUEUED",
-            actor: "reaper", reason: "retry", attempt: row.attempts, policyVersion, now: currentNow,
-          });
-        } else {
-          transition(db, {
-            runId: row.run_id, to: "QUEUED",
-            actor: "reaper", reason: "lease_expired", attempt: row.attempts, policyVersion, now: currentNow,
-          });
-        }
-      } else {
-        if (row.state === "LEASED") {
-          transition(db, {
-            runId: row.run_id, to: "RUNNING",
-            actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now: currentNow,
-          });
-        }
+      const failureReason = typedFailureReason("lease_expired");
+
+      // VERIFYING cannot transition directly to QUEUED; record its failure first.
+      if (row.state === "VERIFYING") {
         transition(db, {
           runId: row.run_id, to: "FAILED",
-          actor: "reaper", reason: "lease_expired_attempts_exhausted", attempt: row.attempts, policyVersion, now: currentNow,
+          actor: "reaper", reason: failureReason, attempt: row.attempts, policyVersion, now: currentNow,
         });
-        finishAttempt(db, row.run_id, row.attempts, "FAILED", "lease_expired", currentNow);
+      }
+      finishAttempt(db, row.run_id, row.attempts, "FAILED", "lease_expired", currentNow);
+      const decision = retryDecision(db, row.run_id, spec, "lease_expired");
+
+      if (decision.retry) {
+        transition(db, {
+          runId: row.run_id, to: "QUEUED",
+          actor: "reaper", reason: `retry:${decision.cause}`, attempt: row.attempts, policyVersion, now: currentNow,
+        });
+        continue;
+      }
+
+      // LEASED has no direct FAILED edge; advance through RUNNING only when
+      // the environment retry ceiling is exhausted and the run must terminate.
+      if (row.state === "LEASED") {
+        transition(db, {
+          runId: row.run_id, to: "RUNNING",
+          actor: "reaper", reason: failureReason, attempt: row.attempts, policyVersion, now: currentNow,
+        });
+      }
+      if (row.state !== "VERIFYING") {
+        transition(db, {
+          runId: row.run_id, to: "FAILED",
+          actor: "reaper", reason: failureReason, attempt: row.attempts, policyVersion, now: currentNow,
+        });
       }
     }
     return rows.length;
@@ -1132,15 +1194,18 @@ export function forceFailRun(db, runId, { actor = "operator", reason = "operator
 }
 
 /**
- * Operator retry (§13): FAILED → QUEUED, or recovery from VERIFYING. Retrying past maxAttempts requires
- * the explicit force override, which is recorded in the journal reason.
+ * Operator retry (§13): FAILED → QUEUED, or recovery from VERIFYING. Only
+ * agent-caused failures spend maxAttempts; environment attempts remain retryable.
+ * Retrying past the agent budget requires the explicit force override.
  */
 export function retryRun(db, runId, { actor, force = false, now = () => Date.now(), policyVersion } = {}) {
   const currentNow = resolveNow(now);
   const row = db.query(`SELECT state, spec_json, attempts FROM runs WHERE run_id = ?`).get(runId);
   if (!row) throw new Error(`unknown run ${runId}`);
   const spec = JSON.parse(row.spec_json);
-  if (!force && row.attempts >= spec.maxAttempts) throw new Error("attempts_exhausted");
+  if (!force && failureCount(db, runId, "agent_error") >= spec.maxAttempts) {
+    throw new Error("attempts_exhausted");
+  }
   if (row.state === "VERIFYING") {
     return txImmediate(db, () => {
       transition(db, { runId, to: "FAILED", actor, reason: "operator_retry_verifying", policyVersion, now: currentNow });
