@@ -242,6 +242,71 @@ describe("emitDueTicks (§3)", () => {
     expect(ticks.emitted).toHaveLength(1);
     expect(ticks.emitted[0].slot).toBe("2026-08-13T21:00:00.000Z");
   });
+
+  test("live merge-factory shape: lastAdmittedSlot finds emitted event with configured eventType (WM-421)", () => {
+    const d = db();
+    const registry = {
+      ...base,
+      schedules: {
+        "merge-factory": {
+          every: "30s",
+          eventType: "factory.merge.requested",
+          payload: { repo: "factory" },
+          catchUp: "none",
+          singleton: true,
+          approval: "auto",
+          enabled: true,
+        },
+        "merge-other": {
+          every: "30s",
+          eventType: "factory.merge.requested",
+          payload: { repo: "other" },
+          catchUp: "none",
+          singleton: true,
+          approval: "auto",
+          enabled: true,
+        },
+      },
+    };
+
+    const t1 = at("2026-08-16T15:30:00.000Z");
+    const t1Ticks = emitDueTicks(d, registry, { now: t1 });
+    expect(t1Ticks.emitted).toHaveLength(2);
+    expect(t1Ticks.emitted.find((e) => e.loop === "merge-factory")?.slot).toBe("2026-08-16T15:30:00.000Z");
+
+    // lastAdmittedSlot must resolve the slot despite eventType being factory.merge.requested
+    expect(lastAdmittedSlot(d, "merge-factory", { now: t1 })).toBe("2026-08-16T15:30:00.000Z");
+    expect(lastAdmittedSlot(d, "merge-other", { now: t1 })).toBe("2026-08-16T15:30:00.000Z");
+
+    // scheduleView reports correct lastSlot, nextDue, and stopped state
+    const view = scheduleView(d, registry, { now: t1 });
+    const mfView = view.find((v) => v.loop === "merge-factory");
+    expect(mfView).toBeTruthy();
+    expect(mfView.lastSlot).toBe("2026-08-16T15:30:00.000Z");
+    expect(mfView.nextDue).toBe("2026-08-16T15:30:30.000Z");
+    expect(mfView.stopped).toBe(false);
+
+    // Repeated tick evaluation in the same slot attempts no admission
+    const retryTicks = emitDueTicks(d, registry, { now: t1 + 5000 });
+    expect(retryTicks.emitted).toHaveLength(0);
+
+    // Advancing by one cadence fires the next slot and updates lastSlot
+    const t2 = at("2026-08-16T15:30:30.000Z");
+    const t2Ticks = emitDueTicks(d, registry, { now: t2 });
+    expect(t2Ticks.emitted).toHaveLength(2);
+    expect(lastAdmittedSlot(d, "merge-factory", { now: t2 })).toBe("2026-08-16T15:30:30.000Z");
+
+    // Loop isolation: inserting only a merge-other event does not affect merge-factory
+    const dIsolated = db();
+    emitDueTicks(dIsolated, {
+      ...base,
+      schedules: {
+        "merge-other": registry.schedules["merge-other"],
+      },
+    }, { now: t1 });
+    expect(lastAdmittedSlot(dIsolated, "merge-factory", { now: t1 })).toBeNull();
+    expect(lastAdmittedSlot(dIsolated, "merge-other", { now: t1 })).toBe("2026-08-16T15:30:00.000Z");
+  });
 });
 
 describe("planning a tick (§5, §6)", () => {

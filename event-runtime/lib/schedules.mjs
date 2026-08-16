@@ -79,17 +79,21 @@ export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none", ma
   return { slots, skipped: Math.max(0, totalMissed - 1) };
 }
 
-/** The newest slot already admitted for a loop at or before now, or null if it never fired (OPS-437). */
-export function lastAdmittedSlot(db, loop, { now = Date.now() } = {}) {
+/** The newest slot already admitted for a loop at or before now, or null if it never fired (OPS-437, WM-421). */
+export function lastAdmittedSlot(db, loop, { now = Date.now(), eventType } = {}) {
   const nowMs = typeof now === "number" ? now : (typeof now === "string" ? Date.parse(now) : Date.now());
-  const maxEventId = tickEventId(loop, new Date(nowMs).toISOString());
+  const maxIso = new Date(nowMs).toISOString();
+  const minEventId = `clock:${loop}:`;
+  const maxEventId = tickEventId(loop, maxIso);
   const row = db
     .query(
       `SELECT event_id FROM events
-       WHERE source = ? AND type = ? AND event_id <= ?
+       WHERE source = ?
+         AND event_id >= ? AND event_id <= ?
+         AND (subject = ? OR type = ? OR (? IS NOT NULL AND type = ?))
        ORDER BY event_id DESC LIMIT 1`,
     )
-    .get(SCHEDULE_SOURCE, `clock.tick.${loop}`, maxEventId);
+    .get(SCHEDULE_SOURCE, minEventId, maxEventId, loop, `clock.tick.${loop}`, eventType ?? null, eventType ?? "");
   // eventId is clock:<loop>:<ISO slot>; ISO sorts lexicographically, so the
   // newest row is the newest slot without parsing every payload.
   return row ? row.event_id.slice(`clock:${loop}:`.length) : null;
@@ -110,7 +114,7 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
     try {
       const cadenceSeconds = parseCadence(schedule.every);
       const { slots, skipped } = dueSlots({
-        lastSlot: lastAdmittedSlot(db, loop, { now }),
+        lastSlot: lastAdmittedSlot(db, loop, { now, eventType: schedule.eventType }),
         nowMs: now,
         cadenceSeconds,
         catchUp: schedule.catchUp,
@@ -188,7 +192,7 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
     } catch (err) {
       error = err.message;
     }
-    const lastSlot = lastAdmittedSlot(db, loop, { now });
+    const lastSlot = lastAdmittedSlot(db, loop, { now, eventType: schedule.eventType });
     const lastCompleted = lastCompletedSlot(db, loop);
     const nextDue =
       cadenceSeconds && lastSlot
