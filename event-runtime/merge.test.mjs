@@ -20,6 +20,7 @@ import { admitEvent as persistEvent } from "./lib/intake.mjs";
 import { planAdmittedEvents } from "./lib/planner.mjs";
 import { approveProposal, openProposals } from "./lib/proposals.mjs";
 import { loadRegistry } from "./lib/registry.mjs";
+import { validate } from "./lib/schema.mjs";
 import { runOnce } from "./lib/worker.mjs";
 import {
   commandFixture,
@@ -279,6 +280,48 @@ function seedCompleted(db, { runId, agent, input, artifact }) {
      VALUES (?,1,?,'hash','{}','{}',?)`,
   ).run(runId, canonicalJson({ artifact }), now);
 }
+
+describe("merge-fix result contract (WM-447)", () => {
+  test("UPDATED and BLOCKED prompt artifacts exactly match the registered schema", () => {
+    const def = registry.agents.get("merge-fix@1");
+    const schema = def.outputSchema;
+    const prompt = readFileSync(def.promptPath, "utf8");
+    const declaration = prompt.match(
+      /Both artifacts must\s+contain exactly these properties, in this order:([\s\S]*?)\. Do not add/,
+    );
+
+    expect(declaration).not.toBeNull();
+    expect(
+      [...declaration[1].matchAll(/`([^`]+)`/g)].map((match) => match[1]),
+    ).toEqual(schema.required);
+
+    for (const outcome of ["UPDATED", "BLOCKED"]) {
+      const example = prompt.match(
+        new RegExp(
+          `### ${outcome} artifact[\\s\\S]*?` +
+            "```json\\n([\\s\\S]*?)\\n```",
+        ),
+      );
+
+      expect(example).not.toBeNull();
+      const artifact = JSON.parse(example[1]);
+      expect(Object.keys(artifact)).toEqual(schema.required);
+      expect(artifact.outcome).toBe(outcome);
+      expect(validate(schema, artifact)).toEqual({ valid: true, errors: [] });
+    }
+  });
+
+  test("BLOCKED explicitly retains the pinned input head SHA", () => {
+    const prompt = readFileSync(
+      registry.agents.get("merge-fix@1").promptPath,
+      "utf8",
+    );
+
+    expect(prompt).toMatch(
+      /Use the pinned `input\.json` `headSha` as the required `headSha`, including when\s+the live PR head moved/,
+    );
+  });
+});
 
 describe("durable autonomous merge registry (WM-398/WM-403)", () => {
   test("central mappings register scan, bounded fix, deterministic apply, landed verify, and explicit verify", () => {
