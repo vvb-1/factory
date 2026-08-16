@@ -78,6 +78,32 @@ describe("RunTrace feed", () => {
   });
 });
 
+describe("RunTrace timing (WM-272)", () => {
+  test("filtered views use the next unfiltered entry for duration", async () => {
+    const start = Date.parse("2025-01-01T00:00:00.000Z");
+    const timedTrace: TraceEntry[] = [
+      { ...entry(1, "tool_use", { name: "Read" }), ts: new Date(start).toISOString() },
+      { ...entry(2, "assistant_text", { text: "hidden by the tools filter" }), ts: new Date(start + 200).toISOString() },
+      { ...entry(3, "tool_use", { name: "Write" }), ts: new Date(start + 50_000).toISOString() },
+      { ...entry(4, "tool_result", { content: "done" }), ts: new Date(start + 50_300).toISOString() },
+    ];
+    const r = renderWithClient(
+      <RunTrace runId="run_trace_timing" state="COMPLETED" variant="full" />,
+      {
+        apiMocks: {
+          trace: async () => ({ head: timedTrace[timedTrace.length - 1].seq, entries: timedTrace }),
+        },
+      },
+    );
+    await waitForChrome(r);
+
+    fireEvent.click(r.getByRole("tab", { name: /^Tools/ }));
+
+    expect(await r.findByText("200ms")).toBeTruthy();
+    expect(r.queryByText("50.0s")).toBeNull();
+  });
+});
+
 describe("RunTrace a11y (WM-143)", () => {
   test("locks live trace behavior across every RunState (WM-174)", () => {
     const expectedLiveness: Record<RunState, boolean> = {
