@@ -35,6 +35,12 @@ function seed(
     runSpec = null,
     approvalPolicy = null,
     trustedPredecessor = source === "chain",
+    predecessorAgent = null,
+    predecessorRecommendation = null,
+    predecessorArtifact = null,
+    predecessorInput = input,
+    parentRunId = `parent-${id}`,
+    seedPredecessor = true,
   } = {},
 ) {
   const mapping = registry.eventTypes[type];
@@ -49,16 +55,20 @@ function seed(
       })),
     )
     .find((entry) => entry.edge.eventType === type);
-  const parentRunId = `parent-${id}`;
-  if (trustedPredecessor) {
+  if (trustedPredecessor && seedPredecessor) {
     if (!predecessor)
       throw new Error(`test fixture has no registered predecessor for ${type}`);
     const parentEventId = `parent-event-${id}`;
-    const parentSpec = { agent: predecessor.agent, input };
+    const parentAgent = predecessorAgent ?? predecessor.agent;
+    const parentRule = registry.edges[parentAgent];
+    const parentSpec = { agent: parentAgent, input: predecessorInput };
     const parentResult = {
-      artifact: {
-        [predecessor.rule.recommendationField]: predecessor.recommendation,
-      },
+      artifact:
+        predecessorArtifact ??
+        {
+          [parentRule.recommendationField]:
+            predecessorRecommendation ?? predecessor.recommendation,
+        },
     };
     const at = new Date(now).toISOString();
     db.query(
@@ -171,13 +181,15 @@ const dispatchOk = () => ({
   ok: true,
   evidence: { ticket: { labels: [] }, escalatePathIntersections: [] },
 });
-const auto = (db, options = {}) =>
-  autoApproveChains(db, registry, {
+const auto = (db, options = {}) => {
+  const { approvalRegistry = registry, ...approvalOptions } = options;
+  return autoApproveChains(db, approvalRegistry, {
     now,
     policy,
     dispatchEligibility: dispatchOk,
-    ...options,
+    ...approvalOptions,
   });
+};
 
 describe("chain auto approval (WM-357)", () => {
   test("git-owned policy is an explicit closed allowlist", () => {
@@ -458,6 +470,260 @@ describe("chain auto approval (WM-357)", () => {
     expect(runState(db, spoofed.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
       "chain_predecessor_or_result_missing",
+    );
+  });
+
+  test("a mixed merge result approves every selected edge while preserving escalation", () => {
+    const db = openDb(":memory:");
+    const mergeInput = {
+      repo: "factory",
+      github: "watt-mind/factory",
+      base: "develop",
+      deployBranch: "master",
+      plan: [
+        {
+          pr: 431,
+          headSha: "a".repeat(40),
+          baseSha: "b".repeat(40),
+          headRef: "feat/WM-431",
+          ticket: "WM-431",
+          action: "merge_pr",
+          reason: "independently selected merge",
+          checksGreen: true,
+          mergeable: true,
+          ownedPathsValid: true,
+          handoffValid: true,
+          testsFalsifiable: true,
+          policySafe: true,
+          sensitive: false,
+          ambiguous: false,
+        },
+      ],
+    };
+    const fixItem = {
+      pr: 430,
+      headSha: "c".repeat(40),
+      baseSha: "d".repeat(40),
+      headRef: "feat/WM-430",
+      ticket: "WM-430",
+      finding: "mechanical in-scope fix",
+      findingHash: "e".repeat(64),
+      round: 1,
+      mechanical: true,
+      withinOwnedPaths: true,
+      ownedPaths: ["event-runtime/lib/chain.mjs"],
+    };
+    const fixInput = {
+      repo: mergeInput.repo,
+      github: mergeInput.github,
+      base: mergeInput.base,
+      ...fixItem,
+    };
+    const parentRunId = "parent-mixed-result";
+    const predecessorArtifact = {
+      recommendation: "ESCALATE",
+      ...mergeInput,
+      fix: [fixItem],
+      escalate: [{ pr: 429, reason: "human review required" }],
+      summary: "human review still required",
+    };
+    const merge = seed(db, {
+      id: "mixed-merge",
+      type: "factory.merge-apply.requested",
+      input: mergeInput,
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact,
+      predecessorInput: { repo: "factory" },
+      parentRunId,
+    });
+    const fix = seed(db, {
+      id: "mixed-fix",
+      type: "factory.merge-fix.requested",
+      input: fixInput,
+      parentRunId,
+      seedPredecessor: false,
+    });
+    const escalation = seed(db, {
+      id: "mixed-escalation",
+      type: "factory.merge-escalate.requested",
+      input: { repo: "factory", summary: predecessorArtifact.summary },
+      parentRunId,
+      seedPredecessor: false,
+    });
+
+    const result = auto(db, {
+      policy: {
+        ...policy,
+        maxFixRounds: 2,
+        autoMergeBase: new Set(["develop"]),
+        autoMergeOwners: new Set(["watt-mind"]),
+      },
+      runtimeGuard: () => null,
+    });
+
+    expect(result.approved.map((row) => row.runId).sort()).toEqual(
+      [merge.runId, fix.runId, escalation.runId].sort(),
+    );
+    for (const candidate of [merge, fix, escalation]) {
+      expect(runState(db, candidate.runId)).toBe("QUEUED");
+    }
+  });
+
+  test("a declared but unselected sibling edge still fails closed", () => {
+    const db = openDb(":memory:");
+    const fabricated = seed(db, {
+      id: "unselected-merge",
+      type: "factory.merge-apply.requested",
+      input: {
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        deployBranch: "master",
+        plan: [
+          {
+            pr: 431,
+            headSha: "a".repeat(40),
+            baseSha: "b".repeat(40),
+            headRef: "feat/WM-431",
+            ticket: "WM-431",
+            action: "merge_pr",
+            reason: "fabricated sibling edge",
+            checksGreen: true,
+            mergeable: true,
+            ownedPathsValid: true,
+            handoffValid: true,
+            testsFalsifiable: true,
+            policySafe: true,
+            sensitive: false,
+            ambiguous: false,
+          },
+        ],
+      },
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        deployBranch: "master",
+        plan: [],
+        fix: [],
+        escalate: [{ pr: 429, reason: "human review required" }],
+        summary: "only escalation was selected",
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(auto(db, { runtimeGuard: () => null }).approved).toEqual([]);
+    expect(runState(db, fabricated.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
+    );
+  });
+
+  test("a primitive fan-out sibling reconstructs the router's injected item key", () => {
+    const db = openDb(":memory:");
+    const primitive = seed(db, {
+      id: "primitive-independent-item",
+      type: "factory.work.requested",
+      input: { repo: "factory" },
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        repos: ["factory"],
+        summary: "independent primitive item",
+      },
+      predecessorInput: { repo: "factory" },
+    });
+    const approvalRegistry = {
+      ...registry,
+      edges: {
+        ...registry.edges,
+        "merge-scan@2": {
+          recommendationField: "recommendation",
+          edges: {
+            ESCALATE: registry.edges["merge-scan@2"].edges.ESCALATE,
+            WORK: {
+              eventType: "factory.work.requested",
+              itemsField: "repos",
+              itemKey: "repo",
+              input: {},
+            },
+          },
+        },
+      },
+    };
+
+    expect(
+      auto(db, { approvalRegistry, runtimeGuard: () => null }).approved,
+    ).toEqual([{ proposalId: primitive.id, runId: primitive.runId }]);
+    expect(runState(db, primitive.runId)).toBe("QUEUED");
+  });
+
+  test("a selected sibling edge with a payload not derived from the artifact fails closed", () => {
+    const db = openDb(":memory:");
+    const selectedPlan = {
+      pr: 431,
+      headSha: "a".repeat(40),
+      baseSha: "b".repeat(40),
+      headRef: "feat/WM-431",
+      ticket: "WM-431",
+      action: "merge_pr",
+      reason: "selected predecessor payload",
+      checksGreen: true,
+      mergeable: true,
+      ownedPathsValid: true,
+      handoffValid: true,
+      testsFalsifiable: true,
+      policySafe: true,
+      sensitive: false,
+      ambiguous: false,
+    };
+    const tampered = seed(db, {
+      id: "tampered-independent-payload",
+      type: "factory.merge-apply.requested",
+      input: {
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        deployBranch: "master",
+        plan: [{ ...selectedPlan, headSha: "f".repeat(40) }],
+      },
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        deployBranch: "master",
+        plan: [selectedPlan],
+        fix: [],
+        escalate: [{ pr: 429, reason: "human review required" }],
+        summary: "merge and escalation selected",
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(auto(db, { runtimeGuard: () => null }).approved).toEqual([]);
+    expect(runState(db, tampered.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
+    );
+  });
+
+  test("an event type absent from the predecessor rule still fails closed", () => {
+    const db = openDb(":memory:");
+    const undeclared = seed(db, {
+      id: "undeclared-edge",
+      type: "factory.work.requested",
+      predecessorAgent: "merge-scan@2",
+      predecessorRecommendation: "ESCALATE",
+    });
+
+    expect(auto(db, { runtimeGuard: () => null }).approved).toEqual([]);
+    expect(runState(db, undeclared.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
     );
   });
 

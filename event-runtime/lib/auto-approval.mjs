@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { budgetExhausted } from "../../lib/spend.mjs";
+import { buildChainInput } from "./chain.mjs";
 import { hashJson } from "./canonical.mjs";
 import { approveProposal } from "./proposals.mjs";
 import { getAgent, getEventType } from "./registry.mjs";
@@ -347,6 +348,92 @@ const REGISTERED_COMMAND_EDGES = {
   "merge-verify@1": new Set(["factory.merge.requested"]),
 };
 
+function chainContextValue(expr, context) {
+  if (typeof expr !== "string" || !expr.startsWith("$.")) return expr;
+  const [root, ...segments] = expr.slice(2).split(".");
+  let value = context[root];
+  for (const segment of segments) {
+    if (value === null || typeof value !== "object" || !(segment in value))
+      throw new Error("chain selection path unresolved");
+    value = value[segment];
+  }
+  if (value === undefined) throw new Error("chain selection path unresolved");
+  return value;
+}
+
+/** Prove a sibling edge from the accepted artifact, not registry membership alone. */
+function independentlySelectedEdge(rule, spec, result, envelope) {
+  const artifactHash = {};
+  for (const entry of result.artifacts ?? []) {
+    if (entry.kind && entry.sha256 && artifactHash[entry.kind] === undefined)
+      artifactHash[entry.kind] = entry.sha256;
+  }
+  const context = {
+    input: spec.input ?? {},
+    artifact: result.artifact ?? {},
+    artifactHash,
+  };
+
+  for (const edge of Object.values(rule?.edges ?? {})) {
+    if (edge?.eventType !== envelope.type) continue;
+    try {
+      const itemsField = edge.itemsField ?? rule.itemsField;
+      if (itemsField !== undefined) {
+        const items =
+          typeof itemsField === "string" && itemsField.startsWith("$.")
+            ? chainContextValue(itemsField, context)
+            : context.artifact[itemsField] ?? context.input[itemsField];
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          const itemContext = { ...context, item };
+          const payload = buildChainInput(edge.input ?? {}, itemContext);
+          const itemKey = edge.itemKey ?? rule.itemKey;
+          if (itemKey && payload[itemKey] === undefined) {
+            const itemKeyValue =
+              item && typeof item === "object"
+                ? item[itemKey]
+                : typeof item === "string" || typeof item === "number"
+                  ? String(item)
+                  : undefined;
+            if (
+              itemKeyValue === undefined ||
+              itemKeyValue === null ||
+              String(itemKeyValue).trim() === ""
+            )
+              continue;
+            payload[itemKey] = itemKeyValue;
+          }
+          if (edge.perItem)
+            Object.assign(payload, buildChainInput(edge.perItem, itemContext));
+          if (sameJson(payload, envelope.payload ?? {})) return true;
+        }
+        continue;
+      }
+
+      // Independent single emits (the merge plan today) are selected by a
+      // non-empty artifact array carried into the exact emitted payload.
+      const selected = Object.values(edge.input ?? {}).some((expr) => {
+        if (typeof expr !== "string" || !expr.startsWith("$.")) return false;
+        const value = chainContextValue(expr, context);
+        return Array.isArray(value) && value.length > 0;
+      });
+      if (
+        selected &&
+        sameJson(
+          buildChainInput(edge.input ?? {}, context),
+          envelope.payload ?? {},
+        )
+      ) {
+        return true;
+      }
+    } catch {
+      // A declared edge whose selection or payload cannot be reconstructed is
+      // not approval evidence; the candidate remains watched.
+    }
+  }
+  return false;
+}
+
 /**
  * `source=chain` is necessary provenance, not sufficient authorization. The
  * predecessor/result and registered edge are re-read from the durable ledger
@@ -388,8 +475,18 @@ function chainPredecessorReason(db, registry, candidate, envelope) {
     ? result.artifact?.[rule.recommendationField]
     : undefined;
   const declaredEdge = rule?.edges?.[recommendation];
+  const independentEdge = independentlySelectedEdge(
+    rule,
+    spec,
+    result,
+    envelope,
+  );
   const commandEdge = REGISTERED_COMMAND_EDGES[spec.agent]?.has(envelope.type);
-  if (declaredEdge?.eventType !== envelope.type && !commandEdge)
+  if (
+    declaredEdge?.eventType !== envelope.type &&
+    !independentEdge &&
+    !commandEdge
+  )
     return "chain_edge_not_registered";
 
   // Registered command edges carry immutable identity from their predecessor.
