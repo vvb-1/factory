@@ -22,11 +22,10 @@ export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OU
 export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && state !== "VERIFYING";
 
 /**
- * The two states `reapExpiredLeases` sweeps (lib/worker.mjs) — so exactly the
- * states where the current attempt is racing a deadline. A VERIFYING run has
- * already exited its agent and is never reaped, so it has no clock to show.
+ * The states `reapExpiredLeases` sweeps (lib/worker.mjs) — exactly the states
+ * where the current attempt is still racing its attempt and lease deadlines.
  */
-export const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING"];
+export const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
 
 /** `off`: no deadline running yet. `spent`: the deadline passed; the runtime has not caught up. */
 export type Clock = { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };
@@ -185,14 +184,22 @@ export function isWorkerId(actor: string): boolean {
   return /^worker_.+/.test(actor);
 }
 
-export function ActorRef({ actor, className }: { actor: string; className?: string }) {
-  if (!isWorkerId(actor)) return <span title={actor}>{actor}</span>;
+export function ActorRef({
+  actor,
+  className,
+  title = actor,
+}: {
+  actor: string;
+  className?: string;
+  title?: string;
+}) {
+  if (!isWorkerId(actor)) return <span title={title}>{actor}</span>;
   return (
     <JumpLink
       onClick={() => {
         window.location.hash = `#/${withProject(hashPath("workers", actor), hashProject(window.location.hash))}`;
       }}
-      title={actor}
+      title={title}
       className={className}
     >
       {shortId(actor)}
@@ -610,7 +617,11 @@ export function RunDetailBlocks({
                     className="min-w-0 flex-1 break-words whitespace-pre-wrap text-[11.5px] leading-relaxed text-(--text-faint)"
                     title={e.reason ? `${e.actor} · ${e.reason}` : e.actor}
                   >
-                    <ActorRef actor={e.actor} className="text-[11.5px]" />
+                    <ActorRef
+                      actor={e.actor}
+                      className="text-[11.5px]"
+                      title={e.reason ? `${e.actor} · ${e.reason}` : e.actor}
+                    />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
                 </span>

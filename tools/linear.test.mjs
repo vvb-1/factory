@@ -8,7 +8,7 @@
  * tickets a human curated — so it gets real tests.
  */
 import { test, expect } from "bun:test";
-import { resolveLabelIds, claimLabels, validateLabels, formatTicket, agentLabel, TYPE_LABELS, formatComment, formatComments } from "./linear.mjs";
+import { resolveLabelIds, claimLabels, validateLabels, formatTicket, agentLabel, TYPE_LABELS, formatComment, formatComments, parsePositionalArgs } from "./linear.mjs";
 
 const LABELS = [
   { id: "l-ready", name: "ai:agent-ready" },
@@ -168,6 +168,28 @@ test("formatComments accepts issue object containing comments nodes", () => {
   const text = formatComments(issue);
   expect(text).toContain("Charlie");
   expect(text).toContain("Testing issue comments wrapper");
+});
+
+// ------------------------------------------------------- argument parsing ---
+test("state label-only updates do not parse flag values as positional arguments", () => {
+  expect(parsePositionalArgs([
+    "state", "WM-250", "--add", "ai:needs-review", "--remove", "ai:in-progress",
+  ])).toEqual(["WM-250"]);
+});
+
+test("state and label updates preserve the explicit state positional argument", () => {
+  expect(parsePositionalArgs([
+    "state", "WM-250", "In Review", "--add", "ai:needs-review",
+  ])).toEqual(["WM-250", "In Review"]);
+});
+
+test("values for other flags are not treated as positional arguments", () => {
+  expect(parsePositionalArgs([
+    "claim", "WM-250", "--agent", "codex", "--json",
+  ])).toEqual(["WM-250"]);
+  expect(parsePositionalArgs([
+    "file", "--team", "WM", "--title", "A title", "--todo",
+  ])).toEqual([]);
 });
 
 // -------------------------------------------------------- label mutations ---

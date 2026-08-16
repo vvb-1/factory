@@ -227,10 +227,18 @@ it before useful work begins and throw a typed error with
 `cli_not_found` reason without retrying the same incapable worker.
 
 `pi.mjs:resolvePiCommand()` follows this rule (`pi`, then `npx pi`, otherwise
-`CliNotFoundError`). Claude currently relies on `spawn("claude", ...)` and a
+`CliNotFoundError`). `cursor.mjs:resolveCursorCommand()` does the same
+(`agent`, then `cursor-agent`). Claude currently relies on `spawn("claude", ...)` and a
 missing binary becomes the generic `adapter_error`; this is a known conformance
 gap tracked by [WM-296](https://linear.app/watt-mind/issue/WM-296/fixevent-runtime-make-claude-cli-absence-a-typed-preflight-refusal),
 not precedent for a new adapter.
+
+**Cursor (WM-440).** `lib/adapters/cursor.mjs` is a fourth LLM adapter on
+this same contract. Prompt is a positional argument (`-p` is a boolean);
+`--force` is always passed so `./result.json` can be written (print without
+it only proposes writes; `--mode ask|plan` is no-edits and is refused);
+`HARNESS_DENIAL_PATTERNS` is empty until a Cursor-authored refusal is
+confirmed. The `cursor` editor binary is not a fallback.
 
 ### Claude/pi conformance audit
 

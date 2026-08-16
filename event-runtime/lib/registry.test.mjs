@@ -32,6 +32,16 @@ const PI_TIERS = {
     standard: "openai-codex/gpt-5.6-terra",
     light: "openai-codex/gpt-5.6-luna",
   },
+  agy: {
+    strong: "gemini-3.7-flash",
+    standard: "gemini-3.7-flash",
+    light: "gemini-3.7-flash",
+  },
+  cursor: {
+    strong: "composer-2.5",
+    standard: "composer-2.5",
+    light: "composer-2.5-fast",
+  },
 };
 
 describe("registry", () => {

@@ -360,3 +360,115 @@ describe("Workers Open run action shortcut badge (WM-236)", () => {
   });
 });
 
+describe("Active agent, target, and model columns in Workers view (WM-463)", () => {
+  const stubRun = {
+    runId: "run_active_463",
+    state: "RUNNING" as const,
+    attempts: 1,
+    maxAttempts: 1,
+    agent: "dispatch@1",
+    adapter: "pi",
+    reasonCode: null,
+    eventId: "chain-run_b1023018-WM-253",
+    eventSource: "chain",
+    created_at: NOW,
+    updated_at: NOW,
+    modelTier: "strong",
+    model: "openai-codex/gpt-5.6-sol",
+    repos: ["factory"],
+  };
+
+  function withRunsAndWorkers(workers: Worker[], runs: typeof stubRun[], fn: () => Promise<void>) {
+    const origWorkers = api.workers;
+    const origRuns = api.runs;
+    api.workers = async () => ({ workers, capacity: capacityFromWorkers(workers) });
+    api.runs = async () => ({ runs });
+    return fn().finally(() => {
+      api.workers = origWorkers;
+      api.runs = origRuns;
+    });
+  }
+
+  test("renders Agent, Target, Active Model columns by default with run details and inline agent", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+    };
+    const workerIdle: Worker = stubWorker("w_idle_free", "idle");
+
+    await withRunsAndWorkers([workerBusy, workerIdle], [stubRun], async () => {
+      const { getByText, getByRole, getAllByText } = renderWorkers();
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+      });
+
+      // Verify Column headers exist
+      expect(getByRole("columnheader", { name: "Agent" })).toBeTruthy();
+      expect(getByRole("columnheader", { name: "Target" })).toBeTruthy();
+      expect(getByRole("columnheader", { name: "Active Model" })).toBeTruthy();
+
+      // Verify busy worker displays agent, target, active model, and inline agent with run
+      expect(getAllByText("dispatch@1").length).toBeGreaterThanOrEqual(1);
+      expect(getByText("factory · WM-253")).toBeTruthy();
+      expect(getByText("openai-codex/gpt-5.6-sol")).toBeTruthy();
+
+      // Verify idle worker displays dashes for active columns
+      expect(getByText("w_idle_free")).toBeTruthy();
+    });
+  });
+
+  test("filters workers by active agent name and target", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+    };
+    const workerIdle: Worker = stubWorker("w_idle_free", "idle");
+
+    await withRunsAndWorkers([workerBusy, workerIdle], [stubRun], async () => {
+      const { getByRole, getByText, queryByText } = renderWorkers();
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+      });
+
+      act(() => {
+        changeInput(getByRole("combobox", { name: "Filter workers" }), "dispatch");
+      });
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+        expect(queryByText("w_idle_free")).toBeNull();
+      });
+
+      act(() => {
+        changeInput(getByRole("combobox", { name: "Filter workers" }), "WM-253");
+      });
+
+      await waitFor(() => {
+        expect(getByText("w_busy_active")).toBeTruthy();
+        expect(queryByText("w_idle_free")).toBeNull();
+      });
+    });
+  });
+
+  test("detail pane shows rich Active Run section with Agent, Target, Model when worker has currentRun", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+    };
+
+    await withRunsAndWorkers([workerBusy], [stubRun], async () => {
+      const { findByText, getAllByText } = renderWithClient(
+        <Workers context={{ kind: "all" }} focusWorkerId="w_busy_active" onSelectWorker={noop} />,
+      );
+
+      await findByText("Active Run");
+      expect(getAllByText("dispatch@1").length).toBeGreaterThanOrEqual(2);
+      expect(getAllByText("factory · WM-253").length).toBeGreaterThanOrEqual(1);
+      expect(getAllByText("openai-codex/gpt-5.6-sol").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+});
+
+

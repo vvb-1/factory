@@ -241,9 +241,28 @@ async function applyLabels(issue, add, remove) {
 }
 
 // ------------------------------------------------------------------ verbs ---
+const VALUE_FLAGS = new Set([
+  "add", "agent", "area", "body", "label", "project", "remove",
+  "source", "team", "title", "type", "var",
+]);
+
+/** Return command arguments that are not flags or values consumed by flags. */
+export function parsePositionalArgs(argv) {
+  const positional = [];
+  for (let i = 1; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg.startsWith("--")) {
+      if (VALUE_FLAGS.has(arg.slice(2))) i += 1;
+      continue;
+    }
+    positional.push(arg);
+  }
+  return positional;
+}
+
 const argv = process.argv.slice(2);
 const verb = argv[0];
-const positional = argv.slice(1).filter((a) => !a.startsWith("--"));
+const positional = parsePositionalArgs(argv);
 const flag = (name, dflt = null) => {
   const i = argv.indexOf(`--${name}`);
   return i === -1 ? dflt : argv[i + 1];

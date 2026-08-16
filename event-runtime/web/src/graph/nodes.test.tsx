@@ -376,6 +376,50 @@ describe("Graph view inspect loop", () => {
     );
   });
 
+  test("match counter follows the input without participating in toolbar layout", async () => {
+    await withApi(
+      {
+        agents: async () => graphAgents(),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByLabelText, getByText } = renderGraph();
+        const input = (await waitFor(() => getByLabelText("Search graph nodes"))) as HTMLInputElement;
+
+        changeInput(input, "agent:");
+        const counter = await waitFor(() => getByText("1 / 2"));
+        expect(input.nextElementSibling).toBe(counter);
+        expect(counter.className).toContain("absolute");
+        expect(input.parentElement?.className).toContain("w-52");
+
+        changeInput(input, "missing");
+        await waitFor(() => expect(getByText("no matches")).toBe(counter));
+      },
+    );
+  });
+
+  test("Escape clears a search before blurring an empty input", async () => {
+    await withApi(
+      {
+        agents: async () => graphAgents(),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByLabelText } = renderGraph();
+        const input = (await waitFor(() => getByLabelText("Search graph nodes"))) as HTMLInputElement;
+        input.focus();
+        changeInput(input, "agent:");
+
+        fireEvent.keyDown(input, { key: "Escape" });
+        expect(input.value).toBe("");
+        expect(document.activeElement).toBe(input);
+
+        fireEvent.keyDown(input, { key: "Escape" });
+        expect(document.activeElement).not.toBe(input);
+      },
+    );
+  });
+
   test("Enter selects match 1 of N instead of skipping to match 2", async () => {
     const onSelectNode = mock(() => {});
     await withApi(

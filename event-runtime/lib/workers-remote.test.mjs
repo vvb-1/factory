@@ -130,15 +130,23 @@ describe("remote probe and version skew", () => {
     adapters: ["claude"],
   };
 
-  test("probeRemoteNode detects synced remote worker", () => {
-    const mockSpawn = () => ({
-      exitCode: 0,
-      stdout: "PROBE_RESULT:abc12345|develop|0|arm64|Darwin|1.3.14|45001",
-      stderr: "",
-    });
+  test("probeRemoteNode expands remote probe variables and returns exact telemetry", () => {
+    const mockSpawn = (args) => {
+      const probeScript = args.at(-1);
+      expect(probeScript).toContain(
+        'echo "PROBE_RESULT:$HEAD_SHA|$BRANCH|$DIRTY|$ARCH|$OS|$BUN_VER|$WORKER_PIDS"',
+      );
+      expect(probeScript).not.toContain("$$HEAD_SHA");
+      return {
+        exitCode: 0,
+        stdout:
+          "PROBE_RESULT:0123456789abcdef0123456789abcdef01234567|feat/remote-probe|2|arm64|Darwin|1.3.14|501,777",
+        stderr: "",
+      };
+    };
 
     const result = probeRemoteNode(testNode, {
-      localTrunkSha: "abc12345",
+      localTrunkSha: "0123456789abcdef0123456789abcdef01234567",
       spawnFn: mockSpawn,
     });
 
@@ -146,8 +154,10 @@ describe("remote probe and version skew", () => {
     expect(result.outdated).toBe(false);
     expect(result.skewStatus).toBe("synced");
     expect(result.workerActive).toBe(true);
-    expect(result.workerPids).toEqual([45001]);
-    expect(result.details.headSha).toBe("abc12345");
+    expect(result.workerPids).toEqual([501, 777]);
+    expect(result.details.headSha).toBe("0123456789abcdef0123456789abcdef01234567");
+    expect(result.details.branch).toBe("feat/remote-probe");
+    expect(result.details.dirtyCount).toBe(2);
   });
 
   test("probeRemoteNode detects outdated version skew", () => {
