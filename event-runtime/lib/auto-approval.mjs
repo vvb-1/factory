@@ -327,13 +327,71 @@ function mergeBarrierReason(db, candidate) {
   if (unverified) return `merge_barrier_unverified:${unverified.event_id}`;
 
   // An apply that failed after its last deterministic precheck is uncertain:
-  // the merge may have landed before event admission. Keep the barrier closed
-  // until an operator recovers that durable evidence.
+  // the merge may have landed before event admission. A later completed apply
+  // clears only that exact PR/reviewed-head hold, and only after the apply's
+  // causally emitted landing has itself been verified to completion.
   const uncertain = db
     .query(
-      `SELECT run_id FROM runs
-     WHERE state IN ('FAILED','TIMED_OUT')
-       AND json_extract(spec_json, '$.agent') = 'merge-apply@2'
+      `SELECT failed.run_id FROM runs failed
+     WHERE failed.state IN ('FAILED','TIMED_OUT')
+       AND json_extract(failed.spec_json, '$.agent') = 'merge-apply@2'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM runs applied
+         JOIN events landed
+           ON landed.source = 'chain'
+          AND landed.type = 'factory.merge-landed'
+          AND landed.causation_id = applied.run_id
+         JOIN proposals verification_proposal
+           ON verification_proposal.event_source = landed.source
+          AND verification_proposal.event_id = landed.event_id
+         JOIN runs verifier
+           ON verifier.run_id = verification_proposal.run_id
+         WHERE applied.rowid > failed.rowid
+           AND verification_proposal.decision = 'run'
+           AND verification_proposal.status = 'approved'
+           AND applied.state = 'COMPLETED'
+           AND json_extract(applied.spec_json, '$.agent') = 'merge-apply@2'
+           AND json_extract(applied.spec_json, '$.input.github') =
+             json_extract(failed.spec_json, '$.input.github')
+           AND json_extract(applied.spec_json, '$.input.plan[0].pr') =
+             json_extract(failed.spec_json, '$.input.plan[0].pr')
+           AND json_extract(applied.spec_json, '$.input.plan[0].headSha') =
+             json_extract(failed.spec_json, '$.input.plan[0].headSha')
+           AND json_extract(landed.envelope_json, '$.payload.repo') =
+             json_extract(applied.spec_json, '$.input.repo')
+           AND json_extract(landed.envelope_json, '$.payload.github') =
+             json_extract(applied.spec_json, '$.input.github')
+           AND json_extract(landed.envelope_json, '$.payload.base') =
+             json_extract(applied.spec_json, '$.input.base')
+           AND json_extract(landed.envelope_json, '$.payload.pr') =
+             json_extract(applied.spec_json, '$.input.plan[0].pr')
+           AND json_extract(landed.envelope_json, '$.payload.ticket') =
+             json_extract(applied.spec_json, '$.input.plan[0].ticket')
+           AND json_extract(landed.envelope_json, '$.payload.headSha') =
+             json_extract(applied.spec_json, '$.input.plan[0].headSha')
+           AND json_extract(landed.envelope_json, '$.payload.headRef') =
+             json_extract(applied.spec_json, '$.input.plan[0].headRef')
+           AND verifier.state = 'COMPLETED'
+           AND json_extract(verifier.spec_json, '$.agent') = 'merge-verify@1'
+           AND json_extract(verifier.spec_json, '$.input.repo') =
+             json_extract(landed.envelope_json, '$.payload.repo')
+           AND json_extract(verifier.spec_json, '$.input.github') =
+             json_extract(landed.envelope_json, '$.payload.github')
+           AND json_extract(verifier.spec_json, '$.input.base') =
+             json_extract(landed.envelope_json, '$.payload.base')
+           AND json_extract(verifier.spec_json, '$.input.pr') =
+             json_extract(landed.envelope_json, '$.payload.pr')
+           AND json_extract(verifier.spec_json, '$.input.ticket') =
+             json_extract(landed.envelope_json, '$.payload.ticket')
+           AND json_extract(verifier.spec_json, '$.input.headSha') =
+             json_extract(landed.envelope_json, '$.payload.headSha')
+           AND json_extract(verifier.spec_json, '$.input.headRef') =
+             json_extract(landed.envelope_json, '$.payload.headRef')
+           AND json_extract(verifier.spec_json, '$.input.mergeCommitSha') =
+             json_extract(landed.envelope_json, '$.payload.mergeCommitSha')
+       )
+     ORDER BY failed.rowid
      LIMIT 1`,
     )
     .get();
