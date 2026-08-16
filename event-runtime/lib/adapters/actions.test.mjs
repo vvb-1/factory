@@ -215,6 +215,53 @@ describe("execute refutations", () => {
 });
 
 describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
+  test("computes declarative chain outcome from applied actions", async () => {
+    const ws = tmp("evrt-ws-");
+    const def = {
+      ref: "triage-apply@1",
+      itemsField: "plan",
+      itemKey: "issueId",
+      actionRegistry: {
+        label_ready: { argv: ["echo", "label={issueId}"] },
+        detail: { argv: ["echo", "detail={issueId}"] },
+        noop: { argv: ["echo", "noop"] },
+      },
+      chainOutcome: {
+        precedence: [
+          { action: "label_ready", outcome: "SUPPLY_CHANGED" },
+          { action: "detail", outcome: "DETAIL_CHANGED" },
+        ],
+        default: "NO_CHANGE",
+      },
+    };
+    const spec = {
+      input: {
+        repo: "bj29",
+        plan: [
+          { issueId: "WM-116", action: "detail" },
+          { issueId: "WM-117", action: "label_ready" },
+        ],
+      },
+    };
+
+    const res = await execute({ spec, def, workspaceDir: ws, timeoutMs: 5000 });
+    expect(res.exitCode).toBe(0);
+
+    const result = JSON.parse(readFileSync(path.join(ws, "result.json"), "utf8"));
+    expect(result.artifact.outcome).toBe("SUPPLY_CHANGED");
+
+    const noopSpec = {
+      input: {
+        repo: "bj29",
+        plan: [{ issueId: "WM-118", action: "noop" }],
+      },
+    };
+    const noopRes = await execute({ spec: noopSpec, def, workspaceDir: ws, timeoutMs: 5000 });
+    expect(noopRes.exitCode).toBe(0);
+    const noopResult = JSON.parse(readFileSync(path.join(ws, "result.json"), "utf8"));
+    expect(noopResult.artifact.outcome).toBe("NO_CHANGE");
+  });
+
   test("executes registered actions and records standardized issueId from itemKey", async () => {
     const ws = tmp("evrt-ws-");
     const def = {
@@ -250,7 +297,6 @@ describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
       ],
     });
   });
-
   test("refuses before executing any item when an action is unregistered", async () => {
     const ws = tmp("evrt-ws-");
     const def = {

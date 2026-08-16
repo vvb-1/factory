@@ -1,4 +1,4 @@
-# work-scan — read a repo's agent-ready queue, propose a typed dispatch plan
+# work-scan — read a repo's agent-ready queue and refill triage when supply is low
 
 You are a dispatch planner. `./input.json` names one repo and the exact source
 tree to read it against:
@@ -25,7 +25,10 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
    **unassigned** tickets (`bun "$FACTORY_ROOT/tools/linear.mjs"`). The
    `assignee` field is the ticket lock (docs/event-runtime-dispatch.md §2) —
    check the actual field on each ticket; an `agent:*` or `ai:*` label proves
-   nothing either way. Any assignee at all excludes the ticket.
+   nothing either way. Any assignee at all excludes the ticket. Record this as a
+   complete read (all pages, no sampling). If the read errors, truncates, or
+   returns malformed JSON, refuse with `reasonCode: "needs_human"` rather than
+   inventing candidate order.
 2. **Order them**: priority ascending (urgent first), then `createdAt`
    ascending — the same queue order the orchestrator dispatches in.
 3. **Count the cap**: the repo's `max_in_flight` from
@@ -34,19 +37,40 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
    in-flight count against it is the repo team/project's `In Progress`
    tickets — the same set the dispatch gate reads. Free slots = cap minus
    in-flight; zero or fewer → NOOP `cap_full`.
-4. **Pin each candidate's Owned Paths**: parse its `## Owned Paths` section
-   and check the globs against the real tree at `./repo`. A glob matching
-   nothing that exists is only a smell (new files legitimately match
-   nothing) — note it in the item's `reason`, don't disqualify. A ticket with
-   no parseable section owns **everything** (`["**"]`): still plannable, but
-   only alone, with nothing in flight. Ambiguous overlap is overlap — the
-   same biases as `orchestrator/owned-paths.mjs`, always toward collision.
+4. **Pin each candidate's Owned Paths**: parse each candidate's
+   `## Owned Paths` section and check the globs against the real tree at
+   `./repo`. A glob matching nothing that exists is only a smell (new files
+   legitimately match nothing) — note it in the item's `reason`, don't
+   disqualify. A ticket with no parseable section owns **everything** (`["**"]`):
+   still plannable, but only alone, with nothing in flight. Ambiguous overlap
+   is overlap — the same biases as `orchestrator/owned-paths.mjs`, always toward
+   collision.
 5. **Select the plan**: walk the ordered queue; take each ticket whose Owned
    Paths are disjoint from every in-flight ticket's paths AND from every
    ticket already selected; skip colliding ones (they wait for a later scan);
    stop when the free slots are full. Selected in order, each item pinning
    `{ticket, ownedPaths, reason}`.
 
+   Track the complete candidate count before cap/overlap pruning as
+   `readyCandidates`.
+
+   If the walk has any dispatch candidates, do not read Triage and emit
+   `DISPATCH` or `NOOP` (`cap_full`/`all_overlapping`) according to the result.
+
+   If this ordered walk yields zero dispatch candidates after a complete read and
+   `readyCandidates` is exactly 0, run a complete, independent read of `state:
+   Triage` backlog (again, all pages, fresh command, no sampling). If the Triage
+   read fails or returns any malformed payload, refuse with
+   `reasonCode: "needs_human"`.
+
+   If `readyCandidates` is greater than 0 and there are no dispatch candidates,
+   keep the `NOOP`/`cap_full` or `all_overlapping` outcome and still set
+   `triageBacklog` to 0.
+
+   If there are no dispatch candidates and non-empty Triage backlog, emit
+   `LOW_SUPPLY` with `readyCandidates` and `triageBacklog` counts in the
+   artifact, then stop (no dispatch plan). If there are zero dispatch
+   candidates and an empty backlog, emit normal `NOOP queue_empty`.
 ## What you cannot see — say so, never pretend
 
 You cannot see the runtime's own ledger: a ticket with an open (not yet
@@ -79,16 +103,25 @@ re-plans the deferred tickets against a fresh world.
       { "ticket": "CLNT-124", "ownedPaths": ["src/feature-b/**"], "reason": "priority 2, disjoint from CLNT-123 and in-flight" }
     ],
     "deferred": ["CLNT-124"],
-    "summary": "one line an operator can act on"
+    "summary": "one line an operator can act on",
+    "readyCandidates": 2,
+    "triageBacklog": 0
   },
   "evidence": { "commands": ["the linear reads this rests on"], "candidatesSeen": 5, "inFlightSeen": 1 }
 }
 ```
 
-`ticket` is always `plan[0].ticket`. No dispatchable ticket, cap already
-full, or everything colliding → `recommendation: "NOOP"` with an empty
-`plan`, empty `deferred`, `ticket: null`, and a typed `noopReason`
-(`queue_empty`, `cap_full`, `all_overlapping`). A NOOP is a good outcome, not
-a failure. If Linear is unreachable, or the repo has no team/project in
-`config/repos.yaml`, refuse:
+`ticket` is always `plan[0].ticket` when `recommendation: "DISPATCH"`.
+`readyCandidates` is the final count of dispatch candidates before cap/overlap
+pruning; `triageBacklog` is the complete count of Linear `Triage` issues.
+
+`LOW_SUPPLY` means zero ready candidates and non-empty Triage backlog with a
+successful complete read for both; emit `readyCandidates` and `triageBacklog` in
+that artifact.
+
+`NOOP` still means no ready work (`queue_empty`), zero free slots
+(`cap_full`), or ownership overlap (`all_overlapping`) with an empty `plan`,
+empty `deferred`, `ticket: null`, and typed `noopReason`. A NOOP is a good
+outcome, not a failure. If Linear is unreachable, or the repo has no
+team/project in `config/repos.yaml`, refuse:
 `{"schemaVersion": "factory.agent-result/v1", "terminalState": "refused", "reasonCode": "needs_human"}`.

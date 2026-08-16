@@ -9,6 +9,7 @@ import { ContractViolation, verifyResult } from "./verify.mjs";
 const registry = loadRegistry();
 const def = getAgent(registry, "factory-status-report@1");
 const dispatchDef = getAgent(registry, "dispatch@1");
+const workScanDef = getAgent(registry, "work-scan@1");
 
 function makeSpec(input = { repos: ["bj29"] }) {
   return {
@@ -85,6 +86,67 @@ describe("verifyResult", () => {
     const out = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
     expect(out.result.evidenceSetHash).toBeNull();
     expect(out.receipt.journalHead).toBeNull();
+  });
+
+  test("missing LOW_SUPPLY counts violates work-scan semantics", () => {
+    const dir = makeWorkspace({
+      schemaVersion: "factory.agent-result/v1",
+      terminalState: "completed",
+      artifact: {
+        recommendation: "LOW_SUPPLY",
+        repo: "low",
+        ticket: null,
+        plan: [],
+        deferred: [],
+        summary: "low supply with missing counts",
+        triageBacklog: 2,
+      },
+    });
+
+    const spec = {
+      ...makeSpec(),
+      agent: "work-scan@1",
+      outputContract: "factory.work-plan/v1",
+    };
+
+    try {
+      verifyResult({ spec, def: workScanDef, registry, workspaceDir: dir, attempt: 1 });
+      throw new Error("expected ContractViolation");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractViolation);
+      expect(err.violations).toContain("readyCandidates_required_for_low_supply");
+    }
+  });
+
+  test("invalid LOW_SUPPLY counts violate work-scan semantics", () => {
+    const dir = makeWorkspace({
+      schemaVersion: "factory.agent-result/v1",
+      terminalState: "completed",
+      artifact: {
+        recommendation: "LOW_SUPPLY",
+        repo: "low",
+        ticket: null,
+        plan: [],
+        deferred: [],
+        summary: "low supply with bad counts",
+        readyCandidates: 3,
+        triageBacklog: 0,
+      },
+    });
+
+    const spec = {
+      ...makeSpec(),
+      agent: "work-scan@1",
+      outputContract: "factory.work-plan/v1",
+    };
+
+    try {
+      verifyResult({ spec, def: workScanDef, registry, workspaceDir: dir, attempt: 1 });
+      throw new Error("expected ContractViolation");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractViolation);
+      expect(err.violations.some((x) => x.includes("low_supply_readyCandidates_must_be_0"))).toBe(true);
+    }
   });
 
   test("schema-violating artifact → ContractViolation", () => {
