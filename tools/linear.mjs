@@ -44,7 +44,14 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { loadRepos } from "../event-runtime/lib/repos.mjs";
 import { gql } from "../orchestrator/reaper.mjs";
+import {
+  parseOwnedPaths,
+  ownedPathsClosureGaps,
+  readPinManifestRequirements,
+  formatOwnedPathClosureGaps,
+} from "../orchestrator/owned-paths.mjs";
 
 // Every verb here is a fresh `bun` process, so nothing in module scope survives
 // between calls — and the protocol calls this constantly (claim, heartbeat
@@ -165,6 +172,48 @@ export function formatComments(nodesOrIssue) {
   return nodes.map(formatComment).join("\n\n---\n\n");
 }
 
+let REPOS;
+const PATH_REQUIREMENTS_CACHE = new Map();
+
+function getRepos() {
+  if (!REPOS) REPOS = loadRepos();
+  return REPOS;
+}
+
+export function __resetLinearReposCache() {
+  REPOS = undefined;
+  PATH_REQUIREMENTS_CACHE.clear();
+}
+
+function repoForIssue(issue) {
+  const repoTeam = issue?.team?.key;
+  const repoProject = issue?.project?.name;
+  if (!repoTeam || !repoProject) return null;
+  for (const repo of getRepos().values()) {
+    if (repo.team === repoTeam && repo.project === repoProject) return repo;
+  }
+  return null;
+}
+
+export function closureCheckMessages(issue) {
+  const repo = repoForIssue(issue);
+  if (!repo?.ownedPathsPolicy) return [];
+  const key = `${repo.name}::${repo.ownedPathsPolicy.pinManifests?.join(",") || ""}`;
+  if (!PATH_REQUIREMENTS_CACHE.has(key)) {
+    const requirements = repo.ownedPathsPolicy.pinManifests?.length
+      ? readPinManifestRequirements(repo.path, repo.ownedPathsPolicy.pinManifests)
+      : [];
+    PATH_REQUIREMENTS_CACHE.set(key, requirements);
+  }
+  const requirements = PATH_REQUIREMENTS_CACHE.get(key);
+  const gaps = ownedPathsClosureGaps({
+    ownedPaths: parseOwnedPaths(issue.description ?? ""),
+    ownedPathsPolicy: repo.ownedPathsPolicy,
+    pinManifestRequirements: requirements,
+  });
+  return formatOwnedPathClosureGaps(gaps);
+}
+
 /** Build an idempotent description update for the `detail` verb. */
 export function appendIssueDetail(currentDescription, rawDetail) {
   const detail = String(rawDetail ?? "").trim();
@@ -180,6 +229,7 @@ export function appendIssueDetail(currentDescription, rawDetail) {
 // --------------------------------------------------------------- helpers ---
 const ISSUE_FIELDS = `id identifier title url description
   state{ id name type } assignee{ id name }
+  team{ key } project{ name }
   labels(first:30){ nodes{ id name } }`;
 
 const COMMENTS_FIELDS = `id identifier title
@@ -387,6 +437,13 @@ const VERBS = {
       target = states.find((s) => s.name.toLowerCase() === wanted.toLowerCase());
       if (!target) throw new Error(`no state "${wanted}" on team ${teamOf(key)} — have: ${states.map((s) => s.name).join(", ")}`);
       input.stateId = target.id;
+    }
+
+    if (add.includes("ai:agent-ready")) {
+      const gaps = closureCheckMessages(issue);
+      if (gaps.length) {
+        throw new Error(`Cannot add ai:agent-ready on ${key}: Owned Paths closure policy not satisfied:\n${gaps.map((g) => `- ${g}`).join("\n")}`);
+      }
     }
 
     if (add.length || remove.length) input.labelIds = await applyLabels(issue, add, remove);

@@ -44,6 +44,17 @@ beforeAll(() => {
     `#!/bin/bash\nset -e\necho "down $1" >> "${callsLog}"\nrm -rf "${wtRoot}/$1"\n`,
   );
 
+  mkdirSync(path.join(repoDir, "event-runtime", "agents"), { recursive: true });
+  writeFileSync(
+    path.join(repoDir, "event-runtime", "agents", "triage-scan.json"),
+    `${JSON.stringify({
+      pins: {
+        "event-runtime/schemas/triage-scan.output.json": "dummy",
+        "event-runtime/schemas/triage-apply.input.json": "dummy",
+      },
+    })}\n`,
+  );
+
   mkdirSync(path.join(root, "config"), { recursive: true });
   writeFileSync(
     path.join(root, "config", "repos.yaml"),
@@ -52,6 +63,13 @@ beforeAll(() => {
       `    team: WM\n    project: Factory\n    max_in_flight: 1\n` +
       `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
       `    worktree_root: ${wtRoot}\n    verify: echo verified\n    escalate_paths:\n      - src/auth/**\n` +
+      `    owned_paths_policy:\n` +
+      `      direct:\n` +
+      `        - source: shared/**\n` +
+      `          requires:\n` +
+      `            - dist/**\n` +
+      `      pin_manifests:\n` +
+      `        - event-runtime/agents/*.json\n` +
       `  - name: watched\n    path: ${repoDir}\n    team: OPS\n    project: Watched\n    report_only: true\n` +
       `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n    worktree_root: ${wtRoot}\n    escalate_paths: []\n` +
       `  - name: uncapped\n    path: ${repoDir}\n    team: WM\n    project: Factory\n` +
@@ -269,6 +287,18 @@ describe("dispatch planner refusals (WM-108, dispatch doc §§2–5)", () => {
       ],
     }));
     expect(refusal).toBeNull();
+  });
+
+  test("incomplete owned-paths scope on a policy-enforced repo -> human_needed before worktree setup", () => {
+    const { outcome } = plan({
+      repo: "wt29",
+      ticket: "WM-500",
+    }, openWorld({
+      fetchTicket: () => readyTicket({ description: "## Owned Paths\n- shared/**\n" }),
+    }));
+    expect(outcome).toMatchObject({ decision: "human_needed", reason: "owned_paths_not_closed" });
+    expect(outcome.proposal).toBeTruthy();
+    expect(outcome.proposal.status).toBe("open");
   });
 
   test("a Linear transport failure throws — plan_failures/dead-letter own retries, not a one-shot refusal", () => {
