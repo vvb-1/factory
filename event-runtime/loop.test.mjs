@@ -222,16 +222,12 @@ describe("dispatch-completion edge: a finished dispatch re-fires the work-scan (
 
 // ---------------------------------------------------------------------------
 // The heartbeat half (WM-112): work/merge/ship loop schedules per dispatchable
-// repo, every one shipped disabled — switching a loop on stays a deliberate
-// operator act, and `approval: auto` appears nowhere (WM-107 §7).
+// repo, work and ship stay disabled. WM-417 deliberately limits autonomous
+// merge discovery to Factory while the new merge loop proves itself live.
 // ---------------------------------------------------------------------------
 
-/** The repos in config/repos.yaml that are NOT report_only, enumerated by hand
- *  from the actual file — dispatch doc §5: report_only repos are never loop
- *  targets. coach-wattz, watts-mobile, proxies, hdkiller and eslint-config
- *  are report_only. factory is dispatchable since OPS-463 but its loop
- *  schedules are deliberate follow-up scope, so it is asserted absent below
- *  alongside the report_only set rather than listed here. */
+/** Product repos that remain configured for watched/manual loops. Factory is
+ *  the sole autonomous merge target during the bootstrap period (WM-417). */
 const DISPATCHABLE = ["bj29", "wm-home", "legalease", "cashsaas"];
 
 const loopEntry = (eventType, repo, every, { approval = "watched", enabled = false } = {}) => ({
@@ -244,27 +240,34 @@ const loopEntry = (eventType, repo, every, { approval = "watched", enabled = fal
   enabled,
 });
 
-describe("loop schedules ship disabled (WM-112)", () => {
-  test("merge discovery is durable and autonomous while work and ship remain watched and disabled", () => {
+describe("loop schedule autonomy scope (WM-112/WM-417)", () => {
+  test("Factory alone has autonomous merge discovery while every other loop remains watched and disabled", () => {
     for (const repo of DISPATCHABLE) {
       expect(registry.schedules[`work-${repo}`]).toEqual(loopEntry("factory.work.requested", repo, "30m"));
-      expect(registry.schedules[`merge-${repo}`]).toEqual(
-        loopEntry("factory.merge.requested", repo, "30m", { approval: "auto", enabled: true }),
-      );
+      expect(registry.schedules[`merge-${repo}`]).toEqual(loopEntry("factory.merge.requested", repo, "30m"));
       expect(registry.schedules[`ship-${repo}`]).toEqual(loopEntry("factory.ship.requested", repo, "7d"));
     }
+    expect(registry.schedules["merge-factory"]).toEqual(
+      loopEntry("factory.merge.requested", "factory", "30m", { approval: "auto", enabled: true }),
+    );
   });
 
-  test("no loop targets a report_only repo (nor factory), and only merge scans are autonomous", () => {
-    for (const repo of ["coach-wattz", "watts-mobile", "proxies", "hdkiller", "eslint-config", "factory"]) {
+  test("the exact enabled autonomous merge set is merge-factory", () => {
+    for (const repo of ["coach-wattz", "watts-mobile", "proxies", "hdkiller", "eslint-config"]) {
       expect(registry.schedules[`work-${repo}`]).toBeUndefined();
       expect(registry.schedules[`merge-${repo}`]).toBeUndefined();
       expect(registry.schedules[`ship-${repo}`]).toBeUndefined();
     }
+    expect(registry.schedules["work-factory"]).toBeUndefined();
+    expect(registry.schedules["ship-factory"]).toBeUndefined();
+
+    const enabledAutonomous = Object.entries(registry.schedules)
+      .filter(([, schedule]) => schedule.enabled && schedule.approval === "auto")
+      .map(([loop]) => loop);
+    expect(enabledAutonomous).toEqual(["merge-factory"]);
+
     for (const [loop, schedule] of Object.entries(registry.schedules)) {
-      if (loop.startsWith("merge-")) {
-        expect({ approval: schedule.approval, enabled: schedule.enabled }).toEqual({ approval: "auto", enabled: true });
-      } else {
+      if (loop !== "merge-factory") {
         expect({ approval: schedule.approval, enabled: schedule.enabled }).toEqual({ approval: "watched", enabled: false });
       }
     }
@@ -297,11 +300,11 @@ describe("loop schedules ship disabled (WM-112)", () => {
     // below proves each tick now plans a real run.
   });
 
-  test("the shipped clock fires only autonomous merge discovery", () => {
+  test("the shipped clock fires only Factory merge discovery", () => {
     const db = openDb(":memory:");
     const emitted = emitDueTicks(db, registry, { now: Date.now() }).emitted;
-    expect(emitted.map((row) => row.loop).sort()).toEqual(DISPATCHABLE.map((repo) => `merge-${repo}`).sort());
-    expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(DISPATCHABLE.length);
+    expect(emitted.map((row) => row.loop)).toEqual(["merge-factory"]);
+    expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(1);
     db.close();
   });
 });
