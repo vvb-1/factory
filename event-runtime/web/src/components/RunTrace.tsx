@@ -12,7 +12,7 @@ function copyText(text: string, label: string = "text") {
 }
 
 /** States in which the trace is still being written — poll incrementally. */
-const LIVE_STATES: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
+export const LIVE_STATES: readonly RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
 
 /** Server page cap; the recorder's row cap (2000 + 1 marker) is ≤ 5 pages. */
 const PAGE = 500;
