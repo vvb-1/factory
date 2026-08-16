@@ -62,6 +62,41 @@ case "$ACTION" in
       die "--workers and --dev both replace the worker daemon — run the pool without --dev"
     fi
 
+    # Dependency freshness (WM-312). A runtime dependency added to the repo does
+    # not exist on the running stack until someone remembers `bun install` after
+    # pulling, and nothing detected the gap: on 2026-08-15 the Gondolin sandbox
+    # SDK shipped, CI went green on it (CI installs fresh every run), and the
+    # live fleet ran the rest of the day with `sandbox doctor` reporting
+    # unavailable and no signal anywhere. CI green plus production dark is the
+    # failure worth closing, not the missing package.
+    #
+    # A stamp file rather than node_modules' mtime: `bun install` leaves the
+    # directory untouched when nothing changes, so an mtime comparison would
+    # report stale forever and install on every single start.
+    # Gated on a LOCKFILE, not on package.json: a lockfile is what makes a
+    # directory a dependency tree we own. Without one there is nothing to be
+    # stale against, and installing anyway would run `bun install` over any
+    # directory that merely happens to contain a package.json — including the
+    # synthetic fixtures bin/live-stack.test.mjs builds, whose package.json is
+    # deliberately not valid JSON.
+    ensure_deps() {
+      local label="$1" dir="$2"
+      local lock=""
+      for candidate in "$dir/bun.lock" "$dir/bun.lockb"; do
+        [[ -f "$candidate" ]] && { lock="$candidate"; break; }
+      done
+      [[ -n "$lock" ]] || return 0
+      local stamp="$dir/node_modules/.factory-deps-stamp"
+      if [[ -d "$dir/node_modules" && -f "$stamp" && ! "$lock" -nt "$stamp" ]]; then
+        [[ -f "$dir/package.json" && "$dir/package.json" -nt "$stamp" ]] || return 0
+      fi
+      info "installing $label dependencies (lockfile newer than the last install)"
+      (cd "$dir" && bun install) || die "bun install failed in $dir — refusing to start on stale dependencies"
+      mkdir -p "$dir/node_modules" && : > "$stamp"
+    }
+    ensure_deps "root" "$REPO"
+    ensure_deps "event-runtime/web" "$REPO/event-runtime/web"
+
     # Policy-driven by default: the presence of a workers: block is the switch,
     # so a checkout without one keeps starting exactly one plain worker (the
     # pre-WM-226 behavior, unchanged).
