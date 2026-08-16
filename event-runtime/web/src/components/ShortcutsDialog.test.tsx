@@ -81,6 +81,21 @@ describe("ShortcutsDialog", () => {
     expect(actions.textContent).toContain("switch status tab");
   });
 
+  test("documents proposal multi-selection shortcuts (WM-293)", () => {
+    const r = render(<ShortcutsDialog onClose={() => {}} />);
+    const actions = r.getByRole("region", { name: "Actions" });
+    const content = actions.textContent ?? "";
+
+    expect(content).toContain("Space / Shift+Space");
+    expect(content).toContain("toggle highlighted proposal selection");
+    expect(content).toContain("* a / ⌘A");
+    expect(content).toContain("select all actionable proposals");
+    expect(content).toContain("* n / Esc");
+    expect(content).toContain("clear proposal selection");
+    expect(content).toContain("A / X");
+    expect(content).toContain("approve / reject selected proposals");
+  });
+
   test("documents view-specific actions and dialog hotkeys (WM-236)", () => {
     const r = render(<ShortcutsDialog onClose={() => {}} />);
     const actionsSection = r.getByRole("region", { name: "Actions" });

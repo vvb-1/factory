@@ -259,6 +259,68 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     expect(r.queryByRole("toolbar", { name: /bulk actions/i })).toBeNull();
   });
 
+  test("Space and Shift+Space toggle the highlighted proposal checkbox", async () => {
+    const p1 = stubProposal("prop_keyboard", "open", { agent: "keyboard-agent" });
+    api.proposals = async () => ({ proposals: [p1] });
+
+    const r = renderProposals({ focusProposalId: "prop_keyboard" });
+    const checkbox = await waitFor(
+      () => r.getByLabelText("Select proposal prop_keyboard") as HTMLInputElement,
+    );
+
+    fireEvent.keyDown(document.body, { key: " " });
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.keyDown(document.body, { key: " ", shiftKey: true });
+    expect(checkbox.checked).toBe(false);
+  });
+
+  test("selection chords select all and clear the active multi-selection", async () => {
+    const p1 = stubProposal("prop_1", "open", { agent: "triage-scan" });
+    const p2 = stubProposal("prop_2", "open", { agent: "security-scan" });
+    api.proposals = async () => ({ proposals: [p1, p2] });
+
+    const r = renderProposals();
+    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+
+    fireEvent.keyDown(document.body, { key: "*" });
+    fireEvent.keyDown(document.body, { key: "a" });
+    expect(r.getByText("Approve selected (2)")).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: "*" });
+    fireEvent.keyDown(document.body, { key: "n" });
+    expect(r.queryByRole("toolbar", { name: /bulk actions/i })).toBeNull();
+
+    fireEvent.keyDown(document.body, { key: "a", metaKey: true });
+    expect(r.getByText("Approve selected (2)")).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(r.queryByRole("toolbar", { name: /bulk actions/i })).toBeNull();
+  });
+
+  test("Shift+A and Shift+X open bulk dialogs and buttons show shortcut hints", async () => {
+    const p1 = stubProposal("prop_1", "open");
+    const p2 = stubProposal("prop_2", "open");
+    api.proposals = async () => ({ proposals: [p1, p2] });
+
+    const r = renderProposals();
+    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    fireEvent.click(r.getByLabelText("Select all proposals"));
+
+    const approveButton = r.getByRole("button", { name: /Approve selected \(2\)/ });
+    const rejectButton = r.getByRole("button", { name: /Reject selected \(2\)/ });
+    expect(approveButton.textContent).toContain("A");
+    expect(rejectButton.textContent).toContain("X");
+
+    fireEvent.keyDown(document.body, { key: "A", shiftKey: true });
+    expect(r.getByRole("dialog", { name: /Approve and queue 2 runs/i })).toBeTruthy();
+    fireEvent.click(r.getByRole("button", { name: "Not yet" }));
+
+    await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+    fireEvent.keyDown(document.body, { key: "X", shiftKey: true });
+    expect(r.getByRole("dialog", { name: /Reject 2 selected proposals/i })).toBeTruthy();
+  });
+
   test("selection clears on tab switch and history rows are not selectable", async () => {
     const pOpen = stubProposal("prop_open", "open", { agent: "open-agent" });
     const pHist = stubProposal("prop_hist", "approved", { agent: "hist-agent" });
