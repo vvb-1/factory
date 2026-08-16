@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import { keyGuard, useNow } from "../hooks";
+import { hashPath, hashProject, withProject } from "../hash";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
 import {
@@ -9,11 +10,13 @@ import {
   CopyActions,
   Dialog,
   JumpLink,
+  Section,
   StateBadge,
   VerbError,
   copyLink,
   copyText,
   notify,
+  shortId,
 } from "../components/ui";
 import {
   RunDetailBlocks,
@@ -21,6 +24,7 @@ import {
   isCancellable,
 } from "../components/RunDetailBlocks";
 import { handleRunArtifactClick } from "./Runs";
+import type { RunListItem } from "../types";
 
 /**
  * Full-page run view (`#/run/:id`, webui doc §10.11) — the trace at a
@@ -60,10 +64,28 @@ export function RunFull({
     queryFn: () => api.runs(),
     refetchInterval: 2000,
   });
+  const eventsQ = useQuery({
+    queryKey: ["events", "ALL"],
+    queryFn: () => api.events(),
+    refetchInterval: 2000,
+  });
   const listRow = useMemo(
     () => (listQ.data?.runs ?? []).find((r) => r.runId === runId) ?? null,
     [listQ.data, runId],
   );
+  const followUpEvents = useMemo(() => {
+    const events = eventsQ.data?.events ?? [];
+    return events.filter(
+      (e) => e.causationId === runId || (e.envelope as any)?.causationId === runId,
+    );
+  }, [eventsQ.data, runId]);
+  const runsById = useMemo(() => {
+    const map = new Map<string, RunListItem>();
+    for (const r of listQ.data?.runs ?? []) {
+      map.set(r.runId, r);
+    }
+    return map;
+  }, [listQ.data]);
 
   const d = detail.data;
   const attemptsExhausted = d
@@ -344,6 +366,101 @@ export function RunFull({
                 onRetry={() => retry.mutate({ id: d.run.runId, force: false })}
                 onForceRetry={() => setConfirm("force-retry")}
                 retryPending={retry.isPending}
+                afterLifecycle={
+                  <Section title="Follow-up Events" id="run-follow-up-events" card={followUpEvents.length === 0}>
+                    {followUpEvents.length === 0 ? (
+                      <div className="text-[12px] text-(--text-faint)">
+                        No follow-up event was emitted.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {followUpEvents.map((e) => {
+                          const linkedRun = e.runId ? runsById.get(e.runId) : null;
+                          return (
+                            <div
+                              key={`${e.source}:${e.eventId}`}
+                              className="rounded-md border border-(--border) bg-(--surface-0) p-3 text-[12px]"
+                            >
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="mono font-medium text-(--text) truncate" title={e.type}>
+                                  {e.type}
+                                </span>
+                                <span
+                                  className="mono shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                                  style={{
+                                    background: e.status === "planned" || e.status === "admitted" ? "var(--surface-2)" : "var(--surface-1)",
+                                    color: e.status === "dead_lettered" ? "var(--hue-err)" : "var(--text-dim)",
+                                  }}
+                                >
+                                  {e.status}
+                                </span>
+                              </div>
+
+                              <div className="mt-1.5 flex items-baseline justify-between gap-2 text-[11px] text-(--text-faint)">
+                                <span className="shrink-0">event</span>
+                                <JumpLink
+                                  onClick={() => onJumpEvent(e.source, e.eventId)}
+                                  title={e.eventId}
+                                  className="truncate"
+                                >
+                                  {shortId(e.eventId)}
+                                </JumpLink>
+                              </div>
+
+                              {e.proposalId && (
+                                <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px] text-(--text-faint)">
+                                  <span className="shrink-0">proposal</span>
+                                  <JumpLink
+                                    href={`#/${withProject(hashPath("proposals", e.proposalId), hashProject(window.location.hash))}`}
+                                    title={e.proposalId}
+                                    className="truncate"
+                                  >
+                                    {shortId(e.proposalId)}
+                                  </JumpLink>
+                                </div>
+                              )}
+
+                              {e.runId && (
+                                <div className="mt-2 border-t border-(--border) pt-2">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-medium text-(--text-dim)">
+                                      Follow-up Run
+                                    </span>
+                                    {linkedRun?.state && (
+                                      <StateBadge state={linkedRun.state} />
+                                    )}
+                                  </div>
+                                  <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+                                    <span className="text-(--text-faint)">agent</span>
+                                    <span className="text-(--text-dim) truncate">
+                                      {linkedRun?.agent ? (
+                                        <JumpLink onClick={() => onJumpAgent(linkedRun.agent)} title={linkedRun.agent}>
+                                          {linkedRun.agent}
+                                        </JumpLink>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+                                    <span className="text-(--text-faint)">run</span>
+                                    <JumpLink
+                                      href={`#/${withProject(hashPath("run", e.runId), hashProject(window.location.hash))}`}
+                                      title={`Open run ${e.runId}`}
+                                      className="text-(--accent) truncate"
+                                    >
+                                      {shortId(e.runId)} →
+                                    </JumpLink>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Section>
+                }
                 verbError={
                   cancel.error ??
                   (confirm === "force-retry" ? null : retry.error)

@@ -31,6 +31,7 @@ export class WorktreeError extends Error {
   constructor(message) {
     super(message);
     this.name = "WorktreeError";
+    this.code = "workspace_provisioning_error";
   }
 }
 
@@ -109,12 +110,38 @@ function materializeWorktree({ workspaceDir, input, checkoutDir }) {
       `repo "${repoName}" declares no worktree lifecycle in config/repos.yaml (worktree_up/worktree_down/worktree_root) — the planner should have refused this`,
     );
   }
-  const up = spawnSync("/bin/bash", [repo.worktreeUp, ticket], { cwd: repo.path, encoding: "utf8" });
+  // Repo-owned bring-up may discover a red project baseline after the usable
+  // worktree already exists. It reports that condition out-of-band and still
+  // exits zero; a non-zero exit remains a provisioning failure.
+  const reportPath = path.join(workspaceDir, ".worktree-up.json");
+  const up = spawnSync("/bin/bash", [repo.worktreeUp, ticket], {
+    cwd: repo.path,
+    encoding: "utf8",
+    env: { ...process.env, FACTORY_WORKTREE_REPORT: reportPath },
+  });
   if (up.status !== 0) {
     const why = (up.stderr || up.stdout || "").trim().split("\n").pop() || `exit ${up.status}`;
     throw new WorktreeError(`worktree_up failed for ${repoName}/${ticket}: ${why}`);
   }
+
   const worktreePath = path.join(repo.worktreeRoot, ticket);
+  if (!existsSync(worktreePath)) {
+    throw new WorktreeError(`worktree_up reported success for ${repoName}/${ticket} but did not create ${worktreePath}`);
+  }
+
+  let baseline = null;
+  if (existsSync(reportPath)) {
+    try {
+      const report = JSON.parse(readFileSync(reportPath, "utf8"));
+      if (report?.status !== "red" || typeof report.check !== "string" || typeof report.output !== "string") {
+        throw new Error("expected status=red with string check and output");
+      }
+      baseline = report;
+    } catch (err) {
+      throw new WorktreeError(`worktree_up wrote an invalid baseline report for ${repoName}/${ticket}: ${err.message}`);
+    }
+  }
+
   symlinkSync(worktreePath, path.join(workspaceDir, checkoutDir));
   const record = {
     repo: repoName,
@@ -123,8 +150,23 @@ function materializeWorktree({ workspaceDir, input, checkoutDir }) {
     repoPath: repo.path,
     down: repo.worktreeDown,
     verify: repo.verify,
+    ...(baseline ? { baseline } : {}),
   };
   writeFileSync(path.join(workspaceDir, WORKTREE_MARKER), `${canonicalJson(record)}\n`, "utf8");
+
+  // The agent contract points it at input.json, so runtime-discovered context
+  // must be present there rather than hidden in an implementation marker.
+  // Keep the run spec immutable; this is workspace-local execution context.
+  if (baseline) {
+    const enrichedInput = {
+      ...input,
+      baseline: {
+        ...baseline,
+        guidance: `The ${baseline.check} check already fails at this commit. If your ticket is unrelated, do not fix it; if it is related, use this as the starting point.`,
+      },
+    };
+    writeFileSync(path.join(workspaceDir, "input.json"), `${canonicalJson(enrichedInput)}\n`, "utf8");
+  }
   return record;
 }
 
