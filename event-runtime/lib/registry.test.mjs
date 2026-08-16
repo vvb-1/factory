@@ -37,6 +37,11 @@ const PI_TIERS = {
     standard: "gemini-3.7-flash",
     light: "gemini-3.7-flash",
   },
+  cursor: {
+    strong: "composer-2.5",
+    standard: "composer-2.5",
+    light: "composer-2.5-fast",
+  },
 };
 
 describe("registry", () => {

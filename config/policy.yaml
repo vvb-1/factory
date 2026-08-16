@@ -110,6 +110,12 @@ models:
     strong: gemini-3.7-flash
     standard: gemini-3.7-flash
     light: gemini-3.7-flash
+  # cursor (WM-440), Cursor Agent CLI login/subscription window.
+  # IDs from `agent --list-models` on 2026.08.11.
+  cursor:
+    strong: composer-2.5
+    standard: composer-2.5
+    light: composer-2.5-fast
 
 limits:
   # Hard wall-clock cap the FACTORY enforces, independent of whatever the

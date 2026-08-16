@@ -277,5 +277,13 @@
       "inputHash"
     ],
     "proposalTtlSeconds": 1800
+  },
+  "factory.cursor-smoke.requested": {
+    "agent": "cursor-smoke@1",
+    "adapter": "cursor",
+    "idempotencyScope": [
+      "inputHash"
+    ],
+    "proposalTtlSeconds": 1800
   }
 }
