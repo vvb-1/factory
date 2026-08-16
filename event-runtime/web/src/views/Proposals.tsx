@@ -619,6 +619,37 @@ export function Proposals({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  useEffect(() => {
+    if (!confirmApprove && !replan && !bulkConfirmOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (confirmApprove && sel && connected && !approve.isPending) {
+          setConfirmApprove(false);
+          approve.mutate(sel);
+        } else if (replan && connected && !approve.isPending) {
+          const fresh = replan.after;
+          setReplan(null);
+          approve.mutate(fresh);
+        } else if (bulkConfirmOpen && connected && !bulkApproving && approvableSelected.length > 0) {
+          void handleBulkApprove();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    confirmApprove,
+    replan,
+    bulkConfirmOpen,
+    sel,
+    connected,
+    approve,
+    bulkApproving,
+    approvableSelected,
+    handleBulkApprove,
+  ]);
+
   return (
     <div className="flex h-full min-w-0">
       <ListPane
@@ -947,7 +978,7 @@ export function Proposals({
                     disabled={!connected || approve.isPending}
                     onClick={() => setConfirmApprove(true)}
                   >
-                    Approve… <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">a</span>
+                    Approve… <span className="mono ml-1 opacity-80" aria-hidden="true">a</span>
                   </Button>
                 )}
               </div>
@@ -1167,7 +1198,7 @@ export function Proposals({
             <KV k="ttl" v={<Countdown createdAt={sel.created_at} ttlSeconds={sel.ttl_seconds} />} />
           </div>
           {sel.spec && (
-            <div className="mb-3 max-h-[50vh] overflow-auto">
+            <div className="mb-3 max-h-[38vh] overflow-auto">
               <JsonBlock value={sel.spec} />
             </div>
           )}
@@ -1181,7 +1212,7 @@ export function Proposals({
                 approve.mutate(sel);
               }}
             >
-              Approve and queue
+              Approve and queue <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
             </Button>
           </div>
         </Dialog>
@@ -1193,7 +1224,9 @@ export function Proposals({
             The TTL passed, so the planner re-read authoritative state and produced a new spec. Review
             the difference; nothing runs until you approve the new proposal explicitly.
           </div>
-          <SpecDiff before={replan.before.spec} after={replan.after.spec} />
+          <div className="mb-3 max-h-[38vh] overflow-auto">
+            <SpecDiff before={replan.before.spec} after={replan.after.spec} />
+          </div>
           <div className="mt-3 flex justify-end gap-2">
             <Button onClick={() => setReplan(null)}>Not yet</Button>
             <Button
@@ -1205,7 +1238,7 @@ export function Proposals({
                 approve.mutate(fresh);
               }}
             >
-              Approve new proposal
+              Approve new proposal <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
             </Button>
           </div>
         </Dialog>
@@ -1244,7 +1277,7 @@ export function Proposals({
             — each agent below runs with these capabilities the moment you confirm. Stale and non-run
             rows are skipped.
           </div>
-          <div className="flex max-h-[60vh] flex-col gap-4 overflow-auto">
+          <div className="flex max-h-[50vh] flex-col gap-4 overflow-auto">
             {approvableSelected.map((p) => (
               <div key={p.id} className="rounded-md border border-(--border) bg-(--surface-0) p-2.5">
                 <div className="mb-2 font-medium text-[12px]">{p.agent ?? p.id}</div>
@@ -1268,7 +1301,7 @@ export function Proposals({
                 void handleBulkApprove();
               }}
             >
-              Approve and queue
+              Approve and queue <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
             </Button>
           </div>
         </Dialog>

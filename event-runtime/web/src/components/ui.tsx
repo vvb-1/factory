@@ -1447,7 +1447,7 @@ export function Dialog({
   }, []);
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 pt-[10vh]"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && onCloseRef.current()}
     >
       <div
@@ -1456,7 +1456,7 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[80vh] overflow-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 shadow-2xl outline-none`}
+        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[85vh] overflow-y-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 sm:p-5 shadow-2xl outline-none`}
       >
         <div id={titleId} className="display mb-3 text-[15px] font-semibold">
           {title}

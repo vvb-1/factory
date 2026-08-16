@@ -18,11 +18,13 @@ function classes(el: HTMLElement): string[] {
 }
 
 beforeEach(() => {
+  modal.depth = 0;
   jest.useFakeTimers();
   clearToasts();
 });
 
 afterEach(() => {
+  modal.depth = 0;
   clearToasts();
   jest.useRealTimers();
   cleanup();
