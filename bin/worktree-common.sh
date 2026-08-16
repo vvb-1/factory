@@ -320,6 +320,14 @@ release_bun_install_lock() { # <lock-dir> <owner-pid>
   fi
 }
 
+# Invoke the action from Bash's shell-escaped `trap -p` output.
+run_bun_install_trap() { # <trap-definition>
+  local definition="$1"
+  [[ -n "$definition" ]] || return 0
+  eval "set -- ${definition#trap -- }"
+  eval "$1"
+}
+
 # File-locked bun install with retry on SQLITE_BUSY (OPS-322).
 # Prevents concurrent worktree bring-ups from racing on bun's global cache DB.
 locked_bun_install() { # <dir>
@@ -387,9 +395,12 @@ locked_bun_install() { # <dir>
   previous_exit_trap=$(trap -p EXIT || true)
   previous_int_trap=$(trap -p INT || true)
   previous_term_trap=$(trap -p TERM || true)
-  trap 'release_bun_install_lock "$lock_dir" "$$"' EXIT
-  trap 'release_bun_install_lock "$lock_dir" "$$"; exit 130' INT
-  trap 'release_bun_install_lock "$lock_dir" "$$"; exit 143' TERM
+  local exit_handler
+  printf -v exit_handler 'code=$?; release_bun_install_lock %q %q; trap - EXIT; run_bun_install_trap %q; exit "$code"' \
+    "$lock_dir" "$$" "$previous_exit_trap"
+  trap "$exit_handler" EXIT
+  trap 'release_bun_install_lock "$lock_dir" "$$"; trap - EXIT INT; [[ -n "$previous_exit_trap" ]] && eval "$previous_exit_trap"; run_bun_install_trap "$previous_int_trap"; exit 130' INT
+  trap 'release_bun_install_lock "$lock_dir" "$$"; trap - EXIT TERM; [[ -n "$previous_exit_trap" ]] && eval "$previous_exit_trap"; run_bun_install_trap "$previous_term_trap"; exit 143' TERM
 
   local attempt=1 max_attempts=5 out="" code=0
   while [[ $attempt -le $max_attempts ]]; do

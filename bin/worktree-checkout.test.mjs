@@ -177,14 +177,18 @@ test("old holder cleanup preserves a new holder before pid publication", () => {
   }
 });
 
-test("locked_bun_install cleans up held lock on SIGTERM and exits 143", async () => {
-  const testDir = createTempProject();
-  const lockDir = makeTestLockDir("test-sigterm-trap");
-  const mockBinDir = mkdtempSync(path.join(tmpdir(), "mock-bun-"));
-  const readyFile = path.join(mockBinDir, "ready.txt");
+test("locked_bun_install composes prior INT/TERM/EXIT traps on interruption", async () => {
+  for (const { trapName, exitCode } of [
+    { trapName: "INT", exitCode: 130 },
+    { trapName: "TERM", exitCode: 143 },
+  ]) {
+    const testDir = createTempProject();
+    const lockDir = makeTestLockDir(`test-${trapName.toLowerCase()}-trap`);
+    const mockBinDir = mkdtempSync(path.join(tmpdir(), "mock-bun-"));
+    const readyFile = path.join(mockBinDir, "ready.txt");
 
-  const mockBun = path.join(mockBinDir, "bun");
-  writeFileSync(mockBun, `#!/usr/bin/env bash
+    const mockBun = path.join(mockBinDir, "bun");
+    writeFileSync(mockBun, `#!/usr/bin/env bash
 if [[ "$1" == "install" ]]; then
   touch "${readyFile}"
   sleep 1
@@ -193,35 +197,48 @@ fi
 exec bun "$@"
 `, { mode: 0o755 });
 
-  try {
-    const proc = Bun.spawn([
-      "bash",
-      "-c",
-      `source "${COMMON}"\nlocked_bun_install "${testDir}"`,
-    ], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: {
-        ...process.env,
-        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_LOCK_DIR: lockDir,
-      },
-    });
+    try {
+      const proc = Bun.spawn([
+        "bash",
+        "-c",
+        `source "${COMMON}"
+trap 'echo PRIOR_EXIT_TRIGGERED' EXIT
+trap 'echo PRIOR_${trapName}_TRIGGERED' ${trapName}
+(
+  for _ in {1..200}; do
+    if [[ -e "${readyFile}" ]]; then
+      kill -${trapName} "$$"
+      exit 0
+    fi
+    sleep 0.01
+  done
+  echo "timed out waiting for mock bun" >&2
+) &
+locked_bun_install "${testDir}"`,
+      ], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          PATH: `${mockBinDir}${path.delimiter}${process.env.PATH}`,
+          FACTORY_LOCK_DIR: lockDir,
+        },
+      });
+      const stdoutPromise = new Response(proc.stdout).text();
+      const stderrPromise = new Response(proc.stderr).text();
 
-    for (let i = 0; i < 50; i++) {
-      if (existsSync(readyFile)) break;
-      await Bun.sleep(10);
+      const [status, stdout, stderr] = await Promise.all([proc.exited, stdoutPromise, stderrPromise]);
+      expect(stderr).toBe("");
+      expect(stdout).toContain(`PRIOR_${trapName}_TRIGGERED`);
+      expect(stdout).toContain("PRIOR_EXIT_TRIGGERED");
+      expect(status).toBe(exitCode);
+      expect(existsSync(readyFile)).toBe(true);
+      expect(existsSync(lockDir)).toBe(false);
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+      rmSync(lockDir, { recursive: true, force: true });
+      rmSync(mockBinDir, { recursive: true, force: true });
     }
-
-    expect(existsSync(lockDir)).toBe(true);
-    proc.kill("SIGTERM");
-    const exitCode = await proc.exited;
-    expect([143, 1, 0]).toContain(exitCode);
-    expect(existsSync(lockDir)).toBe(false);
-  } finally {
-    rmSync(testDir, { recursive: true, force: true });
-    rmSync(lockDir, { recursive: true, force: true });
-    rmSync(mockBinDir, { recursive: true, force: true });
   }
 });
 
