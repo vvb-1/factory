@@ -157,20 +157,20 @@ test("locked_bun_install restores prior EXIT/INT/TERM traps upon clean return", 
   }
 });
 
-test("release_bun_install_lock only deletes lock owned by current process or pid-less", () => {
-  const lockDir = makeTestLockDir("test-release-ownership");
+test("old holder cleanup preserves a new holder before pid publication", () => {
+  const lockDir = makeTestLockDir("test-release-generation");
   mkdirSync(lockDir, { recursive: true });
-  writeFileSync(path.join(lockDir, "pid"), "12345");
 
   try {
-    // Attempt release with non-matching owner PID -> should NOT remove lock
-    const rNonMatch = sh(`release_bun_install_lock "${lockDir}" "99999"`);
-    expect(rNonMatch.status).toBe(0);
+    const oldCleanup = sh(`release_bun_install_lock "${lockDir}" "12345"`);
+    expect(oldCleanup.status).toBe(0);
     expect(existsSync(lockDir)).toBe(true);
 
-    // Release with matching owner PID -> removes lock
-    const rMatch = sh(`release_bun_install_lock "${lockDir}" "12345"`);
-    expect(rMatch.status).toBe(0);
+    writeFileSync(path.join(lockDir, "pid"), "67890");
+    expect(existsSync(lockDir)).toBe(true);
+
+    const newCleanup = sh(`release_bun_install_lock "${lockDir}" "67890"`);
+    expect(newCleanup.status).toBe(0);
     expect(existsSync(lockDir)).toBe(false);
   } finally {
     rmSync(lockDir, { recursive: true, force: true });

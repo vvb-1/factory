@@ -309,13 +309,13 @@ web_build_hash() { # <web-dir>
   ) | shasum | cut -d' ' -f1
 }
 
-# Remove a bun-install lock only when it still belongs to this process. The
-# pid-less case covers a signal arriving after mkdir but before the pid rename.
+# Remove a bun-install lock only when its published owner is this process.
+# A pid-less directory may be a new holder's pre-publication generation.
 release_bun_install_lock() { # <lock-dir> <owner-pid>
   local lock_dir="$1" owner_pid="$2" holder=""
   [[ -d "$lock_dir" ]] || return 0
   holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
-  if [[ -z "$holder" || "$holder" == "$owner_pid" ]]; then
+  if [[ "$holder" == "$owner_pid" ]]; then
     rm -rf "$lock_dir" 2>/dev/null || true
   fi
 }
