@@ -247,6 +247,29 @@ const inputCls =
 
 type EditorTab = "form" | "json";
 
+export function humanizeSchemaErrors(errs: string[], fields?: FieldSpec[] | null): string[] {
+  const byName = new Map((fields ?? []).map((f) => [f.name, f]));
+  return errs.map((err) => {
+    if (!/does not match pattern/.test(err)) return err;
+    const fielded = err.match(/^\$\.([A-Za-z0-9_$-]+)((?:[.[])[^:]*)?: (.*)$/);
+    if (fielded) {
+      const name = fielded[1];
+      const subpath = fielded[2] ?? "";
+      const message = fielded[3];
+      const spec = byName.get(name);
+      const example = !subpath && spec ? placeholderFor(name, spec.schema) : null;
+      const hint = example ? ` (e.g. ${example})` : "";
+      const humanizedMsg = message.replace(
+        /does not match pattern[\s\S]*$/,
+        `does not match expected format${hint}`,
+      );
+      return `$.${name}${subpath}: ${humanizedMsg}`;
+    }
+    return err.replace(/does not match pattern[\s\S]*$/, "does not match expected format");
+  });
+}
+
+
 /**
  * Inject dialog (webui spec §4.4, templates per OPS-214, confirm per OPS-230,
  * format OPS-361, 2-column sidebar OPS-363, schema-driven Form view WM-76,
@@ -528,12 +551,18 @@ export function InjectDialog({
     if (!keys.includes(e.key)) return;
     if (!(e.target instanceof HTMLElement) || e.target.getAttribute("role") !== "radio") return;
     e.preventDefault();
+    const radios = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]'));
+    const idx = radios.indexOf(e.target);
+    if (e.key === "ArrowUp" && idx === 0) {
+      searchRef.current?.focus();
+      return;
+    }
     const ids = templateIds();
-    const idx = checkedId === null ? ids.length - 1 : Math.max(ids.indexOf(checkedId), 0);
+    const selectedIdx = checkedId === null ? ids.length - 1 : Math.max(ids.indexOf(checkedId), 0);
     const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
-    const nextIdx = (idx + delta + ids.length) % ids.length;
+    const nextIdx = (selectedIdx + delta + ids.length) % ids.length;
     applySelection(ids[nextIdx]);
-    listRef.current?.querySelectorAll<HTMLElement>('[role="radio"]')[nextIdx]?.focus();
+    radios[nextIdx]?.focus();
   }
 
   // ---------------------------------------------------------------------------
@@ -691,7 +720,9 @@ export function InjectDialog({
   /** Warn-and-ack for a schema-invalid payload; returns true when submission should pause. */
   function needsSchemaAck(type: string, errs: string[]): boolean {
     if (errs.length === 0 || schemaAck) return false;
-    const summary = errs.slice(0, 3).join("; ") + (errs.length > 3 ? ` (+${errs.length - 3} more)` : "");
+    const fields = schemaFields(schemaFor(type));
+    const humanized = humanizeSchemaErrors(errs, fields);
+    const summary = humanized.slice(0, 3).join("; ") + (humanized.length > 3 ? ` (+${humanized.length - 3} more)` : "");
     setClientError(
       `payload does not validate against the "${type}" input schema: ${summary}. Intake will admit it, but planning will park it human_needed. Inject anyway to proceed.`,
     );
@@ -807,7 +838,8 @@ export function InjectDialog({
     if (!isPlainObject(env) || typeof env.type !== "string") return [];
     const schema = schemaFor(env.type);
     if (!schema) return [];
-    return validate(schema, env.payload ?? {}).errors;
+    const rawErrs = validate(schema, env.payload ?? {}).errors;
+    return humanizeSchemaErrors(rawErrs, schemaFields(schema));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- schemaFor reads registryView
   }, [tab, text, registryView]);
 

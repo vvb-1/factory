@@ -88,6 +88,16 @@ describe("RunDetailBlocks field tiering (WM-129)", () => {
     expect(done.queryByText("Deadlines")).toBeNull();
   });
 
+  test("shows active attempt and lease clocks while a run is VERIFYING (WM-249)", () => {
+    const verifying = renderBlocks(
+      createRunDetailFixture({ run: { state: "VERIFYING" } as RunDetail["run"] }),
+    );
+
+    expect(verifying.getByText("Deadlines")).toBeTruthy();
+    expect(verifying.getByTitle(/^timeout in /)).toBeTruthy();
+    expect(verifying.getByTitle(/^reaped in /)).toBeTruthy();
+  });
+
   test("attempt cards carry started/finished timestamps", () => {
     const r = renderBlocks(createRunDetailFixture({}));
     // Once in the Deadlines clock, once on the attempt card — the card row is the one this test owns.
@@ -166,10 +176,14 @@ describe("Lifecycle reason readability (WM-145)", () => {
     );
     expect(failedRow).toBeTruthy();
 
-    const titled = Array.from(failedRow!.querySelectorAll("[title]")).filter((el) =>
-      (el.getAttribute("title") ?? "").includes(LONG_REASON),
+    const expectedTitle = `worker_test · ${LONG_REASON}`;
+    const titled = Array.from(failedRow!.querySelectorAll("[title]")).filter(
+      (el) => el.getAttribute("title") === expectedTitle,
     );
-    expect(titled.length).toBeGreaterThan(0);
+    // Both the reason wrapper and the nested ActorRef jump link expose the
+    // composite title, so hovering the actor cannot mask the reason.
+    expect(titled.length).toBe(2);
+    expect(failedRow!.querySelector("button")?.getAttribute("title")).toBe(expectedTitle);
 
     const truncated = Array.from(failedRow!.querySelectorAll(".truncate")).filter((el) =>
       el.textContent?.includes(LONG_REASON),

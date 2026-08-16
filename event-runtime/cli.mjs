@@ -18,8 +18,10 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { hostname, homedir } from "node:os";
 import path from "node:path";
 import * as actions from "./lib/adapters/actions.mjs";
+import * as agy from "./lib/adapters/agy.mjs";
 import * as claude from "./lib/adapters/claude.mjs";
 import * as command from "./lib/adapters/command.mjs";
+import * as cursor from "./lib/adapters/cursor.mjs";
 import * as fake from "./lib/adapters/fake.mjs";
 import * as pi from "./lib/adapters/pi.mjs";
 import { apiClient } from "./lib/client.mjs";
@@ -31,6 +33,8 @@ import { newWorkerId } from "./lib/ids.mjs";
 import { pruneArtifacts } from "./lib/artifacts.mjs";
 import { publishOutbox } from "./lib/outbox.mjs";
 import { autoApproveScheduled, emitDueTicks, scheduleView } from "./lib/schedules.mjs";
+import { autoApproveChains } from "./lib/auto-approval.mjs";
+import { worktreeDispatchAutoEligibility } from "./lib/planner.mjs";
 import { resolveChains } from "./lib/chain.mjs";
 import { notifyPending } from "./lib/notify.mjs";
 import { reconcileInbox } from "./lib/inbox.mjs";
@@ -135,7 +139,7 @@ async function withClient(fn) {
 // cannot hitch every 1s tick.
 export const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
-export const TICK_SUBSYSTEMS = ["tick emit", "plan", "auto-approve", "inbox", "notify", "outbox", "GC", "chains"];
+export const TICK_SUBSYSTEMS = ["tick emit", "plan", "auto-approve", "auto-approve-chains", "inbox", "notify", "outbox", "GC", "chains"];
 
 /**
  * One serve-loop pass (OPS-412). Each named subsystem is caught on its own
@@ -187,6 +191,17 @@ export async function tick({
     const auto = autoApproveScheduled(db, registry, approveProposal, { now, policyVersion: pv });
     for (const a of auto.approved) logLine(`schedule approved ${a.loop} → run ${a.runId} (actor: schedule)`);
     for (const err of auto.errors) logLine(`schedule approval error: ${err}`);
+  });
+
+  await runStep("auto-approve-chains", () => {
+    const auto = autoApproveChains(db, registry, {
+      now,
+      policyVersion: pv,
+      dispatchEligibility: worktreeDispatchAutoEligibility,
+      dispatch: db ? db : null,
+    });
+    for (const a of auto.approved) logLine(`chain proposal approved ${a.proposalId} → run ${a.runId} (actor: chain auto)`);
+    for (const e of auto.errors) logLine(`chain approval error: ${e.proposalId}:${e.reason}`);
   });
 
   await runStep("announce", () => {
@@ -347,7 +362,7 @@ async function serve(args) {
     fail(`serve: invalid port "${rawPort}" (must be integer 1-65535)`);
   }
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
-  const adapters = { actions, claude, command, fake, pi };
+  const adapters = { actions, agy, claude, command, cursor, fake, pi };
   if (adapterOverride && !adapters[adapterOverride]) {
     fail(`serve: unknown --adapter-override "${adapterOverride}" (have: ${Object.keys(adapters).join(", ")})`);
   }
@@ -502,7 +517,7 @@ async function work(args) {
   if (!Number.isInteger(pollMs) || pollMs < 25 || pollMs > 5_000) {
     fail("work: --poll-ms must be an integer between 25 and 5000");
   }
-  const adapters = { actions, claude, command, fake, pi };
+  const adapters = { actions, agy, claude, command, cursor, fake, pi };
   if (adapterOverride && !adapters[adapterOverride]) {
     fail(`work: unknown --adapter-override "${adapterOverride}" (have: ${Object.keys(adapters).join(", ")})`);
   }

@@ -3,7 +3,7 @@ import { cpSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
-import { buildChainInput, resolveChains } from "./chain.mjs";
+import { admitChainEvent, buildChainInput, resolveChains } from "./chain.mjs";
 import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
@@ -54,6 +54,20 @@ function harness() {
 
   return { db, adapters, workerOpts, runToCompletion };
 }
+
+describe("trusted chain admission", () => {
+  test("assigns immutable chain provenance instead of preserving caller source", () => {
+    const db = openDb(":memory:");
+    const outcome = admitChainEvent(db, registry, {
+      ...failedRunEnvelope({ eventId: "internal-chain-proof" }),
+      source: "operator",
+    });
+
+    expect(outcome.admitted).toBe(true);
+    expect(outcome.event.source).toBe("chain");
+    expect(JSON.parse(outcome.event.envelope_json).source).toBe("chain");
+  });
+});
 
 describe("buildChainInput", () => {
   const context = { input: { repo: "wm/x", runId: 7 }, artifact: { verdict: "FLAKE", nested: { a: 1 } } };
@@ -212,6 +226,44 @@ describe("registry gates (OPS-223)", () => {
       JSON.stringify({ "ci-doctor@2": { recommendationField: "verdict", edges: { FLAKE: { eventType: "factory.ci-rerun.requested", input: { x: "$.secrets.key" } } } } }),
     );
     expect(() => loadRegistry({ root })).toThrow("only $.input.*, $.artifact.* and $.artifactHash.*");
+
+    const independentRule = (edge) => ({
+      "ci-doctor@2": {
+        recommendationField: "verdict",
+        independent: true,
+        edges: { FLAKE: edge },
+      },
+    });
+    writeFileSync(
+      path.join(root, "edges.json"),
+      JSON.stringify(independentRule({ eventType: "factory.ci-rerun.requested", input: {} })),
+    );
+    expect(() => loadRegistry({ root })).toThrow("independent edge has no whenItemsField");
+
+    writeFileSync(
+      path.join(root, "edges.json"),
+      JSON.stringify(
+        independentRule({
+          eventType: "factory.ci-rerun.requested",
+          whenItemsField: "signals",
+          input: {},
+        }),
+      ),
+    );
+    expect(() => loadRegistry({ root })).toThrow("independent edge needs a mixedEventId containing ${runId}");
+
+    writeFileSync(
+      path.join(root, "edges.json"),
+      JSON.stringify(
+        independentRule({
+          eventType: "factory.ci-rerun.requested",
+          whenItemsField: "signals",
+          mixedEventId: "chain-${runId}-flake",
+          input: {},
+        }),
+      ),
+    );
+    expect(() => loadRegistry({ root })).not.toThrow();
   });
 });
 

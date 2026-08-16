@@ -966,5 +966,27 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
     fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
     expect(rejectedCalls).toEqual([]);
   });
+
+  test("Enter key submits single-proposal approve dialog when connected", async () => {
+    const p1 = stubProposal("prop_approve_hotkey", "open", { agent: "triage-scan", decision: "run" });
+    const approvedCalls: string[] = [];
+    api.proposals = async () => ({ proposals: [p1] });
+    api.approve = async (id: string) => {
+      approvedCalls.push(id);
+      return { approved: true, runId: "run_approved_1" };
+    };
+
+    const r = renderProposals({ focusProposalId: "prop_approve_hotkey", connected: true });
+    const approveBtn = await waitFor(() => r.getByRole("button", { name: /^Approve/ }));
+    expect(approveBtn.textContent).toContain("a");
+
+    // Open confirmation dialog
+    fireEvent.click(approveBtn);
+    await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+    // Press Enter to confirm approval
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await waitFor(() => expect(approvedCalls).toEqual(["prop_approve_hotkey"]));
+  });
 });
 

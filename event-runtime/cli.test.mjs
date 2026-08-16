@@ -27,6 +27,137 @@ function runCli(args, env = {}) {
   return { ...result, all: `${result.stdout}${result.stderr}` };
 }
 
+async function awaitFile(file, label, { timeoutMs = 5000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(file)) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`${label} did not appear within ${timeoutMs}ms`);
+}
+
+/** Wait for both durable writes made after an async notifier process exits. */
+async function awaitNotifierDelivery(db, target, { timeoutMs = 5000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const row = db.query(
+      `SELECT i.delivery_json, n.exit_code
+       FROM inbox_items i JOIN notify_log n ON n.inbox_item_id = i.id
+       WHERE n.target = ?`,
+    ).get(target);
+    const delivery = JSON.parse(row?.delivery_json ?? "{}");
+    if (delivery.telegram && row?.exit_code !== null) {
+      return { ...delivery.telegram, exitCode: row.exit_code };
+    }
+    await Bun.sleep(10);
+  }
+  throw new Error(`notifier delivery for ${target} did not settle within ${timeoutMs}ms`);
+}
+
+function writeGatedNotifier(dir, { exitCode = 0 } = {}) {
+  const outFile = path.join(dir, "pushes.txt");
+  const startedFile = path.join(dir, "notifier-started");
+  const releaseFile = path.join(dir, "notifier-release");
+  const stub = path.join(dir, "notify-stub.sh");
+  // The child advertises that it is pending, then waits for the test's explicit
+  // release condition. A visible message alone is deliberately insufficient.
+  writeFileSync(
+    stub,
+    `#!/bin/sh\nprintf '%s\\n' "$1" >> ${outFile}\n: > ${startedFile}\nwhile [ ! -f ${releaseFile} ]; do sleep 0.01; done\nexit ${exitCode}\n`,
+  );
+  spawnSync("chmod", ["+x", stub]);
+  return { outFile, startedFile, releaseFile, stub };
+}
+
+async function assertHealthyLiveServe() {
+  const home = mkdtempSync(path.join(os.tmpdir(), "evrt-doc-healthy-"));
+  const port = String(59700 + (process.pid % 100));
+  const child = spawn("bun", [CLI, "serve", "--port", port], {
+    env: {
+      ...process.env,
+      FACTORY_EVENT_HOME: home,
+      FACTORY_EVENT_SECRET: "test-secret",
+      FACTORY_GITHUB_WEBHOOK_SECRET: "test-gh-secret",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let out = "";
+  child.stdout.on("data", (b) => {
+    out += b;
+  });
+  child.stderr.on("data", (b) => {
+    out += b;
+  });
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline && !out.includes("control API on")) {
+    await Bun.sleep(10);
+  }
+  let docRes;
+  try {
+    expect(out).toContain("control API on");
+    docRes = spawnSync("bun", [CLI, "doctor"], {
+      encoding: "utf8",
+      env: { ...process.env, FACTORY_EVENT_HOME: home, FACTORY_EVENT_PORT: port, FACTORY_RUN_DIR: throwawayRunDir() },
+    });
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+  }
+  expect(docRes.status).toBe(0);
+  expect(docRes.stdout).toContain("anomalies");
+  expect(docRes.stdout).toContain("none");
+}
+
+async function runNotifierDeliveryCase({ failWhilePending = false } = {}) {
+  const { tick } = await import("./cli.mjs");
+  const { loadRegistry } = await import("./lib/registry.mjs");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-tick-notify-"));
+  const { outFile, startedFile, releaseFile, stub } = writeGatedNotifier(dir);
+  const db = openDb(path.join(dir, "runtime.db"));
+  const at = new Date().toISOString();
+  db.query(
+    `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, status, admitted_at)
+     VALUES ('test', 'evt-tick', 'linear.ticket.agent_ready', ?, ?, '{}', 'sha256:x', 'human_needed', ?)`,
+  ).run(at, at, at);
+  db.query(
+    `INSERT INTO proposals (id, event_source, event_id, decision, status, reason, created_at, ttl_seconds)
+     VALUES ('prop-tick', 'test', 'evt-tick', 'human_needed', 'open', 'no_worktree_scripts', ?, 1800)`,
+  ).run(at);
+
+  const saved = { N: process.env.FACTORY_EVENT_NOTIFY, C: process.env.FACTORY_EVENT_NOTIFY_CMD };
+  process.env.FACTORY_EVENT_NOTIFY = "1";
+  process.env.FACTORY_EVENT_NOTIFY_CMD = stub;
+  const logs = [];
+  let deliveryStarted = false;
+  let deliverySettled = false;
+  try {
+    await tick({ db, registry: loadRegistry(), policyVersion: "git:test", log: (l) => logs.push(l) });
+    deliveryStarted = true;
+    await awaitFile(startedFile, "notifier start");
+    if (failWhilePending) throw new Error("intentional assertion failure while notifier delivery is pending");
+    writeFileSync(releaseFile, "release\n");
+    const delivery = await awaitNotifierDelivery(db, "test/evt-tick");
+    deliverySettled = true;
+    expect(readFileSync(outFile, "utf8").trim()).toBe(
+      "BLOCKED linear.ticket.agent_ready evt-tick: no_worktree_scripts",
+    );
+    expect(logs.some((l) => l.includes("notify human_needed test/evt-tick"))).toBe(true);
+    await tick({ db, registry: loadRegistry(), policyVersion: "git:test", log: () => {} });
+    expect(readFileSync(outFile, "utf8").trim().split("\n")).toHaveLength(1);
+    return { delivery };
+  } finally {
+    // This is the critical cleanup contract: first unblock an in-flight child,
+    // then await its inbox and notify-log writes, only then close SQLite.
+    if (deliveryStarted && !existsSync(releaseFile)) writeFileSync(releaseFile, "release\n");
+    if (deliveryStarted && !deliverySettled) await awaitNotifierDelivery(db, "test/evt-tick");
+    if (saved.N === undefined) delete process.env.FACTORY_EVENT_NOTIFY;
+    else process.env.FACTORY_EVENT_NOTIFY = saved.N;
+    if (saved.C === undefined) delete process.env.FACTORY_EVENT_NOTIFY_CMD;
+    else process.env.FACTORY_EVENT_NOTIFY_CMD = saved.C;
+    db.close();
+  }
+}
+
 describe("cli", () => {
   test("no command → usage text listing all verbs, non-zero exit", () => {
     const r = runCli([]);
@@ -425,6 +556,191 @@ describe("cli", () => {
     expect(row?.state).toBe("COMPLETED");
   });
 
+  test("agy-smoke@1 routes end-to-end through the agy adapter via a fake shim (WM-424)", async () => {
+    const { createRun, transition } = await import("./lib/lifecycle.mjs");
+    const { canonicalJson, hashJson } = await import("./lib/canonical.mjs");
+    const { loadRegistry } = await import("./lib/registry.mjs");
+    const { claimNext, executeClaimed } = await import("./lib/worker.mjs");
+
+    const db = openDb(":memory:");
+    const registry = loadRegistry();
+
+    const input = { message: "hello from WM-424" };
+    const spec = {
+      schemaVersion: "factory.run-spec/v1",
+      runId: "run_agy_smoke_test",
+      agent: "agy-smoke@1",
+      input,
+      inputHash: hashJson(input),
+      workspace: { type: "ephemeral", retainOnFailure: true },
+      adapter: "agy",
+      model: "gemini-3.7-flash",
+      effort: "high",
+      promptVersion: "git:test",
+      policyVersion: "git:test",
+      outputContract: "factory.agy-smoke/v1",
+      capabilities: [],
+      timeoutSeconds: 5,
+      maxAttempts: 1,
+      idempotencyKey: "idem_agy_smoke_test",
+    };
+
+    createRun(db, {
+      runId: spec.runId,
+      idempotencyKey: spec.idempotencyKey,
+      spec,
+      specJson: canonicalJson(spec),
+      specHash: hashJson(spec),
+      actor: "test",
+      policyVersion: "test",
+      now: Date.now(),
+    });
+    transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now: Date.now() });
+    transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now: Date.now() });
+
+    let agyCalled = false;
+    const mockAdapters = {
+      agy: {
+        execute: async ({ spec: runSpec, workspaceDir }) => {
+          agyCalled = true;
+          const { readFileSync, writeFileSync } = await import("node:fs");
+          const { default: path } = await import("node:path");
+          const staged = JSON.parse(readFileSync(path.join(workspaceDir, "input.json"), "utf8"));
+          writeFileSync(
+            path.join(workspaceDir, "result.json"),
+            JSON.stringify({
+              schemaVersion: "factory.agent-result/v1",
+              terminalState: "completed",
+              reasonCode: "ok",
+              artifact: { echo: staged.message },
+              evidence: { commands: [] },
+            }),
+            "utf8",
+          );
+          return { exitCode: 0, timedOut: false };
+        },
+      },
+    };
+
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-agy-smoke-"));
+    const claim = claimNext(db, { owner: "w1" });
+    expect(claim).toBeTruthy();
+
+    const summary = await executeClaimed(db, registry, mockAdapters, claim, {
+      workspacesRoot: home,
+    });
+
+    expect(agyCalled).toBe(true);
+    expect(summary.terminalState).toBe("COMPLETED");
+
+    const row = db.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_agy_smoke_test");
+    expect(row?.state).toBe("COMPLETED");
+  });
+
+  test("work --adapter-override cursor is accepted at the work call site (WM-440)", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-work-cursor-"));
+    const child = spawn("bun", [CLI, "work", "--adapter-override", "cursor"], {
+      env: { ...process.env, FACTORY_EVENT_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (b) => {
+      out += b;
+    });
+    child.stderr.on("data", (b) => {
+      out += b;
+    });
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !out.includes("adapter override")) {
+      await Bun.sleep(100);
+    }
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+
+    expect(out).not.toContain('unknown --adapter-override "cursor"');
+    expect(out).toContain('adapter override: executing every run with "cursor"');
+  });
+
+  test("cursor-smoke@1 routes end-to-end through the cursor adapter via a fake shim (WM-440)", async () => {
+    const { createRun, transition } = await import("./lib/lifecycle.mjs");
+    const { canonicalJson, hashJson } = await import("./lib/canonical.mjs");
+    const { loadRegistry } = await import("./lib/registry.mjs");
+    const { claimNext, executeClaimed } = await import("./lib/worker.mjs");
+
+    const db = openDb(":memory:");
+    const registry = loadRegistry();
+
+    const input = { message: "hello from WM-440" };
+    const spec = {
+      schemaVersion: "factory.run-spec/v1",
+      runId: "run_cursor_smoke_test",
+      agent: "cursor-smoke@1",
+      input,
+      inputHash: hashJson(input),
+      workspace: { type: "ephemeral", retainOnFailure: true },
+      adapter: "cursor",
+      model: "composer-2.5-fast",
+      promptVersion: "git:test",
+      policyVersion: "git:test",
+      outputContract: "factory.cursor-smoke/v1",
+      capabilities: [],
+      timeoutSeconds: 5,
+      maxAttempts: 1,
+      idempotencyKey: "idem_cursor_smoke_test",
+    };
+
+    createRun(db, {
+      runId: spec.runId,
+      idempotencyKey: spec.idempotencyKey,
+      spec,
+      specJson: canonicalJson(spec),
+      specHash: hashJson(spec),
+      actor: "test",
+      policyVersion: "test",
+      now: Date.now(),
+    });
+    transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now: Date.now() });
+    transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now: Date.now() });
+
+    let cursorCalled = false;
+    const mockAdapters = {
+      cursor: {
+        execute: async ({ workspaceDir }) => {
+          cursorCalled = true;
+          const { readFileSync, writeFileSync } = await import("node:fs");
+          const { default: path } = await import("node:path");
+          const staged = JSON.parse(readFileSync(path.join(workspaceDir, "input.json"), "utf8"));
+          writeFileSync(
+            path.join(workspaceDir, "result.json"),
+            JSON.stringify({
+              schemaVersion: "factory.agent-result/v1",
+              terminalState: "completed",
+              reasonCode: "ok",
+              artifact: { echo: staged.message },
+              evidence: { commands: [] },
+            }),
+            "utf8",
+          );
+          return { exitCode: 0, timedOut: false };
+        },
+      },
+    };
+
+    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-cursor-smoke-"));
+    const claim = claimNext(db, { owner: "w1" });
+    expect(claim).toBeTruthy();
+
+    const summary = await executeClaimed(db, registry, mockAdapters, claim, {
+      workspacesRoot: home,
+    });
+
+    expect(cursorCalled).toBe(true);
+    expect(summary.terminalState).toBe("COMPLETED");
+
+    const row = db.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_cursor_smoke_test");
+    expect(row?.state).toBe("COMPLETED");
+  });
+
   test("tick runs notify as an isolated subsystem (WM-65): a throwing notifier step cannot break the tick", async () => {
     const { tick, TICK_SUBSYSTEMS } = await import("./cli.mjs");
     const { loadRegistry } = await import("./lib/registry.mjs");
@@ -452,52 +768,24 @@ describe("cli", () => {
   });
 
   test("tick with FACTORY_EVENT_NOTIFY=1 pushes a human_needed park through the stub notifier exactly once", async () => {
-    const { tick } = await import("./cli.mjs");
-    const { loadRegistry } = await import("./lib/registry.mjs");
-    const { chmodSync, readFileSync, writeFileSync, existsSync } = await import("node:fs");
+    const { delivery } = await runNotifierDeliveryCase();
+    expect(delivery.error).toBeNull();
+    expect(delivery.exitCode).toBe(0);
+  });
 
-    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-tick-notify-"));
-    const outFile = path.join(dir, "pushes.txt");
-    const stub = path.join(dir, "notify-stub.sh");
-    writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$1" >> ${outFile}\n`);
-    chmodSync(stub, 0o755);
-
-    const db = openDb(path.join(dir, "runtime.db"));
-    const at = new Date().toISOString();
-    db.query(
-      `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, status, admitted_at)
-       VALUES ('test', 'evt-tick', 'linear.ticket.agent_ready', ?, ?, '{}', 'sha256:x', 'human_needed', ?)`,
-    ).run(at, at, at);
-    db.query(
-      `INSERT INTO proposals (id, event_source, event_id, decision, status, reason, created_at, ttl_seconds)
-       VALUES ('prop-tick', 'test', 'evt-tick', 'human_needed', 'open', 'no_worktree_scripts', ?, 1800)`,
-    ).run(at);
-
-    const saved = { N: process.env.FACTORY_EVENT_NOTIFY, C: process.env.FACTORY_EVENT_NOTIFY_CMD };
-    process.env.FACTORY_EVENT_NOTIFY = "1";
-    process.env.FACTORY_EVENT_NOTIFY_CMD = stub;
-    const logs = [];
-    try {
-      await tick({ db, registry: loadRegistry(), policyVersion: "git:test", log: (l) => logs.push(l) });
-      const deadline = Date.now() + 5000;
-      while (Date.now() < deadline && !existsSync(outFile)) {
-        await Bun.sleep(50);
-      }
-      expect(readFileSync(outFile, "utf8").trim()).toBe(
-        "BLOCKED linear.ticket.agent_ready evt-tick: no_worktree_scripts",
-      );
-      expect(logs.some((l) => l.includes("notify human_needed test/evt-tick"))).toBe(true);
-      // A second tick pushes nothing new.
-      await tick({ db, registry: loadRegistry(), policyVersion: "git:test", log: () => {} });
-      await Bun.sleep(200);
-      expect(readFileSync(outFile, "utf8").trim().split("\n")).toHaveLength(1);
-    } finally {
-      if (saved.N === undefined) delete process.env.FACTORY_EVENT_NOTIFY;
-      else process.env.FACTORY_EVENT_NOTIFY = saved.N;
-      if (saved.C === undefined) delete process.env.FACTORY_EVENT_NOTIFY_CMD;
-      else process.env.FACTORY_EVENT_NOTIFY_CMD = saved.C;
-      db.close();
+  test("notifier delivery immediately followed by healthy live serve stays durable across repeated runs (WM-402)", async () => {
+    for (let iteration = 0; iteration < 3; iteration += 1) {
+      const { delivery } = await runNotifierDeliveryCase();
+      expect(delivery.error).toBeNull();
+      await assertHealthyLiveServe();
     }
+  });
+
+  test("notifier cleanup quiesces a failed pending delivery before closing SQLite (WM-402)", async () => {
+    await expect(runNotifierDeliveryCase({ failWhilePending: true })).rejects.toThrow(
+      "intentional assertion failure while notifier delivery is pending",
+    );
+    await assertHealthyLiveServe();
   });
 
   test("doctor against a dead port says serve is not running, non-zero exit", () => {

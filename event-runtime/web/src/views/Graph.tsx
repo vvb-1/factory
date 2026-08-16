@@ -366,35 +366,40 @@ export function Graph({
         </div>
         <div className="absolute top-4 right-4 z-10 flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
-            {query.trim() && (
-              <span className="text-[11px] text-(--text-faint)">
-                {matches.length ? `${safeMatchIdx + 1} / ${matches.length}` : "no matches"}
-              </span>
-            )}
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const result = searchEnter(matches, safeMatchIdx, focusNodeId);
-                  if (result) {
+            <div className="relative w-52">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const result = searchEnter(matches, safeMatchIdx, focusNodeId);
+                    if (result) {
+                      e.preventDefault();
+                      setMatchIdx(result.nextIdx);
+                      onSelectNode(result.selectId);
+                    }
+                  } else if (e.key === "Escape") {
                     e.preventDefault();
-                    setMatchIdx(result.nextIdx);
-                    onSelectNode(result.selectId);
+                    if (query) setQuery("");
+                    else e.currentTarget.blur();
                   }
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  if (query) setQuery("");
-                  else e.currentTarget.blur();
-                }
-              }}
-              placeholder="Search nodes…"
-              aria-label="Search graph nodes"
-              data-view-filter
-              spellCheck={false}
-              className="w-52 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
-            />
+                }}
+                placeholder="Search nodes…"
+                aria-label="Search graph nodes"
+                data-view-filter
+                spellCheck={false}
+                className="w-full rounded-md border border-(--border) bg-(--surface-1) py-1 pr-20 pl-2.5 text-[12px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
+              />
+              {query.trim() && (
+                <span
+                  className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] tabular-nums text-(--text-faint)"
+                  aria-live="polite"
+                >
+                  {matches.length ? `${safeMatchIdx + 1} / ${matches.length}` : "no matches"}
+                </span>
+              )}
+            </div>
             {positioned && graph && graph.nodes.length > 0 && (
               <Button onClick={() => setLayoutEpoch((n) => n + 1)}>Reset layout</Button>
             )}

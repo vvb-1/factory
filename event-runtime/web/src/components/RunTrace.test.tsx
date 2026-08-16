@@ -1,9 +1,9 @@
 import "../test-dom";
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import type { TraceEntry } from "../types";
+import type { RunState, TraceEntry } from "../types";
 import { changeInput, renderWithClient, restoreApi } from "../test-render";
-import { RunTrace } from "./RunTrace";
+import { LIVE_STATES, RunTrace } from "./RunTrace";
 
 afterEach(() => {
   cleanup();
@@ -26,13 +26,12 @@ const TRACE: TraceEntry[] = [
   }),
 ];
 
-function renderTrace(overrides?: { onCancelShortcut?: () => void; state?: "RUNNING" | "COMPLETED" }) {
+function renderTrace(overrides?: { state?: RunState }) {
   return renderWithClient(
     <RunTrace
       runId="run_trace_a11y"
       state={overrides?.state ?? "RUNNING"}
       variant="full"
-      onCancelShortcut={overrides?.onCancelShortcut}
     />,
     {
       apiMocks: {
@@ -50,6 +49,26 @@ async function waitForChrome(r: ReturnType<typeof renderTrace>) {
 }
 
 describe("RunTrace a11y (WM-143)", () => {
+  test("locks live trace behavior across every RunState (WM-174)", () => {
+    const expectedLiveness: Record<RunState, boolean> = {
+      PROPOSED: false,
+      APPROVED: false,
+      QUEUED: false,
+      LEASED: true,
+      RUNNING: true,
+      VERIFYING: true,
+      COMPLETED: false,
+      REFUSED: false,
+      FAILED: false,
+      TIMED_OUT: false,
+      CANCELLED: false,
+    };
+
+    for (const state of Object.keys(expectedLiveness) as RunState[]) {
+      expect(LIVE_STATES.includes(state)).toBe(expectedLiveness[state]);
+    }
+  });
+
   test("renders no emoji in trace chrome (tools, tokens, errors, jump, clear)", async () => {
     const r = renderTrace();
     const tablist = await waitForChrome(r);
@@ -113,55 +132,52 @@ describe("RunTrace a11y (WM-143)", () => {
     expect(r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected")).toBe("true");
   });
 
-  test("x on the trace search input calls onCancelShortcut; j/k/slash stay typing", async () => {
-    const onCancelShortcut = mock(() => {});
-    const r = renderTrace({ onCancelShortcut });
-    await waitForChrome(r);
+  test.each(["LEASED", "RUNNING", "VERIFYING"] as const)(
+    "typing words with x in search input does not trigger cancellation or blur while %s (WM-267, WM-174)",
+    async (state) => {
+      let cancelKeyDownDispatchedToBody = false;
+      const bodyListener = (e: KeyboardEvent) => {
+        if (e.key === "x" && e.target === document.body) {
+          cancelKeyDownDispatchedToBody = true;
+        }
+      };
+      document.body.addEventListener("keydown", bodyListener);
 
-    const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
-    search.focus();
-    act(() => {
-      changeInput(search, "too");
-    });
+      try {
+        const r = renderTrace({ state });
+        await waitForChrome(r);
 
-    fireEvent.keyDown(search, { key: "j" });
-    fireEvent.keyDown(search, { key: "k" });
-    fireEvent.keyDown(search, { key: "/" });
-    expect(onCancelShortcut).not.toHaveBeenCalled();
+        const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
+        search.focus();
+        expect(document.activeElement).toBe(search);
 
-    fireEvent.keyDown(search, { key: "x" });
-    expect(onCancelShortcut).toHaveBeenCalledTimes(1);
-    expect(search.value).toBe("too");
-  });
+        // Type words containing 'x' (exec, regex, context)
+        act(() => {
+          changeInput(search, "exec");
+        });
+        expect(search.value).toBe("exec");
 
-  test("x on search of a COMPLETED run types the letter — cancel does not apply", async () => {
-    const r = renderTrace({ state: "COMPLETED" });
-    await waitForChrome(r);
+        // Press 'x' key directly while search input is focused
+        fireEvent.keyDown(search, { key: "x" });
 
-    const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
-    search.focus();
-    fireEvent.keyDown(search, { key: "x" });
-    expect(document.activeElement).toBe(search);
-  });
+        // Search input must remain focused (not blurred)
+        expect(document.activeElement).toBe(search);
+        // No synthetic x event redispatched to document.body
+        expect(cancelKeyDownDispatchedToBody).toBe(false);
 
-  test("x on search of a RUNNING run with no callback redispatches on a non-input target", async () => {
-    const seen: EventTarget[] = [];
-    const onWin = (e: KeyboardEvent) => {
-      if (e.key === "x") seen.push(e.target as EventTarget);
-    };
-    window.addEventListener("keydown", onWin);
-    try {
-      const r = renderTrace();
-      await waitForChrome(r);
-      const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
-      search.focus();
-      fireEvent.keyDown(search, { key: "x" });
-      expect(document.activeElement).not.toBe(search);
-      expect(seen.some((t) => t instanceof HTMLElement && !t.closest("input"))).toBe(true);
-    } finally {
-      window.removeEventListener("keydown", onWin);
-    }
-  });
+        // Typing more words containing 'x'
+        act(() => {
+          changeInput(search, "regex context");
+        });
+        expect(search.value).toBe("regex context");
+        fireEvent.keyDown(search, { key: "x" });
+        expect(document.activeElement).toBe(search);
+        expect(cancelKeyDownDispatchedToBody).toBe(false);
+      } finally {
+        document.body.removeEventListener("keydown", bodyListener);
+      }
+    },
+  );
 
   test("single-key shortcuts 1-5 and [ / ] switch filter tabs (WM-217)", async () => {
     const r = renderTrace();

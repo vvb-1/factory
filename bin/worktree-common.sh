@@ -215,32 +215,114 @@ health_field() { # <json> <field>
   '
 }
 
-# First even port at or after preferred in the ticket band that is free or
-# already serving expected_home. Dies if the whole band is someone else's.
-allocate_api_port() { # <preferred> <expected_home>
-  local preferred="$1" expected="$2"
-  local port="$preferred" i=0 json occupant=""
+# First API port at or after preferred that is free or already serving
+# expected_home. When worktree is supplied, its adjacent web port must also
+# be free or owned by that worktree's recorded web daemon.
+allocate_api_port() { # <preferred> <expected_home> [worktree]
+  local preferred="$1" expected="$2" wt="${3:-}"
+  local port="$preferred" i=0 json occupant="" api_available web_port web_pid_port
   [[ "$preferred" =~ ^[0-9]+$ ]] || die "invalid preferred port '$preferred'"
   while [[ $i -lt $PORT_SPAN ]]; do
+    api_available=0
     if port_listening "$port"; then
       json=$(health_json "$port")
       occupant=$(health_field "$json" home)
       if [[ -n "$occupant" && "$occupant" == "$expected" ]]; then
+        api_available=1
+      else
+        warn "port $port is owned by ${occupant:-unknown process} — trying next"
+      fi
+    else
+      api_available=1
+    fi
+
+    if [[ "$api_available" -eq 1 ]]; then
+      if [[ -z "$wt" ]]; then
         printf '%s' "$port"
         return 0
       fi
-      warn "port $port is owned by ${occupant:-unknown process} — trying next"
-    else
-      printf '%s' "$port"
-      return 0
+      web_port=$((port + 1))
+      if ! port_listening "$web_port"; then
+        printf '%s' "$port"
+        return 0
+      fi
+      web_pid_port=""
+      if pid_alive "$(run_dir "$wt")/web.pid"; then
+        web_pid_port=$(listen_tcp_port "$(run_dir "$wt")/web.pid" || true)
+      fi
+      if [[ "$web_pid_port" == "$web_port" ]]; then
+        printf '%s' "$port"
+        return 0
+      fi
+      warn "web port $web_port is owned by another process — trying next pair"
     fi
+
     port=$((port + 2))
     if [[ $port -ge $((PORT_BASE + 2 * PORT_SPAN)) ]]; then
       port=$PORT_BASE
     fi
     i=$((i + 1))
   done
-  die "no free API port in $PORT_BASE–$((PORT_BASE + 2 * PORT_SPAN - 2)); $preferred is owned by ${occupant:-unknown}"
+  die "no free API/web port pair in $PORT_BASE–$((PORT_BASE + 2 * PORT_SPAN - 1)); $preferred is unavailable"
+}
+
+# Resolve and persist a checkout's API/web pair. Recorded ports win when the
+# API slot is free or already serves this checkout. Otherwise recover a live
+# daemon's ports when possible, then walk from the preferred API slot.
+# Sets API_PORT and WEB_PORT for the caller.
+resolve_worktree_ports() { # <worktree> <preferred-api-port> <expected-home>
+  local wt="$1" preferred="$2" expected="$3"
+  local rdir resolved=0 recorded occupant sp wp recorded_web_pid_port api_reusable web_reusable
+  rdir="$(run_dir "$wt")"
+
+  if recorded=$(read_ports "$wt"); then
+    API_PORT="${recorded%% *}"
+    WEB_PORT="${recorded##* }"
+    api_reusable=0
+    web_reusable=0
+
+    if port_listening "$API_PORT"; then
+      occupant=$(health_field "$(health_json "$API_PORT")" home)
+      [[ "$occupant" == "$expected" ]] && api_reusable=1
+    else
+      api_reusable=1
+    fi
+
+    if ! port_listening "$WEB_PORT"; then
+      web_reusable=1
+    elif pid_alive "$rdir/web.pid"; then
+      recorded_web_pid_port=$(listen_tcp_port "$rdir/web.pid" || true)
+      [[ "$recorded_web_pid_port" == "$WEB_PORT" ]] && web_reusable=1
+    fi
+
+    if [[ "$api_reusable" -eq 1 && "$web_reusable" -eq 1 ]]; then
+      info "reusing recorded ports $API_PORT / $WEB_PORT"
+      resolved=1
+    else
+      warn "recorded ports $API_PORT / $WEB_PORT are occupied by another process — allocating a free pair"
+    fi
+  fi
+
+  if [[ "$resolved" -eq 0 ]] && pid_alive "$rdir/serve.pid"; then
+    if sp=$(listen_tcp_port "$rdir/serve.pid"); then
+      API_PORT="$sp"
+      if pid_alive "$rdir/web.pid" && wp=$(listen_tcp_port "$rdir/web.pid"); then
+        WEB_PORT="$wp"
+      else
+        WEB_PORT=$((API_PORT + 1))
+      fi
+      info "reusing live daemon ports $API_PORT / $WEB_PORT"
+      write_ports "$wt" "$API_PORT" "$WEB_PORT"
+      resolved=1
+    fi
+  fi
+
+  if [[ "$resolved" -eq 0 ]]; then
+    API_PORT="$(allocate_api_port "$preferred" "$expected" "$wt")"
+    WEB_PORT=$((API_PORT + 1))
+    write_ports "$wt" "$API_PORT" "$WEB_PORT"
+    info "allocated ports $API_PORT / $WEB_PORT (preferred $preferred)"
+  fi
 }
 
 # Refuse to proceed (and never seed) when /health is a different event home.

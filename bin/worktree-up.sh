@@ -98,54 +98,15 @@ RUN_DIR="$(run_dir "$WT")"
 HOME_DIR="$(event_home "$WT")"
 mkdir -p "$RUN_DIR"
 
-# Resolve API/web ports only after the checkout exists so we can persist them
-# under .factory/run/ports and refuse a stranger already bound on the slot.
+# Resolve API/web ports only after the checkout exists so we can persist them.
+# --here prefers 7391/7392 but follows the same recorded-port reuse and
+# collision fallback path as named ticket worktrees.
 if [[ "$HERE" -eq 1 ]]; then
-  API_PORT="$HERE_API_PORT"
-  WEB_PORT="$HERE_WEB_PORT"
-  write_ports "$WT" "$API_PORT" "$WEB_PORT"
+  preferred="$HERE_API_PORT"
 else
-  resolved=0
-  if recorded=$(read_ports "$WT"); then
-    API_PORT="${recorded%% *}"
-    WEB_PORT="${recorded##* }"
-    if port_listening "$API_PORT"; then
-      occupant=$(health_field "$(health_json "$API_PORT")" home)
-      if [[ "$occupant" == "$HOME_DIR" ]]; then
-        info "reusing recorded ports $API_PORT / $WEB_PORT"
-        resolved=1
-      else
-        if pid_alive "$RUN_DIR/serve.pid" && [[ -n "$occupant" ]]; then
-          die "port $API_PORT is owned by another runtime (env.home=$occupant, this worktree=$HOME_DIR) — refusing to seed"
-        fi
-        warn "recorded port $API_PORT is owned by ${occupant:-unknown process} — allocating a free port"
-      fi
-    else
-      info "reusing recorded ports $API_PORT / $WEB_PORT"
-      resolved=1
-    fi
-  fi
-  if [[ "$resolved" -eq 0 ]] && pid_alive "$RUN_DIR/serve.pid"; then
-    if sp=$(listen_tcp_port "$RUN_DIR/serve.pid"); then
-      API_PORT="$sp"
-      if pid_alive "$RUN_DIR/web.pid" && wp=$(listen_tcp_port "$RUN_DIR/web.pid"); then
-        WEB_PORT="$wp"
-      else
-        WEB_PORT=$((API_PORT + 1))
-      fi
-      info "reusing live daemon ports $API_PORT / $WEB_PORT"
-      write_ports "$WT" "$API_PORT" "$WEB_PORT"
-      resolved=1
-    fi
-  fi
-  if [[ "$resolved" -eq 0 ]]; then
-    preferred="$(ticket_api_port "$TICKET")"
-    API_PORT="$(allocate_api_port "$preferred" "$HOME_DIR")"
-    WEB_PORT=$((API_PORT + 1))
-    write_ports "$WT" "$API_PORT" "$WEB_PORT"
-    info "allocated ports $API_PORT / $WEB_PORT (preferred $preferred)"
-  fi
+  preferred="$(ticket_api_port "$TICKET")"
 fi
+resolve_worktree_ports "$WT" "$preferred" "$HOME_DIR"
 
 # ------------------------------------------------------------ dependencies ---
 info "installing dependencies (bun install, root + web)"

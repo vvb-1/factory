@@ -2,7 +2,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadRepos, RepoError, reposView } from "./repos.mjs";
+import {
+  loadRepos,
+  proveMergeChecks,
+  RepoError,
+  reposView,
+  selectMergeCheckGate,
+} from "./repos.mjs";
 
 const scratch = [];
 afterAll(() => {
@@ -47,6 +53,11 @@ const YAML = `repos:
             - plugins/core/**
       pin_manifests:
         - event-runtime/agents/*.json
+    merge_ci:
+      workflow: CI
+      required_checks:
+        - Shadow runner fleet available
+        - Verify
     security:
       python_version: "3.12"
     escalate_paths:
@@ -74,6 +85,10 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       reportOnly: false,
       maxInFlight: 20,
       smokeDeadlineSeconds: null,
+      mergeCi: {
+        workflow: "CI",
+        requiredChecks: ["Shadow runner fleet available", "Verify"],
+      },
       worktreeRoot: path.join(home, "Develop/.worktrees/full"),
       worktreeUp: "bin/worktree-up.sh",
       worktreeDown: "bin/worktree-down.sh",
@@ -99,6 +114,7 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       // fabricated one here would read as a limit repos.yaml never set.
       maxInFlight: null,
       smokeDeadlineSeconds: null,
+      mergeCi: null,
       worktreeRoot: null,
       worktreeDown: null,
       verify: null,
@@ -195,9 +211,9 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
   test("owned_paths_policy must be valid schema", () => {
     const invalidCases = [
       `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy: []\n`,
-      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct: \"oops\"\n`,
-      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct:\n        - source: \"shared/**\"\n      pin_manifests: [\"x\"]\n`,
-      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct:\n        - source: \"shared/**\"\n          requires: []\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct: "oops"\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct:\n        - source: "shared/**"\n      pin_manifests: ["x"]\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct:\n        - source: "shared/**"\n          requires: []\n`,
       `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      pin_manifests: [null]\n`,
       `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      extra: 1\n`,
     ];
@@ -206,6 +222,55 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
     }
   });
 
+  test("merge_ci is all-or-nothing, nonempty, string-only, and unambiguous (WM-419)", () => {
+    const invalidCases = [
+      `repos:\n  - name: no-workflow\n    path: /tmp/a\n    merge_ci:\n      required_checks: [Verify]\n`,
+      `repos:\n  - name: no-checks\n    path: /tmp/b\n    merge_ci:\n      workflow: CI\n`,
+      `repos:\n  - name: empty-workflow\n    path: /tmp/c\n    merge_ci:\n      workflow: ""\n      required_checks: [Verify]\n`,
+      `repos:\n  - name: empty-checks\n    path: /tmp/d\n    merge_ci:\n      workflow: CI\n      required_checks: []\n`,
+      `repos:\n  - name: duplicate\n    path: /tmp/e\n    merge_ci:\n      workflow: CI\n      required_checks: [Verify, Verify]\n`,
+      `repos:\n  - name: non-string\n    path: /tmp/f\n    merge_ci:\n      workflow: CI\n      required_checks: [42]\n`,
+    ];
+    for (const yaml of invalidCases) {
+      expect(() => loadRepos({ root: factoryRoot(yaml) })).toThrow(RepoError);
+    }
+  });
+
+  test("GitHub required contexts are preferred; configured checks are the explicit empty fallback (WM-419)", () => {
+    const repos = loadRepos({ root: factoryRoot(YAML) });
+    const repo = repos.get("full");
+    expect(selectMergeCheckGate(repo, ["Protected Verify"])).toEqual({
+      source: "github",
+      workflow: null,
+      requiredChecks: ["Protected Verify"],
+    });
+    expect(selectMergeCheckGate(repo, [])).toEqual({
+      source: "config",
+      workflow: "CI",
+      requiredChecks: ["Shadow runner fleet available", "Verify"],
+    });
+    expect(() => selectMergeCheckGate(repos.get("bare"), [])).toThrow(RepoError);
+    expect(() => selectMergeCheckGate(repo, ["Verify", "Verify"])).toThrow(RepoError);
+  });
+
+  test("exact-SHA check proof rejects empty, missing, pending, red, stale, and ambiguous evidence (WM-419)", () => {
+    const sha = "a".repeat(40);
+    const green = (name) => ({ name, headSha: sha, status: "completed", conclusion: "success", workflow: "CI" });
+    const expected = ["Shadow runner fleet available", "Verify"];
+    expect(proveMergeChecks({ expectedChecks: expected, actualChecks: expected.map(green), expectedSha: sha, workflow: "CI" })).toBe(true);
+    const invalid = [
+      [],
+      [green(expected[0])],
+      [green(expected[0]), { ...green(expected[1]), status: "in_progress", conclusion: null }],
+      [green(expected[0]), { ...green(expected[1]), conclusion: "failure" }],
+      [green(expected[0]), { ...green(expected[1]), headSha: "b".repeat(40) }],
+      [green(expected[0]), green(expected[1]), green(expected[1])],
+      [green(expected[0]), { ...green(expected[1]), workflow: "Other" }],
+    ];
+    for (const actualChecks of invalid) {
+      expect(() => proveMergeChecks({ expectedChecks: expected, actualChecks, expectedSha: sha, workflow: "CI" })).toThrow(RepoError);
+    }
+  });
   test("malformed YAML throws RepoError with file path and parse error message (OPS-346)", () => {
     const root = factoryRoot("repos: [ invalid: {");
     expect(() => loadRepos({ root })).toThrow(RepoError);
@@ -232,7 +297,7 @@ describe("reposView is what the control API serves", () => {
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([
         "base", "deployBranch", "github", "hasWorktreeDown", "hasWorktreeUp", "hasWorktreeWarm",
-        "maxInFlight", "name", "path", "project", "reportOnly", "smokeDeadlineSeconds", "team", "verify", "worktreeRoot",
+        "maxInFlight", "mergeCi", "name", "path", "project", "reportOnly", "smokeDeadlineSeconds", "team", "verify", "worktreeRoot",
       ]);
     }
     const serialized = JSON.stringify(rows);

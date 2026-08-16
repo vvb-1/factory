@@ -10,6 +10,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { test, expect } from "bun:test";
 import {
   resolveLabelIds,
   claimLabels,
@@ -19,6 +20,7 @@ import {
   TYPE_LABELS,
   formatComment,
   formatComments,
+  parsePositionalArgs,
   closureCheckMessages,
   __resetLinearReposCache,
 } from "./linear.mjs";
@@ -181,6 +183,28 @@ test("formatComments accepts issue object containing comments nodes", () => {
   const text = formatComments(issue);
   expect(text).toContain("Charlie");
   expect(text).toContain("Testing issue comments wrapper");
+});
+
+// ------------------------------------------------------- argument parsing ---
+test("state label-only updates do not parse flag values as positional arguments", () => {
+  expect(parsePositionalArgs([
+    "state", "WM-250", "--add", "ai:needs-review", "--remove", "ai:in-progress",
+  ])).toEqual(["WM-250"]);
+});
+
+test("state and label updates preserve the explicit state positional argument", () => {
+  expect(parsePositionalArgs([
+    "state", "WM-250", "In Review", "--add", "ai:needs-review",
+  ])).toEqual(["WM-250", "In Review"]);
+});
+
+test("values for other flags are not treated as positional arguments", () => {
+  expect(parsePositionalArgs([
+    "claim", "WM-250", "--agent", "codex", "--json",
+  ])).toEqual(["WM-250"]);
+  expect(parsePositionalArgs([
+    "file", "--team", "WM", "--title", "A title", "--todo",
+  ])).toEqual([]);
 });
 
 // -------------------------------------------------------- label mutations ---

@@ -186,9 +186,61 @@ export interface Section<T> {
   subsections?: Section<T>[];
 }
 
-const cmp = (a: unknown, b: unknown): number => {
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a ?? "").localeCompare(String(b ?? ""));
+function parseDateString(s: string): number | null {
+  if (/^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(s.trim())) {
+    const t = Date.parse(s.trim());
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+}
+
+function parseDurationString(s: string): number | null {
+  const str = s.trim().toLowerCase();
+  const colonMatch = str.match(/^(\d+):(\d{2})(?::(\d{2}))?$/);
+  if (colonMatch) {
+    if (colonMatch[3] !== undefined) {
+      return (
+        parseInt(colonMatch[1], 10) * 3600000 +
+        parseInt(colonMatch[2], 10) * 60000 +
+        parseInt(colonMatch[3], 10) * 1000
+      );
+    }
+    return parseInt(colonMatch[1], 10) * 60000 + parseInt(colonMatch[2], 10) * 1000;
+  }
+
+  if (/[0-9]+(?:\.[0-9]+)?\s*(?:d|h|m|s)/i.test(str)) {
+    const durRegex = /(?:(\d+(?:\.\d+)?)\s*d(?:ays?)?)?\s*(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+(?:\.\d+)?)\s*m(?:in(?:ute)?s?)?)?\s*(?:(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?)?(?:\s*ago)?$/;
+    const m = str.match(durRegex);
+    if (m && (m[1] !== undefined || m[2] !== undefined || m[3] !== undefined || m[4] !== undefined)) {
+      const days = parseFloat(m[1] || "0") * 86400000;
+      const hours = parseFloat(m[2] || "0") * 3600000;
+      const mins = parseFloat(m[3] || "0") * 60000;
+      const secs = parseFloat(m[4] || "0") * 1000;
+      return days + hours + mins + secs;
+    }
+  }
+  return null;
+}
+
+export const cmp = (a: unknown, b: unknown): number => {
+  if (typeof a === "number" && typeof b === "number") {
+    if (Number.isNaN(a) && Number.isNaN(b)) return 0;
+    if (Number.isNaN(a)) return 1;
+    if (Number.isNaN(b)) return -1;
+    return a - b;
+  }
+  if (typeof a === "string" && typeof b === "string") {
+    const dateA = parseDateString(a);
+    const dateB = parseDateString(b);
+    if (dateA !== null && dateB !== null) return dateA - dateB;
+
+    const durA = parseDurationString(a);
+    const durB = parseDurationString(b);
+    if (durA !== null && durB !== null) return durA - durB;
+
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  }
+  return String(a ?? "").localeCompare(String(b ?? ""), undefined, { numeric: true, sensitivity: "base" });
 };
 
 /** Stable sort by the configured field; DEFAULT_ORDER keeps (or reverses) API order. */
