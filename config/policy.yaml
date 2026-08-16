@@ -41,11 +41,10 @@ workers:
   # concurrent agent runs on this machine and should be read that way.
   min: 1                    # never zero: something has to notice the next
                             # queued run and grow the pool back
-  max: 3                    # same argument as max_in_flight_per_repo above —
-                            # beyond ~3 concurrent agent runs the constraint is
-                            # the subscription usage window, which nothing here
-                            # can observe yet (WM-66 is the prerequisite for a
-                            # budget-aware ceiling)
+  max: 20                   # operator-selected throughput ceiling; the host
+                            # has capacity for a wider pool, while subscription
+                            # usage remains unobservable until WM-66 provides a
+                            # budget-aware ceiling
 
 actions_cache:
   # GitHub's cache API reports decimal bytes. The initial 73 GB quota is
