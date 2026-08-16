@@ -12,7 +12,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { effectiveOwnedPaths, parseOwnedPaths, pathsCollide } from "../../orchestrator/owned-paths.mjs";
+import {
+  effectiveOwnedPaths,
+  pathsCollide,
+  parseOwnedPaths,
+  readPinManifestRequirements,
+  ownedPathsClosureGaps,
+} from "../../orchestrator/owned-paths.mjs";
 import { budgetExhausted } from "../../lib/spend.mjs";
 import { liveWorkerLeases } from "../../lib/worker-leases.mjs";
 import { findArtifact, pinRunArtifact } from "./artifacts.mjs";
@@ -145,6 +151,26 @@ function fetchTicketDefault(ticketId) {
 
 const IN_FLIGHT_QUERY =
   `query($t:String!,$p:String!){ issues(first:250, filter:{ team:{key:{eq:$t}}, project:{name:{eq:$p}}, state:{name:{eq:"In Progress"}} }){ nodes{ identifier description } } }`;
+
+const OWNED_PATHS_CLOSURE_CACHE = new Map();
+
+function ownedPathsClosureDetails(repoName, repo, ticketDescription) {
+  if (!repo?.ownedPathsPolicy) return [];
+  const cacheKey = `${repoName}::${repo.path}`;
+  if (!OWNED_PATHS_CLOSURE_CACHE.has(cacheKey)) {
+    const requirements = repo.ownedPathsPolicy.pinManifests?.length
+      ? readPinManifestRequirements(repo.path, repo.ownedPathsPolicy.pinManifests)
+      : [];
+    OWNED_PATHS_CLOSURE_CACHE.set(cacheKey, requirements);
+  }
+  const requirements = OWNED_PATHS_CLOSURE_CACHE.get(cacheKey);
+  const ownedPaths = parseOwnedPaths(ticketDescription ?? "");
+  return ownedPathsClosureGaps({
+    ownedPaths,
+    ownedPathsPolicy: repo.ownedPathsPolicy,
+    pinManifestRequirements: requirements,
+  });
+}
 
 function fetchInFlightDefault(repoConfig) {
   try {
@@ -320,6 +346,16 @@ export function worktreeDispatchAutoEligibility(payload, {
   if (evidence.ticket.labels.includes("ai:escalated")) {
     return refusal("ticket_escalated", evidence);
   }
+
+  try {
+    const gaps = ownedPathsClosureDetails(repo.name, repo, ticket.description);
+    if (gaps.length) {
+      return refusal("owned_paths_not_closed", evidence, "human_needed");
+    }
+  } catch (err) {
+    return refusal(`owned_paths_not_closed: ${err.message || String(err)}`, evidence, "human_needed");
+  }
+
   evidence.checks.ticket_not_escalated = true;
   if (
     evidence.ticket.labels.includes("type:security") ||

@@ -69,7 +69,7 @@ was right.
 
 | action              | when                                                                                               |
 | :------------------ | :------------------------------------------------------------------------------------------------- |
-| `label-agent-ready` | fully specified: acceptance criteria, owned paths, verification command                            |
+| `label-agent-ready` | fully specified: acceptance criteria, owned paths, verification command, and complete criterion→path coverage |
 | `move-to-todo`      | specified and ready to queue (usually alongside agent-ready)                                       |
 | `write-detail`      | missing template sections can be derived from this pinned checkout without making a product choice |
 | `needs-detail`      | real work, but an agent would have to guess — say what is missing                                  |
@@ -110,6 +110,11 @@ Acceptance Criteria`, `## Owned Paths`, or `## Verification` sections.
   evidence. If the issue presents incompatible options, asks what behavior is
   wanted, or otherwise requires a product/architecture choice, emit
   `needs-human` instead. Do not silently choose an option.
+- When recording each criterion, add an `acceptanceCriteria` item object with both
+  `text` and an `ownedPaths` array of concrete files touched by that criterion.
+  A criterion that is not evidenced by any owned path stays unmapped and must
+  downgrade to `needs-detail` or `needs-human` so the operator can resolve the
+  ambiguity before promotion.
 - Do not use `write-detail` to split or complete a multi-item bundle. Emit
   `needs-detail` and identify the split that is needed.
 

@@ -397,6 +397,20 @@ repos:
 
     verify: bun test && bun build/emit.mjs --check
 
+    # Owned Paths closure rules for this repo's control-plane ticket types.
+    owned_paths_policy:
+      # Emitting source means owning its generated outputs.
+      direct:
+        - source: shared/**
+          requires:
+            - dist/**
+            - plugins/core/**
+      # JSON pin manifests are source-of-truth for generated contract files:
+      # owning any path referenced by a manifest requires owning the manifest
+      # file itself before dispatch.
+      pin_manifests:
+        - event-runtime/agents/*.json
+
     # Git-owned fallback for autonomous develop merges. GitHub branch-protection
     # required contexts remain preferred when present; this exact workflow/job
     # set is used only because Factory intentionally has no required contexts.

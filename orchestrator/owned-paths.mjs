@@ -16,6 +16,9 @@
  * must not require an install step to work.
  */
 
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+
 /**
  * Extract the Owned Paths bullet list (levels 2-4) from a Linear issue description.
  * Returns [] when the section is missing or fails to parse — for dispatch,
@@ -173,6 +176,145 @@ export function globsOverlap(a, b) {
 /** Do two tickets' Owned Paths sets intersect? */
 export function pathsCollide(setA = [], setB = []) {
   return setA.some((a) => setB.some((b) => globsOverlap(a, b)));
+}
+
+function walkFiles(rootDir, baseDir = rootDir, out = []) {
+  for (const dirent of readdirSync(rootDir, { withFileTypes: true })) {
+    const nextPath = path.join(rootDir, dirent.name);
+    const rel = path.relative(baseDir, nextPath).replace(/\\/g, "/");
+    if (dirent.isDirectory()) {
+      walkFiles(nextPath, baseDir, out);
+      continue;
+    }
+    if (dirent.isFile()) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+function matchingManifestPaths(repoPath, manifestGlobs = []) {
+  if (!Array.isArray(manifestGlobs) || manifestGlobs.length === 0) return [];
+  if (!existsSync(repoPath)) {
+    throw new Error(`owned-path closure check failed: repo path does not exist: ${repoPath}`);
+  }
+  const files = walkFiles(repoPath);
+  const matched = new Set();
+  for (const pattern of manifestGlobs) {
+    const matcher = globToRegExp(pattern);
+    for (const file of files) {
+      if (matcher.test(file)) matched.add(file);
+    }
+  }
+  return [...matched].sort();
+}
+
+function parsePinnedPaths(manifestPath) {
+  let payload;
+  try {
+    payload = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (err) {
+    throw new Error(`owned-path closure check failed: cannot parse pin manifest ${manifestPath}: ${err.message}`);
+  }
+  const raw = payload?.pins;
+  if (raw == null) return [];
+  if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
+    throw new Error(`owned-path closure check failed: pin manifest ${manifestPath} has invalid "pins" value`);
+  }
+  return Object.keys(raw)
+    .filter((value) => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Gather every pin manifest and the paths it pins from a repo.
+ *
+ * Throws when a manifest can't be read or parsed; dispatch/state promotion is
+ * fail-closed around those config or content errors.
+ */
+export function readPinManifestRequirements(repoPath, manifestGlobs = []) {
+  const absoluteRepo = path.resolve(repoPath);
+  const manifests = matchingManifestPaths(absoluteRepo, manifestGlobs);
+  const out = [];
+
+  for (const manifest of manifests) {
+    const manifestPath = path.join(absoluteRepo, manifest);
+    const pinnedPaths = parsePinnedPaths(manifestPath);
+    out.push({ manifestPath: manifest, pinnedPaths });
+  }
+
+  return out;
+}
+
+/**
+ * Pure closure check: do the declared Owned Paths satisfy local closure policy?
+ *
+ * A ticket can dispatch only if every required path is also owned, and every
+ * manifest used by those paths is also owned.
+ */
+export function ownedPathsClosureGaps({
+  ownedPaths = [],
+  ownedPathsPolicy = { direct: [], pinManifests: [] },
+  pinManifestRequirements = [],
+} = {}) {
+  const own = Array.isArray(ownedPaths) ? ownedPaths : [];
+  const policy = {
+    direct: Array.isArray(ownedPathsPolicy?.direct) ? ownedPathsPolicy.direct : [],
+    pinManifests: Array.isArray(ownedPathsPolicy?.pinManifests) ? ownedPathsPolicy.pinManifests : [],
+  };
+
+  const gaps = [];
+  const seen = new Set();
+
+  const addGap = (gap) => {
+    const key = `${gap.requiredPath}::${gap.rule}::${gap.requiredBy}::${gap.manifestPath ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    gaps.push(gap);
+  };
+
+  for (const rule of policy.direct) {
+    if (!rule?.source || !Array.isArray(rule?.requires)) continue;
+    if (!own.some((owned) => globsOverlap(owned, rule.source))) continue;
+    for (const requiredPath of rule.requires) {
+      if (!own.some((owned) => globsOverlap(owned, requiredPath))) {
+        addGap({
+          rule: "direct",
+          requiredPath,
+          requiredBy: rule.source,
+        });
+      }
+    }
+  }
+
+  for (const manifestRequirement of pinManifestRequirements) {
+    const pinnedPaths = Array.isArray(manifestRequirement?.pinnedPaths) ? manifestRequirement.pinnedPaths : [];
+    const manifestPath = manifestRequirement?.manifestPath;
+    if (!manifestPath || !Array.isArray(pinnedPaths)) continue;
+    if (!pinnedPaths.some((pinnedPath) => own.some((owned) => globsOverlap(owned, pinnedPath)))) continue;
+    if (!own.some((owned) => globsOverlap(owned, manifestPath))) {
+      const requiredBy = pinnedPaths.find((pinnedPath) => own.some((owned) => globsOverlap(owned, pinnedPath)));
+      addGap({
+        rule: "pin-manifest",
+        requiredPath: manifestPath,
+        requiredBy: requiredBy ?? pinnedPaths[0],
+        manifestPath,
+      });
+    }
+  }
+
+  return gaps;
+}
+
+/** Render closure gaps as operator-facing one-line hints. */
+export function formatOwnedPathClosureGaps(gaps = []) {
+  return gaps.map((gap) => {
+    if (gap.rule === "direct") {
+      return `Missing required Owned Paths entry: ${gap.requiredPath} (required by ${gap.requiredBy})`;
+    }
+    return `Missing required Owned Paths entry: ${gap.requiredPath} (required by ${gap.requiredBy} from ${gap.manifestPath})`;
+  });
 }
 
 /**
