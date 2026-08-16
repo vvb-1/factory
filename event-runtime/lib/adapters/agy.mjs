@@ -3,9 +3,10 @@
  * third LLM harness alongside `claude` and `pi`, on the Antigravity/Gemini
  * subscription and Google Cloud authentication window.
  *
- * Spawns a bounded `agy -p - --output-format stream-json --dangerously-skip-permissions`
- * process (prompt piped to stdin, the standard `./input.json` → `./result.json`
- * PROMPT_SUFFIX contract, cwd = workspace), enforces the run spec's timeout with
+ * Spawns a bounded `agy -p <prompt> --output-format stream-json --dangerously-skip-permissions`
+ * process (the prompt travels as an argv value and stdin is closed, the standard
+ * `./input.json` → `./result.json` PROMPT_SUFFIX contract, cwd = workspace),
+ * enforces the run spec's timeout with
  * TERM→KILL(killGraceMs), strips API keys so the CLI authenticates against the
  * session/subscription instead of per-token billing, and captures full stdout as
  * the `.transcript.json` artifact.
@@ -20,6 +21,16 @@ export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
 
 export const KILL_GRACE_MS = 30_000;
 const TEXT_PREVIEW_CHARS = 4000;
+
+/**
+ * How much sooner agy's own print-mode wait expires than the worker's timeout.
+ *
+ * The CLI should give up just before the worker's TERM→KILL so it exits on its
+ * own terms and still emits the terminal `result` event — that event carries
+ * the status, error and token counts the trace and usage accounting depend on.
+ * Killing it first would discard them.
+ */
+export const PRINT_TIMEOUT_GRACE_MS = 5_000;
 
 export class CliNotFoundError extends Error {
   constructor(message) {
@@ -53,8 +64,11 @@ export function buildAgyArgv({ prompt, def, model, effort, workspaceDir, timeout
   }
 
   if (timeoutMs) {
-    const printMin = Math.max(1, Math.round(timeoutMs / 60000) - 2);
-    args.push("--print-timeout", `${printMin}m`);
+    // Seconds, not rounded minutes: `--print-timeout` takes Go duration syntax,
+    // and minute granularity used to floor every sub-three-minute budget to 1m
+    // (a 120s run gave agy 60s, so it quit while the worker still waited).
+    const printSeconds = Math.max(1, Math.round((timeoutMs - PRINT_TIMEOUT_GRACE_MS) / 1000));
+    args.push("--print-timeout", `${printSeconds}s`);
   }
 
   if (typeof model === "string" && model !== "" && model !== "default") {
@@ -119,8 +133,81 @@ function clip(text) {
   return s.length > TEXT_PREVIEW_CHARS ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]` : s;
 }
 
+/** agy's token counters, renamed to the trace's shape. Absent fields stay absent. */
+function normalizeUsage(raw) {
+  const usage = {};
+  const map = {
+    input_tokens: "input",
+    output_tokens: "output",
+    thinking_tokens: "thinking",
+    cache_read_tokens: "cacheRead",
+    total_tokens: "total",
+  };
+  for (const [from, to] of Object.entries(map)) {
+    if (typeof raw?.[from] === "number") usage[to] = raw[from];
+  }
+  return usage;
+}
+
+/** agy reports step durations in fractional seconds; the trace speaks milliseconds. */
+function durationMsOf(seconds) {
+  return typeof seconds === "number" ? Math.round(seconds * 1000) : null;
+}
+
+/**
+ * Map agy's terminal `result` line to trace events.
+ *
+ * This is the only place the agent's final answer and its failure reason
+ * appear: step updates carry neither. Before WM-435 the whole event was
+ * dropped, so a failed agy run produced a completely blank trace even though
+ * the CLI had reported a status, an error string and full token counts.
+ */
+function mapResultEvent(result) {
+  if (!result || typeof result !== "object") return [];
+  const events = [];
+
+  const response = typeof result.response === "string" ? result.response.trim() : "";
+  if (response) {
+    events.push({ kind: "assistant_text", payload: { text: clip(response) } });
+  }
+
+  const status = result.status ?? null;
+  if (status && status !== "SUCCESS") {
+    events.push({
+      kind: "lifecycle",
+      payload: { note: "agent_error", status, error: result.error ?? null },
+    });
+  }
+
+  events.push({
+    kind: "usage",
+    payload: {
+      durationMs: durationMsOf(result.duration_seconds),
+      numTurns: typeof result.num_turns === "number" ? result.num_turns : null,
+      costUSD: null, // agy bills against the subscription; no per-run cost is reported
+      usage: normalizeUsage(result.usage),
+      status,
+      error: result.error ?? null,
+    },
+  });
+
+  return events;
+}
+
 /**
  * Map one parsed `agy` NDJSON stream line to factory.trace/v1 events.
+ *
+ * Verified against agy 1.1.13's real output (WM-435). What the CLI actually
+ * emits, and the constraints that follow:
+ *
+ * - Steps are keyed by `step_index`, not an id — so the same index correlates
+ *   a tool's ACTIVE and DONE/ERROR events, which is what lets the UI pair them.
+ * - `agent_response` steps carry `usage` and `duration_seconds` and **no text**.
+ *   The agent's prose only ever arrives on the terminal `result` event.
+ * - Tool steps carry no output either. A `tool_result` can honestly report the
+ *   tool, its parameters and how long it took — not what it returned.
+ * - Failure is signalled by `state: "ERROR"` with the detail at
+ *   `tool_info.error.message`; there is no `status` field on a step.
  *
  * @param {any} msg - one parsed NDJSON line from agy stream-json output
  * @returns {Array<{kind: string, payload: object}>}
@@ -128,34 +215,58 @@ function clip(text) {
 export function mapStreamEvent(msg) {
   if (!msg || typeof msg !== "object") return [];
 
-  if (msg.event === "step_update") {
-    const s = msg.step_update ?? {};
-    if (s.step_type === "tool" && s.state === "ACTIVE") {
+  if (msg.event === "result") return mapResultEvent(msg.result);
+  if (msg.event !== "step_update") return [];
+
+  const s = msg.step_update ?? {};
+  const stepIndex = s.step_index === undefined || s.step_index === null ? null : String(s.step_index);
+  const durationMs = durationMsOf(s.duration_seconds);
+
+  if (s.step_type === "tool") {
+    const info = s.tool_info ?? {};
+    const name = s.tool_name ?? info.name ?? "tool";
+    if (s.state === "ACTIVE") {
       return [{
         kind: "tool_use",
-        payload: {
-          id: s.step_id ?? null,
-          name: s.tool_name ?? "tool",
-          input: s.tool_info?.parameters ?? {},
-        },
+        payload: { id: stepIndex, name, input: info.parameters ?? {} },
       }];
     }
-    if (s.step_type === "tool" && s.state === "DONE") {
+    if (s.state === "DONE" || s.state === "ERROR") {
+      const isError = s.state === "ERROR";
       return [{
         kind: "tool_result",
         payload: {
-          toolUseId: s.step_id ?? null,
-          content: clip(s.output ?? s.result ?? ""),
-          isError: s.status === "ERROR",
+          toolUseId: stepIndex,
+          name,
+          content: isError
+            ? clip(info.error?.message ?? `${name} failed`)
+            : `${name} completed${durationMs == null ? "" : ` in ${(durationMs / 1000).toFixed(2)}s`}`,
+          isError,
+          durationMs,
         },
       }];
     }
-    if (s.step_type === "agent_response" && (s.text || s.text_delta)) {
-      return [{
-        kind: "assistant_text",
-        payload: { text: clip(s.text ?? s.text_delta) },
-      }];
-    }
+    return [];
+  }
+
+  if (s.step_type === "error_message") {
+    return [{ kind: "lifecycle", payload: { note: "error_message", stepIndex } }];
+  }
+
+  // agent_response and checkpoint steps exist to report incremental token
+  // spend; surfacing them keeps mid-run accounting available while the run
+  // is still going, which the terminal result alone cannot provide.
+  if (s.usage && typeof s.usage === "object") {
+    return [{
+      kind: "usage",
+      payload: {
+        durationMs,
+        numTurns: null,
+        costUSD: null,
+        usage: normalizeUsage(s.usage),
+        incremental: true,
+      },
+    }];
   }
 
   return [];
@@ -237,18 +348,37 @@ export async function execute({
     if (child.stdout) {
       const lines = createInterface({ input: child.stdout });
       lines.on("line", (line) => {
+        let parsed;
         try {
-          const parsed = JSON.parse(line);
+          parsed = JSON.parse(line);
+        } catch {
+          return; // not JSON — agy interleaves plain text on some paths
+        }
+
+        try {
           const usageInfo = extractUsage(parsed);
           if (usageInfo) {
             finalUsage = usageInfo.usage;
             onUsage?.(usageInfo.usage);
           }
-          for (const event of mapStreamEvent(parsed)) {
-            onTrace?.(event.kind, event.payload);
-          }
         } catch {
-          // not JSON — ignore
+          // usage is accounting, not correctness
+        }
+
+        // Guard each emission separately: one throwing observer must not cost
+        // us the rest of this line's events, nor the run (cf. WM-305 for pi).
+        let events = [];
+        try {
+          events = mapStreamEvent(parsed);
+        } catch {
+          events = [];
+        }
+        for (const event of events) {
+          try {
+            onTrace?.(event.kind, event.payload);
+          } catch {
+            // trace is observability, not correctness
+          }
         }
       });
     }
