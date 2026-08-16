@@ -503,11 +503,13 @@ describe("InjectDialog field errors wait until blur or submit (WM-78)", () => {
       await selectTemplate(r, /disk\.diagnose/i);
       const mount = r.getByLabelText("mount") as HTMLInputElement;
       expect(mount.value).toBe("");
-      expect(r.queryAllByText(/does not match pattern/i)).toHaveLength(0);
+      expect(r.queryAllByText(/expected format/i)).toHaveLength(0);
       act(() => {
         fireEvent.click(r.getByRole("button", { name: /inject/i }));
       });
-      expect(r.getAllByText(/does not match pattern/i).length).toBeGreaterThan(0);
+      expect(r.getAllByText(/expected format/i).length).toBeGreaterThan(0);
+      expect(r.queryAllByText(/does not match pattern/i)).toHaveLength(0);
+      expect(r.container.textContent).not.toMatch(/\^\/\[A-Za-z0-9/);
       expect(r.getByText(/does not validate/i)).toBeTruthy();
       expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
     }));
@@ -698,5 +700,67 @@ describe("InjectDialog last-used template (WM-81)", () => {
       } finally {
         api.replay = origReplay;
       }
+    }));
+});
+
+describe("InjectDialog Inject-anyway banner regex sanitization (WM-179)", () => {
+  test("Inject-anyway banner in Form tab does not expose raw regex patterns", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /disk\.diagnose/i);
+      const mount = r.getByLabelText("mount") as HTMLInputElement;
+      act(() => {
+        changeInput(mount, "invalid-mount-path");
+      });
+      act(() => {
+        fireEvent.click(r.getByRole("button", { name: /inject/i }));
+      });
+      const banner = r.container.textContent ?? "";
+      expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
+      expect(banner).toContain("does not validate against");
+      expect(banner).not.toMatch(/\^\/\[A-Za-z0-9/);
+      expect(banner).not.toContain("does not match pattern");
+      expect(banner).toMatch(/expected format/i);
+    }));
+
+  test("Inject-anyway banner in JSON tab does not expose raw regex patterns", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /ci\.run\.failed/i);
+      act(() => {
+        fireEvent.click(r.getByRole("tab", { name: /json/i }));
+      });
+      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const parsed = JSON.parse(textarea.value);
+      parsed.payload = { repo: "watt-mind/factory", runId: 123, logArtifact: "invalid-log-artifact" };
+      act(() => {
+        changeInput(textarea, JSON.stringify(parsed, null, 2));
+      });
+      act(() => {
+        fireEvent.click(r.getByRole("button", { name: /inject/i }));
+      });
+      const banner = r.container.textContent ?? "";
+      expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
+      expect(banner).toContain("does not validate against");
+      expect(banner).not.toMatch(/\^\[0-9a-f\]\{64\}/);
+      expect(banner).not.toContain("does not match pattern");
+      expect(banner).toMatch(/expected format/i);
+    }));
+
+  test("JSON tab live validation warning does not expose raw regex patterns", () =>
+    withSchemaApi(async (r) => {
+      await selectTemplate(r, /ci\.run\.failed/i);
+      act(() => {
+        fireEvent.click(r.getByRole("tab", { name: /json/i }));
+      });
+      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const parsed = JSON.parse(textarea.value);
+      parsed.payload = { repo: "watt-mind/factory", runId: 123, logArtifact: "invalid-log-artifact" };
+      act(() => {
+        changeInput(textarea, JSON.stringify(parsed, null, 2));
+      });
+      const liveWarning = r.container.textContent ?? "";
+      expect(liveWarning).toContain("payload does not validate against the registered input schema");
+      expect(liveWarning).not.toMatch(/\^\[0-9a-f\]\{64\}/);
+      expect(liveWarning).not.toContain("does not match pattern");
+      expect(liveWarning).toMatch(/expected format/i);
     }));
 });
