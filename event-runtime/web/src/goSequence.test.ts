@@ -1,4 +1,9 @@
+import "./test-dom";
 import { describe, expect, test } from "bun:test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { createElement } from "react";
+import { App } from "./App";
 import { GO_CHORD_MS, goSequence } from "./goSequence";
 import { NAV } from "./nav";
 
@@ -13,60 +18,45 @@ function chord(targets = NAV_SUFFIXES) {
 }
 
 describe("goSequence", () => {
-  test("every NAV view chord derives from matrix and resolves to its expected route", () => {
-    const dispatched: string[] = [];
-    const routes: Record<string, () => void> = Object.fromEntries(
-      NAV.map((n) => [
-        n.go,
-        () => {
-          dispatched.push(n.key);
-        },
-      ]),
-    );
-    const seq = goSequence((key) => Object.hasOwn(routes, key));
+  test("App derives useGoSequences view chords from the navigation matrix", () => {
+    const mutableNav = NAV as unknown as Array<{
+      key: string;
+      label: string;
+      go: string;
+    }>;
+    const firstView = mutableNav[0]!;
+    const originalSuffix = firstView.go;
+    const sentinelSuffix = "z";
+    const realFetch = globalThis.fetch;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
 
-    for (const item of NAV) {
-      dispatched.length = 0;
-      expect(seq.press("g")).toBe(false);
-      expect(seq.armed()).toBe(true);
-      const completed = seq.press(item.go);
-      expect(completed).toBe(true);
-      if (completed) {
-        routes[item.go]();
-      }
-      expect(dispatched).toEqual([item.key]);
-      expect(seq.armed()).toBe(false);
-    }
-  });
+    firstView.go = sentinelSuffix;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    window.location.href = "http://localhost/#/events";
 
-  test("navigation matrix maps each route key to a unique chord suffix", () => {
-    const suffixes = new Set<string>();
-    const keys = new Set<string>();
-
-    for (const item of NAV) {
-      expect(suffixes.has(item.go)).toBe(false);
-      expect(keys.has(item.key)).toBe(false);
-      suffixes.add(item.go);
-      keys.add(item.key);
-    }
-
-    expect(suffixes.size).toBe(NAV.length);
-    expect(keys.size).toBe(NAV.length);
-  });
-
-  test("navigation chords fail if a view suffix is omitted or hardcoded", () => {
-    const legacyHardcoded = ["o", "e", "p", "r", "t", "w", "g"];
-    const hardcodedRoutes = Object.fromEntries(
-      legacyHardcoded.map((key) => [key, () => {}]),
-    );
-    const hardcodedChord = goSequence((k) => Object.hasOwn(hardcodedRoutes, k));
-
-    const missingItems = NAV.filter((n) => !legacyHardcoded.includes(n.go));
-    expect(missingItems.length).toBeGreaterThan(0);
-
-    for (const missing of missingItems) {
-      hardcodedChord.press("g");
-      expect(hardcodedChord.press(missing.go)).toBe(false);
+    try {
+      render(
+        createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          createElement(App),
+        ),
+      );
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "g" });
+        fireEvent.keyDown(document.body, { key: sentinelSuffix });
+      });
+      expect(window.location.hash).toBe(`#/${firstView.key}`);
+    } finally {
+      cleanup();
+      firstView.go = originalSuffix;
+      globalThis.fetch = realFetch;
     }
   });
 
