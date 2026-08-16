@@ -65,11 +65,28 @@ afterAll(() => {
   for (const dir of fixtures) rmSync(dir, { recursive: true, force: true });
 });
 
-function harness() {
+const canonicalWriteDetail =
+  `  ## Acceptance Criteria
+
+` +
+  `- [ ] preserve behavior in README
+
+` +
+  `  ## Owned Paths
+
+` +
+  `- README.md
+
+` +
+  `  ## Verification
+
+` +
+  `bun test event-runtime/lib/triage.test.mjs`;
+
+function harness({ adapters = { pi: fake, actions: fake } } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-triage-"));
   const db = openDb(path.join(dir, "runtime.db"));
   const workspaces = mkdtempSync(path.join(os.tmpdir(), "evrt-triage-ws-"));
-  const adapters = { pi: fake, actions: fake };
   const workerOpts = { workspacesRoot: workspaces, owner: "w-test", policyVersion: PV };
 
   async function approveNext(agentRef) {
@@ -82,6 +99,17 @@ function harness() {
   }
   return { db, approveNext };
 }
+
+const triageApplyEnvelope = (repo, eventId, plan) => ({
+  schemaVersion: "factory.event/v1",
+  eventId,
+  type: "factory.triage-apply.requested",
+  source: "operator",
+  subject: repo,
+  occurredAt: "2026-08-13T09:00:00Z",
+  correlationId: eventId,
+  payload: { repo, plan },
+});
 
 const triageEnvelope = (repo, eventId) => ({
   schemaVersion: "factory.event/v1",
@@ -115,6 +143,29 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
     expect(applied.summary.terminalState).toBe("COMPLETED");
     const result = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(applied.runId).result_json);
     expect(result.artifact.applied).toEqual([{ issueId: "CLNT-999", action: "label-agent-ready" }]);
+  });
+
+  test("a canonical write-detail triage-apply payload is approved as run", async () => {
+    const { db } = harness();
+    admitEvent(
+      db,
+      registry,
+      triageApplyEnvelope("bj29", "triage-5", [
+        {
+          issueId: "CLNT-999",
+          action: "write-detail",
+          reason: "fake: canonical multi-section detail",
+          detail: canonicalWriteDetail,
+        },
+      ]),
+    );
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+    const apply = openProposals(db, {}).find((p) => p.spec?.agent === "triage-apply@1" && p.decision === "run");
+    expect(apply).toBeTruthy();
+    expect(apply.decision).toBe("run");
+    expect(apply.status).toBe("open");
+    expect(apply.spec.input.plan?.[0]?.detail).toEqual(canonicalWriteDetail);
   });
 
   test("a clean queue converges to NOOP — nothing proposed, nothing applied", async () => {
