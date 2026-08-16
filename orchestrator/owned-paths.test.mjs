@@ -4,11 +4,22 @@
  * Collision detection is the one piece of the dispatcher that causes silent
  * data loss when wrong — two agents editing one file — so it gets real tests.
  */
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test, expect } from "bun:test";
 
 const expectEqual = (a, b, msg) => expect(a, msg).toEqual(b);
 const expectTrue = (v, msg) => expect(v, msg).toBeTruthy();
-import { parseOwnedPaths, effectiveOwnedPaths, globsOverlap, pathsCollide, nextDispatchable } from "./owned-paths.mjs";
+import {
+  parseOwnedPaths,
+  effectiveOwnedPaths,
+  globsOverlap,
+  pathsCollide,
+  nextDispatchable,
+  readPinManifestRequirements,
+  ownedPathsClosureGaps,
+} from "./owned-paths.mjs";
 
 test("parses the Owned Paths section of a real ticket", () => {
   const desc = `## Problem & Context
@@ -148,4 +159,71 @@ test("a trailing change-kind annotation doesn't sink the path (CLNT-765/768/764 
     "src/analytics/kpis/avgBasePriceByProduct.ts",
     "src/analytics/kpis/existing.ts",
   ]);
+});
+
+test("owned path closure flags missing required direct outputs", () => {
+  const policy = {
+    direct: [{ source: "shared/**", requires: ["dist/**", "plugins/core/**"] }],
+  };
+  expectEqual(ownedPathsClosureGaps({
+    ownedPaths: ["shared/**"],
+    ownedPathsPolicy: policy,
+  }), [
+    {
+      rule: "direct",
+      requiredPath: "dist/**",
+      requiredBy: "shared/**",
+    },
+    {
+      rule: "direct",
+      requiredPath: "plugins/core/**",
+      requiredBy: "shared/**",
+    },
+  ]);
+});
+
+test("owned path closure passes when required paths are also owned", () => {
+  const policy = {
+    direct: [{ source: "shared/**", requires: ["dist/**", "plugins/core/**"] }],
+  };
+  expectEqual(ownedPathsClosureGaps({
+    ownedPaths: ["shared/**", "dist/**", "plugins/core/**"],
+    ownedPathsPolicy: policy,
+  }), []);
+});
+
+test("pin manifests require owning generated output manifests", () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "owned-paths-closure-"));
+  try {
+    mkdirSync(path.join(repo, "event-runtime/agents"), { recursive: true });
+    writeFileSync(
+      path.join(repo, "event-runtime/agents/triage-scan.json"),
+      `${JSON.stringify({ pins: { "event-runtime/schemas/triage-scan.output.json": "factory" } })}\n`,
+    );
+    const requirements = readPinManifestRequirements(repo, ["event-runtime/agents/*.json"]);
+    expectEqual(requirements, [
+      {
+        manifestPath: "event-runtime/agents/triage-scan.json",
+        pinnedPaths: ["event-runtime/schemas/triage-scan.output.json"],
+      },
+    ]);
+
+    expectEqual(
+      ownedPathsClosureGaps({
+        ownedPaths: ["event-runtime/schemas/triage-scan.output.json"],
+        ownedPathsPolicy: { direct: [], pinManifests: ["event-runtime/agents/*.json"] },
+        pinManifestRequirements: requirements,
+      }),
+      [
+        {
+          rule: "pin-manifest",
+          requiredPath: "event-runtime/agents/triage-scan.json",
+          requiredBy: "event-runtime/schemas/triage-scan.output.json",
+          manifestPath: "event-runtime/agents/triage-scan.json",
+        },
+      ],
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

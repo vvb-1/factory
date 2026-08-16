@@ -397,6 +397,20 @@ repos:
 
     verify: bun test && bun build/emit.mjs --check
 
+    # Owned Paths closure rules for this repo's control-plane ticket types.
+    owned_paths_policy:
+      # Emitting source means owning its generated outputs.
+      direct:
+        - source: shared/**
+          requires:
+            - dist/**
+            - plugins/core/**
+      # JSON pin manifests are source-of-truth for generated contract files:
+      # owning any path referenced by a manifest requires owning the manifest
+      # file itself before dispatch.
+      pin_manifests:
+        - event-runtime/agents/*.json
+
     # The control plane holds no client data and serves no traffic. Its risky
     # surfaces (policy.yaml, the merge stage) are what a human reviews on every
     # factory PR anyway, so a path list adds nothing here (WM-47).

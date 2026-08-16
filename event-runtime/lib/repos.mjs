@@ -45,12 +45,64 @@ export function expandHome(p) {
   return p;
 }
 
+function normalizeOwnedPathsPolicy(raw = {}, repoName, file) {
+  if (raw === null || raw === undefined) {
+    return { direct: [], pinManifests: [] };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new RepoError(`${file}: repo ${repoName} owned_paths_policy must be an object`);
+  }
+
+  const unknown = Object.keys(raw).filter((key) => !["direct", "pin_manifests"].includes(key));
+  if (unknown.length) {
+    throw new RepoError(`${file}: repo ${repoName} owned_paths_policy has unknown keys (${unknown.join(", ")})`);
+  }
+
+  const direct = [];
+  if (raw.direct !== undefined) {
+    if (!Array.isArray(raw.direct)) {
+      throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct must be an array`);
+    }
+    for (const rule of raw.direct) {
+      if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
+        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct entries must be objects`);
+      }
+      if (typeof rule.source !== "string" || !rule.source.trim()) {
+        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct.source must be a non-empty string`);
+      }
+      if (!Array.isArray(rule.requires) || rule.requires.length === 0) {
+        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct.requires must be a non-empty array`);
+      }
+      if (!rule.requires.every((req) => typeof req === "string" && req.trim())) {
+        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct.requires must contain only non-empty strings`);
+      }
+      direct.push({ source: rule.source.trim(), requires: rule.requires.map((req) => req.trim()) });
+    }
+  }
+
+  const pinManifests = [];
+  if (raw.pin_manifests !== undefined) {
+    if (!Array.isArray(raw.pin_manifests)) {
+      throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.pin_manifests must be an array`);
+    }
+    for (const manifest of raw.pin_manifests) {
+      if (typeof manifest !== "string" || !manifest.trim()) {
+        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.pin_manifests must contain only non-empty strings`);
+      }
+      pinManifests.push(manifest.trim());
+    }
+  }
+
+  return { direct, pinManifests };
+}
+
 /**
  * @returns {Map<string, {name: string, path: string, github: string|null, base: string,
  *                        deployBranch: string|null, team: string|null, project: string|null,
  *                        reportOnly: boolean, maxInFlight: number|null, smokeDeadlineSeconds: number|null,
  *                        worktreeRoot: string|null, worktreeUp: string|null, worktreeDown: string|null,
- *                        worktreeWarm: string|null, verify: string|null}>}
+ *                        worktreeWarm: string|null, verify: string|null,
+ *                        ownedPathsPolicy: { direct: Array<{source: string, requires: string[]}>, pinManifests: string[] }}>
  */
 export function loadRepos({ root = reposRoot() } = {}) {
   const file = reposConfigPath(root);
@@ -105,6 +157,7 @@ export function loadRepos({ root = reposRoot() } = {}) {
       worktreeDown: entry.worktree_down ?? null,
       worktreeWarm: entry.worktree_warm ?? null,
       verify: entry.verify ?? null,
+      ownedPathsPolicy: normalizeOwnedPathsPolicy(entry.owned_paths_policy, entry.name, file),
     });
   }
   return repos;

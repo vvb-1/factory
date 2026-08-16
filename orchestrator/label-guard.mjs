@@ -23,11 +23,14 @@
  *     bun orchestrator/label-guard.mjs --repo legalease
  *     bun orchestrator/label-guard.mjs --repo legalease --apply
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { gql, fetchTeams } from "./reaper.mjs";
-import { ROOT } from "../lib/schedule.mjs";
-import { parseOwnedPaths } from "./owned-paths.mjs";
+import { loadRepos } from "../event-runtime/lib/repos.mjs";
+import {
+  parseOwnedPaths,
+  ownedPathsClosureGaps,
+  readPinManifestRequirements,
+  formatOwnedPathClosureGaps,
+} from "./owned-paths.mjs";
 
 const AI_AGENT_READY = "ai:agent-ready";
 
@@ -101,6 +104,34 @@ export function templateGaps(description = "") {
   return gaps;
 }
 
+function ownedPathsClosureCheck(description = "", repo, manifestCache) {
+  const owned = parseOwnedPaths(description);
+  const ownedPolicy = repo?.ownedPathsPolicy;
+  if (!ownedPolicy) return { messages: [], gaps: [] };
+
+  let cached = manifestCache.get(repo.name);
+  if (!cached) {
+    const requirements = ownedPolicy.pinManifests?.length
+      ? readPinManifestRequirements(repo.path, ownedPolicy.pinManifests)
+      : [];
+    cached = { requirements, messagesByOwned: new Map() };
+    manifestCache.set(repo.name, cached);
+  }
+
+  const key = JSON.stringify(owned.sort());
+  if (cached.messagesByOwned.has(key)) return { messages: cached.messagesByOwned.get(key), gaps: [] };
+
+  const gaps = ownedPathsClosureGaps({
+    ownedPaths: owned,
+    ownedPathsPolicy: ownedPolicy,
+    pinManifestRequirements: cached.requirements,
+  });
+
+  const messages = formatOwnedPathClosureGaps(gaps);
+  cached.messagesByOwned.set(key, messages);
+  return { messages, gaps };
+}
+
 const QUERY = `
   query($team: String!, $project: String!) {
     issues(first: 250, filter: {
@@ -157,8 +188,14 @@ export function parseArgs(argv = process.argv.slice(2)) {
 
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
-  const repos = (cfg.repos ?? []).filter((r) => !args.repos.length || args.repos.includes(r.name));
+  const allRepos = [...loadRepos().values()].filter((r) => !args.repos.length || args.repos.includes(r.name));
+  const repos = allRepos.map((r) => ({
+    name: r.name,
+    team: r.team,
+    project: r.project,
+    ownedPathsPolicy: r.ownedPathsPolicy,
+    path: r.path,
+  }));
 
   if (!repos.length) {
     console.error(args.repos.length ? `no repo named "${args.repos.join(",")}" in config/repos.yaml` : "no repos configured");
@@ -172,7 +209,20 @@ export async function main(argv = process.argv.slice(2)) {
 
   for (const repo of repos) {
     const issues = await fetchReadyIssues(repo);
-    const bad = issues.map((issue) => ({ issue, gaps: templateGaps(issue.description ?? "") })).filter((r) => r.gaps.length);
+    const closureRequirements = new Map();
+    const bad = issues
+      .map((issue) => {
+        const gapNames = [...templateGaps(issue.description ?? "")];
+        try {
+          const closure = ownedPathsClosureCheck(issue.description ?? "", repo, closureRequirements);
+          gapNames.push(...closure.messages);
+          return { issue, gaps: gapNames };
+        } catch (err) {
+          gapNames.push(`Owned Paths Closure: ${err.message || String(err)}`);
+          return { issue, gaps: gapNames };
+        }
+      })
+      .filter((r) => r.gaps.length);
 
     console.log(`${repo.name}  ${repo.team} / ${repo.project}  --  ${issues.length} ai:agent-ready ticket(s), ${bad.length} failing §5`);
 

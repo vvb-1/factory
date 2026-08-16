@@ -15,7 +15,13 @@ import { liveWorkerLeases } from "../../lib/worker-leases.mjs";
 // Imported as a library, never copied (docs/event-runtime-dispatch.md §4):
 // one collision oracle for both mutation paths, with its safety biases —
 // missing Owned Paths owns everything, ambiguous overlap errs to collision.
-import { effectiveOwnedPaths, pathsCollide } from "../../orchestrator/owned-paths.mjs";
+import {
+  effectiveOwnedPaths,
+  pathsCollide,
+  parseOwnedPaths,
+  readPinManifestRequirements,
+  ownedPathsClosureGaps,
+} from "../../orchestrator/owned-paths.mjs";
 import { findArtifact, pinRunArtifact } from "./artifacts.mjs";
 import { canonicalJson, hashJson } from "./canonical.mjs";
 import { artifactsRoot, DEAD_LETTER_AFTER, DEFAULT_PROPOSAL_TTL_SECONDS, FACTORY_ROOT } from "./config.mjs";
@@ -161,6 +167,26 @@ function fetchTicketDefault(ticketId) {
 const IN_FLIGHT_QUERY =
   `query($t:String!,$p:String!){ issues(first:250, filter:{ team:{key:{eq:$t}}, project:{name:{eq:$p}}, state:{name:{eq:"In Progress"}} }){ nodes{ identifier description } } }`;
 
+const OWNED_PATHS_CLOSURE_CACHE = new Map();
+
+function ownedPathsClosureDetails(repoName, repo, ticketDescription) {
+  if (!repo?.ownedPathsPolicy) return [];
+  const cacheKey = `${repoName}::${repo.path}`;
+  if (!OWNED_PATHS_CLOSURE_CACHE.has(cacheKey)) {
+    const requirements = repo.ownedPathsPolicy.pinManifests?.length
+      ? readPinManifestRequirements(repo.path, repo.ownedPathsPolicy.pinManifests)
+      : [];
+    OWNED_PATHS_CLOSURE_CACHE.set(cacheKey, requirements);
+  }
+  const requirements = OWNED_PATHS_CLOSURE_CACHE.get(cacheKey);
+  const ownedPaths = parseOwnedPaths(ticketDescription ?? "");
+  return ownedPathsClosureGaps({
+    ownedPaths,
+    ownedPathsPolicy: repo.ownedPathsPolicy,
+    pinManifestRequirements: requirements,
+  });
+}
+
 function fetchInFlightDefault(repoConfig) {
   try {
     const out = execFileSync(
@@ -229,6 +255,18 @@ export function worktreeDispatchGate(payload, {
   if (ticket.state?.name !== "Todo") return { decision: "noop", reason: "ticket_not_todo" };
   if (!(ticket.labels?.nodes ?? []).some((l) => l.name === "ai:agent-ready")) {
     return { decision: "noop", reason: "ticket_not_agent_ready" };
+  }
+
+  try {
+    const gaps = ownedPathsClosureDetails(repo.name, repo, ticket.description);
+    if (gaps.length) {
+      return {
+        decision: "human_needed",
+        reason: `owned_paths_not_closed`,
+      };
+    }
+  } catch (err) {
+    return { decision: "human_needed", reason: `owned_paths_not_closed: ${err.message || String(err)}` };
   }
 
   // One collision oracle (§4): the in-flight set is Linear's In Progress
