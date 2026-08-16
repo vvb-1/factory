@@ -183,7 +183,7 @@ describe("safeChildEnvironment", () => {
     process.env = { ...originalEnv };
   });
 
-  test("strips provider and Cursor API keys, keeps declared env", () => {
+  test("keeps CURSOR_API_KEY, strips provider keys and CURSOR_API_ENDPOINT (WM-443)", () => {
     const env = safeChildEnvironment({
       ANTHROPIC_API_KEY: "a",
       OPENAI_API_KEY: "b",
@@ -192,12 +192,19 @@ describe("safeChildEnvironment", () => {
       CUSTOM_VAR: "kept",
     });
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(env.CURSOR_API_KEY).toBeUndefined();
+    expect(env.CURSOR_API_KEY).toBe("cursor-secret");
     expect(env.CURSOR_API_ENDPOINT).toBeUndefined();
     expect(env.CUSTOM_VAR).toBe("kept");
   });
 
-  test("strips push credentials for non-mutating runs", () => {
+  test("inherits CURSOR_API_KEY from process.env when caller env omits it (WM-443)", () => {
+    process.env.CURSOR_API_KEY = "from-process";
+    const env = safeChildEnvironment({ CUSTOM_VAR: "kept" });
+    expect(env.CURSOR_API_KEY).toBe("from-process");
+    expect(env.CUSTOM_VAR).toBe("kept");
+  });
+
+  test("strips push credentials for non-mutating runs and still keeps CURSOR_API_KEY", () => {
     const childEnv = safeChildEnvironment({
       SSH_AUTH_SOCK: "/tmp/test.sock",
       GITHUB_TOKEN: "ghp_secret",
@@ -206,10 +213,10 @@ describe("safeChildEnvironment", () => {
     for (const key of PUSH_CREDENTIAL_ENV) {
       expect(childEnv[key]).toBeUndefined();
     }
-    expect(childEnv.CURSOR_API_KEY).toBeUndefined();
+    expect(childEnv.CURSOR_API_KEY).toBe("sk");
   });
 
-  test("preserves push credentials for mutating runs while still stripping API keys", () => {
+  test("preserves push credentials for mutating runs and keeps CURSOR_API_KEY", () => {
     const childEnv = safeChildEnvironment({
       SSH_AUTH_SOCK: "/tmp/agent.sock",
       GITHUB_TOKEN: "ghp_mutating",
@@ -217,7 +224,7 @@ describe("safeChildEnvironment", () => {
     }, { mutating: true });
     expect(childEnv.SSH_AUTH_SOCK).toBe("/tmp/agent.sock");
     expect(childEnv.GITHUB_TOKEN).toBe("ghp_mutating");
-    expect(childEnv.CURSOR_API_KEY).toBeUndefined();
+    expect(childEnv.CURSOR_API_KEY).toBe("sk");
   });
 
   test("defaults to stripping when mutating is omitted", () => {
@@ -274,6 +281,11 @@ if (behavior === "normal") {
 }
 
 if (behavior === "exit_code") {
+  process.exit(parseInt(process.env.FACTORY_TEST_EXIT_CODE || "1", 10));
+}
+
+if (behavior === "stderr_then_exit") {
+  process.stderr.write(process.env.FACTORY_TEST_STDERR || "Error: Authentication required.\\n");
   process.exit(parseInt(process.env.FACTORY_TEST_EXIT_CODE || "1", 10));
 }
 
@@ -382,7 +394,7 @@ if (behavior === "emit_error_tool_result") {
     }
   }
 
-  test("executes stub binary in workspaceDir, strips keys, prompt on argv, captures transcript + trace", async () => {
+  test("executes stub binary in workspaceDir, passes CURSOR_API_KEY, prompt on argv, captures transcript + trace", async () => {
     const workspaceDir = ws();
     const recordFile = path.join(workspaceDir, "record.json");
     const traceEvents = [];
@@ -394,7 +406,7 @@ if (behavior === "emit_error_tool_result") {
       timeoutMs: 5000,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        CURSOR_API_KEY: "sk-must-be-stripped",
+        CURSOR_API_KEY: "sk-must-be-passed",
         CUSTOM_VAR: "custom_value",
         FACTORY_TEST_BEHAVIOR: "normal",
         FACTORY_TEST_RECORD_FILE: recordFile,
@@ -406,7 +418,7 @@ if (behavior === "emit_error_tool_result") {
     expect(existsSync(recordFile)).toBe(true);
     const record = JSON.parse(readFileSync(recordFile, "utf8"));
     expect(record.cwd).toBe(workspaceDir);
-    expect(record.env.CURSOR_API_KEY).toBeUndefined();
+    expect(record.env.CURSOR_API_KEY).toBe("sk-must-be-passed");
     expect(record.env.CUSTOM_VAR).toBe("custom_value");
     expect(record.argv).toContain("-p");
     expect(record.argv).toContain("--output-format");
@@ -443,6 +455,32 @@ if (behavior === "emit_error_tool_result") {
     });
     expect(outcome.exitCode).toBe(42);
     expect(outcome.timedOut).toBe(false);
+  });
+
+  test("nonzero exit writes .stderr.txt and emits adapter_stderr lifecycle (WM-443)", async () => {
+    const workspaceDir = ws();
+    const traceEvents = [];
+    const stderr = "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.\n";
+    const outcome = await execute({
+      spec: defaultSpec,
+      def: defaultDef,
+      workspaceDir,
+      timeoutMs: 5000,
+      env: {
+        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+        FACTORY_TEST_BEHAVIOR: "stderr_then_exit",
+        FACTORY_TEST_STDERR: stderr,
+        FACTORY_TEST_EXIT_CODE: "1",
+      },
+      onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
+    });
+    expect(outcome.exitCode).toBe(1);
+    expect(readFileSync(path.join(workspaceDir, ".stderr.txt"), "utf8")).toBe(stderr);
+    expect(traceEvents.some((e) => (
+      e.kind === "lifecycle"
+      && e.payload?.note === "adapter_stderr"
+      && String(e.payload?.text ?? "").includes("Authentication required")
+    ))).toBe(true);
   });
 
   testProcessGroup("timeout kills a real long-lived grandchild (WM-263)", async () => {
