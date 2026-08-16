@@ -13,8 +13,61 @@ function chord(targets = NAV_SUFFIXES) {
 }
 
 describe("goSequence", () => {
-  test("chord matrix covers every NAV suffix — new views cannot drift silently", () => {
-    expect(NAV_SUFFIXES).toEqual(NAV.map((n) => n.go));
+  test("every NAV view chord derives from matrix and resolves to its expected route", () => {
+    const dispatched: string[] = [];
+    const routes: Record<string, () => void> = Object.fromEntries(
+      NAV.map((n) => [
+        n.go,
+        () => {
+          dispatched.push(n.key);
+        },
+      ]),
+    );
+    const seq = goSequence((key) => Object.hasOwn(routes, key));
+
+    for (const item of NAV) {
+      dispatched.length = 0;
+      expect(seq.press("g")).toBe(false);
+      expect(seq.armed()).toBe(true);
+      const completed = seq.press(item.go);
+      expect(completed).toBe(true);
+      if (completed) {
+        routes[item.go]();
+      }
+      expect(dispatched).toEqual([item.key]);
+      expect(seq.armed()).toBe(false);
+    }
+  });
+
+  test("navigation matrix maps each route key to a unique chord suffix", () => {
+    const suffixes = new Set<string>();
+    const keys = new Set<string>();
+
+    for (const item of NAV) {
+      expect(suffixes.has(item.go)).toBe(false);
+      expect(keys.has(item.key)).toBe(false);
+      suffixes.add(item.go);
+      keys.add(item.key);
+    }
+
+    expect(suffixes.size).toBe(NAV.length);
+    expect(keys.size).toBe(NAV.length);
+  });
+
+  test("navigation chords fail if a view suffix is omitted or hardcoded", () => {
+    const legacyHardcoded = ["o", "e", "p", "r", "t", "w", "g"];
+    const hardcodedRoutes = Object.fromEntries(
+      legacyHardcoded.map((key) => [key, () => {}]),
+    );
+    const hardcodedChord = goSequence((k) => Object.hasOwn(hardcodedRoutes, k));
+
+    const missingItems = NAV.filter((n) => !legacyHardcoded.includes(n.go));
+    expect(missingItems.length).toBeGreaterThan(0);
+
+    for (const missing of missingItems) {
+      hardcodedChord.press("g");
+      expect(hardcodedChord.press(missing.go)).toBe(false);
+    }
   });
 
   test("g g completes the chord inside the window — the Graph suffix is not swallowed", () => {
