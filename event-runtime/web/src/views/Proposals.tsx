@@ -620,8 +620,9 @@ export function Proposals({
   }, []);
 
   return (
-    <div className="flex h-full min-w-0">
-      <ListPane
+    <div className="flex h-full min-w-0 max-sm:fixed max-sm:inset-0 max-sm:z-50 max-sm:bg-(--surface-0) [&_[role=dialog]]:max-w-[calc(100vw-2rem)]">
+      <div className={`${sel ? "hidden sm:flex" : "flex"} min-h-0 min-w-0 flex-1`}>
+        <ListPane
         chrome={
           <>
         <h1 className="display mb-4 text-lg font-semibold">Proposals</h1>
@@ -700,7 +701,7 @@ export function Proposals({
         }
       >
 
-        <table className="w-full border-separate border-spacing-0">
+        <table className="w-full border-separate border-spacing-0 max-sm:[&_th:nth-child(n+4)]:hidden max-sm:[&_td:nth-child(n+4)]:hidden">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
               {tab === "open" && (
@@ -902,11 +903,12 @@ export function Proposals({
             )}
           </tbody>
         </table>
-      </ListPane>
+        </ListPane>
+      </div>
 
       {sel && (
         <DetailPane
-          widthClass="w-[460px]"
+          widthClass="w-full sm:w-[460px]"
           title={
             <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal">
               <button
@@ -1050,14 +1052,14 @@ export function Proposals({
                     </div>
                     <span className="mono text-[11px] text-(--text-faint)">{sel.spec.adapter}</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div><div className="text-[11px] uppercase text-(--text-faint)">Target Repo</div><div className="mono truncate text-(--text-dim)" title={repo}>{repo}</div></div>
                     <div><div className="text-[11px] uppercase text-(--text-faint)">Target Branch</div><div className="mono truncate text-(--text-dim)" title={branch}>{branch}</div></div>
                     <div><div className="text-[11px] uppercase text-(--text-faint)">Issue ID</div><div className="mono truncate text-(--text-dim)" title={issue}>{issue}</div></div>
                     <div><div className="text-[11px] uppercase text-(--text-faint)">Host</div><div className="mono truncate text-(--text-dim)" title={host}>{host}</div></div>
                     <div><div className="text-[11px] uppercase text-(--text-faint)">Budget</div><div className="mono text-(--text-dim)">{sel.spec.timeoutSeconds}s · max {sel.spec.maxAttempts} att</div></div>
                     <div><div className="text-[11px] uppercase text-(--text-faint)">Egress</div><div className="mono truncate text-(--text-dim)">{egress.length ? egress.join(", ") : "none"}</div></div>
-                    <div className="col-span-2">
+                    <div className="sm:col-span-2">
                       <div className="text-[11px] uppercase text-(--text-faint)">Capabilities</div>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {caps.length ? caps.map((c) => <span key={c} className="rounded bg-(--surface-2) px-1.5 py-0.5 mono text-[11.5px] text-(--text-dim)">{c}</span>) : <span className="text-[11px] text-(--text-faint)">none (sandboxed)</span>}
@@ -1116,7 +1118,7 @@ export function Proposals({
                   </button>
                 ))}
               </div>
-              <div className="flex gap-2 mt-1">
+              <div className="mt-1 flex flex-col gap-2 sm:flex-row">
                 <input
                   ref={reasonRef}
                   value={reason}
@@ -1134,7 +1136,7 @@ export function Proposals({
                     if (e.key === "Escape") setRejecting(false);
                   }}
                   placeholder="Reason (required — rejections are audit records)"
-                  className="flex-1 rounded-md border border-(--border-strong) bg-(--surface-1) px-2.5 py-1 text-(--text) outline-none focus:border-(--accent)"
+                  className="min-w-0 flex-1 rounded-md border border-(--border-strong) bg-(--surface-1) px-2.5 py-1 text-(--text) outline-none focus:border-(--accent)"
                 />
                 <Button
                   variant="danger"
