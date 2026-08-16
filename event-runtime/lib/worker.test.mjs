@@ -576,6 +576,30 @@ describe("worker", () => {
     expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
   });
 
+  test("post-VERIFYING exception finalizes the attempt and re-queues instead of stranding it (WM-261)", async () => {
+    const db = openDb(":memory:");
+    const blockedStoreParent = path.join(freshRoot(), "not-a-directory");
+    writeFileSync(blockedStoreParent, "blocks artifact store creation\n");
+    const spec = queueRun(db, makeSpec({
+      maxAttempts: 2,
+      workspace: { type: "ephemeral", retainOnFailure: false },
+    }));
+    const o = opts({ artifactStore: path.join(blockedStoreParent, "artifacts") });
+
+    const summary = await runOnce(db, registry, adapters, o);
+
+    expect(summary).toMatchObject({ terminalState: "FAILED", reasonCode: "adapter_error" });
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(lifecycleOf(db, spec.runId).slice(-3).map((event) => event.to_state)).toEqual([
+      "VERIFYING", "FAILED", "QUEUED",
+    ]);
+    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    expect(attempt.terminal_state).toBe("FAILED");
+    expect(attempt.reason_code).toBe("adapter_error");
+    expect(attempt.finished_at).toBeTruthy();
+    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+  });
+
   test("reapExpiredLeases dead-letters when maxAttempts is reached (OPS-405)", () => {
     const db = openDb(":memory:");
     const spec = queueRun(db, makeSpec({ maxAttempts: 1 }));
