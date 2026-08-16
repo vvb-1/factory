@@ -22,7 +22,7 @@ import { ScopeCaption } from "../components/ContextTabs";
 import type { AdmittedEvent, EventFocus } from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
-import { EVENT_FACETS, matchesFilterQuery, parseFilterQuery, removeFilterToken, type FilterToken } from "../filterQuery";
+import { EVENT_FACETS, matchesFilterQuery, parseFilterQuery, type FilterToken } from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import {
   Ago,
@@ -49,6 +49,20 @@ import {
   shortId,
 } from "../components/ui";
 
+function removeTokensFromQuery(filter: string, tokens: readonly FilterToken[]): string {
+  const ordered = [...tokens].sort((a, b) => a.start - b.start);
+  let cursor = 0;
+  let next = "";
+
+  for (const token of ordered) {
+    next += filter.slice(cursor, token.start);
+    cursor = token.end;
+  }
+  next += filter.slice(cursor);
+
+  return next.replace(/\s+/g, " ").trim();
+}
+
 function toggleFacetInQuery(filter: string, key: "type" | "source", value: string): string {
   const parsed = parseFilterQuery(filter, EVENT_FACETS);
   const existingTokens = parsed.tokens.filter(
@@ -60,23 +74,15 @@ function toggleFacetInQuery(filter: string, key: "type" | "source", value: strin
   );
 
   if (isAlreadyActive) {
-    let next = filter;
-    const matching = existingTokens
-      .filter((t) => t.value.toLowerCase() === value.toLowerCase())
-      .sort((a, b) => b.start - a.start);
-    for (const t of matching) {
-      next = removeFilterToken(next, t);
-    }
-    return next;
+    const matching = existingTokens.filter(
+      (t) => t.value.toLowerCase() === value.toLowerCase(),
+    );
+    return removeTokensFromQuery(filter, matching);
   }
 
-  let next = filter;
-  const toRemove = [...existingTokens].sort((a, b) => b.start - a.start);
-  for (const t of toRemove) {
-    next = removeFilterToken(next, t);
-  }
+  const next = removeTokensFromQuery(filter, existingTokens);
   const addition = `${key}:${value}`;
-  return next ? `${next} ${addition}`.replace(/\s+/g, " ").trim() : addition;
+  return next ? `${next} ${addition}` : addition;
 }
 
 function setFacetInQuery(filter: string, key: "type" | "source", value: string): string {
@@ -85,13 +91,9 @@ function setFacetInQuery(filter: string, key: "type" | "source", value: string):
     (t): t is Extract<FilterToken, { kind: "field" }> =>
       t.kind === "field" && t.key === key,
   );
-  let next = filter;
-  const toRemove = [...existingTokens].sort((a, b) => b.start - a.start);
-  for (const t of toRemove) {
-    next = removeFilterToken(next, t);
-  }
+  const next = removeTokensFromQuery(filter, existingTokens);
   const addition = `${key}:${value}`;
-  return next ? `${next} ${addition}`.replace(/\s+/g, " ").trim() : addition;
+  return next ? `${next} ${addition}` : addition;
 }
 
 const STATUS_TABS = ["all", "admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
