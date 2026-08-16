@@ -367,6 +367,31 @@ describe("merge-scan selected PR contract (WM-426)", () => {
   });
 });
 
+describe("merge-scan required-context resolution (WM-433)", () => {
+  test("scan uses the supported PR query through the deterministic resolver", () => {
+    const prompt = readFileSync(
+      registry.agents.get("merge-scan@2").promptPath,
+      "utf8",
+    );
+
+    expect(prompt).toContain(
+      'gh pr checks "$pr" --repo "$github" --required --json name,bucket,state',
+    );
+    expect(prompt).toContain(
+      "./repo/event-runtime/lib/merge-ci-proof.mjs resolve-required-contexts",
+    );
+    expect(prompt).toContain(
+      "Status 1 with exactly `no required checks reported on the <headRef> branch`",
+    );
+    expect(prompt).toContain("`proveMergeCiFallback`");
+    expect(prompt).toContain("Do not query");
+    expect(prompt).toContain("branches/{branch}/protection");
+    expect(prompt).not.toContain(
+      "First query GitHub's branch-protection required contexts",
+    );
+  });
+});
+
 describe("merge-scan repository workspace and result contract (WM-425)", () => {
   test("the definition and prompt declare the pinned repository contract", () => {
     const def = registry.agents.get("merge-scan@2");
