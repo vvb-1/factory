@@ -45,6 +45,14 @@ const YAML = `repos:
     worktree_root: ~/Develop/.worktrees/full
     max_in_flight: 20
     verify: npm run typecheck
+    owned_paths_policy:
+      direct:
+        - source: shared/**
+          requires:
+            - dist/**
+            - plugins/core/**
+      pin_manifests:
+        - event-runtime/agents/*.json
     merge_ci:
       workflow: CI
       required_checks:
@@ -86,6 +94,10 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       worktreeDown: "bin/worktree-down.sh",
       worktreeWarm: "bin/worktree-warm.sh",
       verify: "npm run typecheck",
+      ownedPathsPolicy: {
+        direct: [{ source: "shared/**", requires: ["dist/**", "plugins/core/**"] }],
+        pinManifests: ["event-runtime/agents/*.json"],
+      },
     });
   });
 
@@ -182,6 +194,34 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
     }
   });
 
+  test("owned_paths_policy is parsed and validated, defaulting to empty when absent", () => {
+    const repos = loadRepos({ root: factoryRoot(`repos:
+  - name: bare
+    path: /tmp/a
+    owned_paths_policy:
+      direct: []
+      pin_manifests: []
+  - name: absent-policy
+    path: /tmp/b
+`) });
+    expect(repos.get("bare").ownedPathsPolicy).toEqual({ direct: [], pinManifests: [] });
+    expect(repos.get("absent-policy").ownedPathsPolicy).toEqual({ direct: [], pinManifests: [] });
+  });
+
+  test("owned_paths_policy must be valid schema", () => {
+    const invalidCases = [
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy: []\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct: "oops"\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct:\n        - source: "shared/**"\n      pin_manifests: ["x"]\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      direct:\n        - source: "shared/**"\n          requires: []\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      pin_manifests: [null]\n`,
+      `repos:\n  - name: bad\n    path: /tmp/a\n    owned_paths_policy:\n      extra: 1\n`,
+    ];
+    for (const yaml of invalidCases) {
+      expect(() => loadRepos({ root: factoryRoot(yaml) })).toThrow(RepoError);
+    }
+  });
+
   test("merge_ci is all-or-nothing, nonempty, string-only, and unambiguous (WM-419)", () => {
     const invalidCases = [
       `repos:\n  - name: no-workflow\n    path: /tmp/a\n    merge_ci:\n      required_checks: [Verify]\n`,
@@ -231,7 +271,6 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       expect(() => proveMergeChecks({ expectedChecks: expected, actualChecks, expectedSha: sha, workflow: "CI" })).toThrow(RepoError);
     }
   });
-
   test("malformed YAML throws RepoError with file path and parse error message (OPS-346)", () => {
     const root = factoryRoot("repos: [ invalid: {");
     expect(() => loadRepos({ root })).toThrow(RepoError);

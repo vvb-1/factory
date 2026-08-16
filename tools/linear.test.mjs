@@ -7,8 +7,23 @@
  * strips every other label on the ticket. That is data loss with no error, on
  * tickets a human curated — so it gets real tests.
  */
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { test, expect } from "bun:test";
-import { resolveLabelIds, claimLabels, validateLabels, formatTicket, agentLabel, TYPE_LABELS, formatComment, formatComments, parsePositionalArgs } from "./linear.mjs";
+import {
+  resolveLabelIds,
+  claimLabels,
+  validateLabels,
+  formatTicket,
+  agentLabel,
+  TYPE_LABELS,
+  formatComment,
+  formatComments,
+  parsePositionalArgs,
+  closureCheckMessages,
+  __resetLinearReposCache,
+} from "./linear.mjs";
 
 const LABELS = [
   { id: "l-ready", name: "ai:agent-ready" },
@@ -201,5 +216,48 @@ test("label edits support both addition and removal without touching other label
   expect(ids).toContain("l-review");
   expect(ids).not.toContain("l-prog");
   expect(ids).toHaveLength(3);
+});
+
+test("closure check blocks ai:agent-ready when Owned Paths closure policy is incomplete", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "linear-closure-"));
+  const repoPath = path.join(root, "repo");
+  const previous = process.env.FACTORY_REPOS_ROOT;
+  try {
+    mkdirSync(path.join(root, "config"), { recursive: true });
+    mkdirSync(path.join(repoPath, "event-runtime", "agents"), { recursive: true });
+    mkdirSync(path.join(repoPath, "event-runtime", "schemas"), { recursive: true });
+    writeFileSync(path.join(repoPath, "event-runtime", "agents", "triage-scan.json"), `${JSON.stringify({
+      pins: { "event-runtime/schemas/triage-scan.output.json": "x" },
+    })}\n`);
+    writeFileSync(path.join(root, "config", "repos.yaml"), `repos:\n  - name: wm\n    path: ${repoPath}\n    team: WM\n    project: Tests\n    owned_paths_policy:\n      direct:\n        - source: shared/**\n          requires:\n            - dist/**\n      pin_manifests:\n        - event-runtime/agents/*.json\n`);
+
+    process.env.FACTORY_REPOS_ROOT = root;
+    __resetLinearReposCache();
+
+    expect(
+      closureCheckMessages({
+        team: { key: "WM" },
+        project: { name: "Tests" },
+        description: "## Owned Paths\n- shared/**\n",
+      }),
+    ).toEqual(["Missing required Owned Paths entry: dist/** (required by shared/**)"]);
+
+    expect(
+      closureCheckMessages({
+        team: { key: "WM" },
+        project: { name: "Tests" },
+        description: "## Owned Paths\n- shared/**\n- event-runtime/schemas/triage-scan.output.json\n- dist/**\n",
+      }),
+    ).toEqual([
+      "Missing required Owned Paths entry: event-runtime/agents/triage-scan.json (required by event-runtime/schemas/triage-scan.output.json from event-runtime/agents/triage-scan.json)",
+    ]);
+
+    __resetLinearReposCache();
+  } finally {
+    if (previous === undefined) delete process.env.FACTORY_REPOS_ROOT;
+    else process.env.FACTORY_REPOS_ROOT = previous;
+    __resetLinearReposCache();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
