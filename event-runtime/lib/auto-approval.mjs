@@ -361,8 +361,16 @@ function chainContextValue(expr, context) {
   return value;
 }
 
-/** Prove a sibling edge from the accepted artifact, not registry membership alone. */
+function chainArrayField(field, context) {
+  if (typeof field === "string" && field.startsWith("$."))
+    return chainContextValue(field, context);
+  return context.artifact[field] ?? context.input[field];
+}
+
+/** Prove an explicitly independent sibling edge from its declared selector and payload. */
 function independentlySelectedEdge(rule, spec, result, envelope) {
+  if (rule?.independent !== true) return false;
+
   const artifactHash = {};
   for (const entry of result.artifacts ?? []) {
     if (entry.kind && entry.sha256 && artifactHash[entry.kind] === undefined)
@@ -377,12 +385,13 @@ function independentlySelectedEdge(rule, spec, result, envelope) {
   for (const edge of Object.values(rule?.edges ?? {})) {
     if (edge?.eventType !== envelope.type) continue;
     try {
+      if (edge.whenItemsField === undefined) continue;
+      const selectedItems = chainArrayField(edge.whenItemsField, context);
+      if (!Array.isArray(selectedItems) || selectedItems.length === 0) continue;
+
       const itemsField = edge.itemsField ?? rule.itemsField;
       if (itemsField !== undefined) {
-        const items =
-          typeof itemsField === "string" && itemsField.startsWith("$.")
-            ? chainContextValue(itemsField, context)
-            : context.artifact[itemsField] ?? context.input[itemsField];
+        const items = chainArrayField(itemsField, context);
         if (!Array.isArray(items)) continue;
         for (const item of items) {
           const itemContext = { ...context, item };
@@ -410,15 +419,7 @@ function independentlySelectedEdge(rule, spec, result, envelope) {
         continue;
       }
 
-      // Independent single emits (the merge plan today) are selected by a
-      // non-empty artifact array carried into the exact emitted payload.
-      const selected = Object.values(edge.input ?? {}).some((expr) => {
-        if (typeof expr !== "string" || !expr.startsWith("$.")) return false;
-        const value = chainContextValue(expr, context);
-        return Array.isArray(value) && value.length > 0;
-      });
       if (
-        selected &&
         sameJson(
           buildChainInput(edge.input ?? {}, context),
           envelope.payload ?? {},

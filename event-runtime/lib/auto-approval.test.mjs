@@ -191,6 +191,31 @@ const auto = (db, options = {}) => {
   });
 };
 
+const independentMergeRegistry = ({ independent = true, selectors = {} } = {}) => {
+  const mergeRule = registry.edges["merge-scan@2"];
+  return {
+    ...registry,
+    edges: {
+      ...registry.edges,
+      "merge-scan@2": {
+        ...mergeRule,
+        independent,
+        edges: Object.fromEntries(
+          Object.entries(mergeRule.edges).map(([name, edge]) => [
+            name,
+            {
+              ...edge,
+              whenItemsField:
+                selectors[name] ??
+                { MERGE: "plan", FIX: "fix", ESCALATE: "escalate" }[name],
+            },
+          ]),
+        ),
+      },
+    },
+  };
+};
+
 describe("chain auto approval (WM-357)", () => {
   test("git-owned policy is an explicit closed allowlist", () => {
     const loaded = loadChainAutoApprovalPolicy();
@@ -552,6 +577,7 @@ describe("chain auto approval (WM-357)", () => {
     });
 
     const result = auto(db, {
+      approvalRegistry: independentMergeRegistry(),
       policy: {
         ...policy,
         maxFixRounds: 2,
@@ -567,6 +593,126 @@ describe("chain auto approval (WM-357)", () => {
     for (const candidate of [merge, fix, escalation]) {
       expect(runState(db, candidate.runId)).toBe("QUEUED");
     }
+  });
+
+  test("a non-independent array sibling remains watched", () => {
+    const db = openDb(":memory:");
+    const mergeInput = {
+      repo: "factory",
+      github: "watt-mind/factory",
+      base: "develop",
+      deployBranch: "master",
+      plan: [
+        {
+          pr: 431,
+          headSha: "a".repeat(40),
+          baseSha: "b".repeat(40),
+          headRef: "feat/WM-431",
+          ticket: "WM-431",
+          action: "merge_pr",
+          reason: "selected sibling",
+          checksGreen: true,
+          mergeable: true,
+          ownedPathsValid: true,
+          handoffValid: true,
+          testsFalsifiable: true,
+          policySafe: true,
+          sensitive: false,
+          ambiguous: false,
+        },
+      ],
+    };
+    const sibling = seed(db, {
+      id: "non-independent-array-sibling",
+      type: "factory.merge-apply.requested",
+      input: mergeInput,
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        ...mergeInput,
+        fix: [],
+        escalate: [{ pr: 429, reason: "human review required" }],
+        summary: "merge and escalation selected",
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(
+      auto(db, {
+        approvalRegistry: independentMergeRegistry({ independent: false }),
+        policy: {
+          ...policy,
+          autoMergeBase: new Set(["develop"]),
+          autoMergeOwners: new Set(["watt-mind"]),
+        },
+        runtimeGuard: () => null,
+      }).approved,
+    ).toEqual([]);
+    expect(runState(db, sibling.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
+    );
+  });
+
+  test("a sibling with a nonempty payload array but empty selector remains watched", () => {
+    const db = openDb(":memory:");
+    const mergeInput = {
+      repo: "factory",
+      github: "watt-mind/factory",
+      base: "develop",
+      deployBranch: "master",
+      plan: [
+        {
+          pr: 431,
+          headSha: "a".repeat(40),
+          baseSha: "b".repeat(40),
+          headRef: "feat/WM-431",
+          ticket: "WM-431",
+          action: "merge_pr",
+          reason: "selected sibling",
+          checksGreen: true,
+          mergeable: true,
+          ownedPathsValid: true,
+          handoffValid: true,
+          testsFalsifiable: true,
+          policySafe: true,
+          sensitive: false,
+          ambiguous: false,
+        },
+      ],
+    };
+    const sibling = seed(db, {
+      id: "empty-independent-selector",
+      type: "factory.merge-apply.requested",
+      input: mergeInput,
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        ...mergeInput,
+        fix: [],
+        escalate: [{ pr: 429, reason: "human review required" }],
+        summary: "merge payload exists but its selector is empty",
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(
+      auto(db, {
+        approvalRegistry: independentMergeRegistry({
+          selectors: { MERGE: "fix" },
+        }),
+        policy: {
+          ...policy,
+          autoMergeBase: new Set(["develop"]),
+          autoMergeOwners: new Set(["watt-mind"]),
+        },
+        runtimeGuard: () => null,
+      }).approved,
+    ).toEqual([]);
+    expect(runState(db, sibling.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
+    );
   });
 
   test("a declared but unselected sibling edge still fails closed", () => {
@@ -641,10 +787,12 @@ describe("chain auto approval (WM-357)", () => {
         ...registry.edges,
         "merge-scan@2": {
           recommendationField: "recommendation",
+          independent: true,
           edges: {
             ESCALATE: registry.edges["merge-scan@2"].edges.ESCALATE,
             WORK: {
               eventType: "factory.work.requested",
+              whenItemsField: "$.artifact.repos",
               itemsField: "repos",
               itemKey: "repo",
               input: {},
