@@ -49,6 +49,21 @@ export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
 
 export const KILL_GRACE_MS = 30_000;
 
+/** Terminate a detached CLI and every subprocess it started (WM-263). */
+export function killProcessGroup(child, signal = "SIGTERM", kill = process.kill) {
+  const pid = child?.pid;
+  if (!pid) return;
+  try {
+    kill(-pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // already terminated
+    }
+  }
+}
+
 /** Trace events preview text; the recorder's byte bound is the real limit. */
 const TEXT_PREVIEW_CHARS = 4000;
 
@@ -333,6 +348,7 @@ export async function execute({
       cwd: workspaceDir,
       env: childEnv,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     child.stdin.on("error", () => {}); // a child that exits before reading stdin must not crash the worker
@@ -396,15 +412,15 @@ export async function execute({
     let killTimer = null;
     const termTimer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+      killProcessGroup(child, "SIGTERM");
+      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
       killTimer.unref?.();
     }, timeoutMs);
 
     const onAbort = () => {
-      child.kill("SIGTERM");
+      killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
         killTimer.unref?.();
       }
     };
