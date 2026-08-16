@@ -1382,16 +1382,22 @@ describe("execute-side dispatch hardening (WM-115)", () => {
 
 
     const currentBranch = (spawnSync("git", ["-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+    // GitHub Actions checks out a PR merge ref detached from its source branch.
+    // Give worktree-up a verified origin ref to that checked-out commit, rather
+    // than accidentally constructing the invalid origin/HEAD ref.
+    const detachedBaseBranch = currentBranch === "HEAD" ? `wm334-test-${ticket}-${process.pid}` : null;
+    if (detachedBaseBranch) {
+      const head = (spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+      execFileSync("git", ["-C", repoRoot, "update-ref", `refs/remotes/origin/${detachedBaseBranch}`, head]);
+    }
     const hasRemoteBranch = (branch) => branch && branch !== "HEAD" && spawnSync(
       "git",
       ["-C", repoRoot, "show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
     ).status === 0;
-    const baseBranch = [process.env.GITHUB_BASE_REF, currentBranch, "develop"].find(hasRemoteBranch);
+    const baseBranch = [currentBranch, detachedBaseBranch, process.env.GITHUB_BASE_REF, "develop"].find(hasRemoteBranch);
     expect(baseBranch).toBeDefined();
     expect(baseBranch).not.toBe("HEAD");
-    if (hasRemoteBranch(process.env.GITHUB_BASE_REF)) {
-      expect(baseBranch).toBe(process.env.GITHUB_BASE_REF);
-    }
+    expect(hasRemoteBranch(baseBranch)).toBe(true);
     const realBun = (spawnSync("bash", ["-c", "command -v bun"], { encoding: "utf8", env: { ...process.env } }).stdout || "").trim() || "bun";
 
     mkdirSync(stubDir, { recursive: true });
@@ -1638,6 +1644,9 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       });
       expect(comments[0].body).toContain(`<!-- ${marker} -->`);
     } finally {
+      if (detachedBaseBranch) {
+        spawnSync("git", ["-C", repoRoot, "update-ref", "-d", `refs/remotes/origin/${detachedBaseBranch}`]);
+      }
       for (const child of keepAliveProcesses) {
         try {
           child.kill();
