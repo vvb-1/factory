@@ -27,7 +27,7 @@ const LABEL_IDS_QUERY = `
 // Comments + label history for held tickets only. Kept out of the queue's main
 // issue query on purpose: this costs per-issue nested pagination, so it runs
 // as a second query and only when the cheap query shows a held ticket at all.
-const HELD_QUERY = `
+export const HELD_QUERY = `
   query($team: String!, $project: String!, $label: String!) {
     issues(first: 100, filter: {
       team: { key: { eq: $team } },
@@ -38,8 +38,8 @@ const HELD_QUERY = `
       nodes {
         identifier
         state { name }
-        comments(first: 100) { nodes { createdAt } }
-        history(first: 100) { nodes { createdAt addedLabelIds } }
+        comments(last: 100) { nodes { createdAt } }
+        history(last: 50) { nodes { createdAt addedLabelIds } }
       }
     }
   }`;

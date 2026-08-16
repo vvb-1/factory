@@ -2,7 +2,7 @@ import "../test-dom";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { Button, clearToasts, CopyActions, Countdown, DetailPane, Dialog, FilterInput, getValueHue, KV, notify, Section, shortId, StateBadge, SuggestInput, ToastContainer } from "./ui";
+import { Button, ChipInput, clearToasts, CopyActions, Countdown, DetailPane, Dialog, FilterInput, getValueHue, KV, notify, Section, shortId, StateBadge, SuggestInput, ToastContainer } from "./ui";
 import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 import { modal } from "../hooks";
 import { changeInput, typeText } from "../test-render";
@@ -18,11 +18,13 @@ function classes(el: HTMLElement): string[] {
 }
 
 beforeEach(() => {
+  modal.depth = 0;
   jest.useFakeTimers();
   clearToasts();
 });
 
 afterEach(() => {
+  modal.depth = 0;
   clearToasts();
   jest.useRealTimers();
   cleanup();
@@ -704,6 +706,77 @@ describe("SuggestInput popover (WM-79)", () => {
     expect(r.getByRole("listbox")).toBeTruthy();
     fireEvent.keyDown(input, { key: "Escape" });
     expect(r.queryByRole("listbox")).toBeNull();
+  });
+});
+
+describe("ChipInput popover (WM-160)", () => {
+  function Harness() {
+    const [values, setValues] = useState(["bj29"]);
+    return (
+      <>
+        <label htmlFor="repos">Repos</label>
+        <ChipInput
+          id="repos"
+          values={values}
+          onChange={setValues}
+          suggestions={["bj29", "factory", "watt-mind/bj29"]}
+        />
+      </>
+    );
+  }
+
+  test("uses a combobox and styled listbox instead of a native datalist", () => {
+    const r = render(<Harness />);
+    const input = r.getByRole("combobox", { name: "Repos" });
+    expect(input.getAttribute("list")).toBeNull();
+    expect(r.container.querySelector("datalist")).toBeNull();
+
+    fireEvent.focus(input);
+    const listbox = r.getByRole("listbox", { name: "Suggestions" });
+    expect(listbox.parentElement).toBe(document.body);
+    expect(classes(listbox)).toContain("fixed");
+    expect(r.queryByRole("option", { name: "bj29" })).toBeNull();
+    expect(r.getByRole("option", { name: "factory" })).toBeTruthy();
+  });
+
+  test("filters available suggestions and supports ArrowDown / ArrowUp / Enter / Escape", () => {
+    const r = render(<Harness />);
+    const input = r.getByRole("combobox", { name: "Repos" }) as HTMLInputElement;
+    fireEvent.focus(input);
+
+    const options = r.getAllByRole("option");
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(r.getByRole("button", { name: "Remove watt-mind/bj29" })).toBeTruthy();
+    expect(r.queryByRole("listbox")).toBeNull();
+
+    fireEvent.focus(input);
+    act(() => {
+      changeInput(input, "fact");
+    });
+    expect(r.getAllByRole("option")).toHaveLength(1);
+    expect(r.getByRole("option", { name: "factory" })).toBeTruthy();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(r.queryByRole("listbox")).toBeNull();
+  });
+
+  test("preserves free-text chip entry when no suggestion matches", () => {
+    const r = render(<Harness />);
+    const input = r.getByRole("combobox", { name: "Repos" }) as HTMLInputElement;
+    fireEvent.focus(input);
+    act(() => {
+      changeInput(input, "custom-repo");
+    });
+    expect(r.queryByRole("listbox")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(r.getByRole("button", { name: "Remove custom-repo" })).toBeTruthy();
+    expect(input.value).toBe("");
   });
 });
 

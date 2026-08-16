@@ -23,3 +23,48 @@ new=<newSha>`. Do not merge, approve, mark Done, or delete anything.
 If the branch cannot be reconstructed safely, verification fails, a path is
 out of scope, or any evidence is uncertain, preserve the worktree/branch,
 block the ticket with one answerable reason, and return BLOCKED.
+
+## Result contract
+
+Write `result.json` as a completed `factory.agent-result/v1` result whose
+`artifact` conforms to `factory.merge-fix-result/v1`. Both artifacts must
+contain exactly these properties, in this order: `outcome`, `repo`, `ticket`,
+`pr`, `headSha`, `round`, `summary`. Do not add diagnostic properties; put the
+reason or change description in `summary`.
+
+Copy `repo`, `ticket`, `pr`, and `round` from `input.json`. Substitute the real
+values for the representative values below.
+
+### UPDATED artifact
+
+Use the new commit SHA that was successfully pushed as `headSha`:
+
+```json
+{
+  "outcome": "UPDATED",
+  "repo": "factory",
+  "ticket": "WM-500",
+  "pr": 42,
+  "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "round": 1,
+  "summary": "Applied the mechanical correction, verified it, and pushed the updated head."
+}
+```
+
+### BLOCKED artifact
+
+Use the pinned `input.json` `headSha` as the required `headSha`, including when
+the live PR head moved. Describe the observed mismatch or other blocking reason
+only in `summary`:
+
+```json
+{
+  "outcome": "BLOCKED",
+  "repo": "factory",
+  "ticket": "WM-500",
+  "pr": 42,
+  "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "round": 1,
+  "summary": "Blocked because the live PR head no longer matches the pinned input head."
+}
+```

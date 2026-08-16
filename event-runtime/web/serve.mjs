@@ -33,7 +33,22 @@ Bun.serve({
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
       const target = `http://127.0.0.1:${API_PORT}${url.pathname.slice(4) || "/"}${url.search}`;
       // Pass-through, nothing added: the proxy exists only for same-origin.
-      return fetch(target, { method: req.method, headers: req.headers, body: req.body });
+      // WHATWG fetch rejects GET/HEAD when a body option is present, even when
+      // the incoming client supplied one, so omit the option for those methods.
+      const bodyless = req.method === "GET" || req.method === "HEAD";
+      const headers = bodyless ? new Headers(req.headers) : req.headers;
+      const init = { method: req.method, headers };
+      if (bodyless) {
+        // Drain any non-standard incoming payload so a keep-alive connection
+        // remains aligned for the client's next request. Its framing headers
+        // must not describe a body that the upstream request intentionally omits.
+        await req.arrayBuffer();
+        headers.delete("content-length");
+        headers.delete("transfer-encoding");
+      } else {
+        init.body = req.body;
+      }
+      return fetch(target, init);
     }
 
     // Static, confined to dist/ — reject traversal rather than resolving it.

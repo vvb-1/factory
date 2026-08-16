@@ -395,13 +395,14 @@ per-route resolved value. Resolution order: per-definition `"model"` override
 wins) > tier map > adapter default (absent fields = no spec fields = today's
 behavior). A declared tier with no mapping for a routed model-consuming
 adapter is a **load error, fail closed** — never a silent fall-through to the
-adapter default. Only the LLM adapters (`claude`, `pi`) consume models; on
+adapter default. Only the LLM adapters (`claude`, `pi`, `agy`, `cursor`) consume models; on
 `command`/`actions`/`fake` routes a declared tier is recorded as not
-applicable (`model: null`), never an error. Since WM-215 every committed LLM
-route is `pi`, so `models.pi` is the map that has to cover every tier the
-registry declares (`strong`/`standard`/`light` → sol/terra/luna);
-`models.claude` stays populated for the per-route exception and for
-`--adapter-override claude`. Tier assignments are intent the runtime cannot
+applicable (`model: null`), never an error. Since WM-215 every committed
+production LLM route is `pi`, so `models.pi` is the map that has to cover
+every tier those routes declare (`strong`/`standard`/`light` →
+sol/terra/luna); `models.claude` stays populated for the per-route exception
+and for `--adapter-override claude`. `models.agy` and `models.cursor` cover
+their smoke routes (`agy-smoke@1`, `cursor-smoke@1`). Tier assignments are intent the runtime cannot
 yet audit: per-run usage observability (WM-66) is what will
 show whether a tier is over- or under-provisioned and inform re-mapping.
 
@@ -412,11 +413,12 @@ Codex, Gemini, Cursor, Pi); the event runtime admits only adapters with a
 passing conformance test covering structured output, timeout and shutdown
 behavior, and workspace confinement. The registry has entries for `pi`
 (OPS-296, the default LLM harness on the Codex subscription window, WM-215),
-`claude` (Claude Code, still fully supported), `command` (a closed argv
-template), `actions` (an approved action list resolved against a closed
-registry, remote-SSH or local-argv), and `fake` (tests and demo
-environments). It does not inherit the current runner's entire adapter
-surface.
+`claude` (Claude Code, still fully supported), `agy` (Antigravity/Gemini,
+WM-424), `cursor` (Cursor Agent CLI, WM-440 — smoke-only; no production
+route), `command` (a closed argv template), `actions` (an approved action
+list resolved against a closed registry, remote-SSH or local-argv), and
+`fake` (tests and demo environments). It does not inherit the current
+runner's entire adapter surface.
 
 **pi is the default harness, per route, not per mode (WM-215).** Every
 LLM-routed event type in `event-runtime/event-types.json` declares
@@ -429,6 +431,32 @@ what the per-route exception selects, and `--adapter-override claude`
 registry. Note that an adapter override changes execution only — the model
 still resolves against the **registered** route's adapter (§6, WM-135), so an
 overridden run carries the pinned `models.pi` value.
+
+**The `cursor` adapter (`lib/adapters/cursor.mjs`, WM-440) mirrors `pi.mjs`
+against the Cursor Agent CLI.** Binary is `agent` on PATH, else
+`cursor-agent` — never the `cursor` editor wrapper. Flags confirmed against
+the installed CLI (`agent` 2026.08.11): `-p` is a boolean and the prompt is
+a trailing positional (after `--`); `--output-format stream-json` is NDJSON
+without `--stream-partial-output` (those deltas would double-emit);
+`--trust` skips the workspace prompt; `--force` is required to *apply*
+writes — print without it only proposes them. `--mode ask|plan` is
+documented no-edits and is never passed: it would fail the result contract
+(OPS-518). Read-only containment is the workspace cwd plus the worker
+integrity gate, same audited-not-enforced framing as pi. `--worktree` is
+Cursor's own worktree feature and is never passed. `CURSOR_API_KEY` is
+passed through: CLI 2026.08.11 `agent -p` does not consume the
+`agent login` session and exits 1 without the key (WM-443). That key is a
+Cursor user credential and bills the account's plan / included usage
+pools, not a provider BYOK invoice. `CURSOR_API_ENDPOINT` and provider
+keys stay stripped. A non-zero CLI exit writes workspace `.stderr.txt`
+and a `lifecycle` trace (`note: adapter_stderr`) so inspect is not blank.
+Trace mapping targets the documented stream-json shapes:
+`assistant` (complete messages only) → `assistant_text`, `tool_call`
+started/completed → `tool_use`/`tool_result`, terminal `result` → `usage`
+(duration only; Cursor does not report tokens). A missing CLI is a typed
+`cli_not_found` preflight. The only committed route is
+`factory.cursor-smoke.requested` → `cursor-smoke@1`; no production event
+type is remapped.
 
 **The `pi` adapter (`lib/adapters/pi.mjs`, OPS-296) mirrors `claude.mjs`,
 adapted to a different CLI shape.** `pi -p --mode json` (prompt piped to
@@ -817,6 +845,12 @@ with a 30s kill timeout; a notifier failure is recorded on `notify_log` and
 the serve log, never thrown — the notify step is an isolated tick subsystem
 like GC and chains (OPS-412). Routine flow (admissions, approvals, clean
 completions) never notifies; a channel that pings on everything gets muted.
+
+**Readable output (WM-452).** The artifact verification accepts is the chain's
+truth; how a person reads it is a separate, closed contract — a schema-derived
+view per agent, plus an optional agent-emitted presentation whose values point
+back into the artifact. Design of record:
+[event-runtime-artifact-views.md](event-runtime-artifact-views.md).
 
 **Decisions, not just approvals (WM-383).** Approving a spec is one shape of
 human input; the other is answering the question an agent stopped on. The
