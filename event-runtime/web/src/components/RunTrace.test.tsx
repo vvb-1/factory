@@ -1,5 +1,5 @@
 import "../test-dom";
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { TraceEntry } from "../types";
 import { changeInput, renderWithClient, restoreApi } from "../test-render";
@@ -26,13 +26,12 @@ const TRACE: TraceEntry[] = [
   }),
 ];
 
-function renderTrace(overrides?: { onCancelShortcut?: () => void; state?: "RUNNING" | "COMPLETED" }) {
+function renderTrace(overrides?: { state?: "RUNNING" | "COMPLETED" }) {
   return renderWithClient(
     <RunTrace
       runId="run_trace_a11y"
       state={overrides?.state ?? "RUNNING"}
       variant="full"
-      onCancelShortcut={overrides?.onCancelShortcut}
     />,
     {
       apiMocks: {
@@ -113,53 +112,47 @@ describe("RunTrace a11y (WM-143)", () => {
     expect(r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected")).toBe("true");
   });
 
-  test("x on the trace search input calls onCancelShortcut; j/k/slash stay typing", async () => {
-    const onCancelShortcut = mock(() => {});
-    const r = renderTrace({ onCancelShortcut });
-    await waitForChrome(r);
-
-    const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
-    search.focus();
-    act(() => {
-      changeInput(search, "too");
-    });
-
-    fireEvent.keyDown(search, { key: "j" });
-    fireEvent.keyDown(search, { key: "k" });
-    fireEvent.keyDown(search, { key: "/" });
-    expect(onCancelShortcut).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(search, { key: "x" });
-    expect(onCancelShortcut).toHaveBeenCalledTimes(1);
-    expect(search.value).toBe("too");
-  });
-
-  test("x on search of a COMPLETED run types the letter — cancel does not apply", async () => {
-    const r = renderTrace({ state: "COMPLETED" });
-    await waitForChrome(r);
-
-    const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
-    search.focus();
-    fireEvent.keyDown(search, { key: "x" });
-    expect(document.activeElement).toBe(search);
-  });
-
-  test("x on search of a RUNNING run with no callback redispatches on a non-input target", async () => {
-    const seen: EventTarget[] = [];
-    const onWin = (e: KeyboardEvent) => {
-      if (e.key === "x") seen.push(e.target as EventTarget);
+  test("typing words with x in search input does not trigger cancellation or blur (WM-267)", async () => {
+    let cancelKeyDownDispatchedToBody = false;
+    const bodyListener = (e: KeyboardEvent) => {
+      if (e.key === "x" && e.target === document.body) {
+        cancelKeyDownDispatchedToBody = true;
+      }
     };
-    window.addEventListener("keydown", onWin);
+    document.body.addEventListener("keydown", bodyListener);
+
     try {
-      const r = renderTrace();
+      const r = renderTrace({ state: "RUNNING" });
       await waitForChrome(r);
+
       const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
       search.focus();
+      expect(document.activeElement).toBe(search);
+
+      // Type words containing 'x' (exec, regex, context)
+      act(() => {
+        changeInput(search, "exec");
+      });
+      expect(search.value).toBe("exec");
+
+      // Press 'x' key directly while search input is focused
       fireEvent.keyDown(search, { key: "x" });
-      expect(document.activeElement).not.toBe(search);
-      expect(seen.some((t) => t instanceof HTMLElement && !t.closest("input"))).toBe(true);
+
+      // Search input must remain focused (not blurred)
+      expect(document.activeElement).toBe(search);
+      // No synthetic x event redispatched to document.body
+      expect(cancelKeyDownDispatchedToBody).toBe(false);
+
+      // Typing more words containing 'x'
+      act(() => {
+        changeInput(search, "regex context");
+      });
+      expect(search.value).toBe("regex context");
+      fireEvent.keyDown(search, { key: "x" });
+      expect(document.activeElement).toBe(search);
+      expect(cancelKeyDownDispatchedToBody).toBe(false);
     } finally {
-      window.removeEventListener("keydown", onWin);
+      document.body.removeEventListener("keydown", bodyListener);
     }
   });
 
