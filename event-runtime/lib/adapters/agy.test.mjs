@@ -15,83 +15,189 @@ import {
   safeChildEnvironment,
 } from "./agy.mjs";
 
-describe("mapStreamEvent (agy stream-json shapes)", () => {
-  test("agent_response step_update → assistant_text", () => {
-    const events = mapStreamEvent({
-      event: "step_update",
-      step_update: { step_type: "agent_response", state: "ACTIVE", text: "Checking the PR now." },
-    });
-    expect(events).toEqual([{ kind: "assistant_text", payload: { text: "Checking the PR now." } }]);
-  });
-
-  test("tool ACTIVE step_update → tool_use", () => {
-    const events = mapStreamEvent({
-      event: "step_update",
-      step_update: {
-        step_id: "step_123",
-        step_type: "tool",
-        state: "ACTIVE",
-        tool_name: "run_command",
-        tool_info: { parameters: { CommandLine: "bun test" } },
+/**
+ * Verbatim `--output-format stream-json` lines captured from agy 1.1.13 while
+ * it ran a real tool-using prompt (WM-435). These are the shapes the CLI
+ * actually emits; the fixtures they replaced were invented and asserted fields
+ * (`step_id`, `agent_response.text`, `tool.output`, `tool.status`) that agy
+ * has never produced, which is how the mapper shipped broken.
+ */
+const CAPTURED = {
+  toolActive: {
+    conversation_id: "ce4e067d-e0bb-44ad-8958-658194691858",
+    step_index: 3,
+    state: "ACTIVE",
+    step_type: "tool",
+    tool_name: "list_dir",
+    tool_info: { name: "list_dir", parameters: { DirectoryPath: "/tmp/ws" } },
+  },
+  toolDone: {
+    conversation_id: "ce4e067d-e0bb-44ad-8958-658194691858",
+    step_index: 3,
+    state: "DONE",
+    step_type: "tool",
+    tool_name: "list_dir",
+    duration_seconds: 0.099239,
+    tool_info: { name: "list_dir", parameters: { DirectoryPath: "/tmp/ws" } },
+  },
+  toolError: {
+    conversation_id: "ce4e067d-e0bb-44ad-8958-658194691858",
+    step_index: 6,
+    state: "ERROR",
+    step_type: "tool",
+    tool_name: "list_dir",
+    duration_seconds: 0.057997,
+    tool_info: {
+      name: "list_dir",
+      parameters: { DirectoryPath: "/Users/hdkiller/.gemini/antigravity-cli" },
+      error: {
+        type: "TOOL_ERROR",
+        message:
+          "Permission denied for read_file(/Users/hdkiller/.gemini/antigravity-cli). Matches hardcoded system protection boundary rule.",
       },
-    });
-    expect(events).toEqual([
+    },
+  },
+  agentResponse: {
+    conversation_id: "ce4e067d-e0bb-44ad-8958-658194691858",
+    step_index: 2,
+    state: "DONE",
+    step_type: "agent_response",
+    duration_seconds: 2.0848,
+    usage: {
+      input_tokens: 18496,
+      output_tokens: 325,
+      thinking_tokens: 273,
+      cache_read_tokens: 0,
+      total_tokens: 18821,
+    },
+  },
+  errorMessage: {
+    conversation_id: "ce4e067d-e0bb-44ad-8958-658194691858",
+    step_index: 8,
+    state: "DONE",
+    step_type: "error_message",
+  },
+  resultError: {
+    conversation_id: "ce4e067d-e0bb-44ad-8958-658194691858",
+    status: "ERROR",
+    response: "",
+    error: "timeout waiting for response",
+    duration_seconds: 79.744557,
+    num_turns: 1,
+    usage: {
+      input_tokens: 118982,
+      output_tokens: 3219,
+      thinking_tokens: 2055,
+      cache_read_tokens: 488163,
+      total_tokens: 122201,
+    },
+  },
+  resultSuccess: {
+    conversation_id: "aa11bb22-cc33-dd44-ee55-ff6677889900",
+    status: "SUCCESS",
+    response: "/tmp/ws\ninput.json\n",
+    error: null,
+    duration_seconds: 5.5,
+    num_turns: 1,
+    usage: { input_tokens: 100, output_tokens: 20, thinking_tokens: 5, cache_read_tokens: 0, total_tokens: 120 },
+  },
+};
+
+const step = (stepUpdate) => ({ event: "step_update", step_update: stepUpdate });
+
+describe("mapStreamEvent (real agy stream-json shapes)", () => {
+  test("tool ACTIVE → tool_use keyed by step_index", () => {
+    expect(mapStreamEvent(step(CAPTURED.toolActive))).toEqual([
       {
         kind: "tool_use",
-        payload: { id: "step_123", name: "run_command", input: { CommandLine: "bun test" } },
+        payload: { id: "3", name: "list_dir", input: { DirectoryPath: "/tmp/ws" } },
       },
     ]);
   });
 
-  test("tool DONE step_update → tool_result", () => {
-    const ok = mapStreamEvent({
-      event: "step_update",
-      step_update: {
-        step_id: "step_123",
-        step_type: "tool",
-        state: "DONE",
-        tool_name: "run_command",
-        output: "Tests passed\n",
-        status: "SUCCESS",
-      },
-    });
-    expect(ok).toEqual([
-      {
-        kind: "tool_result",
-        payload: { toolUseId: "step_123", content: "Tests passed\n", isError: false },
-      },
-    ]);
+  test("tool DONE → tool_result correlated to its tool_use", () => {
+    const [event] = mapStreamEvent(step(CAPTURED.toolDone));
+    expect(event.kind).toBe("tool_result");
+    // Same step_index as the ACTIVE event above: this is what makes pairing work.
+    expect(event.payload.toolUseId).toBe("3");
+    expect(event.payload.isError).toBe(false);
+    expect(event.payload.durationMs).toBe(99);
+    // agy streams no tool output, so content names what it does provide.
+    expect(event.payload.content).toContain("list_dir");
+  });
 
-    const err = mapStreamEvent({
-      event: "step_update",
-      step_update: {
-        step_id: "step_456",
-        step_type: "tool",
-        state: "DONE",
-        tool_name: "run_command",
-        output: "Failed to run\n",
-        status: "ERROR",
-      },
+  test("tool ERROR → tool_result carrying the error message (WM-435)", () => {
+    const [event] = mapStreamEvent(step(CAPTURED.toolError));
+    expect(event.kind).toBe("tool_result");
+    expect(event.payload.toolUseId).toBe("6");
+    expect(event.payload.isError).toBe(true);
+    expect(event.payload.content).toContain("Permission denied for read_file");
+    expect(event.payload.durationMs).toBe(58);
+  });
+
+  test("agent_response carries usage and no text, so it maps to usage", () => {
+    const [event] = mapStreamEvent(step(CAPTURED.agentResponse));
+    expect(event.kind).toBe("usage");
+    expect(event.payload.usage).toEqual({
+      input: 18496,
+      output: 325,
+      thinking: 273,
+      cacheRead: 0,
+      total: 18821,
     });
-    expect(err).toEqual([
-      {
-        kind: "tool_result",
-        payload: { toolUseId: "step_456", content: "Failed to run\n", isError: true },
-      },
+    expect(event.payload.durationMs).toBe(2085);
+  });
+
+  test("error_message steps surface instead of vanishing", () => {
+    expect(mapStreamEvent(step(CAPTURED.errorMessage))).toEqual([
+      { kind: "lifecycle", payload: { note: "error_message", stepIndex: "8" } },
     ]);
+  });
+
+  test("terminal result reaches the trace with status, error and tokens", () => {
+    const events = mapStreamEvent({ event: "result", result: CAPTURED.resultError });
+    const kinds = events.map((e) => e.kind);
+    expect(kinds).toContain("usage");
+    expect(kinds).toContain("lifecycle");
+
+    const failure = events.find((e) => e.kind === "lifecycle");
+    expect(failure.payload).toEqual({
+      note: "agent_error",
+      status: "ERROR",
+      error: "timeout waiting for response",
+    });
+
+    const usage = events.find((e) => e.kind === "usage");
+    expect(usage.payload.numTurns).toBe(1);
+    expect(usage.payload.durationMs).toBe(79745);
+    expect(usage.payload.usage.input).toBe(118982);
+    expect(usage.payload.usage.cacheRead).toBe(488163);
+
+    // The failed run whose blank trace prompted WM-435 must not be blank now.
+    expect(events.length).toBeGreaterThan(0);
+  });
+
+  test("successful result emits the final answer as assistant_text", () => {
+    const events = mapStreamEvent({ event: "result", result: CAPTURED.resultSuccess });
+    const text = events.find((e) => e.kind === "assistant_text");
+    expect(text.payload.text).toBe("/tmp/ws\ninput.json");
+    // A clean run has nothing to report as a failure.
+    expect(events.some((e) => e.kind === "lifecycle")).toBe(false);
   });
 
   test("unrecognized events are ignored silently", () => {
     expect(mapStreamEvent({ event: "init", conversation_id: "abc" })).toEqual([]);
     expect(mapStreamEvent(null)).toEqual([]);
     expect(mapStreamEvent("not an object")).toEqual([]);
+    expect(mapStreamEvent(step({ step_type: "checkpoint", state: "ACTIVE", step_index: 1 }))).toEqual([]);
   });
 
   test("very long assistant text is clipped", () => {
-    const [event] = mapStreamEvent({
-      event: "step_update",
-      step_update: { step_type: "agent_response", state: "ACTIVE", text: "y".repeat(10_000) },
+    const events = mapStreamEvent({
+      event: "result",
+      result: { ...CAPTURED.resultSuccess, response: "y".repeat(10_000) },
     });
+    const [event] = events;
     expect(event.kind).toBe("assistant_text");
     expect(event.payload.text.length).toBeLessThan(4100);
     expect(event.payload.text.endsWith("…[truncated]")).toBe(true);
@@ -249,17 +355,33 @@ describe("execute with fake binary", () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  test("spawns agy, feeds stdin prompt, pipes transcript, records trace", async () => {
+  /** Fake agy emitting the line shapes captured from the real CLI (WM-435). */
+  function writeFakeAgy(binDir, lines) {
+    const fakeAgy = path.join(binDir, "agy");
+    const body = lines.map((l) => `echo ${JSON.stringify(JSON.stringify(l))}`).join("\n");
+    writeFileSync(fakeAgy, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+    return fakeAgy;
+  }
+
+  test("spawns agy, pipes transcript, records a trace of the real event shapes", async () => {
     tmp = mkdtempSync(path.join(tmpdir(), "agy-test-"));
     const binDir = path.join(tmp, "bin");
     mkdirSync(binDir, { recursive: true });
-    const fakeAgy = path.join(binDir, "agy");
-    const script = `#!/usr/bin/env bash
-echo '{"event":"init","conversation_id":"c1"}'
-echo '{"event":"step_update","step_update":{"step_id":"s1","step_type":"agent_response","text":"Hello world"}}'
-echo '{"event":"result","result":{"status":"SUCCESS","duration_seconds":1,"usage":{"input_tokens":10,"output_tokens":20}}}'
-`;
-    writeFileSync(fakeAgy, script, { mode: 0o755 });
+    writeFakeAgy(binDir, [
+      { event: "init", conversation_id: "c1" },
+      { event: "step_update", step_update: CAPTURED.toolActive },
+      { event: "step_update", step_update: CAPTURED.toolDone },
+      {
+        event: "result",
+        result: {
+          status: "SUCCESS",
+          response: "Listed the workspace.",
+          duration_seconds: 1,
+          num_turns: 2,
+          usage: { input_tokens: 10, output_tokens: 20 },
+        },
+      },
+    ]);
 
     const promptFile = path.join(tmp, "prompt.md");
     writeFileSync(promptFile, "Do task");
@@ -274,10 +396,83 @@ echo '{"event":"result","result":{"status":"SUCCESS","duration_seconds":1,"usage
     });
 
     expect(res.exitCode).toBe(0);
-    expect(traces).toEqual([
-      { kind: "assistant_text", payload: { text: "Hello world" } },
-    ]);
-    expect(res.usage).toEqual({ input: 10, output: 20 });
+    expect(traces.map((t) => t.kind)).toEqual(["tool_use", "tool_result", "assistant_text", "usage"]);
+    // The tool call and its result correlate by step_index.
+    expect(traces[0].payload.id).toBe("3");
+    expect(traces[1].payload.toolUseId).toBe("3");
+    expect(traces[2].payload.text).toBe("Listed the workspace.");
+    expect(res.usage).toEqual({ input: 10, output: 20, turns: 2 });
     expect(existsSync(path.join(tmp, ".transcript.json"))).toBe(true);
+  });
+
+  test("a failed run still produces a trace carrying the error (WM-435)", async () => {
+    tmp = mkdtempSync(path.join(tmpdir(), "agy-test-"));
+    const binDir = path.join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+    // The exact shape of the 2026-08-16 agy-smoke failures: init, then a
+    // terminal error result. It used to yield zero trace rows.
+    writeFakeAgy(binDir, [
+      { event: "init", conversation_id: "c1" },
+      {
+        event: "result",
+        result: {
+          status: "ERROR",
+          response: "",
+          error: "timeout waiting for response",
+          duration_seconds: 0,
+          num_turns: 0,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      },
+    ]);
+
+    const promptFile = path.join(tmp, "prompt.md");
+    writeFileSync(promptFile, "Do task");
+
+    const traces = [];
+    await execute({
+      spec: {},
+      def: { promptPath: promptFile },
+      workspaceDir: tmp,
+      env: { PATH: `${binDir}:${process.env.PATH}` },
+      onTrace: (kind, payload) => traces.push({ kind, payload }),
+    });
+
+    expect(traces.length).toBeGreaterThan(0);
+    const failure = traces.find((t) => t.payload?.note === "agent_error");
+    expect(failure.payload.error).toBe("timeout waiting for response");
+  });
+
+  test("a throwing onTrace observer cannot strand execution (cf. WM-305)", async () => {
+    tmp = mkdtempSync(path.join(tmpdir(), "agy-test-"));
+    const binDir = path.join(tmp, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFakeAgy(binDir, [
+      { event: "step_update", step_update: CAPTURED.toolActive },
+      {
+        event: "result",
+        result: { status: "SUCCESS", response: "done", duration_seconds: 1, num_turns: 1, usage: {} },
+      },
+    ]);
+
+    const promptFile = path.join(tmp, "prompt.md");
+    writeFileSync(promptFile, "Do task");
+
+    const attempted = [];
+    const res = await execute({
+      spec: {},
+      def: { promptPath: promptFile },
+      workspaceDir: tmp,
+      env: { PATH: `${binDir}:${process.env.PATH}` },
+      onTrace: (kind) => {
+        attempted.push(kind);
+        throw new Error("observer exploded");
+      },
+    });
+
+    expect(res.exitCode).toBe(0);
+    // Each event is guarded on its own: throwing on the tool_use must not
+    // swallow the terminal result's events too.
+    expect(attempted).toEqual(["tool_use", "assistant_text", "usage"]);
   });
 });
