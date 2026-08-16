@@ -176,10 +176,14 @@ describe("Lifecycle reason readability (WM-145)", () => {
     );
     expect(failedRow).toBeTruthy();
 
-    const titled = Array.from(failedRow!.querySelectorAll("[title]")).filter((el) =>
-      (el.getAttribute("title") ?? "").includes(LONG_REASON),
+    const expectedTitle = `worker_test · ${LONG_REASON}`;
+    const titled = Array.from(failedRow!.querySelectorAll("[title]")).filter(
+      (el) => el.getAttribute("title") === expectedTitle,
     );
-    expect(titled.length).toBeGreaterThan(0);
+    // Both the reason wrapper and the nested ActorRef jump link expose the
+    // composite title, so hovering the actor cannot mask the reason.
+    expect(titled.length).toBe(2);
+    expect(failedRow!.querySelector("button")?.getAttribute("title")).toBe(expectedTitle);
 
     const truncated = Array.from(failedRow!.querySelectorAll(".truncate")).filter((el) =>
       el.textContent?.includes(LONG_REASON),

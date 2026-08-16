@@ -184,14 +184,22 @@ export function isWorkerId(actor: string): boolean {
   return /^worker_.+/.test(actor);
 }
 
-export function ActorRef({ actor, className }: { actor: string; className?: string }) {
-  if (!isWorkerId(actor)) return <span title={actor}>{actor}</span>;
+export function ActorRef({
+  actor,
+  className,
+  title = actor,
+}: {
+  actor: string;
+  className?: string;
+  title?: string;
+}) {
+  if (!isWorkerId(actor)) return <span title={title}>{actor}</span>;
   return (
     <JumpLink
       onClick={() => {
         window.location.hash = `#/${withProject(hashPath("workers", actor), hashProject(window.location.hash))}`;
       }}
-      title={actor}
+      title={title}
       className={className}
     >
       {shortId(actor)}
@@ -609,7 +617,11 @@ export function RunDetailBlocks({
                     className="min-w-0 flex-1 break-words whitespace-pre-wrap text-[11.5px] leading-relaxed text-(--text-faint)"
                     title={e.reason ? `${e.actor} · ${e.reason}` : e.actor}
                   >
-                    <ActorRef actor={e.actor} className="text-[11.5px]" />
+                    <ActorRef
+                      actor={e.actor}
+                      className="text-[11.5px]"
+                      title={e.reason ? `${e.actor} · ${e.reason}` : e.actor}
+                    />
                     {e.reason ? ` · ${e.reason}` : ""}
                   </span>
                 </span>
