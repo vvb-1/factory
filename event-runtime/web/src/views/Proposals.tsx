@@ -303,6 +303,14 @@ export function Proposals({
     });
   };
 
+  const selectAllActionable = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      actionableVisible.forEach((p) => next.add(p.id));
+      return next;
+    });
+  };
+
   const selectedRows = useMemo(
     () => rows.filter((p) => selectedIds.has(p.id)),
     [rows, selectedIds],
@@ -539,13 +547,17 @@ export function Proposals({
   };
 
   const pendingC = useRef<number>(0);
+  const pendingStar = useRef<number>(0);
+  const starPrefixActive = () =>
+    pendingStar.current > 0 && Date.now() - pendingStar.current < 800;
 
   useListKeys({
     count: flat.length,
     selected: selectedIndex,
     onSelect: (i) => onSelectProposal(flat[i]?.id ?? null),
     onClose: () => {
-      if (sel) onSelectProposal(null);
+      if (selectedIds.size > 0) setSelectedIds(new Set());
+      else if (sel) onSelectProposal(null);
       else if (filter || expiredOnly) {
         if (filter) setFilter("");
         if (expiredOnly) setExpiredOnly(false);
@@ -555,7 +567,8 @@ export function Proposals({
     },
     keys: {
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
-      a: () => canApprove && connected && setConfirmApprove(true),
+      // When `*` is armed, the proposal-selection listener owns the same `a` key instead.
+      a: () => !starPrefixActive() && canApprove && connected && setConfirmApprove(true),
       x: () => isOpen && connected && openReject(),
       c: () => {
         if (!sel) return;
@@ -570,6 +583,72 @@ export function Proposals({
       },
     },
   });
+
+  useEffect(() => {
+    function onSelectionKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.altKey || goPrefixActive() || e.repeat) return;
+
+      const now = Date.now();
+      const starActive =
+        pendingStar.current > 0 && now - pendingStar.current < 800;
+
+      if (!e.metaKey && !e.ctrlKey && e.key === "*") {
+        e.preventDefault();
+        pendingStar.current = now;
+        return;
+      }
+
+      if (!e.metaKey && !e.ctrlKey && starActive && (e.key === "a" || e.key === "n")) {
+        e.preventDefault();
+        pendingStar.current = 0;
+        if (e.key === "a") selectAllActionable();
+        else setSelectedIds(new Set());
+        return;
+      }
+      pendingStar.current = 0;
+
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "a") {
+        if (actionableVisible.length === 0) return;
+        e.preventDefault();
+        selectAllActionable();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey) return;
+
+      if ((e.key === " " || e.key === "Spacebar") && tab === "open" && sel?.status === "open") {
+        e.preventDefault();
+        toggleSelect(sel.id);
+        return;
+      }
+
+      if (e.shiftKey && e.key.toLowerCase() === "a" && selectedIds.size > 0) {
+        if (!connected || bulkApproving || approvableSelected.length === 0) return;
+        e.preventDefault();
+        setBulkConfirmOpen(true);
+        return;
+      }
+
+      if (e.shiftKey && e.key.toLowerCase() === "x" && selectedIds.size > 0) {
+        if (!connected || bulkRejecting || rejectableSelected.length === 0) return;
+        e.preventDefault();
+        setBulkRejectOpen(true);
+        setBulkReason("");
+      }
+    }
+
+    window.addEventListener("keydown", onSelectionKey);
+    return () => window.removeEventListener("keydown", onSelectionKey);
+  }, [
+    actionableVisible,
+    approvableSelected,
+    bulkApproving,
+    bulkRejecting,
+    connected,
+    rejectableSelected,
+    sel,
+    selectedIds.size,
+    tab,
+  ]);
 
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
@@ -1252,6 +1331,7 @@ export function Proposals({
             onClick={() => setBulkConfirmOpen(true)}
           >
             {bulkApproving ? "Approving…" : `Approve selected (${approvableSelected.length})`}
+            <span className="mono ml-1 text-[10px] text-(--text-faint)" aria-hidden="true">A</span>
           </Button>
           <Button
             variant="danger"
@@ -1262,6 +1342,7 @@ export function Proposals({
             }}
           >
             Reject selected ({selectedIds.size})
+            <span className="mono ml-1 text-[10px] text-(--text-faint)" aria-hidden="true">X</span>
           </Button>
         </BulkActionBar>
       )}
