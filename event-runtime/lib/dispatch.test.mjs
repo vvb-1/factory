@@ -298,7 +298,7 @@ describe("dispatch planner refusals (WM-108, dispatch doc §§2–5)", () => {
     }));
     expect(outcome).toMatchObject({ decision: "human_needed", reason: "owned_paths_not_closed" });
     expect(outcome.proposal).toBeTruthy();
-    expect(outcome.proposal.status).toBe("resolved");
+    expect(outcome.proposal.status).toBe("open");
   });
 
   test("a Linear transport failure throws — plan_failures/dead-letter own retries, not a one-shot refusal", () => {
