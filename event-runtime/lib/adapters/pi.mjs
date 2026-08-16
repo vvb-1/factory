@@ -332,6 +332,7 @@ export async function execute({
   killGraceMs = KILL_GRACE_MS,
   env = {},
   onTrace,
+  onUsage,
   abortSignal,
   signal,
 }) {
@@ -377,6 +378,7 @@ export async function execute({
     let turnCount = 0;
     let costTotal = null;
     const usageTotals = {};
+    let observedModel = null;
     if (child.stdout) {
       const lines = createInterface({ input: child.stdout });
       lines.on("line", (line) => {
@@ -387,6 +389,11 @@ export async function execute({
           return; // not JSON — ignore
         }
         try {
+          if (parsed?.type === "message_end" && typeof parsed.message?.model === "string") {
+            observedModel = parsed.message.model;
+          } else if (typeof parsed?.model === "string") {
+            observedModel = parsed.model;
+          }
           for (const event of mapStreamEvent(parsed)) {
             if (event.kind === "tool_use") {
               lastTool = event.payload?.name ?? null;
@@ -459,9 +466,30 @@ export async function execute({
         costUSD: costTotal,
         usage: usageTotals,
       });
+
+      const normalized = {
+        model: observedModel ?? spec?.model ?? def?.model ?? null,
+        inputTokens: usageTotals.input ?? 0,
+        outputTokens: usageTotals.output ?? 0,
+        cacheCreationInputTokens: usageTotals.cacheWrite ?? 0,
+        cacheReadInputTokens: usageTotals.cacheRead ?? 0,
+        costUSD: typeof costTotal === "number" ? costTotal : 0,
+      };
+
+      try {
+        onUsage?.(normalized);
+      } catch {
+        // Usage is observability: a consumer failure must not change execution.
+      }
+
       // Same WM-127 rule as claude: a denial observed mid-run is evidence,
       // not a verdict — only surfaced to the worker when the run also failed.
-      resolve({ exitCode, timedOut, policyDenials: exitCode === 0 ? [] : policyDenials });
+      resolve({
+        exitCode,
+        timedOut,
+        policyDenials: exitCode === 0 ? [] : policyDenials,
+        usage: normalized,
+      });
     });
   });
 }
