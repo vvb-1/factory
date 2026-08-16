@@ -947,7 +947,7 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
     mkdirSync(path.join(root, "config"), { recursive: true });
     writeFileSync(
       path.join(root, "config", "repos.yaml"),
-      `repos:\n  - name: dispatchable\n    path: ~/Develop/dispatchable\n    github: watt-mind/dispatchable\n    team: CLNT\n    base: develop\n    deploy_branch: master\n    worktree_down: bin/worktree-down.sh\n    worktree_root: ~/Develop/.worktrees/dispatchable\n    max_in_flight: 20\n    escalate_paths:\n      - src/auth/**\n  - name: watched\n    path: ~/Develop/watched\n    team: OPS\n    report_only: true\n`,
+      `repos:\n  - name: dispatchable\n    path: ~/Develop/dispatchable\n    github: watt-mind/dispatchable\n    team: CLNT\n    base: develop\n    deploy_branch: master\n    worktree_down: bin/worktree-down.sh\n    worktree_root: ~/Develop/.worktrees/dispatchable\n    max_in_flight: 20\n    merge_ci:\n      workflow: CI\n      required_checks:\n        - Shadow runner fleet available\n        - Verify\n    escalate_paths:\n      - src/auth/**\n  - name: watched\n    path: ~/Develop/watched\n    team: OPS\n    report_only: true\n`,
     );
     const { server, port, close } = await makeServer({ repos: () => loadRepos({ root }) });
     const client = apiClient({ port });
@@ -965,13 +965,17 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
         reportOnly: false,
         maxInFlight: 20,
         smokeDeadlineSeconds: null,
+        mergeCi: {
+          workflow: "CI",
+          requiredChecks: ["Shadow runner fleet available", "Verify"],
+        },
         worktreeRoot: path.join(process.env.HOME ?? "", "Develop/.worktrees/dispatchable"),
         hasWorktreeUp: false,
         hasWorktreeDown: true,
         hasWorktreeWarm: false,
         verify: null,
       });
-      expect(rows[1]).toMatchObject({ reportOnly: true, maxInFlight: null, hasWorktreeDown: false });
+      expect(rows[1]).toMatchObject({ reportOnly: true, maxInFlight: null, mergeCi: null, hasWorktreeDown: false });
       // Merge-policy paths are config, not registry: the wire never carries them.
       expect(JSON.stringify(rows)).not.toContain("src/auth");
     } finally {
@@ -1718,6 +1722,96 @@ describe("POST /schedules/:loop/run (OPS-401)", () => {
     expect(body.decision).toBe("run");
   });
 
+  test("manual merge trigger propagates selected PR numbers into the immutable event and planned input", async () => {
+    const mergeServer = await makeServer();
+    try {
+      const res = await fetch(mergeServer.url("/schedules/merge-factory/run"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prNumbers: [411, 426] }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const event = mergeServer.db
+        .query(`SELECT envelope_json FROM events WHERE source = 'operator' AND event_id = ?`)
+        .get(body.eventId);
+      expect(JSON.parse(event.envelope_json).payload).toMatchObject({
+        repo: "factory",
+        loop: "merge-factory",
+        prNumbers: [411, 426],
+      });
+      const run = mergeServer.db
+        .query(`SELECT spec_json FROM runs WHERE run_id = ?`)
+        .get(body.runId);
+      expect(JSON.parse(run.spec_json).input.prNumbers).toEqual([411, 426]);
+    } finally {
+      mergeServer.close();
+    }
+  });
+
+  test("omitted merge selection preserves all-open behavior", async () => {
+    const mergeServer = await makeServer();
+    try {
+      const res = await fetch(mergeServer.url("/schedules/merge-factory/run"), {
+        method: "POST",
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const event = mergeServer.db
+        .query(`SELECT envelope_json FROM events WHERE source = 'operator' AND event_id = ?`)
+        .get(body.eventId);
+      const payload = JSON.parse(event.envelope_json).payload;
+      expect(payload.repo).toBe("factory");
+      expect(payload).not.toHaveProperty("prNumbers");
+    } finally {
+      mergeServer.close();
+    }
+  });
+
+  test("merge selection rejects empty, invalid, duplicate, and arbitrary values before admission", async () => {
+    const mergeServer = await makeServer();
+    try {
+      const invalidBodies = [
+        { prNumbers: [] },
+        { prNumbers: [0] },
+        { prNumbers: [-1] },
+        { prNumbers: [1.5] },
+        { prNumbers: ["42"] },
+        { prNumbers: [42, 42] },
+        { prNumbers: 42 },
+        { prNumbers: [42], payload: { forged: true } },
+      ];
+      for (const requestBody of invalidBodies) {
+        const before = mergeServer.db.query(`SELECT COUNT(*) AS n FROM events`).get().n;
+        const res = await fetch(mergeServer.url("/schedules/merge-factory/run"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        expect(res.status, JSON.stringify(requestBody)).toBe(422);
+        expect(mergeServer.db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(before);
+      }
+    } finally {
+      mergeServer.close();
+    }
+  });
+
+  test("non-merge schedules reject payload overrides instead of forging an event", async () => {
+    const overrideServer = await makeServer();
+    try {
+      const res = await fetch(overrideServer.url("/schedules/reaper/run"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prNumbers: [42] }),
+      });
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toContain("does not accept trigger input");
+      expect(overrideServer.db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(0);
+    } finally {
+      overrideServer.close();
+    }
+  });
+
   test("two presses produce two distinct events and proposals (no dedup collapse)", async () => {
     const res1 = await fetch(s.url("/schedules/reaper/run"), { method: "POST" });
     const body1 = await res1.json();
@@ -1741,6 +1835,8 @@ describe("POST /schedules/:loop/run (OPS-401)", () => {
     const { schedules } = await schedRes.json();
     const reaper = schedules.find((sc) => sc.loop === "reaper");
     expect(reaper).toBeDefined();
+    expect(reaper.repo).toBeNull();
+    expect(schedules.find((sc) => sc.loop === "merge-factory").repo).toBe("factory");
     // lastSlot is still null because ad-hoc runs are source='operator', not 'schedule'
     expect(reaper.lastSlot).toBeNull();
   });

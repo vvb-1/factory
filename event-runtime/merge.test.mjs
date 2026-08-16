@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { substituteArgv } from "./lib/adapters/actions.mjs";
 import { resolveTemplate } from "./lib/adapters/command.mjs";
@@ -8,8 +18,10 @@ import { canonicalJson } from "./lib/canonical.mjs";
 import { openDb } from "./lib/db.mjs";
 import { admitEvent as persistEvent } from "./lib/intake.mjs";
 import { planAdmittedEvents } from "./lib/planner.mjs";
-import { openProposals } from "./lib/proposals.mjs";
+import { approveProposal, openProposals } from "./lib/proposals.mjs";
 import { loadRegistry } from "./lib/registry.mjs";
+import { validate } from "./lib/schema.mjs";
+import { runOnce } from "./lib/worker.mjs";
 import {
   commandFixture,
   runCommand,
@@ -98,20 +110,45 @@ function installMergeCommandFakes(fixture) {
       '  *"pr view"*"state,isDraft,mergeable,headRefOid,headRefName,baseRefName,labels"*)',
       "    printf '{\"state\":\"OPEN\",\"isDraft\":false,\"mergeable\":\"MERGEABLE\",\"headRefOid\":\"%s\",\"headRefName\":\"%s\",\"baseRefName\":\"develop\",\"labels\":[]}\\n' \"$FAKE_HEAD_SHA\" \"$FAKE_HEAD_REF\" ;;",
       "  *\"git/ref/heads/develop\"*) printf '%s\\n' \"$FAKE_BASE_SHA\" ;;",
-      "  *\"pr checks\"*\"--required --json bucket\"*) printf '[{\"bucket\":\"pass\"}]\\n' ;;",
+      '  *"pr checks"*"--required --json name,bucket,state"*)',
+      '    case "${FAKE_REQUIRED_MODE:-empty}" in',
+      "      green) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
+      "      pending) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pending\",\"state\":\"PENDING\"}]\\n' ;;",
+      "      duplicate) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"},{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
+      "      status-zero-empty) printf '[]\\n' ;;",
+      "      unquoted) printf 'no required checks reported on the %s branch\\n' \"$FAKE_HEAD_REF\"; exit 1 ;;",
+      "      *) printf \"no required checks reported on the '%s' branch\\n\" \"$FAKE_HEAD_REF\"; exit 1 ;;",
+      '    esac ;;',
       '  *"pr merge"*) : ;;',
+      "  *\"pr view\"*\"--json headRefOid --jq .headRefOid\"*) printf '%s\\n' \"$FAKE_HEAD_SHA\" ;;",
       "  *\"pr view\"*\"select(.state\"*) printf '%s\\n' \"$FAKE_MERGE_SHA\" ;;",
       "  *\"pr view\"*\"@tsv\"*) printf 'MERGED\\t%s\\n' \"$FAKE_MERGE_SHA\" ;;",
       "  *\"pr view\"*\"--jq .state\"*) printf 'MERGED\\n' ;;",
       "  *\"pr view\"*\"--jq .mergeCommit.oid\"*) printf '%s\\n' \"$FAKE_MERGE_SHA\" ;;",
       "  *\"pr checks\"*\"--json name,bucket,state,workflow\"*) printf '[{\"name\":\"Shadow runner fleet available\",\"bucket\":\"pass\",\"state\":\"SUCCESS\",\"workflow\":\"CI\"},{\"name\":\"Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\",\"workflow\":\"CI\"}]\\n' ;;",
-      '  *"run list"*"--workflow CI"*)',
-      "    if [ \"${FAKE_CI_MODE:-success}\" = auxiliary ]; then printf '[]\\n'; else printf '[{\"databaseId\":91,\"status\":\"completed\",\"conclusion\":\"success\",\"workflowName\":\"CI\"}]\\n'; fi ;;",
-      "  *\"run view 91\"*) printf '[{\"name\":\"Shadow runner fleet available\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"Verify\",\"status\":\"completed\",\"conclusion\":\"success\"}]\\n' ;;",
+      '  *"run list"*"--workflow CI"*"--event pull_request"*)',
+      "    printf '[{\"databaseId\":81,\"status\":\"completed\",\"conclusion\":\"success\",\"headSha\":\"%s\",\"workflowName\":\"CI\"}]\\n' \"$FAKE_HEAD_SHA\" ;;",
+      '  *"run list"*"--workflow CI"*"--event push"*)',
+      "    if [ \"${FAKE_CI_MODE:-success}\" = auxiliary ]; then printf '[]\\n'; else printf '[{\"databaseId\":91,\"status\":\"completed\",\"conclusion\":\"success\",\"headSha\":\"%s\",\"workflowName\":\"CI\"}]\\n' \"$FAKE_MERGE_SHA\"; fi ;;",
+      '  *"run view 81"*|*"run view 91"*)',
+      "    if [ \"${FAKE_CI_MODE:-success}\" = shadow-only ]; then printf '[{\"name\":\"Shadow runner fleet available\",\"status\":\"completed\",\"conclusion\":\"success\"}]\\n'; else printf '[{\"name\":\"Shadow runner fleet available\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"Verify\",\"status\":\"completed\",\"conclusion\":\"success\"}]\\n'; fi ;;",
       "  *\"commits/\"*\"/check-runs\"*) printf '[[\"completed\",\"success\"]]\\n' ;;",
       "  *\"git/ref/heads/\"*) printf '%s\\n' \"$FAKE_HEAD_SHA\" ;;",
       '  *"git/refs/heads/"*) : ;;',
       '  *) echo "unexpected gh command: $*" >&2; exit 64 ;;',
+      'esac',
+    ].join("\n"),
+  );
+}
+
+function installBunGateFake(fixture) {
+  writeExecutable(
+    fixture.bin,
+    "bun",
+    [
+      'case "$*" in',
+      '  *"r.mergeCi"*) printf \'{"workflow":"CI","requiredChecks":["Shadow runner fleet available","Verify"]}\' ;;',
+      '  *) exit 0 ;;',
       'esac',
     ].join("\n"),
   );
@@ -173,15 +210,41 @@ function admitEvent(db, registryForAdmission, env) {
         : env.type === "factory.merge-fix.requested"
           ? "FIX"
           : "UPDATED";
+    let artifact;
+    if (recommendation === "MERGE") {
+      artifact = {
+        recommendation,
+        ...env.payload,
+        fix: [],
+        escalate: [],
+        summary: "one selected merge",
+      };
+    } else if (recommendation === "FIX") {
+      const { repo, github, base, deployBranch = "master", ...fixItem } =
+        env.payload;
+      artifact = {
+        recommendation,
+        repo,
+        github,
+        base,
+        deployBranch,
+        plan: [],
+        fix: [fixItem],
+        escalate: [],
+        summary: "one selected fix",
+      };
+    } else {
+      artifact = {
+        recommendation,
+        outcome: recommendation,
+        repo: env.payload.repo,
+      };
+    }
     seedCompleted(db, {
       runId: parent,
       agent: recommendation === "UPDATED" ? "merge-fix@1" : "merge-scan@2",
       input: env.payload,
-      artifact: {
-        recommendation,
-        outcome: recommendation,
-        repo: env.payload.repo,
-      },
+      artifact,
     });
   }
   return persistEvent(
@@ -218,11 +281,54 @@ function seedCompleted(db, { runId, agent, input, artifact }) {
   ).run(runId, canonicalJson({ artifact }), now);
 }
 
+describe("merge-fix result contract (WM-447)", () => {
+  test("UPDATED and BLOCKED prompt artifacts exactly match the registered schema", () => {
+    const def = registry.agents.get("merge-fix@1");
+    const schema = def.outputSchema;
+    const prompt = readFileSync(def.promptPath, "utf8");
+    const declaration = prompt.match(
+      /Both artifacts must\s+contain exactly these properties, in this order:([\s\S]*?)\. Do not add/,
+    );
+
+    expect(declaration).not.toBeNull();
+    expect(
+      [...declaration[1].matchAll(/`([^`]+)`/g)].map((match) => match[1]),
+    ).toEqual(schema.required);
+
+    for (const outcome of ["UPDATED", "BLOCKED"]) {
+      const example = prompt.match(
+        new RegExp(
+          `### ${outcome} artifact[\\s\\S]*?` +
+            "```json\\n([\\s\\S]*?)\\n```",
+        ),
+      );
+
+      expect(example).not.toBeNull();
+      const artifact = JSON.parse(example[1]);
+      expect(Object.keys(artifact)).toEqual(schema.required);
+      expect(artifact.outcome).toBe(outcome);
+      expect(validate(schema, artifact)).toEqual({ valid: true, errors: [] });
+    }
+  });
+
+  test("BLOCKED explicitly retains the pinned input head SHA", () => {
+    const prompt = readFileSync(
+      registry.agents.get("merge-fix@1").promptPath,
+      "utf8",
+    );
+
+    expect(prompt).toMatch(
+      /Use the pinned `input\.json` `headSha` as the required `headSha`, including when\s+the live PR head moved/,
+    );
+  });
+});
+
 describe("durable autonomous merge registry (WM-398/WM-403)", () => {
   test("central mappings register scan, bounded fix, deterministic apply, landed verify, and explicit verify", () => {
-    expect(registry.eventTypes["factory.merge.requested"].agent).toBe(
-      "merge-scan@2",
-    );
+    expect(registry.eventTypes["factory.merge.requested"]).toMatchObject({
+      agent: "merge-scan@2",
+      adapter: "pi",
+    });
     expect(registry.eventTypes["factory.merge-fix.requested"].agent).toBe(
       "merge-fix@1",
     );
@@ -257,7 +363,8 @@ describe("durable autonomous merge registry (WM-398/WM-403)", () => {
     expect(script).toContain("--match-head-commit");
     expect(script).toContain("actual_base");
     expect(script).toContain("isDraft");
-    expect(script).toContain("--required --json bucket");
+    expect(script).toContain("--required --json name,bucket,state");
+    expect(script).toContain("mergeCi");
     expect(script).toContain("factory.merge-landed");
     expect(script).not.toContain("--delete-branch");
     expect(script).not.toContain(" Done ");
@@ -312,6 +419,244 @@ describe("durable autonomous merge registry (WM-398/WM-403)", () => {
   });
 });
 
+describe("merge-scan selected PR contract (WM-426)", () => {
+  test("the input schema declares an optional nonempty list of positive PR numbers", () => {
+    const prNumbers = registry.agents.get("merge-scan@2").inputSchema.properties.prNumbers;
+    expect(prNumbers.type).toBe("array");
+    expect(prNumbers.minItems).toBe(1);
+    expect(prNumbers.items).toEqual({ type: "integer", minimum: 1 });
+    expect(registry.agents.get("merge-scan@2").inputSchema.required).not.toContain("prNumbers");
+  });
+
+  test("the prompt scopes selected scans exactly and fails invalid targets closed", () => {
+    const prompt = readFileSync(registry.agents.get("merge-scan@2").promptPath, "utf8");
+    expect(prompt).toContain("`prNumbers` is absent");
+    expect(prompt).toContain("exactly those PR numbers");
+    expect(prompt).toMatch(/missing, closed, draft, or targets a\s+base other than/);
+    expect(prompt).toContain('"terminalState": "refused"');
+    expect(prompt).toMatch(/evidence clearly naming every invalid\s+selected PR/);
+    expect(prompt).toMatch(/Do not\s+emit a merge-plan artifact/);
+  });
+});
+
+describe("merge-scan required-context resolution (WM-433)", () => {
+  test("scan uses the supported PR query through the deterministic resolver", () => {
+    const prompt = readFileSync(
+      registry.agents.get("merge-scan@2").promptPath,
+      "utf8",
+    );
+
+    expect(prompt).toContain(
+      'gh pr checks "$pr" --repo "$github" --required --json name,bucket,state',
+    );
+    expect(prompt).toContain(
+      'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts',
+    );
+    expect(prompt).not.toContain(
+      "./repo/event-runtime/lib/merge-ci-proof.mjs",
+    );
+    expect(prompt).toMatch(
+      /Status 1 with exactly\s+`no required checks reported on the '<headRef>' branch`/,
+    );
+    expect(prompt).toContain("`proveMergeCiFallback`");
+    expect(prompt).toContain("Do not query");
+    expect(prompt).toContain("branches/{branch}/protection");
+    expect(prompt).not.toContain(
+      "First query GitHub's branch-protection required contexts",
+    );
+  });
+
+  test("the resolver executes when the selected non-Factory repo has no event-runtime tree", () => {
+    const fixture = mkdtempSync(path.join(os.tmpdir(), "merge-scan-cross-repo-"));
+    const target = path.join(fixture, "repo");
+    mkdirSync(target);
+    writeFileSync(path.join(target, "README.md"), "# non-Factory fixture\n");
+
+    try {
+      const output = execFileSync(
+        "sh",
+        [
+          "-c",
+          'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts 1 "feat/WM-243"',
+        ],
+        {
+          cwd: fixture,
+          encoding: "utf8",
+          env: { ...process.env, FACTORY_ROOT: process.cwd() },
+          input:
+            "no required checks reported on the 'feat/WM-243' branch",
+        },
+      );
+
+      expect(output).toBe("[]\n");
+      expect(existsSync(path.join(target, "event-runtime"))).toBe(false);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("merge-scan repository workspace and result contract (WM-425)", () => {
+  test("the definition and prompt declare the pinned repository contract", () => {
+    const def = registry.agents.get("merge-scan@2");
+    expect(def.workspace).toEqual({
+      type: "repository",
+      checkoutDir: "repo",
+      retainOnFailure: true,
+    });
+    expect(def.capabilities.services).toContain("repo:read");
+    expect(def.inputSchema.properties.repoPin.required).toEqual(["repo", "sha"]);
+    expect(def.inputSchema.properties.repoPin.properties.sha.pattern).toBe(
+      "^[0-9a-f]{40}$",
+    );
+
+    const prompt = readFileSync(def.promptPath, "utf8");
+    expect(prompt).toContain("./repo/config/repos.yaml");
+    expect(prompt).toContain("./repo/config/policy.yaml");
+    expect(prompt).toContain('"terminalState": "completed"');
+    expect(prompt).toContain('"artifact": {');
+    expect(prompt).toContain('"terminalState": "refused"');
+  });
+
+  test("a planned scan reads pinned config and a schema-valid fail-closed result is refused, not contract-invalid", async () => {
+    const fixture = mkdtempSync(path.join(os.tmpdir(), "evrt-merge-scan-"));
+    const source = path.join(fixture, "source");
+    const eventHome = path.join(fixture, "event-home");
+    const workspaces = path.join(fixture, "workspaces");
+    const previousReposRoot = process.env.FACTORY_REPOS_ROOT;
+    const previousEventHome = process.env.FACTORY_EVENT_HOME;
+    const git = (args) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "commit.template=",
+          ...args,
+        ],
+        { cwd: source, encoding: "utf8" },
+      ).trim();
+
+    try {
+      mkdirSync(path.join(source, "config"), { recursive: true });
+      mkdirSync(eventHome, { recursive: true });
+      mkdirSync(workspaces, { recursive: true });
+      git(["init", "--quiet", "--initial-branch=develop"]);
+      git(["config", "user.email", "test@example.com"]);
+      git(["config", "user.name", "Test"]);
+      writeFileSync(
+        path.join(source, "config", "repos.yaml"),
+        `repos:\n  - name: mergefixture\n    path: ${source}\n    github: watt-mind/mergefixture\n    base: develop\n    deploy_branch: master\n`,
+      );
+      writeFileSync(
+        path.join(source, "config", "policy.yaml"),
+        "merge_fixture_policy: pinned\n",
+      );
+      git(["add", "config"]);
+      git(["commit", "--quiet", "-m", "pinned config"]);
+      const pinnedSha = git(["rev-parse", "HEAD"]);
+
+      process.env.FACTORY_REPOS_ROOT = source;
+      process.env.FACTORY_EVENT_HOME = eventHome;
+
+      const db = openDb(path.join(fixture, "runtime.db"));
+      persistEvent(
+        db,
+        registry,
+        envelope(
+          "factory.merge.requested",
+          { repo: "mergefixture" },
+          "merge-scan-workspace",
+        ),
+      );
+      planAdmittedEvents(db, registry, { policyVersion: PV });
+      const proposal = openProposals(db, {})[0];
+
+      expect(registry.agents.get("merge-scan@2").workspace).toEqual({
+        type: "repository",
+        checkoutDir: "repo",
+        retainOnFailure: true,
+      });
+      expect(proposal.spec.input.repoPin).toEqual({
+        repo: "mergefixture",
+        ref: "develop",
+        sha: pinnedSha,
+        github: "watt-mind/mergefixture",
+      });
+
+      writeFileSync(
+        path.join(source, "config", "policy.yaml"),
+        "merge_fixture_policy: moved\n",
+      );
+      git(["add", "config/policy.yaml"]);
+      git(["commit", "--quiet", "-m", "move config after planning"]);
+
+      approveProposal(db, registry, proposal.id, {
+        actor: "operator",
+        policyVersion: PV,
+      });
+      let observed = null;
+      const adapter = {
+        async execute({ workspaceDir }) {
+          observed = {
+            repos: readFileSync(
+              path.join(workspaceDir, "repo", "config", "repos.yaml"),
+              "utf8",
+            ),
+            policy: readFileSync(
+              path.join(workspaceDir, "repo", "config", "policy.yaml"),
+              "utf8",
+            ),
+          };
+          writeFileSync(
+            path.join(workspaceDir, "result.json"),
+            `${JSON.stringify({
+              schemaVersion: "factory.agent-result/v1",
+              terminalState: "refused",
+              reasonCode: "needs_human",
+            })}\n`,
+          );
+          return { exitCode: 0, timedOut: false };
+        },
+      };
+      const summary = await runOnce(
+        db,
+        registry,
+        { pi: adapter },
+        { workspacesRoot: workspaces, owner: "merge-test", policyVersion: PV },
+      );
+
+      expect(observed.repos).toContain("name: mergefixture");
+      expect(observed.policy).toBe("merge_fixture_policy: pinned\n");
+      expect(summary).toMatchObject({
+        terminalState: "REFUSED",
+        reasonCode: "needs_human",
+      });
+      expect(
+        JSON.parse(
+          db
+            .query("SELECT result_json FROM results WHERE run_id = ?")
+            .get(proposal.run_id).result_json,
+        ),
+      ).toMatchObject({
+        terminalState: "refused",
+        reasonCode: "needs_human",
+        verification: { status: "passed", checks: ["schema_valid"] },
+      });
+      db.close();
+    } finally {
+      if (previousReposRoot === undefined) delete process.env.FACTORY_REPOS_ROOT;
+      else process.env.FACTORY_REPOS_ROOT = previousReposRoot;
+      if (previousEventHome === undefined) delete process.env.FACTORY_EVENT_HOME;
+      else process.env.FACTORY_EVENT_HOME = previousEventHome;
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("executable merge command safety (WM-412)", () => {
   test("merge-apply fails before merge when Linear lookup errors, is empty, or is malformed", () => {
     for (const mode of ["error", "empty", "malformed"]) {
@@ -325,6 +670,60 @@ describe("executable merge command safety (WM-412)", () => {
       expect(result.status, `${mode}: ${result.stderr}`).not.toBe(0);
       const log = existsSync(fixture.log) ? readFileSync(fixture.log, "utf8") : "";
       expect(log).not.toContain("gh pr merge");
+    }
+  });
+
+  test("merge-apply executes the configured fallback and requires every exact workflow job", () => {
+    for (const [mode, shouldMerge] of [["success", true], ["shadow-only", false]]) {
+      const fixture = commandFixture(`merge-apply-config-${mode}-`);
+      installMergeCommandFakes(fixture);
+      installBunGateFake(fixture);
+      const result = runCommand(
+        applyCommand(applyPayload()),
+        fixture,
+        commandEnv({ FAKE_CI_MODE: mode }),
+      );
+      expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
+      const log = readFileSync(fixture.log, "utf8");
+      expect(log).toContain("--event pull_request");
+      expect(log.includes("gh pr merge")).toBe(shouldMerge);
+    }
+  });
+
+  test("merge-apply accepts only the exact quoted no-required-checks diagnostic", () => {
+    for (const [mode, shouldMerge] of [
+      ["empty", true],
+      ["unquoted", false],
+      ["status-zero-empty", false],
+    ]) {
+      const fixture = commandFixture(`merge-apply-empty-${mode}-`);
+      installMergeCommandFakes(fixture);
+      installBunGateFake(fixture);
+      const result = runCommand(
+        applyCommand(applyPayload()),
+        fixture,
+        commandEnv({ FAKE_REQUIRED_MODE: mode }),
+      );
+      expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
+      const log = readFileSync(fixture.log, "utf8");
+      expect(log.includes("gh pr merge")).toBe(shouldMerge);
+    }
+  });
+
+  test("merge-apply prefers nonempty GitHub required contexts and rejects pending ones", () => {
+    for (const [mode, shouldMerge] of [["green", true], ["pending", false], ["duplicate", false]]) {
+      const fixture = commandFixture(`merge-apply-required-${mode}-`);
+      installMergeCommandFakes(fixture);
+      installBunGateFake(fixture);
+      const result = runCommand(
+        applyCommand(applyPayload()),
+        fixture,
+        commandEnv({ FAKE_REQUIRED_MODE: mode, FAKE_CI_MODE: "auxiliary" }),
+      );
+      expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
+      const log = readFileSync(fixture.log, "utf8");
+      expect(log.includes("gh pr merge")).toBe(shouldMerge);
+      expect(log).not.toContain("--event pull_request");
     }
   });
 
@@ -390,7 +789,7 @@ describe("executable merge command safety (WM-412)", () => {
   test("merge-verify compares state and exact SHA separately and executes the configured CI workflow jobs", () => {
     const fixture = commandFixture("merge-verify-success-");
     installMergeCommandFakes(fixture);
-    writeExecutable(fixture.bin, "bun", "exit 0");
+    installBunGateFake(fixture);
     const result = runCommand(
       verifyCommand({
         repo: "factory",
@@ -417,7 +816,7 @@ describe("executable merge command safety (WM-412)", () => {
   test("an auxiliary check without the configured base-push workflow never passes verification", () => {
     const fixture = commandFixture("merge-verify-auxiliary-");
     installMergeCommandFakes(fixture);
-    writeExecutable(fixture.bin, "bun", "exit 0");
+    installBunGateFake(fixture);
     const result = runCommand(
       verifyCommand({
         repo: "factory",
@@ -437,6 +836,30 @@ describe("executable merge command safety (WM-412)", () => {
     expect(log).toContain("run list");
     expect(log).not.toContain("linear state WM-500 Done");
   });
+
+  test("merge-verify cannot pass the early Shadow-only window before Verify appears and succeeds", () => {
+    const fixture = commandFixture("merge-verify-shadow-only-");
+    installMergeCommandFakes(fixture);
+    installBunGateFake(fixture);
+    const result = runCommand(
+      verifyCommand({
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        pr: 42,
+        ticket: "WM-500",
+        headSha: SHA,
+        headRef: "feat/WM-500",
+        mergeCommitSha: MERGE_SHA,
+      }),
+      fixture,
+      commandEnv({ FAKE_CI_MODE: "shadow-only" }),
+    );
+    expect(result.status).not.toBe(0);
+    const log = readFileSync(fixture.log, "utf8");
+    expect(log).toContain("run view 91");
+    expect(log).not.toContain("linear state WM-500 Done");
+  }, 15_000);
 
   test("factory branch-guard rejects protected refs and another open PR holder", () => {
     const fixture = commandFixture("branch-guard-");
@@ -494,11 +917,11 @@ describe("merge transition chains", () => {
       skipped: 0,
       errors: [],
     });
-    const payload = JSON.parse(
-      db.query(`SELECT envelope_json FROM events WHERE source='chain'`).get()
-        .envelope_json,
-    ).payload;
-    expect(payload).toEqual(applyPayload());
+    const event = db
+      .query(`SELECT event_id,envelope_json FROM events WHERE source='chain'`)
+      .get();
+    expect(event.event_id).toBe("chain-scan-merge");
+    expect(JSON.parse(event.envelope_json).payload).toEqual(applyPayload());
   });
 
   test("FIX fans out one durable request per PR with round and finding hash", () => {
@@ -535,9 +958,13 @@ describe("merge transition chains", () => {
     expect(resolveChains(db, registry).emitted).toBe(2);
     const rows = db
       .query(
-        `SELECT envelope_json FROM events WHERE source='chain' ORDER BY event_id`,
+        `SELECT event_id,envelope_json FROM events WHERE source='chain' ORDER BY event_id`,
       )
       .all();
+    expect(rows.map((row) => row.event_id)).toEqual([
+      "chain-scan-fix-WM-501",
+      "chain-scan-fix-WM-502",
+    ]);
     expect(
       rows.map((row) => JSON.parse(row.envelope_json).payload.ticket),
     ).toEqual(["WM-501", "WM-502"]);
@@ -545,6 +972,185 @@ describe("merge transition chains", () => {
       round: 1,
       findingHash: FINDING_HASH,
       mechanical: true,
+    });
+  });
+
+  test("duplicate fix tickets still derive one stable event per accepted item", () => {
+    const db = openDb(":memory:");
+    const fix = [61, 62].map((pr, index) => ({
+      pr,
+      headSha: SHA,
+      baseSha: BASE_SHA,
+      headRef: `feat/WM-560-${index}`,
+      ticket: "WM-560",
+      finding: `mechanical ${index}`,
+      findingHash: String(index + 1).repeat(64),
+      round: 1,
+      mechanical: true,
+      withinOwnedPaths: true,
+      ownedPaths: [`src/${index}.mjs`],
+    }));
+    seedCompleted(db, {
+      runId: "scan-duplicate-fix-ticket",
+      agent: "merge-scan@2",
+      input: { repo: "factory" },
+      artifact: {
+        recommendation: "FIX",
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        deployBranch: "master",
+        plan: [],
+        fix,
+        escalate: [],
+        summary: "two fixes share one ticket",
+      },
+    });
+
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 2,
+      skipped: 0,
+      errors: [],
+    });
+    expect(
+      db
+        .query(`SELECT event_id FROM events WHERE source='chain' ORDER BY event_id`)
+        .all()
+        .map((row) => row.event_id),
+    ).toEqual([
+      `chain-scan-duplicate-fix-ticket-fix-61-${"1".repeat(64)}`,
+      `chain-scan-duplicate-fix-ticket-fix-62-${"2".repeat(64)}`,
+    ]);
+  });
+
+  test("a legacy aggregate event prevents stale mixed-action backfill after routing changes", () => {
+    const db = openDb(":memory:");
+    seedCompleted(db, {
+      runId: "scan-historical-mixed",
+      agent: "merge-scan@2",
+      input: { repo: "factory" },
+      artifact: {
+        recommendation: "ESCALATE",
+        ...applyPayload(63, "WM-563"),
+        fix: [],
+        escalate: [
+          {
+            pr: 64,
+            headSha: SHA,
+            ticket: "WM-564",
+            reason: "historical hold",
+          },
+        ],
+        summary: "historical aggregate escalation",
+      },
+    });
+    expect(
+      persistEvent(db, registry, {
+        schemaVersion: "factory.event/v1",
+        eventId: "chain-scan-historical-mixed",
+        type: "factory.merge-escalate.requested",
+        source: "chain",
+        subject: "merge-scan@2",
+        occurredAt: "2026-08-16T12:00:00.000Z",
+        correlationId: "historical-mixed",
+        causationId: "scan-historical-mixed",
+        payload: {
+          repo: "factory",
+          summary: "historical aggregate escalation",
+        },
+      }).admitted,
+    ).toBe(true);
+
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 0,
+      errors: [],
+    });
+    expect(
+      db.query(`SELECT COUNT(*) AS n FROM events WHERE source='chain'`).get().n,
+    ).toBe(1);
+  });
+
+  test("a mixed scan independently emits escalation, bounded fixes, and one globally serialized merge", () => {
+    const db = openDb(":memory:");
+    const fix = ["WM-511", "WM-512"].map((ticket, index) => ({
+      pr: 51 + index,
+      headSha: SHA,
+      baseSha: BASE_SHA,
+      headRef: `feat/${ticket}`,
+      ticket,
+      finding: `mechanical ${index}`,
+      findingHash: FINDING_HASH,
+      round: 1,
+      mechanical: true,
+      withinOwnedPaths: true,
+      ownedPaths: [`src/${index}.mjs`],
+    }));
+    seedCompleted(db, {
+      runId: "scan-mixed",
+      agent: "merge-scan@2",
+      input: { repo: "factory" },
+      artifact: {
+        recommendation: "ESCALATE",
+        ...applyPayload(53, "WM-513"),
+        fix,
+        escalate: [
+          {
+            pr: 54,
+            headSha: SHA,
+            ticket: "WM-514",
+            reason: "draft hold remains visible",
+          },
+        ],
+        summary: "one hold, two mechanical fixes, and one safe merge",
+      },
+    });
+
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 4,
+      skipped: 0,
+      errors: [],
+    });
+    const events = db
+      .query(`SELECT event_id,type FROM events WHERE source='chain' ORDER BY event_id`)
+      .all();
+    expect(events.map((event) => event.type).sort()).toEqual([
+      "factory.merge-apply.requested",
+      "factory.merge-escalate.requested",
+      "factory.merge-fix.requested",
+      "factory.merge-fix.requested",
+    ]);
+    expect(events.map((event) => event.event_id)).toEqual([
+      "chain-scan-mixed-escalate",
+      `chain-scan-mixed-fix-51-${FINDING_HASH}`,
+      `chain-scan-mixed-fix-52-${FINDING_HASH}`,
+      "chain-scan-mixed-merge",
+    ]);
+
+    // A process interruption after one admission must not suppress the other
+    // three actions when the same accepted result is resolved again.
+    db.query(
+      `DELETE FROM events WHERE source='chain' AND event_id != 'chain-scan-mixed-escalate'`,
+    ).run();
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 3,
+      skipped: 0,
+      errors: [],
+    });
+    expect(
+      db.query(`SELECT COUNT(*) AS n FROM events WHERE source='chain'`).get().n,
+    ).toBe(4);
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+    expect(
+      db.query(
+        `SELECT COUNT(*) AS n FROM runs WHERE state='QUEUED' AND json_extract(spec_json,'$.agent')='merge-apply@2'`,
+      ).get().n,
+    ).toBe(1);
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 0,
+      errors: [],
     });
   });
 

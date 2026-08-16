@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { budgetExhausted } from "../../lib/spend.mjs";
+import { buildChainInput } from "./chain.mjs";
 import { hashJson } from "./canonical.mjs";
 import { approveProposal } from "./proposals.mjs";
 import { getAgent, getEventType } from "./registry.mjs";
@@ -326,13 +327,71 @@ function mergeBarrierReason(db, candidate) {
   if (unverified) return `merge_barrier_unverified:${unverified.event_id}`;
 
   // An apply that failed after its last deterministic precheck is uncertain:
-  // the merge may have landed before event admission. Keep the barrier closed
-  // until an operator recovers that durable evidence.
+  // the merge may have landed before event admission. A later completed apply
+  // clears only that exact PR/reviewed-head hold, and only after the apply's
+  // causally emitted landing has itself been verified to completion.
   const uncertain = db
     .query(
-      `SELECT run_id FROM runs
-     WHERE state IN ('FAILED','TIMED_OUT')
-       AND json_extract(spec_json, '$.agent') = 'merge-apply@2'
+      `SELECT failed.run_id FROM runs failed
+     WHERE failed.state IN ('FAILED','TIMED_OUT')
+       AND json_extract(failed.spec_json, '$.agent') = 'merge-apply@2'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM runs applied
+         JOIN events landed
+           ON landed.source = 'chain'
+          AND landed.type = 'factory.merge-landed'
+          AND landed.causation_id = applied.run_id
+         JOIN proposals verification_proposal
+           ON verification_proposal.event_source = landed.source
+          AND verification_proposal.event_id = landed.event_id
+         JOIN runs verifier
+           ON verifier.run_id = verification_proposal.run_id
+         WHERE applied.rowid > failed.rowid
+           AND verification_proposal.decision = 'run'
+           AND verification_proposal.status = 'approved'
+           AND applied.state = 'COMPLETED'
+           AND json_extract(applied.spec_json, '$.agent') = 'merge-apply@2'
+           AND json_extract(applied.spec_json, '$.input.github') =
+             json_extract(failed.spec_json, '$.input.github')
+           AND json_extract(applied.spec_json, '$.input.plan[0].pr') =
+             json_extract(failed.spec_json, '$.input.plan[0].pr')
+           AND json_extract(applied.spec_json, '$.input.plan[0].headSha') =
+             json_extract(failed.spec_json, '$.input.plan[0].headSha')
+           AND json_extract(landed.envelope_json, '$.payload.repo') =
+             json_extract(applied.spec_json, '$.input.repo')
+           AND json_extract(landed.envelope_json, '$.payload.github') =
+             json_extract(applied.spec_json, '$.input.github')
+           AND json_extract(landed.envelope_json, '$.payload.base') =
+             json_extract(applied.spec_json, '$.input.base')
+           AND json_extract(landed.envelope_json, '$.payload.pr') =
+             json_extract(applied.spec_json, '$.input.plan[0].pr')
+           AND json_extract(landed.envelope_json, '$.payload.ticket') =
+             json_extract(applied.spec_json, '$.input.plan[0].ticket')
+           AND json_extract(landed.envelope_json, '$.payload.headSha') =
+             json_extract(applied.spec_json, '$.input.plan[0].headSha')
+           AND json_extract(landed.envelope_json, '$.payload.headRef') =
+             json_extract(applied.spec_json, '$.input.plan[0].headRef')
+           AND verifier.state = 'COMPLETED'
+           AND json_extract(verifier.spec_json, '$.agent') = 'merge-verify@1'
+           AND json_extract(verifier.spec_json, '$.input.repo') =
+             json_extract(landed.envelope_json, '$.payload.repo')
+           AND json_extract(verifier.spec_json, '$.input.github') =
+             json_extract(landed.envelope_json, '$.payload.github')
+           AND json_extract(verifier.spec_json, '$.input.base') =
+             json_extract(landed.envelope_json, '$.payload.base')
+           AND json_extract(verifier.spec_json, '$.input.pr') =
+             json_extract(landed.envelope_json, '$.payload.pr')
+           AND json_extract(verifier.spec_json, '$.input.ticket') =
+             json_extract(landed.envelope_json, '$.payload.ticket')
+           AND json_extract(verifier.spec_json, '$.input.headSha') =
+             json_extract(landed.envelope_json, '$.payload.headSha')
+           AND json_extract(verifier.spec_json, '$.input.headRef') =
+             json_extract(landed.envelope_json, '$.payload.headRef')
+           AND json_extract(verifier.spec_json, '$.input.mergeCommitSha') =
+             json_extract(landed.envelope_json, '$.payload.mergeCommitSha')
+       )
+     ORDER BY failed.rowid
      LIMIT 1`,
     )
     .get();
@@ -346,6 +405,93 @@ const REGISTERED_COMMAND_EDGES = {
   ]),
   "merge-verify@1": new Set(["factory.merge.requested"]),
 };
+
+function chainContextValue(expr, context) {
+  if (typeof expr !== "string" || !expr.startsWith("$.")) return expr;
+  const [root, ...segments] = expr.slice(2).split(".");
+  let value = context[root];
+  for (const segment of segments) {
+    if (value === null || typeof value !== "object" || !(segment in value))
+      throw new Error("chain selection path unresolved");
+    value = value[segment];
+  }
+  if (value === undefined) throw new Error("chain selection path unresolved");
+  return value;
+}
+
+function chainArrayField(field, context) {
+  if (typeof field === "string" && field.startsWith("$."))
+    return chainContextValue(field, context);
+  return context.artifact[field] ?? context.input[field];
+}
+
+/** Prove an explicitly independent sibling edge from its declared selector and payload. */
+function independentlySelectedEdge(rule, spec, result, envelope) {
+  if (rule?.independent !== true) return false;
+
+  const artifactHash = {};
+  for (const entry of result.artifacts ?? []) {
+    if (entry.kind && entry.sha256 && artifactHash[entry.kind] === undefined)
+      artifactHash[entry.kind] = entry.sha256;
+  }
+  const context = {
+    input: spec.input ?? {},
+    artifact: result.artifact ?? {},
+    artifactHash,
+  };
+
+  for (const edge of Object.values(rule?.edges ?? {})) {
+    if (edge?.eventType !== envelope.type) continue;
+    try {
+      if (edge.whenItemsField === undefined) continue;
+      const selectedItems = chainArrayField(edge.whenItemsField, context);
+      if (!Array.isArray(selectedItems) || selectedItems.length === 0) continue;
+
+      const itemsField = edge.itemsField ?? rule.itemsField;
+      if (itemsField !== undefined) {
+        const items = chainArrayField(itemsField, context);
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          const itemContext = { ...context, item };
+          const payload = buildChainInput(edge.input ?? {}, itemContext);
+          const itemKey = edge.itemKey ?? rule.itemKey;
+          if (itemKey && payload[itemKey] === undefined) {
+            const itemKeyValue =
+              item && typeof item === "object"
+                ? item[itemKey]
+                : typeof item === "string" || typeof item === "number"
+                  ? String(item)
+                  : undefined;
+            if (
+              itemKeyValue === undefined ||
+              itemKeyValue === null ||
+              String(itemKeyValue).trim() === ""
+            )
+              continue;
+            payload[itemKey] = itemKeyValue;
+          }
+          if (edge.perItem)
+            Object.assign(payload, buildChainInput(edge.perItem, itemContext));
+          if (sameJson(payload, envelope.payload ?? {})) return true;
+        }
+        continue;
+      }
+
+      if (
+        sameJson(
+          buildChainInput(edge.input ?? {}, context),
+          envelope.payload ?? {},
+        )
+      ) {
+        return true;
+      }
+    } catch {
+      // A declared edge whose selection or payload cannot be reconstructed is
+      // not approval evidence; the candidate remains watched.
+    }
+  }
+  return false;
+}
 
 /**
  * `source=chain` is necessary provenance, not sufficient authorization. The
@@ -387,9 +533,20 @@ function chainPredecessorReason(db, registry, candidate, envelope) {
   const recommendation = rule
     ? result.artifact?.[rule.recommendationField]
     : undefined;
-  const declaredEdge = rule?.edges?.[recommendation];
+  const declaredEdge =
+    rule?.independent === true ? undefined : rule?.edges?.[recommendation];
+  const independentEdge = independentlySelectedEdge(
+    rule,
+    spec,
+    result,
+    envelope,
+  );
   const commandEdge = REGISTERED_COMMAND_EDGES[spec.agent]?.has(envelope.type);
-  if (declaredEdge?.eventType !== envelope.type && !commandEdge)
+  if (
+    declaredEdge?.eventType !== envelope.type &&
+    !independentEdge &&
+    !commandEdge
+  )
     return "chain_edge_not_registered";
 
   // Registered command edges carry immutable identity from their predecessor.

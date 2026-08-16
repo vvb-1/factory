@@ -94,6 +94,17 @@ function HashSyncedList(props: { count: number; prefix: string }) {
 }
 
 describe("useTheme", () => {
+  test.each(["light", "contrast"] as const)(
+    "restores the valid %s theme from localStorage",
+    (theme) => {
+      localStorage.setItem("evrt-theme", theme);
+      const r = render(h(ThemeProbe));
+      expect(r.getByTestId("theme").textContent).toBe(theme);
+      expect(localStorage.getItem("evrt-theme")).toBe(theme);
+      expect(document.documentElement.dataset.theme).toBe(theme);
+    },
+  );
+
   test("corrupt evrt-theme in localStorage resets to dark and rewrites storage", () => {
     localStorage.setItem("evrt-theme", "foo");
     const r = render(h(ThemeProbe));

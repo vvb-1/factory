@@ -13,8 +13,13 @@
  */
 import { parseArgs } from "node:util";
 
-const DEFAULT_PORT = 7391;
-const port = process.env.FACTORY_EVENT_PORT ? Number(process.env.FACTORY_EVENT_PORT) : DEFAULT_PORT;
+export const DEFAULT_PORT = 7381;
+
+export function resolvePort(env = process.env) {
+  return env.FACTORY_EVENT_PORT ? Number(env.FACTORY_EVENT_PORT) : DEFAULT_PORT;
+}
+
+const port = resolvePort();
 const BASE_URL = `http://127.0.0.1:${port}`;
 
 const HELP = `factory dispatch — swift event-runtime task dispatcher
@@ -208,4 +213,6 @@ async function main() {
   }
 }
 
-main().catch((e) => die(e.message));
+if (import.meta.main) {
+  main().catch((e) => die(e.message));
+}

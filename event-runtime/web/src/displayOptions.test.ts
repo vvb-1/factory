@@ -208,6 +208,20 @@ describe("sortRows", () => {
     expect(sorted[2].id).toBe("r2"); // priority 3
   });
 
+  test("sorts duration and time strings chronologically instead of alphanumerically", () => {
+    const timeRows: Row[] = [
+      row("r1", "RUNNING", "a", "1d ago"),
+      row("r2", "RUNNING", "b", "1s ago"),
+      row("r3", "RUNNING", "c", "2d ago"),
+      row("r4", "RUNNING", "d", "2m ago"),
+    ];
+    const asc = sortRows(timeRows, CONFIG, state({ sortBy: "created", sortDir: "asc" }));
+    expect(asc.map((r) => r.created_at)).toEqual(["1s ago", "2m ago", "1d ago", "2d ago"]);
+
+    const desc = sortRows(timeRows, CONFIG, state({ sortBy: "created", sortDir: "desc" }));
+    expect(desc.map((r) => r.created_at)).toEqual(["2d ago", "1d ago", "2m ago", "1s ago"]);
+  });
+
   test("does not mutate its input", () => {
     const copy = [...ROWS];
     sortRows(ROWS, CONFIG, state({ sortBy: "created" }));
