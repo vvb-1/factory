@@ -9,6 +9,7 @@ import {
   deriveAllowedTools,
   execute,
   isHarnessDenial,
+  killProcessGroup,
   KILL_GRACE_MS,
   mapStreamEvent,
   PROMPT_SUFFIX,
@@ -17,6 +18,26 @@ import {
   safeChildEnvironment,
   WRITE_TOOLS,
 } from "./claude.mjs";
+
+describe("killProcessGroup (WM-263)", () => {
+  test("signals the detached process group through its negative leader PID", () => {
+    const signals = [];
+    const child = { pid: 4321, kill: () => { throw new Error("parent-only fallback must not run"); } };
+
+    killProcessGroup(child, "SIGKILL", (pid, signal) => signals.push([pid, signal]));
+
+    expect(signals).toEqual([[-4321, "SIGKILL"]]);
+  });
+
+  test("falls back to the child when process-group signaling is unavailable", () => {
+    const signals = [];
+    const child = { pid: 4321, kill: (signal) => signals.push(signal) };
+
+    killProcessGroup(child, "SIGTERM", () => { throw new Error("no process group"); });
+
+    expect(signals).toEqual(["SIGTERM"]);
+  });
+});
 
 describe("isHarnessDenial (WM-127)", () => {
   test("matches the harness's own refusal shapes", () => {

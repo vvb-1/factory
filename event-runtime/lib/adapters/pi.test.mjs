@@ -9,6 +9,7 @@ import {
   execute,
   extractUsage,
   isHarnessDenial,
+  killProcessGroup,
   KILL_GRACE_MS,
   mapStreamEvent,
   PUSH_CREDENTIAL_ENV,
@@ -19,6 +20,26 @@ import {
   resolvePiCommand,
   safeChildEnvironment,
 } from "./pi.mjs";
+
+describe("killProcessGroup (WM-263)", () => {
+  test("signals the detached process group through its negative leader PID", () => {
+    const signals = [];
+    const child = { pid: 8765, kill: () => { throw new Error("parent-only fallback must not run"); } };
+
+    killProcessGroup(child, "SIGTERM", (pid, signal) => signals.push([pid, signal]));
+
+    expect(signals).toEqual([[-8765, "SIGTERM"]]);
+  });
+
+  test("falls back to the child when process-group signaling is unavailable", () => {
+    const signals = [];
+    const child = { pid: 8765, kill: (signal) => signals.push(signal) };
+
+    killProcessGroup(child, "SIGKILL", () => { throw new Error("no process group"); });
+
+    expect(signals).toEqual(["SIGKILL"]);
+  });
+});
 
 describe("isHarnessDenial (WM-127, no confirmed pi refusal shapes yet)", () => {
   test("nothing matches — pi enforces read-only by tool non-exposure, not runtime denial", () => {
