@@ -256,9 +256,10 @@ function seedCompleted(db, { runId, agent, input, artifact }) {
 
 describe("durable autonomous merge registry (WM-398/WM-403)", () => {
   test("central mappings register scan, bounded fix, deterministic apply, landed verify, and explicit verify", () => {
-    expect(registry.eventTypes["factory.merge.requested"].agent).toBe(
-      "merge-scan@2",
-    );
+    expect(registry.eventTypes["factory.merge.requested"]).toMatchObject({
+      agent: "merge-scan@2",
+      adapter: "pi",
+    });
     expect(registry.eventTypes["factory.merge-fix.requested"].agent).toBe(
       "merge-fix@1",
     );
