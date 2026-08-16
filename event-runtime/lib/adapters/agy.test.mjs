@@ -134,7 +134,7 @@ describe("extractUsage", () => {
 });
 
 describe("buildAgyArgv", () => {
-  test("basic flags and stdin prompt format", () => {
+  test("basic flags and argv prompt format", () => {
     const argv = buildAgyArgv({
       def: { prompt: "agents/agy-smoke.md" },
       prompt: "Execute smoke test",
@@ -149,7 +149,31 @@ describe("buildAgyArgv", () => {
     expect(argv).toContain("--add-dir");
     expect(argv).toContain("/tmp/ws");
     expect(argv).toContain("--print-timeout");
-    expect(argv).toContain("3m");
+    expect(argv[argv.indexOf("--print-timeout") + 1]).toBe("295s");
+  });
+
+  test("print-timeout tracks the run budget instead of flooring short runs (WM-439)", () => {
+    // agy-smoke's 120s budget used to round down to the 1m floor, so the CLI
+    // gave up at 60s while the worker was still waiting — the ~64s failures.
+    const argv = buildAgyArgv({
+      def: { prompt: "agents/agy-smoke.md" },
+      prompt: "Execute smoke test",
+      workspaceDir: "/tmp/ws",
+      timeoutMs: 120_000,
+    });
+    const bound = argv[argv.indexOf("--print-timeout") + 1];
+    expect(bound).not.toBe("1m");
+    expect(bound).toBe("115s");
+  });
+
+  test("print-timeout stays positive for a timeout smaller than the grace", () => {
+    const argv = buildAgyArgv({
+      def: { prompt: "agents/agy-smoke.md" },
+      prompt: "Execute smoke test",
+      workspaceDir: "/tmp/ws",
+      timeoutMs: 2_000,
+    });
+    expect(argv[argv.indexOf("--print-timeout") + 1]).toBe("1s");
   });
 
   test("model and effort parameters", () => {

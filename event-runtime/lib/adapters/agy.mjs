@@ -3,9 +3,10 @@
  * third LLM harness alongside `claude` and `pi`, on the Antigravity/Gemini
  * subscription and Google Cloud authentication window.
  *
- * Spawns a bounded `agy -p - --output-format stream-json --dangerously-skip-permissions`
- * process (prompt piped to stdin, the standard `./input.json` → `./result.json`
- * PROMPT_SUFFIX contract, cwd = workspace), enforces the run spec's timeout with
+ * Spawns a bounded `agy -p <prompt> --output-format stream-json --dangerously-skip-permissions`
+ * process (the prompt travels as an argv value and stdin is closed, the standard
+ * `./input.json` → `./result.json` PROMPT_SUFFIX contract, cwd = workspace),
+ * enforces the run spec's timeout with
  * TERM→KILL(killGraceMs), strips API keys so the CLI authenticates against the
  * session/subscription instead of per-token billing, and captures full stdout as
  * the `.transcript.json` artifact.
@@ -20,6 +21,16 @@ export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
 
 export const KILL_GRACE_MS = 30_000;
 const TEXT_PREVIEW_CHARS = 4000;
+
+/**
+ * How much sooner agy's own print-mode wait expires than the worker's timeout.
+ *
+ * The CLI should give up just before the worker's TERM→KILL so it exits on its
+ * own terms and still emits the terminal `result` event — that event carries
+ * the status, error and token counts the trace and usage accounting depend on.
+ * Killing it first would discard them.
+ */
+export const PRINT_TIMEOUT_GRACE_MS = 5_000;
 
 export class CliNotFoundError extends Error {
   constructor(message) {
@@ -53,8 +64,11 @@ export function buildAgyArgv({ prompt, def, model, effort, workspaceDir, timeout
   }
 
   if (timeoutMs) {
-    const printMin = Math.max(1, Math.round(timeoutMs / 60000) - 2);
-    args.push("--print-timeout", `${printMin}m`);
+    // Seconds, not rounded minutes: `--print-timeout` takes Go duration syntax,
+    // and minute granularity used to floor every sub-three-minute budget to 1m
+    // (a 120s run gave agy 60s, so it quit while the worker still waited).
+    const printSeconds = Math.max(1, Math.round((timeoutMs - PRINT_TIMEOUT_GRACE_MS) / 1000));
+    args.push("--print-timeout", `${printSeconds}s`);
   }
 
   if (typeof model === "string" && model !== "" && model !== "default") {
