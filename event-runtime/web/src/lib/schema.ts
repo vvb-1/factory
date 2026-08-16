@@ -80,7 +80,7 @@ function check(schema: unknown, value: unknown, path: string, errors: string[]):
       errors.push(`${path}: longer than maxLength ${s.maxLength}`);
     }
     if (hasOwn(s, "pattern") && typeof s.pattern === "string" && !new RegExp(s.pattern).test(str)) {
-      errors.push(`${path}: does not match pattern ${s.pattern}`);
+      errors.push(`${path}: does not match pattern`);
     }
   }
 

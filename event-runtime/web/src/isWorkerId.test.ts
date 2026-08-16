@@ -50,6 +50,7 @@ describe("ActorRef component", () => {
       const { container, queryByRole } = render(createElement(ActorRef, { actor }));
       expect(queryByRole("button")).toBeNull();
       expect(container.textContent).toBe(actor);
+      expect(container.querySelector("span")?.getAttribute("title")).toBe(actor);
     },
   );
 
@@ -63,6 +64,15 @@ describe("ActorRef component", () => {
     fireEvent.click(link);
     expect(window.location.hash).toBe(`#/workers/${workerId}`);
   });
+
+  test.each(["planner", "worker_12345_a1b2c3d4"])(
+    "uses an explicit title for actor '%s'",
+    (actor) => {
+      const title = `${actor} · attempt timed out`;
+      const { container } = render(createElement(ActorRef, { actor, title }));
+      expect(container.querySelector("[title]")?.getAttribute("title")).toBe(title);
+    },
+  );
 
   test("short worker id renders a jump link and updates hash on click", () => {
     const workerId = "worker_1";

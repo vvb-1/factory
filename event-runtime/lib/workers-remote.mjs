@@ -180,7 +180,7 @@ export function probeRemoteNode(node, {
     `OS=$(uname -s 2>/dev/null || echo "unknown");`,
     `BUN_VER=$(bun --version 2>/dev/null || echo "not_found");`,
     `WORKER_PIDS=$(ps -axo pid,command 2>/dev/null | grep -E "bun.*event-runtime/cli\\.mjs work" | grep -v grep | awk '{print $1}' | tr '\\n' ',' | sed 's/,$//');`,
-    `echo "PROBE_RESULT:$$HEAD_SHA|$$BRANCH|$$DIRTY|$$ARCH|$$OS|$$BUN_VER|$$WORKER_PIDS"`,
+    `echo "PROBE_RESULT:$HEAD_SHA|$BRANCH|$DIRTY|$ARCH|$OS|$BUN_VER|$WORKER_PIDS"`,
   ].join(" ");
 
   const res = executeSsh(node, probeScript, { spawnFn, connectTimeout });
@@ -212,8 +212,10 @@ export function probeRemoteNode(node, {
 
   const [headSha, branch, dirtyCount, arch, osName, bunVer, pidsRaw] = match[1].trim().split("|");
   const pids = pidsRaw ? pidsRaw.split(",").map(Number).filter(Boolean) : [];
+  const parsedDirtyCount = Number(dirtyCount);
+  const normalizedDirtyCount = Number.isInteger(parsedDirtyCount) && parsedDirtyCount >= 0 ? parsedDirtyCount : 0;
   const isMissingDir = headSha === "missing_dir";
-  const isDirty = Number(dirtyCount) > 0;
+  const isDirty = normalizedDirtyCount > 0;
 
   let outdated = false;
   let skewStatus = "synced";
@@ -241,6 +243,7 @@ export function probeRemoteNode(node, {
       factoryRoot: node.factoryRoot,
       headSha: isMissingDir ? null : headSha,
       branch: isMissingDir ? null : branch,
+      dirtyCount: normalizedDirtyCount,
       dirty: isDirty,
       arch,
       os: osName,

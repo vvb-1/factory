@@ -520,8 +520,9 @@ export async function executeClaimed(db, registry, adapters, claim, {
         recordFencedAttempt(db, { runId, attempt, actor: owner, policyVersion, now: currentNow });
         return { fenced: true };
       }
+      const expectFrom = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId)?.state;
       transition(db, {
-        runId, to, expectFrom: "RUNNING",
+        runId, to, expectFrom,
         actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
       });
       finishAttempt(db, runId, attempt, to, reasonCode, currentNow, attemptUsage);
