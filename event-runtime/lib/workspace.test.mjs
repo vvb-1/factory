@@ -83,6 +83,14 @@ describe("worktree workspaces (WM-108)", () => {
       `#!/bin/bash\necho "template failed to build" >&2\nexit 7\n`,
     );
     writeFileSync(
+      path.join(repoDir, "bin", "worktree-up-empty.sh"),
+      `#!/bin/bash\nexit 0\n`,
+    );
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-up-red-baseline.sh"),
+      `#!/bin/bash\nset -e\nmkdir -p "${wtRoot}/$1"\nprintf '%s\\n' '{"status":"red","check":"web_build","command":"bun run build:fast","exitCode":1,"output":"entry chunk exceeds budget"}' > "$FACTORY_WORKTREE_REPORT"\n`,
+    );
+    writeFileSync(
       path.join(repoDir, "bin", "worktree-down-refuse.sh"),
       `#!/bin/bash\necho "refusing: dirty tree" >&2\nexit 1\n`,
     );
@@ -97,6 +105,12 @@ describe("worktree workspaces (WM-108)", () => {
         `  - name: broken-up\n    path: ${repoDir}\n    base: develop\n` +
         `    worktree_up: bin/worktree-up-broken.sh\n    worktree_down: bin/worktree-down.sh\n` +
         `    worktree_root: ${wtRoot}\n` +
+        `  - name: empty-up\n    path: ${repoDir}\n    base: develop\n` +
+        `    worktree_up: bin/worktree-up-empty.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n` +
+        `  - name: red-baseline\n    path: ${repoDir}\n    base: develop\n` +
+        `    worktree_up: bin/worktree-up-red-baseline.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: bun test\n` +
         `  - name: refusing-down\n    path: ${repoDir}\n    base: develop\n` +
         `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down-refuse.sh\n` +
         `    worktree_root: ${wtRoot}\n` +
@@ -164,9 +178,42 @@ describe("worktree workspaces (WM-108)", () => {
     expect(existsSync(path.join(wtRoot, "WM-4"))).toBe(true);
   });
 
-  test("a failing worktree_up is a typed error carrying the script's last line", () => {
-    expect(() => make("broken-up", "WM-5", "run_wt5")).toThrow(WorktreeError);
-    expect(() => make("broken-up", "WM-5", "run_wt5")).toThrow(/template failed to build/);
+  test("a red baseline is recorded in the marker and agent input without aborting workspace creation", () => {
+    const { dir, worktree } = make("red-baseline", "WM-5", "run_wt5");
+    expect(worktree.baseline).toMatchObject({
+      status: "red",
+      check: "web_build",
+      exitCode: 1,
+      output: "entry chunk exceeds budget",
+    });
+    expect(JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8")).baseline).toEqual(worktree.baseline);
+    expect(JSON.parse(readFileSync(path.join(dir, "input.json"), "utf8"))).toMatchObject({
+      repo: "red-baseline",
+      ticket: "WM-5",
+      baseline: {
+        status: "red",
+        check: "web_build",
+        output: "entry chunk exceeds budget",
+        guidance: expect.stringContaining("already fails at this commit"),
+      },
+    });
+    expect(existsSync(path.join(dir, "repo"))).toBe(true);
+    expect(destroyWorkspace(dir)).toBe(true);
+  });
+
+  test("a failing worktree_up is a typed provisioning error carrying the script's last line", () => {
+    try {
+      make("broken-up", "WM-8", "run_wt8");
+      throw new Error("expected WorktreeError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(WorktreeError);
+      expect(err.code).toBe("workspace_provisioning_error");
+      expect(err.message).toContain("template failed to build");
+    }
+  });
+
+  test("a zero-exit script that created no worktree is still a provisioning failure", () => {
+    expect(() => make("empty-up", "WM-9", "run_wt9")).toThrow(/did not create/);
   });
 
   test("a repo with no declared scripts fails typed, not with a crash mid-spawn", () => {
