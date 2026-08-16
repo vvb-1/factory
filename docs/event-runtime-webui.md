@@ -574,18 +574,26 @@ under the buttons (404/409 are normal, §6), never as a toast alone.
 
 #### Keyboard hints (WM-209)
 
-Two idioms exist and each has exactly one home:
+Visible shortcuts use two idioms; compact utility and standard dismiss
+controls deliberately avoid another piece of visible text:
 
-| Where the hint sits                                                                            | Style                                                         | Why                                                                        |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Inside a control that has its own border — button, nav item, tab, chip                         | faint mono subtext: `mono ml-1 text-(--text-faint)`, trailing | a box inside a box is noise; the control's border is already the container |
-| Standalone or on an unbordered surface — input placeholder, ⌘K rows, `?` dialog, footer legend | `<kbd>` box, 10px, `border-(--border)`                        | there is no container, so the box supplies one                             |
-| Prose or body copy                                                                             | never                                                         | a shortcut is shown next to its control, not described                     |
+| Control or surface                                                                                         | Shortcut treatment                                                     | Why                                                                                             |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Bordered, text-labeled control — especially an action `Button`, nav item, tab, or chip                    | trailing faint mono text: `mono ml-1 text-(--text-faint)`              | a box inside a box is noise; the control's border is already the container                      |
+| Standalone or unbordered surface — input placeholder, ⌘K row, `?` dialog, footer legend                   | visible `<kbd>` box, 10px, `border-(--border)`                         | there is no container, so the box supplies one                                                  |
+| Compact icon-only utility control — specifically `CopyActions` (WM-302)                                   | no visible text hint; put the chord in both `title` and `aria-label`   | labels or badges would turn a compact utility row back into a competing action toolbar          |
+| Standard dismiss / close control                                                                          | no `Esc` badge                                                         | `Esc` is the global, standard dismissal path; the text label and accessible name remain `Close` |
+| Prose or body copy                                                                                         | never                                                                  | a shortcut is surfaced by its control or callout, not described in surrounding prose            |
 
-Behaviour: the hint is `aria-hidden` (the accessible name is "Cancel", not
-"Cancel x"); it appears **iff** the control has a single-key or `g` chord
-binding — no invented hints, none omitted. A verb reachable only through ⌘K
-shows no hint. Because hints are per-binding, grouping bound verbs together
+For a bordered text control, the visible hint is `aria-hidden` (the accessible
+name is "Cancel", not "Cancel x"). For an icon-only `CopyActions` control,
+the tooltip and accessible name include the shortcut instead (for example,
+`title="Copy run id · c"` and `aria-label="Copy run id (c)"`). Every
+nonstandard action with a single-key or explicit chord binding (including
+`g …` navigation and `c …` copy chords) surfaces that binding using its row
+above — no invented hints and none omitted — while the
+standard `Esc` close exception remains unbadged. A verb reachable only through
+⌘K shows no hint. Because hints are per-binding, grouping bound verbs together
 (next rule) is what makes them read as deliberate rather than random.
 
 #### DetailPane header actions (WM-209)
@@ -595,19 +603,25 @@ The pane header is three rows, and each row holds one kind of thing:
 ```
 Runs / [● STATE]  run_xxxx                          [Close]
 [Cancel x]                            [Expand o]  [Open in tab]
-copy: id · CLI · link
+CopyActions: [id icon] · [CLI icon] · [link icon]
 ```
 
 1. **Title row** — breadcrumb (`view / StateBadge id`) and the single
-   `close` slot (WM-97).
+   `close` slot (WM-97). `Close` is not badged with `Esc`; dismissal is the
+   standard global exception in the keyboard-hint table above.
 2. **Verb row** — bordered `Button`s, **≤ 3**: lifecycle verbs on the left
    (`danger` leftmost, hidden — not disabled — when the state does not admit
    it), navigation verbs (Expand, Open in tab) on the right. This is where a
    lifecycle verb lives; it never floats between content sections.
-3. **Utility row** — copy/share verbs as a quiet text line, `text-[11px]
-text-(--text-faint)`, `JumpLink` idiom (hover → `--text`), no borders.
-   Anything here is also registered in ⌘K. Do not add a copy verb for a value
-   that `KV` already copies on click or that the breadcrumb already shows.
+3. **Utility row** — copy/share controls use the compact icon-only
+   `<CopyActions />` component (WM-302), not text links or bordered buttons.
+   Each icon button conveys its label and chord through `title` and
+   `aria-label` (`c`, `c i`, or `c l`) rather than a visible hint. Anything
+   here is also registered in ⌘K. Do not add a copy action for a value that
+   `KV` already copies on click. A read-only pane may co-locate `CopyActions`
+   with the identifier in the title row instead of rendering an otherwise
+   empty utility row; it remains a utility control and follows the same
+   tooltip/accessibility rule (as in Agents, §10.6).
 
 Bordered buttons all carry equal visual weight, so five in a row is five
 things claiming priority; the row split is what expresses hierarchy without
@@ -879,8 +893,12 @@ drift — versions are bumped and re-pinned, never edited in place), and
 **Event routing** (which event types select this agent, with adapter,
 idempotency scope, and proposal TTL). The shared envelope contracts
 (`factory.event/v1`, `factory.agent-result/v1`) render once at the list
-level, not per agent. Strictly read-only — the registry has no mutation
-surface. ⌘K jumps to an agent ref the same way it jumps to a run or event.
+level, not per agent. The selected ref in the pane title is followed by the
+shared `<CopyActions />` icon controls: copy-ref (`c`) and copy-link (`c l`)
+put their chord in `title` and `aria-label`, while the text-labeled `Close`
+button carries no visible `Esc` badge. Strictly read-only — the registry has
+no mutation surface. ⌘K jumps to an agent ref the same way it jumps to a run
+or event.
 
 Chord choice: `g t` ("what is **t**his agent?"). `o/e/p/r` were taken, and
 `g a` is unusable — chord suffixes share the keydown with single-key list
