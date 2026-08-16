@@ -1403,6 +1403,12 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     mkdirSync(stubDir, { recursive: true });
     mkdirSync(linearStateDir, { recursive: true });
 
+    const worktreeUp = path.join(stubDir, "worktree-up-no-seed.sh");
+    write(
+      worktreeUp,
+      `#!/usr/bin/env bash\nexec ${JSON.stringify(path.join(repoRoot, "bin", "worktree-up.sh"))} "$@" --no-seed\n`,
+    );
+
     const bunStubLines = [
       "#!/usr/bin/env node",
       "const fs = require(\"fs\");",
@@ -1493,7 +1499,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     ];
     write(path.join(stubDir, "curl"), curlStubLines.join("\n") + "\n");
 
-    for (const filePath of [path.join(stubDir, "bun"), path.join(stubDir, "curl")]) {
+    for (const filePath of [path.join(stubDir, "bun"), path.join(stubDir, "curl"), worktreeUp]) {
       execFileSync("chmod", ["+x", filePath]);
     }
 
@@ -1507,7 +1513,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
         `    team: WM\n` +
         `    project: Factory\n` +
         `    max_in_flight: 1\n` +
-        `    worktree_up: bin/worktree-up.sh\n` +
+        `    worktree_up: ${worktreeUp}\n` +
         `    worktree_down: bin/worktree-down.sh\n` +
         `    worktree_root: ${worktreeRoot}\n` +
         `    verify: printf 'entry chunk exceeds budget\\n' \\n  >&2; exit 1\n`,
