@@ -267,13 +267,19 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
     return { exitCode: 0, timedOut: false };
   }
   if (spec.outputContract === "factory.triage-applied/v1") {
+    const applied = (spec.input.plan ?? []).map((i) => ({ issueId: i.issueId, action: i.action }));
+    const actions = new Set(applied.map((entry) => entry.action));
+    let outcome = "NO_CHANGE";
+    if (actions.has("label-agent-ready")) outcome = "SUPPLY_CHANGED";
+    else if (actions.has("write-detail")) outcome = "DETAIL_CHANGED";
     writeResult(workspaceDir, {
       schemaVersion: "factory.agent-result/v1",
       terminalState: "completed",
       reasonCode: "ok",
       artifact: {
         repo: spec.input.repo,
-        applied: (spec.input.plan ?? []).map((i) => ({ issueId: i.issueId, action: i.action })),
+        applied,
+        outcome,
       },
       evidence: { commands: ["fake"] },
     });

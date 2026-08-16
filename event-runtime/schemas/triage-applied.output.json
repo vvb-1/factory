@@ -1,10 +1,14 @@
 {
-  "title": "factory.triage-applied/v1 output artifact — what was actually applied",
+  "title": "factory.triage-applied/v1 output artifact — what was applied and the chain outcome",
   "type": "object",
-  "required": ["repo", "applied"],
+  "required": ["repo", "applied", "outcome"],
   "additionalProperties": false,
   "properties": {
     "repo": { "type": "string", "minLength": 1 },
+    "outcome": {
+      "type": "string",
+      "enum": ["SUPPLY_CHANGED", "DETAIL_CHANGED", "NO_CHANGE"]
+    },
     "applied": {
       "type": "array",
       "minItems": 1,
