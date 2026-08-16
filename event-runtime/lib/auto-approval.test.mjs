@@ -595,6 +595,90 @@ describe("chain auto approval (WM-357)", () => {
     }
   });
 
+  test("an independent recommendation edge with an empty selector remains watched", () => {
+    const db = openDb(":memory:");
+    const escalation = seed(db, {
+      id: "independent-recommendation-empty-selector",
+      type: "factory.merge-escalate.requested",
+      input: { repo: "factory", summary: "selected escalation" },
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        repo: "factory",
+        summary: "selected escalation",
+        plan: [],
+        fix: [],
+        escalate: [],
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(
+      auto(db, {
+        approvalRegistry: independentMergeRegistry(),
+        runtimeGuard: () => null,
+      }).approved,
+    ).toEqual([]);
+    expect(runState(db, escalation.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
+    );
+  });
+
+  test("an independent recommendation edge with a tampered payload remains watched", () => {
+    const db = openDb(":memory:");
+    const escalation = seed(db, {
+      id: "independent-recommendation-tampered-payload",
+      type: "factory.merge-escalate.requested",
+      input: { repo: "factory", summary: "tampered escalation" },
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        repo: "factory",
+        summary: "selected escalation",
+        plan: [],
+        fix: [],
+        escalate: [{ pr: 429, reason: "human review required" }],
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(
+      auto(db, {
+        approvalRegistry: independentMergeRegistry(),
+        runtimeGuard: () => null,
+      }).approved,
+    ).toEqual([]);
+    expect(runState(db, escalation.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_edge_not_registered",
+    );
+  });
+
+  test("a non-independent recommendation edge preserves legacy approval", () => {
+    const db = openDb(":memory:");
+    const escalation = seed(db, {
+      id: "legacy-recommendation-edge",
+      type: "factory.merge-escalate.requested",
+      input: { repo: "factory", summary: "legacy escalation" },
+      predecessorAgent: "merge-scan@2",
+      predecessorArtifact: {
+        recommendation: "ESCALATE",
+        repo: "factory",
+        summary: "legacy escalation",
+      },
+      predecessorInput: { repo: "factory" },
+    });
+
+    expect(
+      auto(db, {
+        approvalRegistry: independentMergeRegistry({ independent: false }),
+        runtimeGuard: () => null,
+      }).approved,
+    ).toEqual([{ proposalId: escalation.id, runId: escalation.runId }]);
+    expect(runState(db, escalation.runId)).toBe("QUEUED");
+  });
+
   test("a non-independent array sibling remains watched", () => {
     const db = openDb(":memory:");
     const mergeInput = {

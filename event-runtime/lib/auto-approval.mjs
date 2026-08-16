@@ -475,7 +475,8 @@ function chainPredecessorReason(db, registry, candidate, envelope) {
   const recommendation = rule
     ? result.artifact?.[rule.recommendationField]
     : undefined;
-  const declaredEdge = rule?.edges?.[recommendation];
+  const declaredEdge =
+    rule?.independent === true ? undefined : rule?.edges?.[recommendation];
   const independentEdge = independentlySelectedEdge(
     rule,
     spec,
