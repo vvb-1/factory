@@ -218,6 +218,92 @@ describe("verifyResult", () => {
   });
 });
 
+describe("worktree baseline verification (WM-334)", () => {
+  const dispatchResult = {
+    schemaVersion: "factory.agent-result/v1",
+    terminalState: "completed",
+    reasonCode: "ok",
+    artifact: {
+      outcome: "PR_OPEN",
+      repo: "factory",
+      ticket: "WM-334",
+      prUrl: "https://github.com/watt-mind/factory/pull/334",
+      verification: { command: "bun test", passed: true, output: "agent verification passed" },
+      summary: "implemented WM-334",
+    },
+  };
+  const dispatchSpec = {
+    ...makeSpec({ repo: "factory", ticket: "WM-334" }),
+    agent: "dispatch@1",
+    outputContract: "factory.dispatch-result/v1",
+  };
+
+  function worktreeWorkspace(verify, baseline) {
+    const dir = makeWorkspace(dispatchResult);
+    const repo = path.join(dir, "repo");
+    mkdirSync(repo);
+    writeFileSync(path.join(dir, ".worktree.json"), JSON.stringify({ path: repo, verify, baseline }), "utf8");
+    return dir;
+  }
+
+  test("a matching pre-existing failure is rejected with the distinct baseline_red reason", () => {
+    const dir = worktreeWorkspace(
+      "printf 'entry chunk exceeds budget\\n' >&2; exit 9",
+      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+    );
+    try {
+      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      throw new Error("expected ContractViolation");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractViolation);
+      expect(err.reasonCode).toBe("baseline_red");
+      expect(err.violations[0]).toContain("repo_verify_failed");
+    }
+  });
+
+  test("shared baseline output plus a new failure does not classify as baseline_red", () => {
+    const dir = worktreeWorkspace(
+      "printf 'entry chunk exceeds budget\\nnew failure in CI\\n' >&2; exit 9",
+      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+    );
+    try {
+      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      throw new Error("expected ContractViolation");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractViolation);
+      expect(err.reasonCode).toBe("contract_violation");
+    }
+  });
+
+  test("an unrelated post-agent failure remains an ordinary contract violation", () => {
+    const dir = worktreeWorkspace(
+      "printf 'new test regression\\nerror: script \"build\" exited with code 1\\n' >&2; exit 9",
+      {
+        status: "red",
+        check: "web_build",
+        output: "entry chunk exceeds budget\nerror: script \"build\" exited with code 1",
+      },
+    );
+    try {
+      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      throw new Error("expected ContractViolation");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractViolation);
+      expect(err.reasonCode).toBe("contract_violation");
+    }
+  });
+
+  test("a recorded red baseline never weakens a now-green post-agent verification", () => {
+    const dir = worktreeWorkspace(
+      "printf 'verification repaired\\n'",
+      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+    );
+    const out = verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+    expect(out.kind).toBe("completed");
+    expect(out.result.verification.checks).toContain("repo_verify_passed");
+  });
+});
+
 describe("evidence retention (OPS-206)", () => {
   const completedWith = (evidence) => ({
     schemaVersion: "factory.agent-result/v1",

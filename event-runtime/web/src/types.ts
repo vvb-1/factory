@@ -69,6 +69,7 @@ export interface AdmittedEvent {
   occurredAt: string;
   receivedAt: string;
   correlationId: string | null;
+  causationId?: string | null;
   planFailures: number;
   lastPlanError: string | null;
   admittedAt: string;

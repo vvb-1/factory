@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as fake from "./adapters/fake.mjs";
@@ -1031,6 +1032,14 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       path.join(repoDir, "bin", "worktree-down.sh"),
       `#!/bin/bash\nset -e\necho "down $1" >> "${callsLog}"\nrm -rf "${wtRoot}/$1"\n`,
     );
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-up-red-baseline.sh"),
+      `#!/bin/bash\nset -e\necho "up-red $1" >> "${callsLog}"\nmkdir -p "${wtRoot}/$1"\nprintf '%s\\n' '{"status":"red","check":"web_build","command":"bun run build:fast","exitCode":1,"output":"entry chunk exceeds budget"}' > "$FACTORY_WORKTREE_REPORT"\n`,
+    );
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-up-broken.sh"),
+      `#!/bin/bash\necho "dependency install failed" >&2\nexit 12\n`,
+    );
 
     mkdirSync(path.join(factoryRoot, "config"), { recursive: true });
     writeFileSync(path.join(factoryRoot, "config", "policy.yaml"), "{}\n");
@@ -1044,7 +1053,19 @@ describe("execute-side dispatch hardening (WM-115)", () => {
         `  - name: wt-failing-verify\n    path: ${repoDir}\n    github: watt-mind/wt-failing-verify\n    base: develop\n` +
         `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
         `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-        `    worktree_root: ${wtRoot}\n    verify: exit 42\n    escalate_paths: []\n`,
+        `    worktree_root: ${wtRoot}\n    verify: exit 42\n    escalate_paths: []\n` +
+        `  - name: wt-baseline-red\n    path: ${repoDir}\n    github: watt-mind/wt-baseline-red\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up-red-baseline.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: printf 'entry chunk exceeds budget\\n' >&2; exit 9\n    escalate_paths: []\n` +
+        `  - name: wm-baseline-real\n    path: ${repoDir}\n    github: watt-mind/wm-baseline-real\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: echo repo_verified\n    escalate_paths: []\n` +
+        `  - name: wt-broken-up\n    path: ${repoDir}\n    github: watt-mind/wt-broken-up\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up-broken.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: echo never\n    escalate_paths: []\n`,
     );
     previousReposRoot = process.env.FACTORY_REPOS_ROOT;
     process.env.FACTORY_REPOS_ROOT = factoryRoot;
@@ -1302,6 +1323,403 @@ describe("execute-side dispatch hardening (WM-115)", () => {
 
     expect(summary.terminalState).toBe("FAILED");
     expect(summary.reasonCode).toBe("contract_violation");
+  });
+
+  test("a deliberately red baseline still reaches the agent with failure context, then terminates baseline_red", async () => {
+    const db = openDb(":memory:");
+    const lockDir = mkdtempSync(path.join(os.tmpdir(), "evrt-baseline-locks-"));
+    const leaseDir = mkdtempSync(path.join(os.tmpdir(), "evrt-baseline-leases-"));
+    let executionInput = null;
+    const unclaimCalls = [];
+    const blockCalls = [];
+    const observingAdapter = {
+      async execute({ spec, workspaceDir }) {
+        executionInput = JSON.parse(readFileSync(path.join(workspaceDir, "input.json"), "utf8"));
+        return dispatchFakeAdapter.execute({ spec, workspaceDir });
+      },
+    };
+
+    const spec = queueRun(db, makeDispatchSpec({ input: { repo: "wt-baseline-red", ticket: "WM-731" } }));
+    const summary = await runOnce(db, registry, { fake: observingAdapter }, opts({
+      dispatch: {
+        locksDir: lockDir,
+        leasesDir: leaseDir,
+        fetchTicket: () => ({ identifier: "WM-731", state: { name: "Todo" }, assignee: null, labels: { nodes: [{ name: "ai:agent-ready" }] } }),
+        fetchInFlight: () => [],
+        countLeases: () => 0,
+        claimTicket: () => ({ ok: true }),
+        unclaimTicket: (payload) => {
+          unclaimCalls.push(payload);
+          return false;
+        },
+        blockBaselineTicket: (payload) => {
+          blockCalls.push(payload);
+          return true;
+        },
+      },
+    }));
+
+    expect(executionInput).toMatchObject({
+      repo: "wt-baseline-red",
+      ticket: "WM-731",
+      baseline: { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+    });
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("baseline_red");
+    expect(blockCalls).toHaveLength(1);
+    expect(unclaimCalls).toHaveLength(0);
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ?`).get(spec.runId).reason_code).toBe("baseline_red");
+  });
+
+  test("worktree-up handles an actual baseline-red repo verification and deduplicates baseline blocker comments", { timeout: 45_000 }, async () => {
+    const repoRoot = process.cwd();
+    const repoName = "wm-baseline-real";
+    const ticket = `WM-${732000000 + Math.floor(Math.random() * 1_000_000)}`;
+    const apiPort = "7408";
+    const apiPortNumber = Number(apiPort);
+    const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "wm334-real-"));
+    const stubDir = path.join(tmpRoot, "stub");
+    const linearStateDir = path.join(tmpRoot, "linear-state");
+    const worktreeRoot = path.join(tmpRoot, "worktrees");
+    const reposFile = path.join(tmpRoot, "config", "repos.yaml");
+
+    const write = (p, c) => {
+      mkdirSync(path.dirname(p), { recursive: true });
+      writeFileSync(p, c, "utf8");
+    };
+
+    const baselineFailureSignature = ({ why, log = null, baseline }) =>
+      createHash("sha256")
+        .update(JSON.stringify({
+          why,
+          log,
+          baseline: baseline && typeof baseline === "object"
+            ? { check: baseline.check, exitCode: baseline.exitCode, output: baseline.output }
+            : null,
+        }))
+        .digest("hex");
+
+    const baselineFailureMarker = (payload) => `wm:baseline:red:${baselineFailureSignature(payload)}`;
+    const keepAliveProcesses = [];
+
+    const expectedHome = path.join(worktreeRoot, ticket, ".factory", "event-runtime");
+    const seedRuntimeState = () => {};
+
+
+    const currentBranch = (spawnSync("git", ["-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+    // GitHub Actions checks out a PR merge ref detached from its source branch.
+    // Give worktree-up a verified origin ref to that checked-out commit, rather
+    // than accidentally constructing the invalid origin/HEAD ref.
+    const detachedBaseBranch = currentBranch === "HEAD" ? `wm334-test-${ticket}-${process.pid}` : null;
+    if (detachedBaseBranch) {
+      const head = (spawnSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+      execFileSync("git", ["-C", repoRoot, "update-ref", `refs/remotes/origin/${detachedBaseBranch}`, head]);
+    }
+    const hasRemoteBranch = (branch) => branch && branch !== "HEAD" && spawnSync(
+      "git",
+      ["-C", repoRoot, "show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
+    ).status === 0;
+    const baseBranch = [currentBranch, detachedBaseBranch, process.env.GITHUB_BASE_REF, "develop"].find(hasRemoteBranch);
+    expect(baseBranch).toBeDefined();
+    expect(baseBranch).not.toBe("HEAD");
+    expect(hasRemoteBranch(baseBranch)).toBe(true);
+    const realBun = (spawnSync("bash", ["-c", "command -v bun"], { encoding: "utf8", env: { ...process.env } }).stdout || "").trim() || "bun";
+
+    mkdirSync(stubDir, { recursive: true });
+    mkdirSync(linearStateDir, { recursive: true });
+
+    const worktreeUp = path.join(stubDir, "worktree-up-no-seed.sh");
+    write(
+      worktreeUp,
+      `#!/usr/bin/env bash\nexec ${JSON.stringify(path.join(repoRoot, "bin", "worktree-up.sh"))} "$@" --no-seed\n`,
+    );
+
+    const bunStubLines = [
+      "#!/usr/bin/env node",
+      "const fs = require(\"fs\");",
+      "const path = require(\"path\");",
+      "const { spawnSync } = require(\"child_process\");",
+      `const stateDir = process.env.WM334_LINEAR_STATE_DIR || ${JSON.stringify(linearStateDir)}`,
+      `const realBun = process.env.WM334_REAL_BUN || ${JSON.stringify(realBun)}`,
+      "const args = process.argv.slice(2);",
+      "const logPath = process.env.WM334_BUN_LOG || null;",
+      "if (logPath) {\n  try {\n    fs.appendFileSync(logPath, `CALL ${args.join(' ')}\\n`);\n  } catch {}\n}",
+      "",
+      "function commentsPath(ticket) {",
+      "  return path.join(stateDir, ticket + \".comments.json\");",
+      "}",
+      "function readComments(ticket) {",
+      "  try {",
+      "    return JSON.parse(fs.readFileSync(commentsPath(ticket), \"utf8\"));",
+      "  } catch {",
+      "    return [];",
+      "  }",
+      "}",
+      "function writeComments(ticket, rows) {",
+      "  fs.writeFileSync(commentsPath(ticket), JSON.stringify(rows), \"utf8\");",
+      "}",
+      "",
+      "if (args[0]?.endsWith(\"tools/linear.mjs\")) {",
+      "  const verb = args[1];",
+      "  if (verb === \"comments\") {",
+      "    const ticket = args[2];",
+      "    console.log(JSON.stringify(readComments(ticket)));",
+      "    process.exit(0);",
+      "  }",
+      "  if (verb === \"comment\") {",
+      "    const ticket = args[2];",
+      "    const body = args.slice(3).join(\" \");",
+      "    const rows = readComments(ticket);",
+      "    rows.push({ body });",
+      "    writeComments(ticket, rows);",
+      "    process.exit(0);",
+      "  }",
+      "  if (verb === \"state\") {",
+      "    console.log(\"ok\");",
+      "    process.exit(0);",
+      "  }",
+      "  if (verb === \"claim\") {",
+      "    console.log(\"ok\");",
+      "    process.exit(0);",
+      "  }",
+      "  if (verb === \"get\") {",
+      "    console.log(JSON.stringify({ identifier: args[2], state: { name: \"In Progress\" }, assignee: { name: \"agent\" }, labels: { nodes: [{ name: \"ai:in-progress\" }] } }));",
+      "    process.exit(0);",
+      "  }",
+      "  console.log(\"[]\");",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === \"-e\" || args[0] === \"--eval\") {",
+      "  const result = spawnSync(realBun, args, {",
+      "    stdio: \"inherit\",",
+      "    env: process.env,",
+      "  });",
+      "  process.exit(result.status ?? 0);",
+      "}",
+      "if (args.includes(\"install\")) {",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === \"run\" && args[1] === \"build:fast\") {",
+      "  console.log(\"entry chunk exceeds budget\");",
+      "  process.exit(1);",
+      "}",
+      "const result = spawnSync(realBun, args, {",
+      "  stdio: \"inherit\",",
+      "  env: process.env,",
+      "});",
+      "process.exit(result.status ?? 0);",
+    ];
+    write(path.join(stubDir, "bun"), bunStubLines.join("\n") + "\n");
+
+    const expectedHomeJson = JSON.stringify(expectedHome);
+    const curlStubLines = [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      `expected_home=${expectedHomeJson}`,
+      'if [[ "$*" == *"/health"* ]]; then',
+      '  printf "%s\\n" "{\\\"env\\\":{\\\"home\\\":\\\"$expected_home\\\",\\\"adapter\\\":\\\"fake\\\"}}"',
+      "  exit 0",
+      "fi",
+      "exit 0",
+    ];
+    write(path.join(stubDir, "curl"), curlStubLines.join("\n") + "\n");
+
+    for (const filePath of [path.join(stubDir, "bun"), path.join(stubDir, "curl"), worktreeUp]) {
+      execFileSync("chmod", ["+x", filePath]);
+    }
+
+    write(
+      reposFile,
+      `repos:\n` +
+        `  - name: ${repoName}\n` +
+        `    path: ${repoRoot}\n` +
+        `    github: watt-mind/${repoName}\n` +
+        `    base: ${baseBranch}\n` +
+        `    team: WM\n` +
+        `    project: Factory\n` +
+        `    max_in_flight: 1\n` +
+        `    worktree_up: ${worktreeUp}\n` +
+        `    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${worktreeRoot}\n` +
+        `    verify: printf 'entry chunk exceeds budget\\n' \\n  >&2; exit 1\n` +
+        `    escalate_paths: []\n`,
+    );
+    mkdirSync(path.join(tmpRoot, "config"), { recursive: true });
+    write(path.join(tmpRoot, "config", "policy.yaml"),
+      [
+        "models:",
+        "  fake:",
+        "    strong: default",
+        "    standard: default",
+        "    light: default",
+        "  pi:",
+        "    strong: default",
+        "    standard: default",
+        "    light: default",
+      ].join("\n") + "\n",
+    );
+
+    const originalEnv = {
+      FACTORY_REPOS_ROOT: process.env.FACTORY_REPOS_ROOT,
+      FACTORY_SKIP_FETCH: process.env.FACTORY_SKIP_FETCH,
+      FACTORY_BASE_BRANCH: process.env.FACTORY_BASE_BRANCH,
+      FACTORY_WT_ROOT: process.env.FACTORY_WT_ROOT,
+      PATH: process.env.PATH,
+      WM334_LINEAR_STATE_DIR: process.env.WM334_LINEAR_STATE_DIR,
+      WM334_REAL_BUN: process.env.WM334_REAL_BUN,
+      WM334_BUN_LOG: process.env.WM334_BUN_LOG,
+    };
+    try {
+      process.env.FACTORY_REPOS_ROOT = tmpRoot;
+      process.env.FACTORY_SKIP_FETCH = "1";
+      process.env.FACTORY_BASE_BRANCH = baseBranch;
+      process.env.FACTORY_WT_ROOT = worktreeRoot;
+      process.env.PATH = `${path.join(stubDir)}:${process.env.PATH}`;
+      process.env.WM334_LINEAR_STATE_DIR = linearStateDir;
+      process.env.WM334_REAL_BUN = realBun;
+      process.env.WM334_BUN_LOG = path.join(tmpRoot, 'bun-calls.log');
+
+      const db = openDb(":memory:");
+      const lockDir = mkdtempSync(path.join(os.tmpdir(), "wm334-real-locks-"));
+      const leaseDir = mkdtempSync(path.join(os.tmpdir(), "wm334-real-leases-"));
+      const executionInputs = [];
+      const blockCalls = [];
+      const observedAdapter = {
+        async execute({ spec, workspaceDir }) {
+          executionInputs.push(JSON.parse(readFileSync(path.join(workspaceDir, "input.json"), "utf8")));
+          const result = {
+            schemaVersion: "factory.agent-result/v1",
+            terminalState: "completed",
+            reasonCode: "ok",
+            artifact: {
+              outcome: "PR_OPEN",
+              repo: spec.input.repo,
+              ticket: spec.input.ticket,
+              prUrl: `https://github.com/watt-mind/${spec.input.repo}/pull/10`,
+              verification: {
+                command: "printf 'entry chunk exceeds budget\\n' > /dev/null; exit 1",
+                passed: true,
+                output: "agent verification passed",
+              },
+              summary: `implemented ${spec.input.ticket}`,
+            },
+            evidence: { commands: ["cd event-runtime/web && bun run build:fast"] },
+          };
+          writeFileSync(path.join(workspaceDir, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
+          return { exitCode: 0, timedOut: false };
+        },
+      };
+
+      const blockTicket = ({ ticket, why, baseline, log = null }) => {
+        blockCalls.push({ ticket, why, baseline, log });
+        const marker = baselineFailureMarker({ why, baseline, log });
+        const commentsPath = path.join(linearStateDir, `${ticket}.comments.json`);
+        const existing = existsSync(commentsPath) ? JSON.parse(readFileSync(commentsPath, "utf8")) : [];
+        if (!existing.some((row) => String(row.body ?? "").includes(marker))) {
+          existing.push({ body: `Dispatch run blocked due pre-existing baseline red.\n\n**Why:** ${why}\n\n<!-- ${marker} -->` });
+          writeFileSync(commentsPath, JSON.stringify(existing), "utf8");
+        }
+        return true;
+      };
+
+      const run = async () => {
+        seedRuntimeState();
+        const spec = queueRun(db, makeDispatchSpec({
+          input: { repo: repoName, ticket },
+          workspace: { type: "worktree", checkoutDir: "repo", retainOnFailure: false },
+        }));
+        return runOnce(db, registry, { fake: observedAdapter }, opts({
+          workspacesRoot: mkdtempSync(path.join(os.tmpdir(), `${repoName}-run-`)),
+          dispatch: {
+            locksDir: lockDir,
+            leasesDir: leaseDir,
+            fetchTicket: () => ({
+              identifier: ticket,
+              state: { name: "Todo" },
+              assignee: null,
+              labels: { nodes: [{ name: "ai:agent-ready" }] },
+            }),
+            fetchInFlight: () => [],
+            countLeases: () => 0,
+            claimTicket: () => ({ ok: true }),
+            blockBaselineTicket: blockTicket,
+          },
+        }));
+      };
+
+      const first = await run();
+      const second = await run();
+      if (first.reasonCode !== "baseline_red") {
+        console.log("first summary", first);
+      }
+
+      expect(first.terminalState).toBe("FAILED");
+      expect(first.reasonCode).toBe("baseline_red");
+      expect(second.terminalState).toBe("FAILED");
+      expect(second.reasonCode).toBe("baseline_red");
+      expect(executionInputs).toHaveLength(2);
+      expect(blockCalls).toHaveLength(2);
+      expect(executionInputs[0]).toMatchObject({
+        repo: repoName,
+        ticket,
+        baseline: { status: "red", check: "web_build", exitCode: 1 },
+      });
+      expect(String(executionInputs[0].baseline.output ?? "")).toContain("entry chunk exceeds budget");
+
+      const comments = JSON.parse(readFileSync(path.join(linearStateDir, `${ticket}.comments.json`), "utf8"));
+      expect(comments).toHaveLength(1);
+
+      const marker = baselineFailureMarker({
+        why: blockCalls[0].why,
+        baseline: blockCalls[0].baseline,
+        log: blockCalls[0].log,
+      });
+      expect(comments[0].body).toContain(`<!-- ${marker} -->`);
+    } finally {
+      if (detachedBaseBranch) {
+        spawnSync("git", ["-C", repoRoot, "update-ref", "-d", `refs/remotes/origin/${detachedBaseBranch}`]);
+      }
+      for (const child of keepAliveProcesses) {
+        try {
+          child.kill();
+        } catch {
+        }
+      }
+      for (const [key, value] of Object.entries(originalEnv)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      if (!process.env.WM334_KEEP_TMP_ROOT) {
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("worktree provisioning failure is not misclassified as adapter_error and never reaches execution", async () => {
+    const db = openDb(":memory:");
+    const lockDir = mkdtempSync(path.join(os.tmpdir(), "evrt-provision-locks-"));
+    let executed = false;
+    const observingAdapter = { async execute() { executed = true; return { exitCode: 0, timedOut: false }; } };
+
+    const spec = queueRun(db, makeDispatchSpec({ input: { repo: "wt-broken-up", ticket: "WM-732" } }));
+    const summary = await runOnce(db, registry, { fake: observingAdapter }, opts({
+      dispatch: {
+        locksDir: lockDir,
+        fetchTicket: () => ({ identifier: "WM-732", state: { name: "Todo" }, assignee: null, labels: { nodes: [{ name: "ai:agent-ready" }] } }),
+        fetchInFlight: () => [],
+        countLeases: () => 0,
+        claimTicket: () => ({ ok: true }),
+      },
+    }));
+
+    expect(executed).toBe(false);
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("workspace_provisioning_error");
+    expect(summary.error).toContain("dependency install failed");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ?`).get(spec.runId).reason_code).toBe("workspace_provisioning_error");
   });
 
   test("rollback Linear ticket state to Todo on crash, timeout, and contract violation", async () => {

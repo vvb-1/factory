@@ -67,6 +67,25 @@ test("locked_bun_install reclaims stale lock with dead PID and succeeds", () => 
   }
 });
 
+test("locked_bun_install reclaims a stale pid-less lock directory", () => {
+  const testDir = createTempProject();
+  const lockDir = makeTestLockDir("test-pidless-lock");
+  mkdirSync(lockDir, { recursive: true });
+
+  try {
+    const r = sh(`locked_bun_install "${testDir}"`, {
+      FACTORY_LOCK_DIR: lockDir,
+      FACTORY_LOCK_STALE_AFTER: "0",
+      FACTORY_LOCK_MAX_WAIT: "2",
+    });
+    expect(r.status).toBe(0);
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
 test("locked_bun_install preserves live locks and times out when lock held", () => {
   const testDir = createTempProject();
   const lockDir = makeTestLockDir("test-live-lock");
@@ -112,6 +131,169 @@ test("concurrent locked_bun_install invocations serialize without colliding", as
   } finally {
     rmSync(testDir1, { recursive: true, force: true });
     rmSync(testDir2, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("locked_bun_install restores prior EXIT/INT/TERM traps upon clean return", () => {
+  const testDir = createTempProject();
+  const lockDir = makeTestLockDir("test-trap-restore");
+  try {
+    const script = `
+      trap 'echo CUSTOM_EXIT_TRIGGERED' EXIT
+      trap 'echo CUSTOM_INT_TRIGGERED' INT
+      trap 'echo CUSTOM_TERM_TRIGGERED' TERM
+      locked_bun_install "${testDir}"
+      echo "INSTALL_COMPLETED"
+    `;
+    const r = sh(script, { FACTORY_LOCK_DIR: lockDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("INSTALL_COMPLETED");
+    expect(r.stdout).toContain("CUSTOM_EXIT_TRIGGERED");
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("old holder cleanup preserves a new holder before pid publication", () => {
+  const lockDir = makeTestLockDir("test-release-generation");
+  mkdirSync(lockDir, { recursive: true });
+
+  try {
+    const oldCleanup = sh(`release_bun_install_lock "${lockDir}" "12345"`);
+    expect(oldCleanup.status).toBe(0);
+    expect(existsSync(lockDir)).toBe(true);
+
+    writeFileSync(path.join(lockDir, "pid"), "67890");
+    expect(existsSync(lockDir)).toBe(true);
+
+    const newCleanup = sh(`release_bun_install_lock "${lockDir}" "67890"`);
+    expect(newCleanup.status).toBe(0);
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("locked_bun_install composes prior INT/TERM/EXIT traps on interruption", async () => {
+  for (const { trapName, exitCode } of [
+    { trapName: "INT", exitCode: 130 },
+    { trapName: "TERM", exitCode: 143 },
+  ]) {
+    const testDir = createTempProject();
+    const lockDir = makeTestLockDir(`test-${trapName.toLowerCase()}-trap`);
+    const mockBinDir = mkdtempSync(path.join(tmpdir(), "mock-bun-"));
+    const readyFile = path.join(mockBinDir, "ready.txt");
+
+    const mockBun = path.join(mockBinDir, "bun");
+    writeFileSync(mockBun, `#!/usr/bin/env bash
+if [[ "$1" == "install" ]]; then
+  touch "${readyFile}"
+  sleep 1
+  exit 0
+fi
+exec bun "$@"
+`, { mode: 0o755 });
+
+    try {
+      const proc = Bun.spawn([
+        "bash",
+        "-c",
+        `source "${COMMON}"
+trap 'echo PRIOR_EXIT_TRIGGERED' EXIT
+trap 'echo PRIOR_${trapName}_TRIGGERED' ${trapName}
+(
+  for _ in {1..200}; do
+    if [[ -e "${readyFile}" ]]; then
+      kill -${trapName} "$$"
+      exit 0
+    fi
+    sleep 0.01
+  done
+  echo "timed out waiting for mock bun" >&2
+) &
+locked_bun_install "${testDir}"`,
+      ], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          PATH: `${mockBinDir}${path.delimiter}${process.env.PATH}`,
+          FACTORY_LOCK_DIR: lockDir,
+        },
+      });
+      const stdoutPromise = new Response(proc.stdout).text();
+      const stderrPromise = new Response(proc.stderr).text();
+
+      const [status, stdout, stderr] = await Promise.all([proc.exited, stdoutPromise, stderrPromise]);
+      expect(stderr).toBe("");
+      expect(stdout).toContain(`PRIOR_${trapName}_TRIGGERED`);
+      expect(stdout).toContain("PRIOR_EXIT_TRIGGERED");
+      expect(status).toBe(exitCode);
+      expect(existsSync(readyFile)).toBe(true);
+      expect(existsSync(lockDir)).toBe(false);
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+      rmSync(lockDir, { recursive: true, force: true });
+      rmSync(mockBinDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("multiple contenders race to reclaim a stale pid-less lock and all succeed", async () => {
+  const testDirs = [createTempProject(), createTempProject(), createTempProject(), createTempProject()];
+  const lockDir = makeTestLockDir("test-pidless-race");
+  mkdirSync(lockDir, { recursive: true });
+
+  try {
+    const runContender = (dir) =>
+      Bun.spawn(["bash", "-c", `source "${COMMON}"\nlocked_bun_install "${dir}"`], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          FACTORY_LOCK_DIR: lockDir,
+          FACTORY_LOCK_STALE_AFTER: "0",
+          FACTORY_LOCK_MAX_WAIT: "10",
+        },
+      }).exited;
+
+    const results = await Promise.all(testDirs.map(runContender));
+    for (const code of results) {
+      expect(code).toBe(0);
+    }
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    for (const d of testDirs) rmSync(d, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
+test("high concurrency race of 8 parallel locked_bun_install processes serializes cleanly", async () => {
+  const testDirs = Array.from({ length: 8 }, () => createTempProject());
+  const lockDir = makeTestLockDir("test-high-conc-lock");
+
+  try {
+    const runContender = (dir) =>
+      Bun.spawn(["bash", "-c", `source "${COMMON}"\nlocked_bun_install "${dir}"`], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          FACTORY_LOCK_DIR: lockDir,
+          FACTORY_LOCK_MAX_WAIT: "30",
+        },
+      }).exited;
+
+    const results = await Promise.all(testDirs.map(runContender));
+    for (const code of results) {
+      expect(code).toBe(0);
+    }
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    for (const d of testDirs) rmSync(d, { recursive: true, force: true });
     rmSync(lockDir, { recursive: true, force: true });
   }
 });

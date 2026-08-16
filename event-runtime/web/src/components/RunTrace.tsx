@@ -34,6 +34,12 @@ type TraceFilterKind = "all" | "tools" | "reasoning" | "errors" | "usage";
 function useTraceFeed(runId: string, live: boolean) {
   const acc = useRef<TraceEntry[]>([]);
   const cursor = useRef(0);
+
+  useEffect(() => {
+    acc.current = [];
+    cursor.current = 0;
+  }, [runId]);
+
   const query = useQuery<TraceEntry[]>({
     queryKey: ["trace", runId],
     queryFn: async () => {

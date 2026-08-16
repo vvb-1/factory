@@ -98,6 +98,27 @@ RUN_DIR="$(run_dir "$WT")"
 HOME_DIR="$(event_home "$WT")"
 mkdir -p "$RUN_DIR"
 
+# `worktree_up` has two failure classes (WM-334). Provisioning failures still
+# exit non-zero. A project check that is already red is reported to the runtime
+# through this per-invocation file and bring-up continues with a usable tree.
+# The runtime supplies a workspace-confined path; --here callers get a local
+# fallback so the same behavior is visible when provisioning manually.
+BASELINE_REPORT="${FACTORY_WORKTREE_REPORT:-$RUN_DIR/baseline.json}"
+rm -f "$BASELINE_REPORT"
+record_red_baseline() {
+  local check="$1"
+  local command="$2"
+  local exit_code="$3"
+  local output_file="$4"
+  bun -e '
+    import { readFileSync, writeFileSync } from "node:fs";
+    const [report, check, command, exitCode, outputFile] = process.argv.slice(1);
+    const raw = readFileSync(outputFile, "utf8");
+    const output = raw.length > 65536 ? raw.slice(-65536) : raw;
+    writeFileSync(report, JSON.stringify({ status: "red", check, command, exitCode: Number(exitCode), output }, null, 2) + "\n");
+  ' -- "$BASELINE_REPORT" "$check" "$command" "$exit_code" "$output_file"
+}
+
 # Resolve API/web ports only after the checkout exists so we can persist them.
 # --here prefers 7391/7392 but follows the same recorded-port reuse and
 # collision fallback path as named ticket worktrees.
@@ -125,8 +146,16 @@ if [[ -f "$WEB_DIR/dist/index.html" && "$(cat "$WEB_DIR/dist/.buildstamp" 2>/dev
   info "web bundle up to date — skipping build"
 else
   info "building the web bundle"
-  (cd "$WEB_DIR" && bun run build:fast >/dev/null) || die "web build failed — run it manually: cd $WEB_DIR && bun run build"
-  printf '%s\n' "$WEB_HASH" >"$WEB_DIR/dist/.buildstamp"
+  WEB_BUILD_OUTPUT="$RUN_DIR/baseline-web-build.log"
+  if (cd "$WEB_DIR" && bun run build:fast >"$WEB_BUILD_OUTPUT" 2>&1); then
+    printf '%s\n' "$WEB_HASH" >"$WEB_DIR/dist/.buildstamp"
+    rm -f "$WEB_BUILD_OUTPUT"
+  else
+    build_status=$?
+    cat "$WEB_BUILD_OUTPUT" >&2
+    warn "baseline is red: web_build failed (exit $build_status) — continuing with the usable worktree"
+    record_red_baseline "web_build" "cd event-runtime/web && bun run build:fast" "$build_status" "$WEB_BUILD_OUTPUT"
+  fi
 fi
 
 # ---------------------------------------------------------------- daemons ---
