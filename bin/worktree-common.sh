@@ -309,69 +309,109 @@ web_build_hash() { # <web-dir>
   ) | shasum | cut -d' ' -f1
 }
 
+# Remove a bun-install lock only when it still belongs to this process. The
+# pid-less case covers a signal arriving after mkdir but before the pid rename.
+release_bun_install_lock() { # <lock-dir> <owner-pid>
+  local lock_dir="$1" owner_pid="$2" holder=""
+  [[ -d "$lock_dir" ]] || return 0
+  holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
+  if [[ -z "$holder" || "$holder" == "$owner_pid" ]]; then
+    rm -rf "$lock_dir" 2>/dev/null || true
+  fi
+}
+
 # File-locked bun install with retry on SQLITE_BUSY (OPS-322).
 # Prevents concurrent worktree bring-ups from racing on bun's global cache DB.
 locked_bun_install() { # <dir>
   local target_dir="$1"
   local lock_dir="${FACTORY_LOCK_DIR:-$HOME/.factory/locks/bun-install.lock}"
   local max_wait="${FACTORY_LOCK_MAX_WAIT:-120}"
+  local stale_after="${FACTORY_LOCK_STALE_AFTER:-2}"
   local start_time
   start_time=$(date +%s)
 
+  [[ "$max_wait" =~ ^[0-9]+$ ]] || die "FACTORY_LOCK_MAX_WAIT must be numeric (got '$max_wait')"
+  [[ "$stale_after" =~ ^[0-9]+$ ]] || die "FACTORY_LOCK_STALE_AFTER must be numeric (got '$stale_after')"
   mkdir -p "$(dirname "$lock_dir")"
 
   while ! mkdir "$lock_dir" 2>/dev/null; do
-    if [[ -f "$lock_dir/pid" ]]; then
-      local holder
-      holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
-      if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-        local stale_candidate="${lock_dir}.stale.$$.$RANDOM"
-        if mv "$lock_dir" "$stale_candidate" 2>/dev/null; then
-          local stale_holder
-          stale_holder=$(cat "$stale_candidate/pid" 2>/dev/null || true)
-          if [[ -n "$stale_holder" ]] && kill -0 "$stale_holder" 2>/dev/null; then
-            mv "$stale_candidate" "$lock_dir" 2>/dev/null || rm -rf "$stale_candidate"
-          else
-            rm -rf "$stale_candidate"
-          fi
-          continue
-        fi
+    local holder="" now lock_mtime=0 lock_age=0 reclaim=0
+    holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
+    now=$(date +%s)
+
+    if [[ "$holder" =~ ^[0-9]+$ ]]; then
+      if ! kill -0 "$holder" 2>/dev/null; then
+        reclaim=1
+      fi
+    else
+      # A new holder needs a moment between mkdir and publishing its pid. Only
+      # reclaim a pid-less/malformed lock once that grace period has elapsed.
+      if stat -f '%m' "$lock_dir" >/dev/null 2>&1; then
+        lock_mtime=$(stat -f '%m' "$lock_dir" 2>/dev/null || printf '0')
+      else
+        lock_mtime=$(stat -c '%Y' "$lock_dir" 2>/dev/null || printf '0')
+      fi
+      [[ "$lock_mtime" =~ ^[0-9]+$ ]] || lock_mtime=0
+      lock_age=$(( now - lock_mtime ))
+      if (( lock_age >= stale_after )); then
+        reclaim=1
       fi
     fi
-    local now
-    now=$(date +%s)
+
+    if [[ "$reclaim" -eq 1 ]]; then
+      local stale_candidate="${lock_dir}.stale.$$.$RANDOM"
+      if mv "$lock_dir" "$stale_candidate" 2>/dev/null; then
+        local stale_holder
+        stale_holder=$(cat "$stale_candidate/pid" 2>/dev/null || true)
+        if [[ "$stale_holder" =~ ^[0-9]+$ ]] && kill -0 "$stale_holder" 2>/dev/null; then
+          mv "$stale_candidate" "$lock_dir" 2>/dev/null || rm -rf "$stale_candidate"
+        else
+          rm -rf "$stale_candidate"
+        fi
+        continue
+      fi
+    fi
+
     if (( now - start_time >= max_wait )); then
       die "timed out waiting for bun install lock ($lock_dir)"
     fi
     sleep 0.1
   done
-  echo $$ > "$lock_dir/pid"
 
-  local attempt=1 max_attempts=5 out code=0
+  # Publish ownership atomically so contenders never observe a partially
+  # written pid file. Traps are restored before returning to the caller.
+  local pid_tmp="$lock_dir/pid.$$.$RANDOM"
+  printf '%s\n' "$$" > "$pid_tmp"
+  mv "$pid_tmp" "$lock_dir/pid"
+  local previous_exit_trap previous_int_trap previous_term_trap
+  previous_exit_trap=$(trap -p EXIT || true)
+  previous_int_trap=$(trap -p INT || true)
+  previous_term_trap=$(trap -p TERM || true)
+  trap 'release_bun_install_lock "$lock_dir" "$$"' EXIT
+  trap 'release_bun_install_lock "$lock_dir" "$$"; exit 130' INT
+  trap 'release_bun_install_lock "$lock_dir" "$$"; exit 143' TERM
+
+  local attempt=1 max_attempts=5 out="" code=0
   while [[ $attempt -le $max_attempts ]]; do
     out=$(cd "$target_dir" && bun install --frozen-lockfile 2>&1) && code=0 || code=$?
-    if [[ $code -eq 0 ]]; then
-      if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
-        rm -rf "$lock_dir" 2>/dev/null || true
-      fi
-      return 0
-    fi
+    [[ $code -eq 0 ]] && break
     if [[ "$out" =~ "SQLITE_BUSY" || "$out" =~ "database is locked" ]]; then
       warn "bun install in $target_dir hit SQLITE_BUSY (attempt $attempt/$max_attempts) — retrying"
       sleep $(( attempt ))
       attempt=$(( attempt + 1 ))
     else
-      if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
-        rm -rf "$lock_dir" 2>/dev/null || true
-      fi
-      printf '%s\n' "$out" >&2
-      return $code
+      break
     fi
   done
-  if [[ -f "$lock_dir/pid" ]] && [[ "$(cat "$lock_dir/pid" 2>/dev/null || true)" == "$$" ]]; then
-    rm -rf "$lock_dir" 2>/dev/null || true
+
+  release_bun_install_lock "$lock_dir" "$$"
+  trap - EXIT INT TERM
+  [[ -n "$previous_exit_trap" ]] && eval "$previous_exit_trap"
+  [[ -n "$previous_int_trap" ]] && eval "$previous_int_trap"
+  [[ -n "$previous_term_trap" ]] && eval "$previous_term_trap"
+  if [[ $code -ne 0 ]]; then
+    printf '%s\n' "$out" >&2
   fi
-  printf '%s\n' "$out" >&2
   return $code
 }
 

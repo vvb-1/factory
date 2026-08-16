@@ -67,6 +67,25 @@ test("locked_bun_install reclaims stale lock with dead PID and succeeds", () => 
   }
 });
 
+test("locked_bun_install reclaims a stale pid-less lock directory", () => {
+  const testDir = createTempProject();
+  const lockDir = makeTestLockDir("test-pidless-lock");
+  mkdirSync(lockDir, { recursive: true });
+
+  try {
+    const r = sh(`locked_bun_install "${testDir}"`, {
+      FACTORY_LOCK_DIR: lockDir,
+      FACTORY_LOCK_STALE_AFTER: "0",
+      FACTORY_LOCK_MAX_WAIT: "2",
+    });
+    expect(r.status).toBe(0);
+    expect(existsSync(lockDir)).toBe(false);
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+});
+
 test("locked_bun_install preserves live locks and times out when lock held", () => {
   const testDir = createTempProject();
   const lockDir = makeTestLockDir("test-live-lock");
