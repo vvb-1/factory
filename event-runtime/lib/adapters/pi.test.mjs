@@ -9,7 +9,6 @@ import {
   execute,
   extractUsage,
   isHarnessDenial,
-  killProcessGroup,
   KILL_GRACE_MS,
   mapStreamEvent,
   PUSH_CREDENTIAL_ENV,
@@ -20,26 +19,6 @@ import {
   resolvePiCommand,
   safeChildEnvironment,
 } from "./pi.mjs";
-
-describe("killProcessGroup (WM-263)", () => {
-  test("signals the detached process group through its negative leader PID", () => {
-    const signals = [];
-    const child = { pid: 8765, kill: () => { throw new Error("parent-only fallback must not run"); } };
-
-    killProcessGroup(child, "SIGTERM", (pid, signal) => signals.push([pid, signal]));
-
-    expect(signals).toEqual([[-8765, "SIGTERM"]]);
-  });
-
-  test("falls back to the child when process-group signaling is unavailable", () => {
-    const signals = [];
-    const child = { pid: 8765, kill: (signal) => signals.push(signal) };
-
-    killProcessGroup(child, "SIGKILL", () => { throw new Error("no process group"); });
-
-    expect(signals).toEqual(["SIGKILL"]);
-  });
-});
 
 describe("isHarnessDenial (WM-127, no confirmed pi refusal shapes yet)", () => {
   test("nothing matches — pi enforces read-only by tool non-exposure, not runtime denial", () => {
@@ -401,6 +380,15 @@ process.stdin.on("end", () => {
     setInterval(() => {}, 10_000);
   }
 
+  if (behavior === "spawn_long_lived_grandchild") {
+    const grandchild = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 10_000)"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    writeFileSync(process.env.FACTORY_TEST_GRANDCHILD_PID_FILE, String(grandchild.pid), "utf8");
+    setInterval(() => {}, 10_000);
+  }
+
   if (behavior === "emit_tool_then_success") {
     process.stdout.write(JSON.stringify({
       type: "message_end",
@@ -468,6 +456,41 @@ process.stdin.on("end", () => {
     agent: "test-pi-agent@1",
     input: { repos: ["bj29"] },
   };
+  const testProcessGroup = process.platform === "win32" ? test.skip : test;
+
+  async function waitForGrandchildPid(pidFile) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (existsSync(pidFile)) return Number(readFileSync(pidFile, "utf8"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("stub did not report its grandchild PID");
+  }
+
+  function processExists(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return error?.code !== "ESRCH";
+    }
+  }
+
+  async function expectProcessExit(pid) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (!processExists(pid)) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(processExists(pid)).toBe(false);
+  }
+
+  function killIfRunning(pid) {
+    if (!pid || !processExists(pid)) return;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process exited between the existence check and cleanup.
+    }
+  }
 
   test("executes stub binary in workspaceDir, strips API keys, pipes prompt on stdin, captures transcript + trace", async () => {
     const workspaceDir = ws();
@@ -541,20 +564,37 @@ process.stdin.on("end", () => {
     expect(outcome.timedOut).toBe(false);
   });
 
-  test("timeout sends SIGTERM and returns timedOut: true", async () => {
-    const outcome = await execute({
+  testProcessGroup("timeout kills a real long-lived grandchild (WM-263)", async () => {
+    const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
+    const ac = new AbortController();
+    const runPromise = execute({
       spec: defaultSpec,
       def: defaultDef,
-      workspaceDir: ws(),
-      timeoutMs: 150,
+      workspaceDir,
+      timeoutMs: 6_000,
       killGraceMs: 5000,
+      abortSignal: ac.signal,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "sleep_sigterm",
+        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
       },
     });
-    expect(outcome.timedOut).toBe(true);
-  });
+    let grandchildPid;
+
+    try {
+      grandchildPid = await waitForGrandchildPid(pidFile);
+      expect(processExists(grandchildPid)).toBe(true);
+      const outcome = await runPromise;
+      expect(outcome.timedOut).toBe(true);
+      await expectProcessExit(grandchildPid);
+    } finally {
+      ac.abort();
+      await runPromise;
+      killIfRunning(grandchildPid);
+    }
+  }, { timeout: 12_000 });
 
   test("timeout escalates to SIGKILL when child ignores SIGTERM", async () => {
     const outcome = await execute({
@@ -571,23 +611,37 @@ process.stdin.on("end", () => {
     expect(outcome.timedOut).toBe(true);
   });
 
-  test("abortSignal terminates child process promptly with timedOut: false", async () => {
+  testProcessGroup("abort kills a real long-lived grandchild (WM-263)", async () => {
+    const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
     const ac = new AbortController();
     const runPromise = execute({
       spec: defaultSpec,
       def: defaultDef,
-      workspaceDir: ws(),
+      workspaceDir,
       timeoutMs: 10_000,
       killGraceMs: 500,
       abortSignal: ac.signal,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "sleep_sigterm",
+        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
       },
     });
-    setTimeout(() => ac.abort(), 100);
-    const outcome = await runPromise;
-    expect(outcome.timedOut).toBe(false);
+    let grandchildPid;
+
+    try {
+      grandchildPid = await waitForGrandchildPid(pidFile);
+      expect(processExists(grandchildPid)).toBe(true);
+      ac.abort();
+      const outcome = await runPromise;
+      expect(outcome.timedOut).toBe(false);
+      await expectProcessExit(grandchildPid);
+    } finally {
+      ac.abort();
+      await runPromise;
+      killIfRunning(grandchildPid);
+    }
   });
 
   test("multiple assistant turns accumulate into one combined usage trace event", async () => {

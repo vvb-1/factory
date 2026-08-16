@@ -9,7 +9,6 @@ import {
   deriveAllowedTools,
   execute,
   isHarnessDenial,
-  killProcessGroup,
   KILL_GRACE_MS,
   mapStreamEvent,
   PROMPT_SUFFIX,
@@ -18,26 +17,6 @@ import {
   safeChildEnvironment,
   WRITE_TOOLS,
 } from "./claude.mjs";
-
-describe("killProcessGroup (WM-263)", () => {
-  test("signals the detached process group through its negative leader PID", () => {
-    const signals = [];
-    const child = { pid: 4321, kill: () => { throw new Error("parent-only fallback must not run"); } };
-
-    killProcessGroup(child, "SIGKILL", (pid, signal) => signals.push([pid, signal]));
-
-    expect(signals).toEqual([[-4321, "SIGKILL"]]);
-  });
-
-  test("falls back to the child when process-group signaling is unavailable", () => {
-    const signals = [];
-    const child = { pid: 4321, kill: (signal) => signals.push(signal) };
-
-    killProcessGroup(child, "SIGTERM", () => { throw new Error("no process group"); });
-
-    expect(signals).toEqual(["SIGTERM"]);
-  });
-});
 
 describe("isHarnessDenial (WM-127)", () => {
   test("matches the harness's own refusal shapes", () => {
@@ -406,6 +385,15 @@ if (behavior === "ignore_sigterm") {
   setInterval(() => {}, 10_000);
 }
 
+if (behavior === "spawn_long_lived_grandchild") {
+  const grandchild = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 10_000)"], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  writeFileSync(process.env.FACTORY_TEST_GRANDCHILD_PID_FILE, String(grandchild.pid), "utf8");
+  setInterval(() => {}, 10_000);
+}
+
 if (behavior === "emit_bash_then_success") {
   process.stdout.write(
     JSON.stringify({
@@ -516,6 +504,41 @@ if (behavior === "emit_denial_then_recovery") {
     agent: "test-agent@1",
     input: { repos: ["bj29"] },
   };
+  const testProcessGroup = process.platform === "win32" ? test.skip : test;
+
+  async function waitForGrandchildPid(pidFile) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (existsSync(pidFile)) return Number(readFileSync(pidFile, "utf8"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("stub did not report its grandchild PID");
+  }
+
+  function processExists(pid) {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return error?.code !== "ESRCH";
+    }
+  }
+
+  async function expectProcessExit(pid) {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      if (!processExists(pid)) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(processExists(pid)).toBe(false);
+  }
+
+  function killIfRunning(pid) {
+    if (!pid || !processExists(pid)) return;
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // The process exited between the existence check and cleanup.
+    }
+  }
 
   test("executes stub binary in workspaceDir, strips ANTHROPIC_API_KEY, captures .transcript.json and trace", async () => {
     const workspaceDir = ws();
@@ -600,21 +623,37 @@ if (behavior === "emit_denial_then_recovery") {
     expect(outcome.timedOut).toBe(false);
   });
 
-  test("timeout sends SIGTERM and returns timedOut: true", async () => {
+  testProcessGroup("timeout kills a real long-lived grandchild (WM-263)", async () => {
     const workspaceDir = ws();
-    const outcome = await execute({
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
+    const ac = new AbortController();
+    const runPromise = execute({
       spec: defaultSpec,
       def: defaultDef,
       workspaceDir,
-      timeoutMs: 150,
+      timeoutMs: 6_000,
       killGraceMs: 5000,
+      abortSignal: ac.signal,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "sleep_sigterm",
+        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
       },
     });
-    expect(outcome.timedOut).toBe(true);
-  });
+    let grandchildPid;
+
+    try {
+      grandchildPid = await waitForGrandchildPid(pidFile);
+      expect(processExists(grandchildPid)).toBe(true);
+      const outcome = await runPromise;
+      expect(outcome.timedOut).toBe(true);
+      await expectProcessExit(grandchildPid);
+    } finally {
+      ac.abort();
+      await runPromise;
+      killIfRunning(grandchildPid);
+    }
+  }, { timeout: 12_000 });
 
   test("timeout escalates to SIGKILL when child ignores SIGTERM", async () => {
     const workspaceDir = ws();
@@ -632,8 +671,9 @@ if (behavior === "emit_denial_then_recovery") {
     expect(outcome.timedOut).toBe(true);
   });
 
-  test("abortSignal terminates child process promptly with timedOut: false", async () => {
+  testProcessGroup("abort kills a real long-lived grandchild (WM-263)", async () => {
     const workspaceDir = ws();
+    const pidFile = path.join(workspaceDir, "grandchild.pid");
     const ac = new AbortController();
     const runPromise = execute({
       spec: defaultSpec,
@@ -644,14 +684,24 @@ if (behavior === "emit_denial_then_recovery") {
       abortSignal: ac.signal,
       env: {
         PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "sleep_sigterm",
+        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
       },
     });
+    let grandchildPid;
 
-    setTimeout(() => ac.abort(), 100);
-
-    const outcome = await runPromise;
-    expect(outcome.timedOut).toBe(false);
+    try {
+      grandchildPid = await waitForGrandchildPid(pidFile);
+      expect(processExists(grandchildPid)).toBe(true);
+      ac.abort();
+      const outcome = await runPromise;
+      expect(outcome.timedOut).toBe(false);
+      await expectProcessExit(grandchildPid);
+    } finally {
+      ac.abort();
+      await runPromise;
+      killIfRunning(grandchildPid);
+    }
   });
 
   test("pre-aborted abortSignal terminates child immediately", async () => {
