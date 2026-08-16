@@ -105,6 +105,19 @@ export function probeBytes(raw) {
 }
 
 /** Substitute {field} placeholders across an argv template (item-list mode). */
+function computeChainOutcome(actions, chainOutcomeConfig) {
+  if (!chainOutcomeConfig || typeof chainOutcomeConfig !== "object") return undefined;
+
+  const appliedActions = new Set(actions.map((entry) => entry.action));
+  const rules = Array.isArray(chainOutcomeConfig.precedence) ? chainOutcomeConfig.precedence : [];
+  for (const rule of rules) {
+    if (!rule || typeof rule.action !== "string") continue;
+    if (typeof rule.outcome !== "string") continue;
+    if (appliedActions.has(rule.action)) return rule.outcome;
+  }
+  return typeof chainOutcomeConfig.default === "string" ? chainOutcomeConfig.default : "NO_CHANGE";
+}
+
 export function substituteArgv(argv, context) {
   for (const element of argv) {
     if (/\$\{[A-Za-z0-9_]+\}/.test(element)) {
@@ -179,6 +192,11 @@ async function executeItemList({ spec, def, workspaceDir, timeoutMs }) {
     applied.push({ issueId, action: item.action });
   }
 
+  const artifact = { repo: spec.input.repo, applied };
+  if (def.chainOutcome && Object.prototype.hasOwnProperty.call(def.chainOutcome, "precedence")) {
+    artifact.outcome = computeChainOutcome(applied, def.chainOutcome);
+  }
+
   writeFileSync(
     path.join(workspaceDir, "result.json"),
     `${JSON.stringify(
@@ -186,7 +204,7 @@ async function executeItemList({ spec, def, workspaceDir, timeoutMs }) {
         schemaVersion: "factory.agent-result/v1",
         terminalState: "completed",
         reasonCode: "ok",
-        artifact: { repo: spec.input.repo, applied },
+        artifact,
         evidence: { commands: resolved.map((r) => r.argv), outputs },
         artifacts: [{ kind: "log", path: ".actions.log" }],
       },

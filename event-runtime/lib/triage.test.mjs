@@ -83,6 +83,40 @@ const canonicalWriteDetail =
 ` +
   `bun test event-runtime/lib/triage.test.mjs`;
 
+function triagePlanScan({ action, detail }) {
+  return {
+    async execute({ spec, workspaceDir }) {
+      const item = {
+        issueId: "CLNT-999",
+        action,
+        reason: `fake: chain outcome ${action}`,
+        ...(detail ? { detail } : {}),
+      };
+      writeFileSync(
+        path.join(workspaceDir, "result.json"),
+        `${JSON.stringify(
+          {
+            schemaVersion: "factory.agent-result/v1",
+            terminalState: "completed",
+            reasonCode: "ok",
+            artifact: {
+              recommendation: "TRIAGE",
+              repo: spec.input.repo,
+              plan: [item],
+              summary: `fake triage of ${spec.input.repo}`,
+            },
+            evidence: { commands: ["fake"], issuesSeen: 1 },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      return { exitCode: 0, timedOut: false };
+    },
+  };
+}
+
 function harness({ adapters = { pi: fake, actions: fake } } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-triage-"));
   const db = openDb(path.join(dir, "runtime.db"));
@@ -192,6 +226,60 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
       action: "write-detail",
       reason: "fake: canonical multi-section detail",
     });
+  });
+
+  test("apply outcome SUPPLY_CHANGED chains to work.requested", async () => {
+    const { db, approveNext } = harness({ adapters: { pi: fake, actions: fake } });
+    admitEvent(db, registry, triageEnvelope("bj29", "triage-6"));
+
+    const scan = await approveNext("triage-scan@1");
+    expect(scan.summary.terminalState).toBe("COMPLETED");
+    expect(resolveChains(db, registry).emitted).toBe(1);
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+    const applied = await approveNext("triage-apply@1");
+    expect(applied.summary.terminalState).toBe("COMPLETED");
+
+    const chain = resolveChains(db, registry);
+    expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
+    const event = db.query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`).get(applied.runId);
+    expect(event.type).toBe("factory.work.requested");
+    expect(JSON.parse(event.envelope_json).payload).toEqual({ repo: "bj29" });
+  });
+
+  test("apply outcome DETAIL_CHANGED chains to triage.requested", async () => {
+    const { db, approveNext } = harness({ adapters: { pi: triagePlanScan({ action: "write-detail", detail: canonicalWriteDetail }), actions: fake } });
+    admitEvent(db, registry, triageEnvelope("bj29", "triage-7"));
+
+    const scan = await approveNext("triage-scan@1");
+    expect(scan.summary.terminalState).toBe("COMPLETED");
+    expect(resolveChains(db, registry).emitted).toBe(1);
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+    const applied = await approveNext("triage-apply@1");
+    expect(applied.summary.terminalState).toBe("COMPLETED");
+
+    const chain = resolveChains(db, registry);
+    expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
+    const event = db.query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`).get(applied.runId);
+    expect(event.type).toBe("factory.triage.requested");
+    expect(JSON.parse(event.envelope_json).payload).toEqual({ repo: "bj29" });
+  });
+
+  test("apply outcome NO_CHANGE terminates with no follow-up", async () => {
+    const { db, approveNext } = harness({ adapters: { pi: triagePlanScan({ action: "move-to-todo" }), actions: fake } });
+    admitEvent(db, registry, triageEnvelope("bj29", "triage-8"));
+
+    const scan = await approveNext("triage-scan@1");
+    expect(scan.summary.terminalState).toBe("COMPLETED");
+    expect(resolveChains(db, registry).emitted).toBe(1);
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+    const applied = await approveNext("triage-apply@1");
+    expect(applied.summary.terminalState).toBe("COMPLETED");
+
+    const chain = resolveChains(db, registry);
+    expect(chain).toEqual({ emitted: 0, skipped: 1, errors: [] });
   });
 
   test("a clean queue converges to NOOP — nothing proposed, nothing applied", async () => {

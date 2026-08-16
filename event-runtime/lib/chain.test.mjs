@@ -355,5 +355,72 @@ describe("multi-emit chain resolution (WM-119)", () => {
     expect(outcome.errors).toHaveLength(1);
     expect(outcome.errors[0]).toContain('missing key "ticket"');
   });
+
+  test("triage-apply outcome edges route to the correct follow-up", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-chain-triage-apply-1"));
+    const db = openDb(path.join(dir, "runtime.db"));
+
+    seedCompletedRun(db, {
+      runId: "run-triage-supply",
+      agent: "triage-apply@1",
+      input: { repo: "wm/triage" },
+      artifact: {
+        outcome: "SUPPLY_CHANGED",
+        repo: "wm/triage",
+        applied: [{ issueId: "WM-1", action: "label-agent-ready" }],
+      },
+    });
+
+    const supplyOutcome = resolveChains(db, registry);
+    expect(supplyOutcome).toEqual({ emitted: 1, skipped: 0, errors: [] });
+    const supplyEvent = db.query(`SELECT * FROM events WHERE source = 'chain' AND event_id = ?`).get("chain-run-triage-supply");
+    expect(supplyEvent.type).toBe("factory.work.requested");
+    expect(JSON.parse(supplyEvent.envelope_json).payload).toEqual({ repo: "wm/triage" });
+
+    const dir2 = mkdtempSync(path.join(os.tmpdir(), "evrt-chain-triage-apply-2"));
+    const db2 = openDb(path.join(dir2, "runtime.db"));
+    seedCompletedRun(db2, {
+      runId: "run-triage-detail",
+      agent: "triage-apply@1",
+      input: { repo: "wm/triage" },
+      artifact: {
+        outcome: "DETAIL_CHANGED",
+        repo: "wm/triage",
+        applied: [{ issueId: "WM-2", action: "write-detail" }],
+      },
+    });
+    const detailOutcome = resolveChains(db2, registry);
+    expect(detailOutcome).toEqual({ emitted: 1, skipped: 0, errors: [] });
+    const detailEvent = db2.query(`SELECT * FROM events WHERE source = 'chain' AND event_id = ?`).get("chain-run-triage-detail");
+    expect(detailEvent.type).toBe("factory.triage.requested");
+    expect(JSON.parse(detailEvent.envelope_json).payload).toEqual({ repo: "wm/triage" });
+
+    const dir3 = mkdtempSync(path.join(os.tmpdir(), "evrt-chain-triage-apply-3"));
+    const db3 = openDb(path.join(dir3, "runtime.db"));
+    seedCompletedRun(db3, {
+      runId: "run-triage-nochange",
+      agent: "triage-apply@1",
+      input: { repo: "wm/triage" },
+      artifact: {
+        outcome: "NO_CHANGE",
+        repo: "wm/triage",
+        applied: [{ issueId: "WM-3", action: "move-to-todo" }],
+      },
+    });
+    expect(resolveChains(db3, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+  });
+
+  test("non-completed runs do not generate chain candidates", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-chain-triage-fail-"));
+    const db = openDb(path.join(dir, "runtime.db"));
+    const now = new Date().toISOString();
+
+    db.query(
+      `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+       VALUES ('run-triage-failed', 'idem-run-triage-failed', '{"agent":"triage-apply@1","input":{"repo":"wm/triage"}}', 'hash', 'FAILED', 1, ?, ?)`,
+    ).run(now, now);
+
+    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 0, errors: [] });
+  });
 });
 

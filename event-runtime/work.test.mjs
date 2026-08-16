@@ -55,10 +55,11 @@ beforeAll(() => {
   mkdirSync(path.join(root, "config"), { recursive: true });
   const wm29 = makeGitRepo("wm29");
   const clean = makeGitRepo("clean");
+  const low = makeGitRepo("low");
   const wtRoot = mkdtempSync(path.join(os.tmpdir(), "evrt-work-trees-"));
   fixtures.push(wtRoot);
 
-  for (const r of [wm29, clean]) {
+  for (const r of [wm29, clean, low]) {
     mkdirSync(path.join(r, "bin"), { recursive: true });
     writeFileSync(
       path.join(r, "bin", "worktree-up.sh"),
@@ -80,7 +81,11 @@ beforeAll(() => {
       `  - name: clean\n    path: ${clean}\n    github: watt-mind/clean\n    base: develop\n` +
       `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
       `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-      `    worktree_root: ${wtRoot}\n`,
+      `    worktree_root: ${wtRoot}\n` +
+      `  - name: low\n    path: ${low}\n    github: watt-mind/low\n    base: develop\n` +
+      `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
+      `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+      `    worktree_root: ${wtRoot}\n    verify: echo verified\n`,
   );
   previousReposRoot = process.env.FACTORY_REPOS_ROOT;
   process.env.FACTORY_REPOS_ROOT = root;
@@ -117,6 +122,18 @@ function workScanArtifact(repo) {
       deferred: [],
       summary: "fake: no dispatchable tickets",
       noopReason: "queue_empty",
+    };
+  }
+  if (repo === "low") {
+    return {
+      recommendation: "LOW_SUPPLY",
+      repo,
+      ticket: null,
+      plan: [],
+      deferred: [],
+      summary: "fake: triage backlog exists",
+      readyCandidates: 0,
+      triageBacklog: 3,
     };
   }
   return {
@@ -295,7 +312,7 @@ describe("work-scan registration (WM-110)", () => {
     expect(schema.properties.noopReason.enum).toEqual(["queue_empty", "cap_full", "all_overlapping"]);
   });
 
-  test("the DISPATCH edge is multi-emit: fans out plan items into factory.dispatch.requested (WM-119)", () => {
+  test("DISPATCH remains multi-emit and LOW_SUPPLY chains to triage", () => {
     // chain.mjs derives eventId chain-<runId>-<ticket> — multi-emit fan-out
     // edge feeds every planned ticket into factory.dispatch.requested.
     expect(registry.edges["work-scan@1"]).toEqual({
@@ -305,6 +322,10 @@ describe("work-scan registration (WM-110)", () => {
           eventType: "factory.dispatch.requested",
           itemsField: "plan",
           itemKey: "ticket",
+          input: { repo: "$.artifact.repo" },
+        },
+        LOW_SUPPLY: {
+          eventType: "factory.triage.requested",
           input: { repo: "$.artifact.repo" },
         },
       },
@@ -359,6 +380,26 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
 
     // One chain pass per run: re-resolving emits nothing new.
     expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 0, errors: [] });
+  });
+
+  test("a LOW_SUPPLY scan chains to one triage scan", async () => {
+    const { db, planAll, approveNext } = harness();
+    admitEvent(db, registry, workEnvelope("low", "work-low-1"));
+    const scan = await approveNext("work-scan@1");
+    expect(scan.summary.terminalState).toBe("COMPLETED");
+    const scanResult = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+    expect(scanResult.artifact.readyCandidates).toBe(0);
+    expect(scanResult.artifact.triageBacklog).toBe(3);
+
+    const chain = resolveChains(db, registry);
+    expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
+
+    const chainEvent = db.query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`).get(scan.runId);
+    expect(chainEvent.type).toBe("factory.triage.requested");
+    expect(JSON.parse(chainEvent.envelope_json).payload).toEqual({ repo: "low" });
+
+    planAll();
+    expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeTruthy();
   });
 
   test("a NOOP scan chains to nothing — no dispatch proposal exists", async () => {
