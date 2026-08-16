@@ -1381,7 +1381,17 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     const seedRuntimeState = () => {};
 
 
-    const baseBranch = (spawnSync("git", ["-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).stdout || "").trim() || "develop";
+    const currentBranch = (spawnSync("git", ["-C", repoRoot, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).stdout || "").trim();
+    const hasRemoteBranch = (branch) => branch && branch !== "HEAD" && spawnSync(
+      "git",
+      ["-C", repoRoot, "show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`],
+    ).status === 0;
+    const baseBranch = [process.env.GITHUB_BASE_REF, currentBranch, "develop"].find(hasRemoteBranch);
+    expect(baseBranch).toBeDefined();
+    expect(baseBranch).not.toBe("HEAD");
+    if (hasRemoteBranch(process.env.GITHUB_BASE_REF)) {
+      expect(baseBranch).toBe(process.env.GITHUB_BASE_REF);
+    }
     const realBun = (spawnSync("bash", ["-c", "command -v bun"], { encoding: "utf8", env: { ...process.env } }).stdout || "").trim() || "bun";
 
     mkdirSync(stubDir, { recursive: true });
