@@ -22,11 +22,10 @@ export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OU
 export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && state !== "VERIFYING";
 
 /**
- * The two states `reapExpiredLeases` sweeps (lib/worker.mjs) — so exactly the
- * states where the current attempt is racing a deadline. A VERIFYING run has
- * already exited its agent and is never reaped, so it has no clock to show.
+ * The states `reapExpiredLeases` sweeps (lib/worker.mjs) — exactly the states
+ * where the current attempt is still racing its attempt and lease deadlines.
  */
-export const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING"];
+export const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
 
 /** `off`: no deadline running yet. `spent`: the deadline passed; the runtime has not caught up. */
 export type Clock = { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };

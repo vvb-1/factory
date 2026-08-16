@@ -88,6 +88,16 @@ describe("RunDetailBlocks field tiering (WM-129)", () => {
     expect(done.queryByText("Deadlines")).toBeNull();
   });
 
+  test("shows active attempt and lease clocks while a run is VERIFYING (WM-249)", () => {
+    const verifying = renderBlocks(
+      createRunDetailFixture({ run: { state: "VERIFYING" } as RunDetail["run"] }),
+    );
+
+    expect(verifying.getByText("Deadlines")).toBeTruthy();
+    expect(verifying.getByTitle(/^timeout in /)).toBeTruthy();
+    expect(verifying.getByTitle(/^reaped in /)).toBeTruthy();
+  });
+
   test("attempt cards carry started/finished timestamps", () => {
     const r = renderBlocks(createRunDetailFixture({}));
     // Once in the Deadlines clock, once on the attempt card — the card row is the one this test owns.
