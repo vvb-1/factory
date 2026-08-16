@@ -42,27 +42,40 @@ export class ContractViolation extends Error {
   }
 }
 
-function failureSignatureLines(output) {
+function normalizeFailureOutput(output) {
   return String(output ?? "")
     .replace(/\x1b\[[0-9;]*m/g, "")
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length >= 8)
+    .filter((line) => line.length > 0)
     // Runners repeat these for unrelated failures; they are not evidence that
     // the same underlying check remains red.
     .filter((line) => !/^(\$ |bun test|error: script |error: ".*" exited|exited with code)/i.test(line));
 }
 
-/** Conservative evidence that post-agent verification hit the recorded red baseline. */
-function matchesRedBaseline(baseline, verifyOutput) {
-  if (baseline?.status !== "red") return false;
-  const finalLines = new Set(failureSignatureLines(verifyOutput));
-  if (finalLines.size === 0) return false;
-  return failureSignatureLines(baseline.output)
-    .slice(-20)
-    .some((line) => finalLines.has(line));
+/**
+ * Deterministic normalized signature of a failure payload.
+ * Exact equality is intentionally strict: any new signal (even a single
+ * additional line) proves the failure signature changed.
+ */
+function failureSignature(output) {
+  return normalizeFailureOutput(output).join("\n");
 }
 
+/**
+ * Conservative evidence that post-agent verification hit the recorded red baseline.
+ * Unlike partial line overlap, this compares full normalized signatures and fails
+ * closed on ambiguous signal drift.
+ */
+function matchesRedBaseline(baseline, verifyOutput) {
+  if (baseline?.status !== "red") return false;
+  const baselineSig = failureSignature(baseline.output);
+  const verifySig = failureSignature(verifyOutput);
+  if (!baselineSig || !verifySig) return false;
+  return baselineSig === verifySig;
+}
+
+export { normalizeFailureOutput, failureSignature };
 /**
  * Verify one attempt's workspace output against the agent-result contract and
  * the agent definition's output schema.

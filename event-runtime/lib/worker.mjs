@@ -373,6 +373,70 @@ function defaultUnclaimTicket({ repo, ticket, why, log = null, fetchTicket }) {
   }
 }
 
+const BASELINE_COMMENT_MARKER = "wm:baseline:red:";
+
+function baselineFailureSignature({ why, log = null, baseline = null }) {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      why,
+      log,
+      baseline: baseline && typeof baseline === "object"
+        ? { check: baseline.check, exitCode: baseline.exitCode, output: baseline.output }
+        : null,
+    }))
+    .digest("hex");
+}
+
+function hasRecordedBaselineFailureComment(ticket, signature) {
+  const marker = `${BASELINE_COMMENT_MARKER}${signature}`;
+  try {
+    const out = execFileSync("bun", [linearCli(), "comments", ticket, "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const comments = JSON.parse(out);
+    return (comments ?? []).some((row) => String(row.body ?? "").includes(marker));
+  } catch {
+    return false;
+  }
+}
+
+function defaultBlockBaselineTicket({ repo, ticket, why, log = null, baseline = null, fetchTicket }) {
+  try {
+    let cur = null;
+    if (typeof fetchTicket === "function") {
+      cur = fetchTicket(ticket);
+    } else {
+      const out = execFileSync("bun", [linearCli(), "get", ticket, "--json"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      cur = JSON.parse(out);
+    }
+    if (!cur || cur.state?.name !== "In Progress") return false;
+    if (!(cur.labels?.nodes ?? []).some((l) => l.name === "ai:in-progress")) return false;
+
+    const signature = baselineFailureSignature({ why, log, baseline });
+    execFileSync("bun", [linearCli(), "state", ticket, "Blocked", "--unassign", "--add", "ai:blocked", "--remove", "ai:in-progress"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    if (!hasRecordedBaselineFailureComment(ticket, signature)) {
+      const marker = `${BASELINE_COMMENT_MARKER}${signature}`;
+      const body = `Dispatch run blocked due pre-existing baseline red.\n\n**Why:** ${why}${log ? `\n**Log:** \`${log.replace(homedir(), "~")}\`` : ""}\n\n
+<!-- ${marker} -->`;
+      execFileSync("bun", [linearCli(), "comment", ticket, body], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Active executions by runId for cooperative cancellation. */
 const ACTIVE_EXECUTIONS = new Map();
 
@@ -425,6 +489,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
   const isAliveFn = dispatchOpts?.isAlive ?? defaultIsAlive;
   const claimTicketFn = dispatchOpts?.claimTicket ?? (dispatchOpts?.fetchTicket ? (() => ({ ok: true })) : defaultClaimTicket);
   const unclaimTicketFn = dispatchOpts?.unclaimTicket ?? ((args) => defaultUnclaimTicket({ ...args, fetchTicket: dispatchOpts?.fetchTicket }));
+  const blockTicketFn = dispatchOpts?.blockBaselineTicket ?? ((args) => defaultBlockBaselineTicket({ ...args, fetchTicket: dispatchOpts?.fetchTicket }));
 
   const nowFn = typeof now === "function" ? now : () => (now ?? Date.now());
 
@@ -737,7 +802,19 @@ export async function executeClaimed(db, registry, adapters, claim, {
       const reasonCode = err.reasonCode === "baseline_red" ? "baseline_red" : "contract_violation";
       const failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
       if (ticketClaimed) {
-        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: failureReason, log: null }); } catch {}
+        if (reasonCode === "baseline_red") {
+          try {
+            blockTicketFn({
+              repo: repoName,
+              ticket: ticketId,
+              why: failureReason,
+              log: null,
+              baseline: worktreeRecord?.baseline,
+            });
+          } catch {}
+        } else {
+          try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: failureReason, log: null }); } catch {}
+        }
       }
       // Invalid output is a typed contract failure and emits no completion
       // event (§15) — no results row, no outbox row. A matching pre-existing

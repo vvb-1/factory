@@ -261,6 +261,20 @@ describe("worktree baseline verification (WM-334)", () => {
     }
   });
 
+  test("shared baseline output plus a new failure does not classify as baseline_red", () => {
+    const dir = worktreeWorkspace(
+      "printf 'entry chunk exceeds budget\\nnew failure in CI\\n' >&2; exit 9",
+      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+    );
+    try {
+      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      throw new Error("expected ContractViolation");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractViolation);
+      expect(err.reasonCode).toBe("contract_violation");
+    }
+  });
+
   test("an unrelated post-agent failure remains an ordinary contract violation", () => {
     const dir = worktreeWorkspace(
       "printf 'new test regression\\nerror: script \"build\" exited with code 1\\n' >&2; exit 9",
