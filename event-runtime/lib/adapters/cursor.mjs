@@ -4,9 +4,10 @@
  * `agent -p --output-format stream-json` process (prompt as a positional
  * argument, the standard `./input.json` → `./result.json` PROMPT_SUFFIX
  * contract, cwd = workspace), enforces the run spec's timeout with
- * TERM→KILL(killGraceMs), strips provider API keys (including CURSOR_API_KEY)
- * so the CLI authenticates against the login/subscription session, and
- * captures full stdout as the `.transcript.json` artifact.
+ * TERM→KILL(killGraceMs), strips provider API keys and `CURSOR_API_ENDPOINT`,
+ * passes `CURSOR_API_KEY` through (`agent -p` does not consume the login
+ * session — WM-443), captures full stdout as the `.transcript.json` artifact,
+ * and on a non-zero exit writes `.stderr.txt` plus a `lifecycle` trace.
  *
  * Flags confirmed against the installed CLI (`agent` 2026.08.11,
  * `agent --help`), not inferred from Claude/Pi:
@@ -25,7 +26,7 @@
  * editor CLI.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, readFileSync } from "node:fs";
+import { createWriteStream, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { FACTORY_ROOT } from "../config.mjs";
@@ -89,6 +90,10 @@ export function buildCursorArgv({ prompt, model }) {
 export const BASE_INHERITED_ENV = [
   "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM",
   "TMPDIR", "USER", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+  // `agent -p` ignores the login session and requires this Cursor user key
+  // (WM-443). It authenticates as the account and bills the user's plan —
+  // not a provider BYOK key. Still strip CURSOR_API_ENDPOINT below.
+  "CURSOR_API_KEY",
 ];
 
 /**
@@ -96,8 +101,9 @@ export const BASE_INHERITED_ENV = [
  * Fail-closed: only an explicit `mutating: true` (or a boolean `true`)
  * inherits push credentials (pi's rule, not Claude's legacy).
  *
- * `CURSOR_API_KEY` is stripped so the CLI uses the login session under HOME
- * rather than per-token billing — same rationale as the other LLM adapters.
+ * `CURSOR_API_KEY` is passed through: CLI 2026.08.11 `agent -p` does not
+ * use the `agent login` session (WM-443). Provider keys and
+ * `CURSOR_API_ENDPOINT` stay stripped.
  */
 export function safeChildEnvironment(env = {}, defOrOpts = {}) {
   const isMutating = typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
@@ -110,7 +116,7 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
   for (const key of [
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
     "GOOGLE_GENAI_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
-    "CURSOR_API_KEY", "CURSOR_API_ENDPOINT",
+    "CURSOR_API_ENDPOINT",
     "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
   ]) {
     delete childEnv[key];
@@ -278,6 +284,15 @@ export async function execute({
       child.stdout.pipe(transcript);
     }
 
+    const STDERR_FILE_CHARS = 16_384;
+    let stderrBuf = "";
+    if (child.stderr) {
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk) => {
+        stderrBuf = (stderrBuf + chunk).slice(-STDERR_FILE_CHARS);
+      });
+    }
+
     const policyDenials = [];
     let lastTool = null;
     const toolNames = new Map();
@@ -371,6 +386,18 @@ export async function execute({
         });
       } catch {
         // same
+      }
+      if (exitCode !== 0 && stderrBuf) {
+        try {
+          writeFileSync(path.join(workspaceDir, ".stderr.txt"), stderrBuf, "utf8");
+        } catch {
+          // workspace may already be gone; trace still carries the tail
+        }
+        try {
+          onTrace?.("lifecycle", { note: "adapter_stderr", text: clip(stderrBuf) });
+        } catch {
+          // observability
+        }
       }
       resolve({ exitCode, timedOut, policyDenials: exitCode === 0 ? [] : policyDenials });
     });

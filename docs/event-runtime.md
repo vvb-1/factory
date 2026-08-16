@@ -443,9 +443,14 @@ writes — print without it only proposes them. `--mode ask|plan` is
 documented no-edits and is never passed: it would fail the result contract
 (OPS-518). Read-only containment is the workspace cwd plus the worker
 integrity gate, same audited-not-enforced framing as pi. `--worktree` is
-Cursor's own worktree feature and is never passed. `CURSOR_API_KEY` and
-`CURSOR_API_ENDPOINT` are stripped so the CLI uses the login session under
-`HOME`. Trace mapping targets the documented stream-json shapes:
+Cursor's own worktree feature and is never passed. `CURSOR_API_KEY` is
+passed through: CLI 2026.08.11 `agent -p` does not consume the
+`agent login` session and exits 1 without the key (WM-443). That key is a
+Cursor user credential and bills the account's plan / included usage
+pools, not a provider BYOK invoice. `CURSOR_API_ENDPOINT` and provider
+keys stay stripped. A non-zero CLI exit writes workspace `.stderr.txt`
+and a `lifecycle` trace (`note: adapter_stderr`) so inspect is not blank.
+Trace mapping targets the documented stream-json shapes:
 `assistant` (complete messages only) → `assistant_text`, `tool_call`
 started/completed → `tool_use`/`tool_result`, terminal `result` → `usage`
 (duration only; Cursor does not report tokens). A missing CLI is a typed
