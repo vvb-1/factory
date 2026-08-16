@@ -56,6 +56,9 @@ beforeAll(() => {
   const wm29 = makeGitRepo("wm29");
   const clean = makeGitRepo("clean");
   const low = makeGitRepo("low");
+  const overlap = low;
+  const cap = low;
+  const lowBad = low;
   const wtRoot = mkdtempSync(path.join(os.tmpdir(), "evrt-work-trees-"));
   fixtures.push(wtRoot);
 
@@ -85,7 +88,20 @@ beforeAll(() => {
       `  - name: low\n    path: ${low}\n    github: watt-mind/low\n    base: develop\n` +
       `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
       `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
-      `    worktree_root: ${wtRoot}\n    verify: echo verified\n`,
+      `    worktree_root: ${wtRoot}\n` +
+      `    verify: echo verified\n` +
+      `  - name: overlap\n    path: ${low}\n    github: watt-mind/overlap\n    base: develop\n` +
+      `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
+      `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+      `    worktree_root: ${wtRoot}\n` +
+      `  - name: cap\n    path: ${low}\n    github: watt-mind/cap\n    base: develop\n` +
+      `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
+      `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+      `    worktree_root: ${wtRoot}\n` +
+      `  - name: lowbad\n    path: ${low}\n    github: watt-mind/lowbad\n    base: develop\n` +
+      `    team: WM\n    project: Factory\n    max_in_flight: 3\n` +
+      `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+      `    worktree_root: ${wtRoot}\n`
   );
   previousReposRoot = process.env.FACTORY_REPOS_ROOT;
   process.env.FACTORY_REPOS_ROOT = root;
@@ -134,6 +150,44 @@ function workScanArtifact(repo) {
       summary: "fake: triage backlog exists",
       readyCandidates: 0,
       triageBacklog: 3,
+    };
+  }
+  if (repo === "overlap") {
+    return {
+      recommendation: "NOOP",
+      repo,
+      ticket: null,
+      plan: [],
+      deferred: [],
+      summary: "fake: overlap blocked",
+      readyCandidates: 2,
+      triageBacklog: 3,
+      noopReason: "all_overlapping",
+    };
+  }
+  if (repo === "cap") {
+    return {
+      recommendation: "NOOP",
+      repo,
+      ticket: null,
+      plan: [],
+      deferred: [],
+      summary: "fake: cap blocked",
+      readyCandidates: 2,
+      triageBacklog: 3,
+      noopReason: "cap_full",
+    };
+  }
+  if (repo === "lowbad") {
+    return {
+      recommendation: "LOW_SUPPLY",
+      repo,
+      ticket: null,
+      plan: [],
+      deferred: [],
+      summary: "fake: malformed low supply counts",
+      triageBacklog: 3,
+      readyCandidates: 1,
     };
   }
   return {
@@ -400,6 +454,46 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
 
     planAll();
     expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeTruthy();
+  });
+
+  test("cap-overlap NOOP outcomes still do not fallback to triage", async () => {
+    for (const [repo, reason] of [
+      ["overlap", "all_overlapping"],
+      ["cap", "cap_full"],
+    ]) {
+      const { db, planAll, approveNext } = harness();
+      admitEvent(db, registry, workEnvelope(repo, `work-${repo}-1`));
+      const scan = await approveNext("work-scan@1");
+      expect(scan.summary.terminalState).toBe("COMPLETED");
+      const scanResult = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+      expect(scanResult.artifact.noopReason).toBe(reason);
+      expect(scanResult.artifact.readyCandidates).toBe(2);
+      expect(scanResult.artifact.triageBacklog).toBe(3);
+
+      const chain = resolveChains(db, registry);
+      expect(chain).toEqual({ emitted: 0, skipped: 1, errors: [] });
+
+      planAll();
+      expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeUndefined();
+      expect(openProposals(db, {}).find((p) => p.spec?.agent === "dispatch@1")).toBeUndefined();
+    }
+  });
+
+  test("invalid LOW_SUPPLY counts fail verification and do not chain", async () => {
+    const { db, approveNext } = harness();
+    admitEvent(db, registry, workEnvelope("lowbad", "work-lowbad-1"));
+    const scan = await approveNext("work-scan@1");
+    expect(scan.summary.terminalState).toBe("FAILED");
+    expect(scan.summary.reasonCode).toBe("contract_violation");
+
+    const chain = resolveChains(db, registry);
+    expect(chain).toEqual({ emitted: 0, skipped: 0, errors: [] });
+    expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeUndefined();
+
+    const journal = db
+      .query(`SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`)
+      .get(scan.runId);
+    expect(journal.reason).toContain("low_supply_readyCandidates_must_be_0");
   });
 
   test("a NOOP scan chains to nothing — no dispatch proposal exists", async () => {

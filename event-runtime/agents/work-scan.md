@@ -51,10 +51,21 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
    stop when the free slots are full. Selected in order, each item pinning
    `{ticket, ownedPaths, reason}`.
 
-   If this ordered walk yields zero dispatch candidates after a complete read,
-   run a complete, independent read of `state: Triage` backlog (again, all
-   pages, fresh command, no sampling). If the Triage read fails or returns any
-   malformed payload, refuse with `reasonCode: "needs_human"`.
+   Track the complete candidate count before cap/overlap pruning as
+   `readyCandidates`.
+
+   If the walk has any dispatch candidates, do not read Triage and emit
+   `DISPATCH` or `NOOP` (`cap_full`/`all_overlapping`) according to the result.
+
+   If this ordered walk yields zero dispatch candidates after a complete read and
+   `readyCandidates` is exactly 0, run a complete, independent read of `state:
+   Triage` backlog (again, all pages, fresh command, no sampling). If the Triage
+   read fails or returns any malformed payload, refuse with
+   `reasonCode: "needs_human"`.
+
+   If `readyCandidates` is greater than 0 and there are no dispatch candidates,
+   keep the `NOOP`/`cap_full` or `all_overlapping` outcome and still set
+   `triageBacklog` to 0.
 
    If there are no dispatch candidates and non-empty Triage backlog, emit
    `LOW_SUPPLY` with `readyCandidates` and `triageBacklog` counts in the
@@ -101,8 +112,8 @@ re-plans the deferred tickets against a fresh world.
 ```
 
 `ticket` is always `plan[0].ticket` when `recommendation: "DISPATCH"`.
-`readyCandidates` is the final count of dispatch candidates before cap/payload
-filtering; `triageBacklog` is the complete count of Linear `Triage` issues.
+`readyCandidates` is the final count of dispatch candidates before cap/overlap
+pruning; `triageBacklog` is the complete count of Linear `Triage` issues.
 
 `LOW_SUPPLY` means zero ready candidates and non-empty Triage backlog with a
 successful complete read for both; emit `readyCandidates` and `triageBacklog` in
