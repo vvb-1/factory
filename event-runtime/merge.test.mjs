@@ -114,7 +114,9 @@ function installMergeCommandFakes(fixture) {
       "      green) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
       "      pending) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pending\",\"state\":\"PENDING\"}]\\n' ;;",
       "      duplicate) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"},{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
-      "      *) printf '[]\\n' ;;",
+      "      status-zero-empty) printf '[]\\n' ;;",
+      "      unquoted) printf 'no required checks reported on the %s branch\\n' \"$FAKE_HEAD_REF\"; exit 1 ;;",
+      "      *) printf \"no required checks reported on the '%s' branch\\n\" \"$FAKE_HEAD_REF\"; exit 1 ;;",
       '    esac ;;',
       '  *"pr merge"*) : ;;',
       "  *\"pr view\"*\"--json headRefOid --jq .headRefOid\"*) printf '%s\\n' \"$FAKE_HEAD_SHA\" ;;",
@@ -254,9 +256,10 @@ function seedCompleted(db, { runId, agent, input, artifact }) {
 
 describe("durable autonomous merge registry (WM-398/WM-403)", () => {
   test("central mappings register scan, bounded fix, deterministic apply, landed verify, and explicit verify", () => {
-    expect(registry.eventTypes["factory.merge.requested"].agent).toBe(
-      "merge-scan@2",
-    );
+    expect(registry.eventTypes["factory.merge.requested"]).toMatchObject({
+      agent: "merge-scan@2",
+      adapter: "pi",
+    });
     expect(registry.eventTypes["factory.merge-fix.requested"].agent).toBe(
       "merge-fix@1",
     );
@@ -364,6 +367,63 @@ describe("merge-scan selected PR contract (WM-426)", () => {
     expect(prompt).toContain('"terminalState": "refused"');
     expect(prompt).toMatch(/evidence clearly naming every invalid\s+selected PR/);
     expect(prompt).toMatch(/Do not\s+emit a merge-plan artifact/);
+  });
+});
+
+describe("merge-scan required-context resolution (WM-433)", () => {
+  test("scan uses the supported PR query through the deterministic resolver", () => {
+    const prompt = readFileSync(
+      registry.agents.get("merge-scan@2").promptPath,
+      "utf8",
+    );
+
+    expect(prompt).toContain(
+      'gh pr checks "$pr" --repo "$github" --required --json name,bucket,state',
+    );
+    expect(prompt).toContain(
+      'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts',
+    );
+    expect(prompt).not.toContain(
+      "./repo/event-runtime/lib/merge-ci-proof.mjs",
+    );
+    expect(prompt).toMatch(
+      /Status 1 with exactly\s+`no required checks reported on the '<headRef>' branch`/,
+    );
+    expect(prompt).toContain("`proveMergeCiFallback`");
+    expect(prompt).toContain("Do not query");
+    expect(prompt).toContain("branches/{branch}/protection");
+    expect(prompt).not.toContain(
+      "First query GitHub's branch-protection required contexts",
+    );
+  });
+
+  test("the resolver executes when the selected non-Factory repo has no event-runtime tree", () => {
+    const fixture = mkdtempSync(path.join(os.tmpdir(), "merge-scan-cross-repo-"));
+    const target = path.join(fixture, "repo");
+    mkdirSync(target);
+    writeFileSync(path.join(target, "README.md"), "# non-Factory fixture\n");
+
+    try {
+      const output = execFileSync(
+        "sh",
+        [
+          "-c",
+          'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts 1 "feat/WM-243"',
+        ],
+        {
+          cwd: fixture,
+          encoding: "utf8",
+          env: { ...process.env, FACTORY_ROOT: process.cwd() },
+          input:
+            "no required checks reported on the 'feat/WM-243' branch",
+        },
+      );
+
+      expect(output).toBe("[]\n");
+      expect(existsSync(path.join(target, "event-runtime"))).toBe(false);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 });
 
@@ -557,6 +617,26 @@ describe("executable merge command safety (WM-412)", () => {
       expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
       const log = readFileSync(fixture.log, "utf8");
       expect(log).toContain("--event pull_request");
+      expect(log.includes("gh pr merge")).toBe(shouldMerge);
+    }
+  });
+
+  test("merge-apply accepts only the exact quoted no-required-checks diagnostic", () => {
+    for (const [mode, shouldMerge] of [
+      ["empty", true],
+      ["unquoted", false],
+      ["status-zero-empty", false],
+    ]) {
+      const fixture = commandFixture(`merge-apply-empty-${mode}-`);
+      installMergeCommandFakes(fixture);
+      installBunGateFake(fixture);
+      const result = runCommand(
+        applyCommand(applyPayload()),
+        fixture,
+        commandEnv({ FAKE_REQUIRED_MODE: mode }),
+      );
+      expect(result.status, `${mode}: ${result.stderr}`).toBe(0);
+      const log = readFileSync(fixture.log, "utf8");
       expect(log.includes("gh pr merge")).toBe(shouldMerge);
     }
   });

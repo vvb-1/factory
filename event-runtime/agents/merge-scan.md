@@ -41,20 +41,43 @@ ticket plus comments. Require a valid structured Handoff, diff containment in
 Owned Paths, mergeability, non-draft state, real required CI, behavior
 correctness, and falsifiable regression tests. Green CI alone is never MERGE.
 
-Resolve the CI gate mechanically for each pinned head SHA. First query GitHub's
-branch-protection required contexts. When that result is a nonempty array of
-unique nonempty names, it is authoritative. When and only when it is a valid
-empty array, load `merge_ci.workflow` and the unique nonempty
+Resolve the CI gate mechanically for each pinned head SHA with the supported
+PR-level command and the checked-in resolver. Capture status and combined
+output from exactly:
+
+```sh
+required_status=0
+required_output=$(gh pr checks "$pr" --repo "$github" --required --json name,bucket,state 2>&1) || required_status=$?
+required=$(printf '%s' "$required_output" | bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts "$required_status" "$headRef")
+```
+
+`FACTORY_ROOT` is injected by the Factory adapter and names the running Factory
+runtime checkout, independently of the selected target checkout at `./repo`.
+Never look for this helper inside the target repository. A resolver failure is
+ESCALATE. Do not query
+`repos/{owner}/{repo}/branches/{branch}/protection` or any other
+branch-protection endpoint: an unavailable feature response such as HTTP 403 is
+not required-context evidence and cannot override the supported PR-level
+result. Status 0 with a valid nonempty list of unique contexts whose names are
+nonempty is authoritative. Status 1 with exactly
+`no required checks reported on the '<headRef>' branch` resolves to an explicit
+empty list. Any other nonzero status, unexpected diagnostic, malformed JSON,
+empty list, empty/invalid name, or duplicate name fails closed. These are the
+same status/output rules enforced again by merge-apply.
+
+When the resolver returns a nonempty list, prove every returned check is
+`bucket: pass` and `state: SUCCESS` on `headRefOid`. When it returns an empty
+list, load `merge_ci.workflow` and the unique nonempty
 `merge_ci.required_checks` from this repo's `config/repos.yaml` entry. Missing
 or malformed config is ESCALATE, never an empty green set. For the configured
 fallback, locate the one unambiguous pull-request run of that exact workflow at
 `headRefOid`, inspect its jobs, and prove exactly one job with each configured
-name is `completed` / `success`. For GitHub-owned contexts, prove exactly one
-check with each required name is green on that same `headRefOid`. Re-read the
-head SHA after collecting evidence. Empty, missing, duplicate, pending,
-neutral, skipped, cancelled, stale-SHA, wrong-workflow, API-error, or otherwise
-ambiguous evidence fails closed. Never substitute all currently visible checks
-for either authoritative set; that recreates the early auxiliary-check race.
+name is `completed` / `success` (the same contract as
+`proveMergeCiFallback` in the checked-in helper). Re-read the head SHA after
+collecting evidence. Empty, missing, duplicate, pending, neutral, skipped,
+cancelled, stale-SHA, wrong-workflow, API-error, or otherwise ambiguous
+evidence fails closed. Never substitute all currently visible checks for
+either authoritative set; that recreates the early auxiliary-check race.
 
 ESCALATE auth/authz, money movement, credentials/secrets, destructive
 migrations, production infrastructure, CLNT security behavior, any
