@@ -34,7 +34,12 @@ export class RepositoryWorkspaceError extends Error {
 
 const git = (args, cwd) => {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    }).trim();
   } catch (err) {
     const detail = err.stderr?.toString().trim() || err.message;
     throw new RepositoryWorkspaceError(`git ${args.slice(0, 2).join(" ")} failed: ${detail}`);
@@ -111,7 +116,7 @@ export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "rep
   if (!target.startsWith(path.resolve(workspaceDir) + path.sep)) {
     throw new RepositoryWorkspaceError(`checkout subdir "${subdir}" escapes the workspace`);
   }
-  if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+  if (sha === "0000000000000000000000000000000000000000" || (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors)))) {
     mkdirSync(target, { recursive: true });
     // The worker's integrity gate must be able to inspect every repository
     // workspace, including a CI/demo fallback with no local source checkout.
