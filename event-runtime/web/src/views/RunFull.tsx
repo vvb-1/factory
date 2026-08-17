@@ -24,6 +24,7 @@ import {
   isCancellable,
 } from "../components/RunDetailBlocks";
 import { handleRunArtifactClick, toggleRunPin } from "./Runs";
+import type { RunListItem } from "../types";
 
 /**
  * Full-page run view (`#/run/:id`, webui doc §10.11) — the trace at a
