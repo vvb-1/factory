@@ -240,6 +240,30 @@ describe("Runs detail failure banner (WM-93)", () => {
 });
 
 describe("Runs component harness: selection & filter retention", () => {
+  test("p toggles the selected run in the context strip and the detail action shows its hint", async () => {
+    const runId = "run_pin_shortcut";
+    sessionStorage.clear();
+
+    await withApi(
+      {
+        runs: async () => ({ runs: [stubListItem(runId, "RUNNING")] }),
+        run: async () => stubDetail(runId, "RUNNING", []),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByRole } = renderRuns({ focusRunId: runId });
+        const openInTab = await waitFor(() => getByRole("button", { name: /Open in tab/ }));
+        expect(openInTab.querySelector('[aria-hidden="true"]')?.textContent).toBe("p");
+
+        fireEvent.keyDown(document.body, { key: "p" });
+        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([runId]);
+
+        fireEvent.keyDown(document.body, { key: "p" });
+        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([]);
+      },
+    );
+  });
+
   test("clicking a row selects the run via onSelectRun", async () => {
     const onSelectRun = mock(() => {});
     const r1 = stubListItem("run_click_test", "RUNNING");

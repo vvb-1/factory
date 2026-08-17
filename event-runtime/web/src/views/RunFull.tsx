@@ -23,7 +23,7 @@ import {
   RunFailureBanner,
   isCancellable,
 } from "../components/RunDetailBlocks";
-import { handleRunArtifactClick } from "./Runs";
+import { handleRunArtifactClick, toggleRunPin } from "./Runs";
 import type { RunListItem } from "../types";
 
 /**
@@ -134,6 +134,11 @@ export function RunFull({
         onBack();
         return;
       }
+      if (e.key === "p") {
+        e.preventDefault();
+        toggleRunPin(runId);
+        return;
+      }
       if (e.key === "x" && d && connected && isCancellable(d.run.state)) {
         e.preventDefault();
         setConfirm("cancel");
@@ -172,6 +177,7 @@ export function RunFull({
   useEffect(() => {
     const copy = [
       { label: "Back to Runs", hint: "Esc", run: onBack },
+      { label: "Open in tab", hint: "p", run: () => toggleRunPin(runId) },
       {
         label: `Copy ${runId}`,
         hint: "c",
@@ -308,6 +314,15 @@ export function RunFull({
                 ))}
             </div>
           )}
+          <Button onClick={() => toggleRunPin(runId)}>
+            <span>Open in tab</span>
+            <span
+              aria-hidden="true"
+              className="mono ml-1 text-(--text-faint) text-[10px]"
+            >
+              p
+            </span>
+          </Button>
           <CopyActions
             id={runId}
             idLabel="run id"

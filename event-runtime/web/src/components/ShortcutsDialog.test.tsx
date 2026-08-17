@@ -69,6 +69,8 @@ describe("ShortcutsDialog", () => {
     expect(actions.textContent).toContain("copy CLI inspect command (Runs)");
     expect(actions.textContent).toContain("c p");
     expect(actions.textContent).toContain("copy repo path (Projects)");
+    expect(actions.textContent).toContain("pin / unpin selected run (Runs)");
+    expect(actions.textContent).toContain("reveal selected node on canvas (Graph)");
   });
 
   test("documents 'v' for display options and '1–N' for status tabs (WM-234)", () => {

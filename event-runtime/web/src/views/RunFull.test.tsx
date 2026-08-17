@@ -16,6 +16,7 @@ import type { RunDetail } from "../types";
 afterEach(() => {
   cleanup();
   restoreApi();
+  sessionStorage.clear();
 });
 
 const noop = () => {};
@@ -104,6 +105,33 @@ describe("RunFull cancel dialog (WM-144)", () => {
 });
 
 describe("RunFull header copy verbs and hints (WM-218)", () => {
+  test("p toggles the run in the context strip and Open in tab shows its hint", async () => {
+    const runId = "run_full_pin_shortcut";
+    const detail = createRunDetailFixture({
+      run: { runId, state: "RUNNING" } as RunDetail["run"],
+    });
+
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [createRunListItemFixture({ runId, state: "RUNNING" })],
+        }),
+      },
+      async () => {
+        const { getByRole } = renderRunFull(runId);
+        const openInTab = await waitFor(() => getByRole("button", { name: /Open in tab/ }));
+        expect(openInTab.querySelector('[aria-hidden="true"]')?.textContent).toBe("p");
+
+        fireEvent.keyDown(document.body, { key: "p" });
+        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([runId]);
+
+        fireEvent.keyDown(document.body, { key: "p" });
+        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([]);
+      },
+    );
+  });
+
   test("renders shortcut tooltips on the back and copy icon actions", async () => {
     const runId = "run_header_hints";
     const detail = createRunDetailFixture({

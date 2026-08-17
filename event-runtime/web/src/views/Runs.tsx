@@ -65,6 +65,17 @@ export const RUN_TABS: readonly RunTab[] = [
   "CANCELLED",
 ] as const;
 
+export function toggleRunPin(id: string) {
+  const pinned = readPinnedRuns();
+  if (pinned.includes(id)) {
+    savePinnedRuns(pinned.filter((runId) => runId !== id));
+    notify(`Unpinned ${id}`, "info");
+  } else {
+    savePinnedRuns([...pinned, id]);
+    notify(`Pinned ${id}`, "ok");
+  }
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
 }
@@ -497,6 +508,7 @@ export function Runs({
           pendingC.current = 0;
         }
       },
+      p: () => sel && toggleRunPin(sel.runId),
     },
   });
 
@@ -522,23 +534,13 @@ export function Runs({
   const d = detail.data;
   const attemptsExhausted = d ? d.run.attempts >= d.run.spec.maxAttempts : false;
 
-  const pinRun = (id: string) => {
-    const cur = readPinnedRuns();
-    if (!cur.includes(id)) {
-      savePinnedRuns([...cur, id]);
-      notify(`Pinned ${id}`, "ok");
-    } else {
-      notify("Already pinned", "info");
-    }
-  };
-
   // Offer the selection's verbs in the ⌘K palette (§5).
   useEffect(() => {
     if (!sel) {
       setContextActions([]);
     } else {
       const copy = [
-        { label: "Open in tab", run: () => pinRun(sel.runId) },
+        { label: "Open in tab", hint: "p", run: () => toggleRunPin(sel.runId) },
         { label: "Open full view", hint: "o", run: () => onOpenFull(sel.runId) },
         { label: "Copy run id", hint: "c", run: () => copyText(sel.runId, "run id") },
         {
@@ -870,7 +872,9 @@ export function Runs({
                 <Button onClick={() => onOpenFull(sel.runId)}>
                   Expand <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">o</span>
                 </Button>
-                <Button onClick={() => pinRun(sel.runId)}>Open in tab</Button>
+                <Button onClick={() => toggleRunPin(sel.runId)}>
+                  Open in tab <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">p</span>
+                </Button>
               </div>
             </>
           }
