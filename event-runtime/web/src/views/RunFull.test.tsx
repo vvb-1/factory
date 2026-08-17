@@ -129,6 +129,38 @@ describe("RunFull header (WM-193)", () => {
   });
 });
 
+describe("RunFull responsive trace flow (WM-546)", () => {
+  test("stacks trace and details in document flow below xl", async () => {
+    const runId = "run_responsive_trace";
+    const detail = createRunDetailFixture({
+      run: { runId, state: "COMPLETED" } as RunDetail["run"],
+    });
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [createRunListItemFixture({ runId, state: "COMPLETED" })],
+        }),
+      },
+      async () => {
+        const { container } = renderRunFull(runId);
+
+        await waitFor(() => {
+          const main = container.querySelector("main");
+          const layout = main?.parentElement;
+          const aside = container.querySelector("aside");
+          expect(layout?.classList.contains("overflow-y-auto")).toBe(true);
+          expect(layout?.classList.contains("xl:overflow-hidden")).toBe(true);
+          expect(main?.classList.contains("flex-none")).toBe(true);
+          expect(main?.classList.contains("xl:flex-1")).toBe(true);
+          expect(aside?.classList.contains("overflow-visible")).toBe(true);
+          expect(aside?.classList.contains("xl:overflow-y-auto")).toBe(true);
+        });
+      },
+    );
+  });
+});
+
 describe("RunFull deadline extension (WM-566)", () => {
   test("shows remaining time and extends by preset or custom increments", async () => {
     const runId = "run_extend_controls";

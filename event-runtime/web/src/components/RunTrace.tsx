@@ -18,6 +18,7 @@ import {
 import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard } from "../hooks";
+import { linkifyText } from "../linkify";
 import type { RunState, TraceEntry, TracePayload } from "../types";
 import {
   DisclosureChevron,
@@ -130,6 +131,24 @@ function useTraceFeed(runId: string, live: boolean) {
   };
 }
 
+function renderLinkifiedText(text: string, keyPrefix: string): React.ReactNode[] {
+  return linkifyText(text).map((part, index) => {
+    if (part.kind === "text") return part.text;
+    return (
+      <a
+        key={`${keyPrefix}-${index}`}
+        href={part.href}
+        title={part.title}
+        target="_blank"
+        rel="noopener"
+        className="text-(--text-dim) underline-offset-2 hover:text-(--accent) hover:underline"
+      >
+        {part.text}
+      </a>
+    );
+  });
+}
+
 function renderInlineMarkdown(text: string): React.ReactNode[] {
   const tokenRegex =
     /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)|(~~[^~]+~~)|(\[[^\]]+\]\([^)]+\))/g;
@@ -139,7 +158,7 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
 
   while ((match = tokenRegex.exec(text)) !== null) {
     if (match.index > lastIdx) {
-      nodes.push(text.slice(lastIdx, match.index));
+      nodes.push(...renderLinkifiedText(text.slice(lastIdx, match.index), `text-${lastIdx}`));
     }
     const full = match[0];
     if (match[1]) {
@@ -154,19 +173,19 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
     } else if (match[2]) {
       nodes.push(
         <strong key={match.index} className="font-semibold text-(--text)">
-          {full.slice(2, -2)}
+          {renderLinkifiedText(full.slice(2, -2), `strong-${match.index}`)}
         </strong>,
       );
     } else if (match[3]) {
       nodes.push(
         <em key={match.index} className="italic text-(--text-dim)">
-          {full.slice(1, -1)}
+          {renderLinkifiedText(full.slice(1, -1), `em-${match.index}`)}
         </em>,
       );
     } else if (match[4]) {
       nodes.push(
         <del key={match.index} className="line-through text-(--text-faint)">
-          {full.slice(2, -2)}
+          {renderLinkifiedText(full.slice(2, -2), `del-${match.index}`)}
         </del>,
       );
     } else if (match[5]) {
@@ -177,7 +196,7 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
             key={match.index}
             href={linkMatch[2]}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener"
             className="text-(--accent) underline hover:opacity-80"
           >
             {linkMatch[1]}
@@ -190,9 +209,39 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
     lastIdx = tokenRegex.lastIndex;
   }
   if (lastIdx < text.length) {
-    nodes.push(text.slice(lastIdx));
+    nodes.push(...renderLinkifiedText(text.slice(lastIdx), `text-${lastIdx}`));
   }
   return nodes.length ? nodes : [text];
+}
+
+function usageTokenCounts(usage?: Record<string, number>) {
+  return {
+    inputTokens: usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens,
+    outputTokens: usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens,
+  };
+}
+
+function hasUsableTokenCounts(
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+  costUSD: number | null | undefined,
+): boolean {
+  const hasInput = typeof inputTokens === "number" && Number.isFinite(inputTokens);
+  const hasOutput = typeof outputTokens === "number" && Number.isFinite(outputTokens);
+  const zeroWithCost = typeof costUSD === "number" && costUSD > 0 && inputTokens === 0 && outputTokens === 0;
+  return hasInput && hasOutput && !zeroWithCost;
+}
+
+export function formatUsageSummary(
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+  costUSD: number | null | undefined,
+): string {
+  const hasCost = typeof costUSD === "number" && Number.isFinite(costUSD);
+  const tokens = hasUsableTokenCounts(inputTokens, outputTokens, costUSD)
+    ? `${inputTokens!.toLocaleString()} in · ${outputTokens!.toLocaleString()} out`
+    : "tokens n/a";
+  return hasCost ? `${tokens} · $${costUSD.toFixed(2)}` : tokens;
 }
 
 export function MarkdownView({
@@ -669,11 +718,15 @@ function TraceBody({
     );
   }
   if (kind === "usage") {
+    const { inputTokens, outputTokens } = usageTokenCounts(p.usage);
+    const summary = [
+      p.numTurns != null ? `${p.numTurns} turns` : null,
+      p.durationMs != null ? `${(p.durationMs / 1000).toFixed(1)}s` : null,
+      formatUsageSummary(inputTokens, outputTokens, p.costUSD),
+    ].filter(Boolean).join(" · ");
     return (
       <div className="min-w-0 flex-1 text-(--text-faint)">
-        {p.numTurns ?? "?"} turns ·{" "}
-        {p.durationMs != null ? `${(p.durationMs / 1000).toFixed(1)}s` : "?"} ·{" "}
-        {p.costUSD != null ? `$${p.costUSD.toFixed(4)}` : "?"}
+        {summary}
         {p.usage && Object.keys(p.usage).length > 0 && (
           <Disclosure label="tokens" forceOpen={forceOpen}>
             <JsonBlock value={p.usage} />
@@ -807,26 +860,46 @@ export function RunTrace({
   }, [entries]);
 
   const tokenStats = useMemo(() => {
-    let promptTokens = 0;
-    let completionTokens = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
     let totalCost = 0;
-    let hasTokens = false;
+    let hasInputTokens = false;
+    let hasOutputTokens = false;
+    let hasUsage = false;
+    let hasUnknownCostTokens = false;
     for (const e of entries) {
       if (e.payload?.usage) {
-        hasTokens = true;
-        const u = e.payload.usage;
-        promptTokens += u.input_tokens ?? u.prompt_tokens ?? u.inputTokens ?? 0;
-        completionTokens +=
-          u.output_tokens ?? u.completion_tokens ?? u.outputTokens ?? 0;
+        hasUsage = true;
+        const counts = usageTokenCounts(e.payload.usage);
+        if (counts.inputTokens != null) {
+          inputTokens += counts.inputTokens;
+          hasInputTokens = true;
+        }
+        if (counts.outputTokens != null) {
+          outputTokens += counts.outputTokens;
+          hasOutputTokens = true;
+        }
+        if (
+          e.payload.costUSD != null &&
+          e.payload.costUSD > 0 &&
+          !hasUsableTokenCounts(
+            counts.inputTokens,
+            counts.outputTokens,
+            e.payload.costUSD,
+          )
+        ) {
+          hasUnknownCostTokens = true;
+        }
       }
-      if (e.payload?.costUSD) totalCost += e.payload.costUSD;
+      if (e.payload?.costUSD != null) totalCost += e.payload.costUSD;
     }
     return {
-      promptTokens,
-      completionTokens,
-      totalTokens: promptTokens + completionTokens,
+      inputTokens:
+        hasInputTokens && !hasUnknownCostTokens ? inputTokens : undefined,
+      outputTokens:
+        hasOutputTokens && !hasUnknownCostTokens ? outputTokens : undefined,
       totalCost,
-      hasTokens,
+      show: hasUsage || totalCost > 0,
     };
   }, [entries]);
 
@@ -1195,17 +1268,15 @@ export function RunTrace({
           <div />
         )}
 
-        {tokenStats.hasTokens && (
+        {tokenStats.show && (
           <div className="flex items-center gap-1.5 rounded bg-(--surface-1) border border-(--border) px-2 py-0.5 text-[11px] mono text-(--text-dim)">
             <span title="Cumulative token burn across trace">
-              {tokenStats.promptTokens.toLocaleString()} in ·{" "}
-              {tokenStats.completionTokens.toLocaleString()} out
+              {formatUsageSummary(
+                tokenStats.inputTokens,
+                tokenStats.outputTokens,
+                tokenStats.totalCost,
+              )}
             </span>
-            {tokenStats.totalCost > 0 && (
-              <span className="text-(--text-faint)">
-                (${tokenStats.totalCost.toFixed(4)})
-              </span>
-            )}
           </div>
         )}
       </div>

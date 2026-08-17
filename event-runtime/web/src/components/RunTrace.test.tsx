@@ -3,7 +3,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { RunState, TraceEntry } from "../types";
 import { changeInput, renderWithClient, restoreApi } from "../test-render";
-import { formatErrorRowLabel, LIVE_STATES, RunTrace } from "./RunTrace";
+import {
+  formatErrorRowLabel,
+  formatUsageSummary,
+  LIVE_STATES,
+  RunTrace,
+} from "./RunTrace";
 
 afterEach(() => {
   cleanup();
@@ -150,6 +155,79 @@ describe("RunTrace error context (WM-588)", () => {
   });
 });
 
+describe("RunTrace links and usage (WM-546)", () => {
+  test("linkifies assistant text but keeps tool-input JSON as code", async () => {
+    const prUrl = "https://github.com/watt-mind/factory/pull/486";
+    const genericUrl = "https://example.com/runs/42";
+    const trace: TraceEntry[] = [
+      entry(1, "assistant_text", {
+        text: `Review ${prUrl}, **${genericUrl}**, and ~~WM-546~~.`,
+      }),
+      entry(2, "tool_use", {
+        name: "Bash",
+        input: { command: `open ${prUrl}` },
+      }),
+    ];
+    const r = renderWithClient(
+      <RunTrace runId="run_trace_links" state="COMPLETED" variant="full" />,
+      {
+        apiMocks: {
+          trace: async () => ({ head: trace[trace.length - 1].seq, entries: trace }),
+        },
+      },
+    );
+
+    await waitForChrome(r);
+
+    const prLink = r.getByRole("link", { name: "watt-mind/factory#486" });
+    expect(prLink.getAttribute("href")).toBe(prUrl);
+    expect(prLink.getAttribute("title")).toBe(prUrl);
+    expect(prLink.getAttribute("target")).toBe("_blank");
+    expect(prLink.getAttribute("rel")).toBe("noopener");
+    expect(r.getByRole("link", { name: genericUrl }).getAttribute("href")).toBe(genericUrl);
+    expect(r.getByRole("link", { name: "WM-546" }).getAttribute("href")).toBe(
+      "https://linear.app/watt-mind/issue/WM-546",
+    );
+
+    fireEvent.click(r.getByText("input"));
+    expect(await r.findByText(/open https:\/\/github\.com\/watt-mind\/factory\/pull\/486/)).toBeTruthy();
+    expect(r.getAllByRole("link")).toHaveLength(3);
+  });
+
+  test("formats missing zero token counts with a real cost without placeholders", async () => {
+    expect(formatUsageSummary(undefined, undefined, 0.7657)).toBe("tokens n/a · $0.77");
+    expect(formatUsageSummary(0, 0, 0.7657)).toBe("tokens n/a · $0.77");
+    expect(formatUsageSummary(12, 34, 0.0123)).toBe("12 in · 34 out · $0.01");
+
+    const trace = [
+      entry(1, "usage", {
+        numTurns: 1,
+        usage: { inputTokens: 1, outputTokens: 1 },
+        costUSD: 0,
+      }),
+      entry(2, "usage", {
+        numTurns: 86,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        costUSD: 0.7657,
+      }),
+    ];
+    const r = renderWithClient(
+      <RunTrace runId="run_trace_usage_na" state="COMPLETED" variant="full" />,
+      {
+        apiMocks: {
+          trace: async () => ({ head: 2, entries: trace }),
+        },
+      },
+    );
+
+    await waitForChrome(r);
+    expect(r.getByText("tokens n/a · $0.77")).toBeTruthy();
+    expect(r.getByText("86 turns · tokens n/a · $0.77")).toBeTruthy();
+    expect(r.container.textContent).not.toContain("0 in · 0 out");
+    expect(r.container.textContent).not.toContain("?");
+  });
+});
+
 describe("RunTrace timing (WM-272)", () => {
   test("filtered views use the next unfiltered entry for duration", async () => {
     const start = Date.parse("2025-01-01T00:00:00.000Z");
@@ -217,7 +295,7 @@ describe("RunTrace a11y (WM-143)", () => {
     const tablist = await waitForChrome(r);
 
     expect(r.getByText("tool · Read")).toBeTruthy();
-    expect(r.getByText(/12 in · 34 out/)).toBeTruthy();
+    expect(r.getAllByText(/12 in · 34 out/)).toHaveLength(2);
     const errorJump = r.getByRole("button", { name: /next error/ });
     expect(errorJump).toBeTruthy();
 
@@ -249,12 +327,13 @@ describe("RunTrace a11y (WM-143)", () => {
       r.getByRole("button", { name: /Jump to latest/ }),
     );
 
+    const usageSummary = r.getAllByText(/12 in · 34 out/)[0];
     const chrome = [
       tablist,
       errorJump,
       clear,
       jump,
-      r.getByText(/12 in · 34 out/).parentElement!,
+      usageSummary.parentElement!,
     ];
     for (const el of chrome) {
       expect(el.textContent ?? "").not.toMatch(/🔧|🔥|⚠️|⬇|✕/);
