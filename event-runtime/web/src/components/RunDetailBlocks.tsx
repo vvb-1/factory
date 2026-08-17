@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
-import { artifactUrl } from "../api";
+import { useQuery } from "@tanstack/react-query";
+import { Suspense, lazy, useState, type ReactNode } from "react";
+import { api, artifactUrl } from "../api";
 import { hashPath, hashProject, withProject } from "../hash";
 import { dur } from "../heartbeat";
 import type { ArtifactRef, Attempt, LifecycleEvent, RunDetail, RunSpec, RunState } from "../types";
@@ -20,6 +21,14 @@ import {
 } from "./ui";
 import { AgentHoverCard } from "./AgentHoverCard";
 import { attrIcon } from "./attrIcons";
+
+/**
+ * The artifact view renderer (WM-455) is fetched on demand: RunDetailBlocks
+ * is on the eager Runs path and the entry chunk is budgeted
+ * (vite.config.ts); until the chunk lands the JSON block below stands in,
+ * which is also exactly what an agent without a view gets.
+ */
+const ArtifactPanel = lazy(() => import("./ArtifactView").then((m) => ({ default: m.ArtifactPanel })));
 
 export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
 export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && state !== "VERIFYING";
@@ -493,6 +502,14 @@ export function RunDetailBlocks({
     : null;
   const clocks = current ? deadlinesOf(current, d.run.spec.timeoutSeconds, now) : null;
 
+  // The artifact's view sidecar rides the `/agents` item for this run's agent
+  // (WM-454); the same query AgentHoverCard already keeps warm, so no new
+  // request per run. No agent, no view → the JSON block, unchanged.
+  const agentsQ = useQuery({ queryKey: ["agents"], queryFn: () => api.agents(), staleTime: 30_000 });
+  const agentDef = (agentsQ.data?.agents ?? []).find(
+    (a) => a.ref === d.run.spec.agent || a.id === d.run.spec.agent,
+  );
+
   return (
     <>
       <Section title="Run" icons>
@@ -707,7 +724,17 @@ export function RunDetailBlocks({
         >
           {d.result.artifact !== undefined ? (
             <Disclosure label="artifact" defaultOpen>
-              <JsonBlock value={d.result.artifact} />
+              {agentDef?.outputView ? (
+                <Suspense fallback={<JsonBlock value={d.result.artifact} />}>
+                  <ArtifactPanel
+                    artifact={d.result.artifact}
+                    schema={agentDef.outputSchema}
+                    view={agentDef.outputView}
+                  />
+                </Suspense>
+              ) : (
+                <JsonBlock value={d.result.artifact} />
+              )}
             </Disclosure>
           ) : (
             <Disclosure label="result" defaultOpen>
