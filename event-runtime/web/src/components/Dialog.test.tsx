@@ -118,21 +118,70 @@ describe("Dialog", () => {
     expect(document.activeElement).toBe(chip);
   });
 
-  test("Tab cycle ignores a hidden control after the last visible control", () => {
-    const r = render(<OpenDialog onClose={() => {}} />);
+  test("Tab cycle includes a control inside a display: contents container", () => {
+    const r = render(
+      <OpenDialog onClose={() => {}}>
+        <div style={{ display: "contents" }}>
+          <button type="button" data-testid="contents-control">
+            contents control
+          </button>
+        </div>
+      </OpenDialog>,
+    );
     const panel = r.getByRole("dialog");
     const envelope = r.getByTestId("envelope");
     const chip = r.getByTestId("chip");
-    const hidden = document.createElement("button");
-    hidden.type = "button";
-    hidden.hidden = true;
-    panel.appendChild(hidden);
+    const contentsControl = r.getByTestId("contents-control");
 
-    // happy-dom has no layout engine, so offsetParent must be stamped to make
-    // this browser visibility branch falsifiable rather than accidentally green.
+    // happy-dom has no layout engine, so stamp the CSSOM values this browser
+    // case produces and make the regression fail under the old heuristic.
     Object.defineProperty(envelope, "offsetParent", { configurable: true, value: panel });
     Object.defineProperty(chip, "offsetParent", { configurable: true, value: panel });
-    Object.defineProperty(hidden, "offsetParent", { configurable: true, value: null });
+    Object.defineProperty(contentsControl, "offsetParent", { configurable: true, value: null });
+
+    envelope.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(contentsControl);
+  });
+
+  test("Tab cycle includes a position: fixed control", () => {
+    const r = render(
+      <OpenDialog onClose={() => {}}>
+        <button type="button" data-testid="fixed-control" style={{ position: "fixed" }}>
+          fixed control
+        </button>
+      </OpenDialog>,
+    );
+    const panel = r.getByRole("dialog");
+    const envelope = r.getByTestId("envelope");
+    const chip = r.getByTestId("chip");
+    const fixedControl = r.getByTestId("fixed-control");
+
+    Object.defineProperty(envelope, "offsetParent", { configurable: true, value: panel });
+    Object.defineProperty(chip, "offsetParent", { configurable: true, value: panel });
+    Object.defineProperty(fixedControl, "offsetParent", { configurable: true, value: null });
+
+    envelope.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(fixedControl);
+  });
+
+  test("Tab cycle ignores hidden, display:none, and visibility:hidden controls", () => {
+    const r = render(
+      <OpenDialog onClose={() => {}}>
+        <button type="button" hidden>
+          hidden attribute
+        </button>
+        <div style={{ display: "none" }}>
+          <button type="button">display none ancestor</button>
+        </div>
+        <button type="button" style={{ visibility: "hidden" }}>
+          visibility hidden
+        </button>
+      </OpenDialog>,
+    );
+    const envelope = r.getByTestId("envelope");
+    const chip = r.getByTestId("chip");
 
     chip.focus();
     expect(fireEvent.keyDown(window, { key: "Tab" })).toBe(false);

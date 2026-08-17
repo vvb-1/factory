@@ -1386,10 +1386,31 @@ export function Button({
 const FOCUSABLE =
   "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
+/** Whether a candidate is rendered without relying on offsetParent layout semantics. */
+function isTabCycleNodeVisible(el: HTMLElement, root: HTMLElement): boolean {
+  if (!el.isConnected) return false;
+
+  // `offsetParent` is also null for visible fixed-position elements and for
+  // descendants of `display: contents`. Walk the rendered ancestor chain
+  // instead, while checking visibility on the candidate because descendants
+  // can override an ancestor's `visibility` value.
+  let current: HTMLElement | null = el;
+  while (current) {
+    if (current.hidden) return false;
+    const style = current.ownerDocument.defaultView?.getComputedStyle(current);
+    if (style?.display === "none") return false;
+    if (current === root) break;
+    current = current.parentElement;
+  }
+
+  const visibility = el.ownerDocument.defaultView?.getComputedStyle(el).visibility;
+  return visibility !== "hidden" && visibility !== "collapse";
+}
+
 /** Keep Tab focus inside a modal while ignoring controls hidden by layout. */
 export function tabCycle(root: HTMLElement, e: KeyboardEvent) {
-  const nodes = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => el.offsetParent !== null || el === document.activeElement,
+  const nodes = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) =>
+    isTabCycleNodeVisible(el, root),
   );
   if (nodes.length === 0) {
     e.preventDefault();
