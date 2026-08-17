@@ -92,6 +92,22 @@ afterAll(async () => {
   }
 });
 
+describe("event-runtime web static files", () => {
+  test("returns an honest 404 for a stale content-hashed asset", async () => {
+    const response = await fetch(`http://127.0.0.1:${webPort}/assets/Proposals-stale.js`);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("asset not found");
+  });
+
+  test("keeps the SPA fallback for client-side routes", async () => {
+    const response = await fetch(`http://127.0.0.1:${webPort}/proposals`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+  });
+});
+
 describe("event-runtime web API proxy", () => {
   test("returns 503 while the API is down, stays alive, then recovers", async () => {
     const unavailable = await requestProxy("GET", "/health");
