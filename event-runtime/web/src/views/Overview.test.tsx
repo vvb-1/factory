@@ -472,131 +472,91 @@ describe("Overview keyboard navigation (WM-292)", () => {
 
     try {
       const view = renderOverview({ kind: "all" }, { onJumpEvents });
-      await waitFor(() => view.getByRole("button", { name: /github.*planner failed/ }));
+      await waitFor(() =>
+        view.getByRole("button", { name: /github.*planner failed/ }),
+      );
       fireEvent.click(view.getByRole("button", { name: "View event" }));
-      expect(onJumpEvents).toHaveBeenCalledWith({ source: "github", eventId: "evt_dead" });
+      expect(onJumpEvents).toHaveBeenCalledWith({
+        source: "github",
+        eventId: "evt_dead",
+      });
     } finally {
       restore();
     }
   });
 });
 
-describe("Overview anomaly deck (WM-95)", () => {
-  test("folds expired proposals into the Runtime group", async () => {
-    const origStatus = api.status;
-    const origProposals = api.proposals;
-    const origOutbox = api.outbox;
-    const origJournal = api.journal;
-    api.status = async () =>
-      baseStatus({ expiredOpenProposals: [stubProposal.id] });
-    api.proposals = async () => ({ proposals: [stubProposal] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-
-    try {
-      const view = renderOverview();
-      await waitFor(() => view.getByText(`expired open proposal ${stubProposal.id}`));
-      expect(view.getByRole("heading", { name: "Runtime" })).toBeTruthy();
-      expect(view.getByRole("button", { name: "View proposal" })).toBeTruthy();
-    } finally {
-      api.status = origStatus;
-      api.proposals = origProposals;
-      api.outbox = origOutbox;
-      api.journal = origJournal;
-    }
-  });
-
-  test("Runtime proposals have a single primary navigation verb", async () => {
-    const origStatus = api.status;
-    const origProposals = api.proposals;
-    const origOutbox = api.outbox;
-    const origJournal = api.journal;
-    api.status = async () =>
-      baseStatus({ expiredOpenProposals: [stubProposal.id] });
-    api.proposals = async () => ({ proposals: [stubProposal] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-
-    const onJumpProposal = mock(() => {});
-
-    try {
-      const view = renderOverview({ kind: "all" }, { onJumpProposal });
-      fireEvent.click(await waitFor(() => view.getByRole("button", { name: "View proposal" })));
-      expect(onJumpProposal).toHaveBeenCalledWith(stubProposal.id);
-      expect(view.queryByRole("button", { name: "Reject…" })).toBeNull();
-    } finally {
-      api.status = origStatus;
-      api.proposals = origProposals;
-      api.outbox = origOutbox;
-      api.journal = origJournal;
-    }
-  });
-
-  test("renders unmatched proposal ids in the Runtime group", async () => {
-    const origStatus = api.status;
-    const origProposals = api.proposals;
-    const origOutbox = api.outbox;
-    const origJournal = api.journal;
-    api.status = async () =>
-      baseStatus({ expiredOpenProposals: ["prop_missing"] });
-    api.proposals = async () => ({ proposals: [] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-
-    try {
-      const view = renderOverview();
-      await waitFor(() => view.getByText("expired open proposal prop_missing"));
-      expect(view.getByRole("heading", { name: "Runtime" })).toBeTruthy();
-    } finally {
-      api.status = origStatus;
-      api.proposals = origProposals;
-      api.outbox = origOutbox;
-      api.journal = origJournal;
-    }
-  });
-
-  test("groups matching dead letters as Runtime rows", async () => {
-    const originals = {
+describe("Overview needs you (WM-596)", () => {
+  const originalInbox = api.inbox;
+  function inboxItem(id: string, kind: string, createdAt: string): InboxItem {
+    return {
+      id,
+      kind,
+      severity: "normal",
+      title: `Attention ${id}`,
+      body: null,
+      refs: {},
+      source: "test",
+      createdAt,
+      ackedAt: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      delivery: {},
+    };
+  }
+  function stubNeedsYou(items: InboxItem[], status = baseStatus()) {
+    const restore = {
       status: api.status,
       proposals: api.proposals,
       outbox: api.outbox,
       journal: api.journal,
     };
-    const eventIds = [
-      "chain-run_abcdef123456",
-      "chain-run_bcdefa234567",
-      "chain-run_cdefab345678",
-    ];
-    api.status = async () =>
-      baseStatus({
-        deadLettered: [
-          ...eventIds.map((eventId) => ({
-            source: "chain",
-            eventId,
-            lastError: "duplicate key",
-          })),
-          {
-            source: "chain",
-            eventId: "chain-run_timeout123456",
-            lastError: "timeout",
-          },
-        ],
-      });
+    api.status = async () => ({
+      ...status,
+      inbox: { open: items.length, acked: 0, byKind: {} },
+    });
     api.proposals = async () => ({ proposals: [] });
     api.outbox = async () => ({ outbox: [] });
     api.journal = async () => ({ entries: [], head: 0 });
-    const onJumpEvents = mock((_focus: EventFocus) => {});
-
+    api.inbox = async () => ({ items });
+    return () => {
+      api.status = restore.status;
+      api.proposals = restore.proposals;
+      api.outbox = restore.outbox;
+      api.journal = restore.journal;
+      api.inbox = originalInbox;
+    };
+  }
+  test("leads with capped oldest-first inbox groups and opens the selected row", async () => {
+    const items = Array.from({ length: 6 }, (_, index) =>
+      inboxItem(
+        `blocked-${index}`,
+        "BLOCKED",
+        `2026-08-17T0${index}:00:00.000Z`,
+      ),
+    );
+    const restore = stubNeedsYou(items);
+    const onNavigate = mock(() => {});
     try {
-      const view = renderOverview({ kind: "all" }, { onJumpEvents });
-      await waitFor(() => view.getByText(/3 dead-lettered · chain · duplicate key/));
-      fireEvent.click(view.getAllByRole("button", { name: "View event" })[0]!);
-      expect(onJumpEvents).toHaveBeenCalledWith({ source: "chain", eventId: eventIds[0] });
+      const view = renderOverview({ kind: "all" }, { onNavigate });
+      await waitFor(() =>
+        expect(view.getByRole("heading", { name: "Needs you" })).toBeTruthy(),
+      );
+      expect(
+        view
+          .getAllByRole("heading")
+          .map((heading) => heading.textContent)
+          .slice(0, 2),
+      ).toEqual(["Overview", "Needs you"]);
+      expect(view.getAllByTitle(/Attention blocked-/)).toHaveLength(5);
+      expect(view.queryByTitle("Attention blocked-5")).toBeNull();
+      expect(
+        view.getByRole("link", { name: "1 more →" }).getAttribute("href"),
+      ).toBe("#/inbox");
+      fireEvent.keyDown(document.body, { key: "Enter" });
+      expect(onNavigate).toHaveBeenCalledWith("inbox/blocked-0");
     } finally {
-      api.status = originals.status;
-      api.proposals = originals.proposals;
-      api.outbox = originals.outbox;
-      api.journal = originals.journal;
+      restore();
     }
   });
 
@@ -690,108 +650,33 @@ describe("Overview anomaly deck (WM-95)", () => {
     }
   });
 
-  test("keeps runtime anomalies inside the shared compact grammar", async () => {
-    const mutableApi = api as typeof api & {
-      archive: (
-        source: string,
-        eventId: string,
-      ) => Promise<{ archived: boolean }>;
-      releaseWorker: (
-        workerId: string,
-        runId: string,
-      ) => Promise<{ released: boolean; runId: string }>;
-    };
-    const originals = {
-      status: api.status,
-      proposals: api.proposals,
-      outbox: api.outbox,
-      journal: api.journal,
-      archive: mutableApi.archive,
-      releaseWorker: mutableApi.releaseWorker,
-    };
-    let deadLettered = true;
-    let stalled = true;
-    api.status = async () =>
-      baseStatus({
-        deadLettered: deadLettered
-          ? [
-              {
-                source: "github",
-                eventId: "dead-1",
-                lastError: "historical failure",
-              },
-            ]
-          : [],
-        stalledWorkers: stalled
-          ? [
-              {
-                workerId: "worker-1",
-                runId: "run-1",
-                host: "lab",
-                lastSeen: new Date(0).toISOString(),
-              },
-            ]
-          : [],
-      });
-    api.proposals = async () => ({ proposals: [] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-    mutableApi.archive = async (source, eventId) => {
-      expect({ source, eventId }).toEqual({
-        source: "github",
-        eventId: "dead-1",
-      });
-      deadLettered = false;
-      return { archived: true };
-    };
-    mutableApi.releaseWorker = async (workerId, runId) => {
-      expect({ workerId, runId }).toEqual({
-        workerId: "worker-1",
-        runId: "run-1",
-      });
-      stalled = false;
-      return { released: true, runId };
-    };
-
+  test("renders Runtime anomalies in the shared compact grammar", async () => {
+    const onJumpRuns = mock(() => {});
+    const restore = stubNeedsYou([], baseStatus({ staleLeases: 1 }));
+    try {
+      const view = renderOverview({ kind: "all" }, { onJumpRuns });
+      await waitFor(() => view.getByRole("heading", { name: "Runtime" }));
+      expect(view.queryByText(/Anomalies ·/)).toBeNull();
+      fireEvent.click(view.getByRole("button", { name: "View leased runs" }));
+      expect(onJumpRuns).toHaveBeenCalledWith("LEASED");
+    } finally {
+      restore();
+    }
+  });
+  test("uses the unfenced calm line when the ledger and runtime are clear", async () => {
+    const restore = stubNeedsYou([]);
     try {
       const view = renderOverview();
-      await waitFor(() => view.getByText(/github · historical failure/));
-      expect(view.getByText(/stalled worker worker-1/)).toBeTruthy();
-      expect(view.queryByRole("button", { name: "Archive" })).toBeNull();
-      expect(view.queryByRole("button", { name: "Release lease" })).toBeNull();
+      await waitFor(() =>
+        expect(
+          view.getByText(/Nothing needs you · last decision/),
+        ).toBeTruthy(),
+      );
+      const needsYou = view.getByLabelText("Needs you");
+      expect(needsYou.querySelector("table")).toBeNull();
+      expect(needsYou.querySelector(".border")).toBeNull();
     } finally {
-      api.status = originals.status;
-      api.proposals = originals.proposals;
-      api.outbox = originals.outbox;
-      api.journal = originals.journal;
-      mutableApi.archive = originals.archive;
-      mutableApi.releaseWorker = originals.releaseWorker;
-    }
-    // Two 2s status polls plus the waitFor budgets put this right at bun's
-    // default 5s — it passed on develop by ~100ms. Give it its real budget.
-  }, 15_000);
-
-  test("other anomaly kinds (stale leases, unpublished outbox) render unchanged", async () => {
-    const origStatus = api.status;
-    const origProposals = api.proposals;
-    const origOutbox = api.outbox;
-    const origJournal = api.journal;
-    api.status = async () =>
-      baseStatus({ staleLeases: 3, unpublishedOutbox: 2 });
-    api.proposals = async () => ({ proposals: [] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-
-    try {
-      const { getByText } = renderOverview();
-
-      await waitFor(() => getByText(/stale leases: 3/));
-      expect(getByText(/unpublished outbox rows: 2/)).toBeTruthy();
-    } finally {
-      api.status = origStatus;
-      api.proposals = origProposals;
-      api.outbox = origOutbox;
-      api.journal = origJournal;
+      restore();
     }
   });
 });

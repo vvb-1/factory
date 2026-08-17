@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard, refetchIntervals, useNow, useRequeuePoll } from "../hooks";
@@ -34,7 +42,9 @@ import { Button as PrimitiveButton } from "../components/ui";
 const FEED_CAP = 50;
 
 const OverviewNeedsYou = lazy(() =>
-  import("./Inbox").then(({ OverviewNeedsYou }) => ({ default: OverviewNeedsYou })),
+  import("./Inbox").then(({ OverviewNeedsYou }) => ({
+    default: OverviewNeedsYou,
+  })),
 );
 
 export function SectionTitle({
@@ -1017,7 +1027,8 @@ export function Overview({
         queryClient.invalidateQueries({ queryKey: ["inbox"] }),
         queryClient.invalidateQueries({ queryKey: ["status"] }),
       ]),
-    onError: (error) => notify(`Ack failed: ${(error as Error).message}`, "err"),
+    onError: (error) =>
+      notify(`Ack failed: ${(error as Error).message}`, "err"),
   });
 
   const s = useMemo(() => normalizeStatus(status.data), [status.data]);
@@ -1059,7 +1070,10 @@ export function Overview({
   const anomalyRowRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   const openInboxItems = useMemo(
-    () => (inbox.data?.items ?? []).filter((item) => !item.ackedAt && !item.resolvedAt),
+    () =>
+      (inbox.data?.items ?? []).filter(
+        (item) => !item.ackedAt && !item.resolvedAt,
+      ),
     [inbox.data?.items],
   );
   const lastDecision = useMemo(() => {
@@ -1069,11 +1083,14 @@ export function Overview({
     return decisionTimes.sort().at(-1) ?? null;
   }, [inbox.data?.items]);
   const runtimeNeeds = useMemo(
-    () => anomalyRows.map((row, index) => ({
-      id: `runtime-${index}`,
-      title: row.text,
-      primaryAction: row.links[0] ? { label: row.links[0].label, onClick: row.links[0].go } : undefined,
-    })),
+    () =>
+      anomalyRows.map((row, index) => ({
+        id: `runtime-${index}`,
+        title: row.text,
+        primaryAction: row.links[0]
+          ? { label: row.links[0].label, onClick: row.links[0].go }
+          : undefined,
+      })),
     [anomalyRows],
   );
 
@@ -1282,7 +1299,13 @@ export function Overview({
       </div>
       <OverviewScopeNotice context={context} />
 
-      <Suspense fallback={<div className="mb-6 text-[12px] text-(--text-faint)">Loading needs you</div>}>
+      <Suspense
+        fallback={
+          <div className="mb-6 text-[12px] text-(--text-faint)">
+            Loading needs you
+          </div>
+        }
+      >
         <OverviewNeedsYou
           items={openInboxItems}
           runtimeItems={runtimeNeeds}

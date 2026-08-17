@@ -392,12 +392,23 @@ export function NeedsYouRow({
         open();
       }}
       className={`group flex min-w-0 items-center gap-2 border-b border-(--border) px-3 py-2 last:border-0 ${
-        onOpen ? "cursor-pointer hover:bg-(--surface-2) focus-visible:outline-2 focus-visible:outline-(--accent)" : ""
+        onOpen
+          ? "cursor-pointer hover:bg-(--surface-2) focus-visible:outline-2 focus-visible:outline-(--accent)"
+          : ""
       } ${selected ? "row-selected" : ""}`}
     >
       <StateBadge state={kind} hues={hues} dot={false} />
-      <span className="min-w-0 flex-1 truncate text-[12px] text-(--text)" title={title}>{title}</span>
-      {age && <span className="mono shrink-0 text-[11px] text-(--text-faint)">{age}</span>}
+      <span
+        className="min-w-0 flex-1 truncate text-[12px] text-(--text)"
+        title={title}
+      >
+        {title}
+      </span>
+      {age && (
+        <span className="mono shrink-0 text-[11px] text-(--text-faint)">
+          {age}
+        </span>
+      )}
       {primaryAction && (
         <button
           type="button"
@@ -447,7 +458,10 @@ export function NeedsYouGroup({
         <h3 className="font-semibold text-(--text-dim)">{label}</h3>
         <span className="mono text-(--text-faint)">{count}</span>
         {count > 5 && (
-          <a href={moreHref} className="ml-auto cursor-pointer text-(--text-faint) hover:text-(--text) hover:underline">
+          <a
+            href={moreHref}
+            className="ml-auto cursor-pointer text-(--text-faint) hover:text-(--text) hover:underline"
+          >
             {count - 5} more →
           </a>
         )}
@@ -491,11 +505,17 @@ export function OverviewNeedsYou({
   const navigable = useMemo(
     () => [
       ...groups.flatMap(({ items: groupItems }) =>
-        groupItems.slice(0, 5).map((item) => ({ id: item.id, open: () => onOpenItem(item.id) })),
+        groupItems
+          .slice(0, 5)
+          .map((item) => ({ id: item.id, open: () => onOpenItem(item.id) })),
       ),
-      ...runtimeItems.slice(0, 5).flatMap((item) =>
-        item.primaryAction ? [{ id: item.id, open: item.primaryAction.onClick }] : [],
-      ),
+      ...runtimeItems
+        .slice(0, 5)
+        .flatMap((item) =>
+          item.primaryAction
+            ? [{ id: item.id, open: item.primaryAction.onClick }]
+            : [],
+        ),
     ],
     [groups, onOpenItem, runtimeItems],
   );
@@ -512,19 +532,31 @@ export function OverviewNeedsYou({
     <section className="mb-6" aria-label="Needs you">
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <h2>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-(--text-faint)">Needs you</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-(--text-faint)">
+            Needs you
+          </span>
         </h2>
-        {items.length > 0 && <span className="text-[11px] text-(--text-faint)">{items.length} open</span>}
+        {items.length > 0 && (
+          <span className="text-[11px] text-(--text-faint)">
+            {items.length} open
+          </span>
+        )}
       </div>
       {items.length === 0 && runtimeItems.length === 0 ? (
         <div className="flex items-center gap-2 px-1 py-2 text-[12px] text-(--text-muted)">
           <span className="size-1.5 rounded-full bg-(--hue-ok)" />
-          Nothing needs you · last decision {lastDecision ? <Ago iso={lastDecision} now={now} /> : "—"}
+          Nothing needs you · last decision{" "}
+          {lastDecision ? <Ago iso={lastDecision} now={now} /> : "—"}
         </div>
       ) : (
         <div className="space-y-2">
           {groups.map(({ group, items: groupItems }) => (
-            <NeedsYouGroup key={group.id} label={group.label} hue={group.hue} count={groupItems.length}>
+            <NeedsYouGroup
+              key={group.id}
+              label={group.label}
+              hue={group.hue}
+              count={groupItems.length}
+            >
               {groupItems.slice(0, 5).map((item) => (
                 <NeedsYouRow
                   key={item.id}
@@ -533,14 +565,21 @@ export function OverviewNeedsYou({
                   age={<Ago iso={item.createdAt} now={now} />}
                   selected={navigable[selectedIndex]?.id === item.id}
                   onOpen={() => onOpenItem(item.id)}
-                  primaryAction={{ label: "Open", onClick: () => onOpenItem(item.id) }}
+                  primaryAction={{
+                    label: "Open",
+                    onClick: () => onOpenItem(item.id),
+                  }}
                   onAck={connected ? () => onAck(item.id) : undefined}
                 />
               ))}
             </NeedsYouGroup>
           ))}
           {runtimeItems.length > 0 && (
-            <NeedsYouGroup label={runtimeLabel} hue="var(--hue-warn)" count={runtimeItems.length}>
+            <NeedsYouGroup
+              label={runtimeLabel}
+              hue="var(--hue-warn)"
+              count={runtimeItems.length}
+            >
               {runtimeItems.slice(0, 5).map((item) => (
                 <NeedsYouRow
                   key={item.id}
