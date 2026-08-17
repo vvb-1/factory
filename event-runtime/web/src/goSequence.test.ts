@@ -1,10 +1,11 @@
 import "./test-dom";
 import { describe, expect, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { createElement } from "react";
 import { App } from "./App";
-import { GO_CHORD_MS, goSequence } from "./goSequence";
+import { CONTEXT_STORAGE_KEY } from "./context";
+import { GO_CHORD_MS, goPrefix, goSequence } from "./goSequence";
 import { NAV } from "./nav";
 
 /** Every `g`-chord suffix registered in nav — single source for the matrix. */
@@ -13,7 +14,10 @@ const NAV_SUFFIXES: string[] = NAV.map((n) => n.go);
 /** A stepper over the real nav suffixes, with a clock the test drives. */
 function chord(targets = NAV_SUFFIXES) {
   let now = GO_CHORD_MS;
-  const seq = goSequence((k) => targets.includes(k), () => now);
+  const seq = goSequence(
+    (k) => targets.includes(k),
+    () => now,
+  );
   return { press: seq.press, armed: seq.armed, at: (t: number) => (now = t) };
 }
 
@@ -28,9 +32,16 @@ describe("goSequence", () => {
     const originalSuffix = firstView.go;
     const sentinelSuffix = "z";
     const realFetch = globalThis.fetch;
+    const originalHref = window.location.href;
+    const originalTitle = document.title;
+    const originalGoPrefix = goPrefix.armedAt;
+    const originalTheme = localStorage.getItem("evrt-theme");
+    const originalThemeDataset = document.documentElement.dataset.theme;
+    const originalContextTabs = sessionStorage.getItem(CONTEXT_STORAGE_KEY);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, refetchInterval: false } },
     });
+    let app: ReturnType<typeof render> | undefined;
 
     firstView.go = sentinelSuffix;
     globalThis.fetch = (async () =>
@@ -41,7 +52,7 @@ describe("goSequence", () => {
     window.location.href = "http://localhost/#/events";
 
     try {
-      render(
+      app = render(
         createElement(
           QueryClientProvider,
           { client: queryClient },
@@ -54,10 +65,34 @@ describe("goSequence", () => {
       });
       expect(window.location.hash).toBe(`#/${firstView.key}`);
     } finally {
-      cleanup();
+      app?.unmount();
+      queryClient.clear();
       firstView.go = originalSuffix;
       globalThis.fetch = realFetch;
+      window.location.href = originalHref;
+      document.title = originalTitle;
+      goPrefix.armedAt = originalGoPrefix;
+      if (originalTheme === null) localStorage.removeItem("evrt-theme");
+      else localStorage.setItem("evrt-theme", originalTheme);
+      if (originalThemeDataset === undefined)
+        delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = originalThemeDataset;
+      if (originalContextTabs === null)
+        sessionStorage.removeItem(CONTEXT_STORAGE_KEY);
+      else sessionStorage.setItem(CONTEXT_STORAGE_KEY, originalContextTabs);
     }
+
+    expect(firstView.go).toBe(originalSuffix);
+    expect(globalThis.fetch).toBe(realFetch);
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+    expect(window.location.href).toBe(originalHref);
+    expect(document.title).toBe(originalTitle);
+    expect(goPrefix.armedAt).toBe(originalGoPrefix);
+    expect(localStorage.getItem("evrt-theme")).toBe(originalTheme);
+    expect(document.documentElement.dataset.theme).toBe(originalThemeDataset);
+    expect(sessionStorage.getItem(CONTEXT_STORAGE_KEY)).toBe(
+      originalContextTabs,
+    );
   });
 
   test("g g completes the chord inside the window — the Graph suffix is not swallowed", () => {
