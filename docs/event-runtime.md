@@ -56,14 +56,14 @@ A runtime justified by one demo scenario is a red flag. These are the concrete
 event types this runtime is expected to serve, in order, each named with the
 machinery it earns. Anything no listed event type needs stays unbuilt.
 
-| Event type | Source | Machinery it earns | When |
-| :--- | :--- | :--- | :--- |
-| `factory.status-report.requested` | operator webhook / replay CLI | intake, dedup, planner, approval, ephemeral workspace, schema verification, receipts | slice 1 |
-| `keephq.disk-alert.raised` | Keep HQ infra alert webhook / replay CLI | two-node chain (diagnose → remediate) via the discovered-chain machinery, semantic verification recomputing reclaimed bytes from before/after probe evidence, typed remediation plans from a **closed action registry** (`lib/adapters/actions.mjs`), first infra-mutating executor behind watched approval (OPS-208) | shipped (watched) |
-| `github.workflow-run.failed` | GitHub webhook / replay CLI | first discovered chain (OPS-223): typed `ci-doctor` diagnosis → recommendation edges → watched closed-command follow-ups (`gh run rerun`, notify); command adapter and edge registry | shipped |
-| `sentry.issue.created` | Sentry webhook | *(dropped as a slice — Sentry already feeds Linear directly, so classifying here validates nothing operationally new; revisit only if that intake moves)* | — |
-| `clock.tick.<loop>` | scheduler | admitted, audited timer events; per-loop migration of the standing loops — **[event-runtime-schedules.md](event-runtime-schedules.md)** (OPS-380/OPS-381) | shipped, loops off by default |
-| repository-mutating events | GitHub / Linear | shared claim, capacity, Owned Paths, and approval authority with the ticket dispatcher (§3, designed in [event-runtime-dispatch.md](event-runtime-dispatch.md)) | last |
+| Event type                        | Source                                   | Machinery it earns                                                                                                                                                                                                                                                                                                    | When                          |
+| :-------------------------------- | :--------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------- |
+| `factory.status-report.requested` | operator webhook / replay CLI            | intake, dedup, planner, approval, ephemeral workspace, schema verification, receipts                                                                                                                                                                                                                                  | slice 1                       |
+| `keephq.disk-alert.raised`        | Keep HQ infra alert webhook / replay CLI | two-node chain (diagnose → remediate) via the discovered-chain machinery, semantic verification recomputing reclaimed bytes from before/after probe evidence, typed remediation plans from a **closed action registry** (`lib/adapters/actions.mjs`), first infra-mutating executor behind watched approval (OPS-208) | shipped (watched)             |
+| `github.workflow-run.failed`      | GitHub webhook / replay CLI              | first discovered chain (OPS-223): typed `ci-doctor` diagnosis → recommendation edges → watched closed-command follow-ups (`gh run rerun`, notify); command adapter and edge registry                                                                                                                                  | shipped                       |
+| `sentry.issue.created`            | Sentry webhook                           | _(dropped as a slice — Sentry already feeds Linear directly, so classifying here validates nothing operationally new; revisit only if that intake moves)_                                                                                                                                                             | —                             |
+| `clock.tick.<loop>`               | scheduler                                | admitted, audited timer events; per-loop migration of the standing loops — **[event-runtime-schedules.md](event-runtime-schedules.md)** (OPS-380/OPS-381)                                                                                                                                                             | shipped, loops off by default |
+| repository-mutating events        | GitHub / Linear                          | shared claim, capacity, Owned Paths, and approval authority with the ticket dispatcher (§3, designed in [event-runtime-dispatch.md](event-runtime-dispatch.md))                                                                                                                                                       | last                          |
 
 Clock events are called out deliberately. [architecture.md](architecture.md)
 §2.7 keeps every timer in `config/schedule.yaml` disabled until a loop earns its
@@ -75,7 +75,7 @@ here is a separate per-loop decision, and the MVP enables no timer (§3).
 Conversely, what no event type above needs yet — and is therefore explicitly
 deferred, with its trigger named:
 
-- **API-mediated worker claims** — the first *remote* worker node. The
+- **API-mediated worker claims** — the first _remote_ worker node. The
   control plane keeps `BEGIN IMMEDIATE` and SQLite behind authenticated
   `/worker/v1` endpoints; workers receive fencing tokens, never database
   credentials ([event-runtime-worker-protocol.md](event-runtime-worker-protocol.md)).
@@ -83,7 +83,7 @@ deferred, with its trigger named:
   superseded (§10).
 - **Declared workflows with `dependsOn` and deterministic joins (§11)** — the
   first event type that needs a fan-out and a join. What shipped is the
-  *discovered* form: one typed recommendation per completed run, resolved
+  _discovered_ form: one typed recommendation per completed run, resolved
   through `edges.json`.
 - **`mounted`, `container` and `persistent` workspaces (§7)** — filesystem
   isolation as a policy axis, and any run needing a durable named workspace.
@@ -299,9 +299,7 @@ the same run.
     "status": "passed",
     "checks": ["schema_valid", "hash_recomputed"]
   },
-  "artifacts": [
-    { "kind": "transcript", "uri": "file://...", "sha256": "..." }
-  ]
+  "artifacts": [{ "kind": "transcript", "uri": "file://...", "sha256": "..." }]
 }
 ```
 
@@ -438,7 +436,7 @@ against the Cursor Agent CLI.** Binary is `agent` on PATH, else
 the installed CLI (`agent` 2026.08.11): `-p` is a boolean and the prompt is
 a trailing positional (after `--`); `--output-format stream-json` is NDJSON
 without `--stream-partial-output` (those deltas would double-emit);
-`--trust` skips the workspace prompt; `--force` is required to *apply*
+`--trust` skips the workspace prompt; `--force` is required to _apply_
 writes — print without it only proposes them. `--mode ask|plan` is
 documented no-edits and is never passed: it would fail the result contract
 (OPS-518). Read-only containment is the workspace cwd plus the worker
@@ -556,14 +554,14 @@ the MVP.
 
 Every run has an execution directory. It does not necessarily have source code.
 
-| Workspace type | Use | MVP |
-| :--- | :--- | :---: |
-| `ephemeral` | Empty directory populated only with declared inputs | yes |
-| `artifacts` | Declared prior artifacts materialized by content hash, read-only (OPS-372) | yes |
-| `repository` | Read-only checkout pinned to a SHA, from a per-repo bare mirror (tier 1, OPS-228); full worktrees for repo-mutating work are tier 2 — designed ([event-runtime-dispatch.md](event-runtime-dispatch.md)), unbuilt | tier 1 |
-| `mounted` | Explicit existing directory, normally read-only | later |
-| `container` | Isolated filesystem/volume in Docker or Kubernetes | later |
-| `persistent` | Named, versioned workspace protected by a single-writer lease | later |
+| Workspace type | Use                                                                                                                                                                                                              |  MVP   |
+| :------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----: |
+| `ephemeral`    | Empty directory populated only with declared inputs                                                                                                                                                              |  yes   |
+| `artifacts`    | Declared prior artifacts materialized by content hash, read-only (OPS-372)                                                                                                                                       |  yes   |
+| `repository`   | Read-only checkout pinned to a SHA, from a per-repo bare mirror (tier 1, OPS-228); full worktrees for repo-mutating work are tier 2 — designed ([event-runtime-dispatch.md](event-runtime-dispatch.md)), unbuilt | tier 1 |
+| `mounted`      | Explicit existing directory, normally read-only                                                                                                                                                                  | later  |
+| `container`    | Isolated filesystem/volume in Docker or Kubernetes                                                                                                                                                               | later  |
+| `persistent`   | Named, versioned workspace protected by a single-writer lease                                                                                                                                                    | later  |
 
 Ephemeral lifecycle:
 
@@ -810,7 +808,7 @@ run, are **not implemented**; they wait for an event type that actually fans out
 Per §2, the DAG engine is earned by slice 2 (`keephq.disk-alert.raised`,
 OPS-208): a read-only LLM diagnose node followed — only after watched approval
 of its typed plan — by a **deterministic-command remediation node**. That
-second node is exactly the "registered agent *or deterministic command*"
+second node is exactly the "registered agent _or deterministic command_"
 option above: the model proposes, code executes. Slice 1 is single-node;
 nothing beyond a two-node chain is built until a real workflow needs it.
 
@@ -829,7 +827,7 @@ are **clients, not the runtime**: every read and every verb goes through the
 same control API the runtime exposes, never directly into the database. That keeps a future web app a second client of
 identical endpoints, with the same audit trail, rather than a reimplementation.
 
-**Push notifications (WM-65).** For the operator who is *not* watching, the
+**Push notifications (WM-65).** For the operator who is _not_ watching, the
 serve tick carries a push channel (`lib/notify.mjs`) over the existing
 `notify.py` convention, covering exactly the two states that wait on a human:
 an event parked `human_needed` pushes `BLOCKED <event-type> <eventId>:
@@ -895,7 +893,7 @@ lifecycle transitions with the operator as actor:
 - **inspect** — the retained workspace path, receipt, and transcript for any
   attempt.
 - **workers** — the registered worker processes: host, pid, labels, state,
-  current run, and heartbeat age. Leases prove an *attempt* is held; this
+  current run, and heartbeat age. Leases prove an _attempt_ is held; this
   answers which processes are alive and what they may claim (OPS-233).
 - **inject** — re-inject a stored event body through the same intake function
   the webhook uses (`POST /replay`); dedup rules apply unchanged. The CLI verb
@@ -906,7 +904,7 @@ lifecycle transitions with the operator as actor:
   due, and the factory repo list.
 - **requeue** — re-plan a dead-lettered or `human_needed` event in place:
   same admitted event, a fresh planning pass against current state. Replay is
-  for a fixed *event body*; requeue is for a fixed *world* — after a registry
+  for a fixed _event body_; requeue is for a fixed _world_ — after a registry
   or planner fix, the stored event is fine and only the decision was wrong.
 
 **Dead-lettering.** An event that fails planning repeatedly (default: 3
@@ -946,7 +944,7 @@ The MVP therefore requires:
 gate enforce the filesystem boundary, and the adapter launches the child with
 a minimal runtime environment instead of copying the worker environment. That
 does not yet turn declarations such as `linear:read` into network authority:
-those still answer *what was authorized*, not *what was possible*. The
+those still answer _what was authorized_, not _what was possible_. The
 declaration is validated at admission, recorded immutably in the `RunSpec`, and
 auditable after the fact.
 
@@ -1053,6 +1051,18 @@ Operationally:
   running the coding agents themselves in-guest is a separate piece of work
   rather than a flag flip.
 
+The coding-agent guest strategy is specified in
+[`eval-gondolin-guest-image.md`](eval-gondolin-guest-image.md) (WM-195). It
+selects a pinned Alpine image with Git and pre-baked Claude/Pi CLIs, keeps
+runtime package installation disabled, and retains exact per-provider
+`allowedHosts` plus host-side credential substitution. It also records two
+migration blockers that the command path does not exercise: linked worktrees'
+`.git` files point outside the mounted worktree, and subscription OAuth cannot
+be migrated by mounting the runner's complete Claude/Pi home into a
+model-controlled guest. The roadmap therefore requires a portable per-run Git
+directory and a host subscription-token broker before either LLM adapter can
+claim the §14.1 boundary.
+
 **The control API is a trust surface of its own.** The operator/web routes bind
 loopback today, so they still rely on local-user access: `ACTOR` is hardcoded
 `"operator"`, and the web server is a loopback static+proxy process. The
@@ -1107,7 +1117,7 @@ MVP exit criteria:
 counting — the model adds little and its output is trivially checkable. That is
 deliberate: slice 1 validates intake, dedup, planning, approval, workspaces,
 lifecycle, and restart survival. The plumbing. It does **not** validate the
-runtime's reason to exist: accepting or rejecting *stochastic* output, and
+runtime's reason to exist: accepting or rejecting _stochastic_ output, and
 gating a consequence behind approval. That is slice 2
 ([OPS-208](https://linear.app/watt-mind/issue/OPS-208)) —
 `keephq.disk-alert.raised` drives a two-node chain: a read-only diagnose agent
