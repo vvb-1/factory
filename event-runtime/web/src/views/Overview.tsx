@@ -673,7 +673,7 @@ function RecentOutcomesStrip({
       title="Recent outcomes (newest on the right)"
     >
       <SectionTitle title="Recent outcomes" meta={`last ${outcomes.length}`} />
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {chrono.map((o) => {
             const hue =
@@ -1235,7 +1235,7 @@ export function Overview({
   };
 
   return (
-    <div className="h-full min-w-0 overflow-auto p-5">
+    <div className="h-full min-w-0 overflow-auto p-3 sm:p-5">
       <div className="mb-4 flex items-baseline justify-between gap-3">
         <h1 className="display text-lg font-semibold">Overview</h1>
       </div>
@@ -1563,7 +1563,7 @@ export function Overview({
           />
         </div>
       ) : (
-        <div className="mb-5 flex items-center justify-between rounded-lg border border-(--border) bg-(--surface-1) px-3.5 py-2.5 text-[12px] text-(--text-dim)">
+        <div className="mb-5 flex flex-col items-start gap-2 rounded-lg border border-(--border) bg-(--surface-1) px-3.5 py-2.5 text-[12px] text-(--text-dim) sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <span className="size-2 rounded-full bg-(--hue-ok)" />
             <span className="font-medium text-(--text)">
@@ -1694,7 +1694,7 @@ export function Overview({
                   type="button"
                   onClick={() => onNavigate("inbox")}
                   aria-label={`Waiting on you: ${s.inbox.open} open inbox item${s.inbox.open === 1 ? "" : "s"} — open the inbox`}
-                  className="flex w-full cursor-pointer items-center gap-3 rounded-md border border-(--border) bg-(--surface-1) px-3 py-1.5 text-left hover:bg-(--surface-2)"
+                  className="flex w-full cursor-pointer items-start gap-3 rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left hover:bg-(--surface-2) sm:items-center sm:py-1.5"
                 >
                   <span
                     className="display text-xl tabular-nums"
@@ -1706,7 +1706,7 @@ export function Overview({
                   >
                     {s.inbox.open}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-(--text-faint)">
+                  <span className="min-w-0 flex-1 break-words text-[11px] text-(--text-faint)">
                     {s.inbox.open > 0 && s.inbox.byKind
                       ? (() => {
                           const kinds = Object.entries(s.inbox.byKind!)
@@ -1727,7 +1727,7 @@ export function Overview({
                         })()
                       : "Nothing needs a decision right now."}
                   </span>
-                  <span className="mono text-[11px] text-(--text-faint)">
+                  <span className="mono shrink-0 self-center text-[11px] text-(--text-faint)">
                     g n →
                   </span>
                 </PrimitiveButton>

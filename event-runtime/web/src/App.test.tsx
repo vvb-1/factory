@@ -252,6 +252,65 @@ describe("Graph proposal navigation (WM-165)", () => {
   });
 });
 
+describe("responsive primary navigation (WM-175)", () => {
+  test("mobile toggle opens and closes the overlay navigation accessibly", async () => {
+    const utils = renderApp();
+    const nav = utils.getByRole("navigation", { name: "Primary" });
+    const main = utils.getByRole("main");
+    const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
+    const toggle = utils.getByRole("button", { name: "Open navigation" });
+
+    expect(toggle.getAttribute("aria-controls")).toBe("primary-navigation");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(nav.className).toContain("hidden");
+    expect(nav.className).toContain("md:flex");
+    expect(nav.className).toContain("md:w-52");
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(nav.className).toContain("flex");
+    expect(nav.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    const close = utils.getByRole("button", { name: "Close navigation" });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    expect(main.hasAttribute("inert")).toBe(true);
+    expect(main.getAttribute("aria-hidden")).toBe("true");
+    expect(statusBar.hasAttribute("inert")).toBe(true);
+
+    const navButtons = within(nav).getAllByRole("button");
+    const first = navButtons[0]!;
+    const last = navButtons.at(-1)!;
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(nav.className).toMatch(/(^|\s)hidden(\s|$)/);
+    expect(main.hasAttribute("inert")).toBe(false);
+    expect(main.hasAttribute("aria-hidden")).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  });
+
+  test("choosing a destination closes the mobile navigation and preserves its landmark", () => {
+    const utils = renderApp();
+    const toggle = utils.getByRole("button", { name: "Open navigation" });
+
+    fireEvent.click(toggle);
+    fireEvent.click(utils.sidebar.getByRole("button", { name: "Events" }));
+
+    expect(window.location.hash).toBe("#/events");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      utils.getByRole("navigation", { name: "Primary" }).getAttribute("id"),
+    ).toBe("primary-navigation");
+  });
+});
+
 describe("bottom status bar", () => {
   test("stale-only fleet agrees with the Workers badge instead of saying no workers (WM-159)", async () => {
     currentStatus = {
