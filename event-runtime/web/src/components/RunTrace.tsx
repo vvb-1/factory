@@ -591,19 +591,18 @@ export function RunTrace({
     }
   }, [allErrorEntries, activeErrorIdx, shown, full]);
 
-  // Waterfall timing calculations:
+  // Calculate each duration from adjacent entries in the complete trace so
+  // filtering cannot make a visible row span hidden work. Scale bars only
+  // against the rows currently shown.
   const { durations, maxDurationMs } = useMemo(() => {
     const map = new Map<number, number>();
-    let max = 0;
-    for (let i = 0; i < shown.length; i++) {
-      const dur = getEntryDuration(shown[i], shown[i + 1]);
-      if (dur != null) {
-        map.set(shown[i].seq, dur);
-        if (dur > max) max = dur;
-      }
+    for (let i = 0; i < entries.length; i++) {
+      const dur = getEntryDuration(entries[i], entries[i + 1]);
+      if (dur != null) map.set(entries[i].seq, dur);
     }
+    const max = shown.reduce((largest, entry) => Math.max(largest, map.get(entry.seq) ?? 0), 0);
     return { durations: map, maxDurationMs: max || 1000 };
-  }, [shown]);
+  }, [entries, shown]);
 
   // In-trace text search matches:
   const searchMatches = useMemo(() => {
