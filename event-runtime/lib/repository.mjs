@@ -91,8 +91,8 @@ export function pinRepo(repoName, ref, { reposRoot, mirrors = mirrorsRoot() } = 
     const { sha } = resolveRef(repo, ref ?? repo.base, { root: mirrors });
     return { repo: repo.name, ref: ref ?? repo.base, sha, github: repo.github };
   } catch (err) {
-    if (!repo.github && !existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
-      return { repo: repo.name, ref: ref ?? repo.base, sha: "0000000000000000000000000000000000000000", github: repo.github };
+    if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+      return { repo: repo.name, ref: ref ?? repo.base, sha: "000000000000000000000000000000000000000", github: repo.github };
     }
     throw err;
   }
@@ -111,7 +111,7 @@ export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "rep
   if (!target.startsWith(path.resolve(workspaceDir) + path.sep)) {
     throw new RepositoryWorkspaceError(`checkout subdir "${subdir}" escapes the workspace`);
   }
-  if (!repo.github && !existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
+  if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
     mkdirSync(target, { recursive: true });
     // The worker's integrity gate must be able to inspect every repository
     // workspace, including a CI/demo fallback with no local source checkout.
