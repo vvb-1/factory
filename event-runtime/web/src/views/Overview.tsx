@@ -907,7 +907,7 @@ export function Overview({
               </div>
             ))}
           </div>
-          <VerbError error={resolveAnomaly.error ?? dismiss.error ?? requeue.error} />
+          <VerbError error={resolveAnomaly.error ?? reject.error ?? requeue.error} />
         </div>
       ) : (
         <div className="mb-5 flex items-center justify-between rounded-lg border border-(--border) bg-(--surface-1) px-3.5 py-2.5 text-[12px] text-(--text-dim)">
