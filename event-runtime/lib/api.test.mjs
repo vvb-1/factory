@@ -671,6 +671,63 @@ describe("webui surface: proposal linkage, history, journal, outbox, requeue (OP
     }
   });
 
+  test("archives dead-lettered events and releases stalled worker leases from status anomalies (WM-326)", async () => {
+    const nowMs = 300_000;
+    const { db, server, port } = await makeServer({ now: () => nowMs });
+    const client = apiClient({ port });
+    try {
+      await client.replay(envelope({ eventId: "dead-archive" }));
+      db.query(
+        `UPDATE events SET status = 'dead_lettered', plan_failures = 3, last_plan_error = 'historical failure'
+         WHERE source = 'test' AND event_id = 'dead-archive'`,
+      ).run();
+
+      const spec = { timeoutSeconds: 60, maxAttempts: 2 };
+      db.query(
+        `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+         VALUES ('run-stalled', 'stalled-key', ?, 'sha256:stalled', 'LEASED', 1, ?, ?)`,
+      ).run(JSON.stringify(spec), new Date(0).toISOString(), new Date(0).toISOString());
+      db.query(
+        `INSERT INTO attempts (run_id, attempt, fencing_token, lease_owner, lease_expires_at)
+         VALUES ('run-stalled', 1, 1, 'worker-stalled', ?)`,
+      ).run(new Date(nowMs + 60_000).toISOString());
+      registerWorker(db, { workerId: "worker-stalled", now: 0 });
+      heartbeat(db, "worker-stalled", { state: "busy", runId: "run-stalled", now: 0 });
+
+      const before = await client.status();
+      expect(before.anomalies.deadLettered.map((event) => event.eventId)).toEqual(["dead-archive"]);
+      expect(before.anomalies.stalledWorkers.map((worker) => worker.workerId)).toEqual(["worker-stalled"]);
+
+      expect(await client.archive("test", "dead-archive")).toEqual({ archived: true });
+      expect(await client.releaseWorker("worker-stalled", "run-stalled")).toEqual({
+        released: true,
+        runId: "run-stalled",
+      });
+
+      const after = await client.status();
+      expect(after.anomalies.deadLettered).toEqual([]);
+      expect(after.anomalies.stalledWorkers).toEqual([]);
+      expect(db.query(`SELECT status, archived_at FROM events WHERE event_id = 'dead-archive'`).get()).toEqual({
+        status: "dead_lettered",
+        archived_at: new Date(nowMs).toISOString(),
+      });
+      expect(db.query(`SELECT state FROM runs WHERE run_id = 'run-stalled'`).get().state).toBe("QUEUED");
+      expect(db.query(`SELECT state, current_run FROM workers WHERE worker_id = 'worker-stalled'`).get()).toEqual({
+        state: "stopped",
+        current_run: null,
+      });
+
+      // Archiving is retry-safe, while invalid targets fail closed.
+      expect(await client.archive("test", "dead-archive")).toEqual({ archived: true });
+      expect((await rejection(client.archive("test", "ghost"))).status).toBe(404);
+      await client.replay(envelope({ eventId: "active-event" }));
+      expect((await rejection(client.archive("test", "active-event"))).status).toBe(409);
+      expect((await rejection(client.releaseWorker("ghost", "run-stalled"))).status).toBe(404);
+    } finally {
+      server.close();
+    }
+  });
+
   test("requeueing a human_needed event supersedes its open proposal", async () => {
     const { db, server, port } = await makeServer();
     const client = apiClient({ port });

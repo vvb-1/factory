@@ -27,7 +27,7 @@ import { closeOpenProposalForRun } from "./proposals.mjs";
 import { computeDefHash, createReceipt, verifyDefHash } from "./receipts.mjs";
 import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
-import { satisfiesPlacement } from "./workers.mjs";
+import { HEARTBEAT_STALE_MS, satisfiesPlacement } from "./workers.mjs";
 import { createWorkspace, destroyWorkspace, PathViolation, safeJoin } from "./workspace.mjs";
 
 /**
@@ -1073,6 +1073,80 @@ export async function executeClaimed(db, registry, adapters, claim, {
       try { releaseWorkerLease({ repo: repoName, ticket: ticketId, owner, dir: leasesDir }); } catch {}
     }
   }
+}
+
+/**
+ * Explicit operator recovery for a worker that stopped heartbeating while it
+ * still owned a run. This mirrors the lease reaper's retry/exhaustion rules,
+ * but targets exactly the selected worker/run and records an operator reason.
+ */
+export function releaseStalledWorkerLease(
+  db,
+  { workerId, runId },
+  { now = () => Date.now(), policyVersion = "unknown", actor = "operator" } = {},
+) {
+  const currentNow = resolveNow(now);
+  return txImmediate(db, () => {
+    const worker = db.query(`SELECT state, current_run, last_seen FROM workers WHERE worker_id = ?`).get(workerId);
+    if (!worker) throw new Error(`unknown worker ${workerId}`);
+    const stale = worker.state !== "stopped" && currentNow - Date.parse(worker.last_seen) > HEARTBEAT_STALE_MS;
+    if (!stale || !worker.current_run) throw new Error(`worker ${workerId} is not stalled with an active run`);
+    if (runId && worker.current_run !== runId) {
+      throw new Error(`worker ${workerId} holds ${worker.current_run}, not ${runId}`);
+    }
+
+    const heldRunId = worker.current_run;
+    const run = db.query(`SELECT state, attempts, spec_json FROM runs WHERE run_id = ?`).get(heldRunId);
+    if (!run) throw new Error(`worker ${workerId} references unknown run ${heldRunId}`);
+    if (!["LEASED", "RUNNING", "VERIFYING"].includes(run.state)) {
+      throw new Error(`run ${heldRunId} is ${run.state}, not actively leased`);
+    }
+    const attempt = db
+      .query(`SELECT lease_owner FROM attempts WHERE run_id = ? AND attempt = ?`)
+      .get(heldRunId, run.attempts);
+    if (!attempt) throw new Error(`run ${heldRunId} has no current attempt`);
+    if (attempt.lease_owner && attempt.lease_owner !== workerId) {
+      throw new Error(`run ${heldRunId} is leased by ${attempt.lease_owner}, not ${workerId}`);
+    }
+
+    const spec = JSON.parse(run.spec_json);
+    const reason = "operator_release_stalled_worker";
+    db.query(`UPDATE attempts SET lease_expires_at = ? WHERE run_id = ? AND attempt = ?`)
+      .run(iso(currentNow - 1), heldRunId, run.attempts);
+    if (run.attempts < spec.maxAttempts) {
+      if (run.state === "VERIFYING") {
+        transition(db, {
+          runId: heldRunId, to: "FAILED", actor, reason,
+          attempt: run.attempts, policyVersion, now: currentNow,
+        });
+        transition(db, {
+          runId: heldRunId, to: "QUEUED", actor, reason: "retry_after_stalled_worker_release",
+          attempt: run.attempts, policyVersion, now: currentNow,
+        });
+      } else {
+        transition(db, {
+          runId: heldRunId, to: "QUEUED", actor, reason,
+          attempt: run.attempts, policyVersion, now: currentNow,
+        });
+      }
+    } else {
+      if (run.state === "LEASED") {
+        transition(db, {
+          runId: heldRunId, to: "RUNNING", actor, reason,
+          attempt: run.attempts, policyVersion, now: currentNow,
+        });
+      }
+      transition(db, {
+        runId: heldRunId, to: "FAILED", actor, reason,
+        attempt: run.attempts, policyVersion, now: currentNow,
+      });
+      finishAttempt(db, heldRunId, run.attempts, "FAILED", "stalled_worker_released", currentNow);
+    }
+    db.query(
+      `UPDATE workers SET state = 'stopped', current_run = NULL, stopped_at = ? WHERE worker_id = ?`,
+    ).run(iso(currentNow), workerId);
+    return { released: true, runId: heldRunId };
+  });
 }
 
 /**

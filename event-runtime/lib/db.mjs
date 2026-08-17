@@ -216,6 +216,23 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "archive_dead_lettered_events",
+    up(db) {
+      // A cold start can have several processes read user_version before one
+      // acquires the migration lock. Keep the additive step retry-safe when a
+      // waiter enters with that stale read after the first process committed.
+      const columns = db.query(`PRAGMA table_info(events)`).all().map((row) => row.name);
+      if (!columns.includes("archived_at")) {
+        db.exec(`ALTER TABLE events ADD COLUMN archived_at TEXT;`);
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_events_dead_letter_archive
+          ON events (status, archived_at);
+      `);
+    },
+  },
 ];
 
 export const CURRENT_SCHEMA_VERSION =

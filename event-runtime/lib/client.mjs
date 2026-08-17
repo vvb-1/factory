@@ -56,6 +56,10 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     outbox: ({ limit = 50 } = {}) => call("GET", `/outbox?limit=${limit}`),
     requeue: (source, eventId) =>
       call("POST", "/events/requeue", { body: JSON.stringify({ source, eventId }) }),
+    archive: (source, eventId) =>
+      call("POST", "/events/archive", { body: JSON.stringify({ source, eventId }) }),
+    releaseWorker: (workerId, runId) =>
+      call("POST", `/workers/${encodeURIComponent(workerId)}/release`, { body: JSON.stringify({ runId }) }),
     agents: () => call("GET", "/agents"),
     workers: () => call("GET", "/workers"),
     schedules: () => call("GET", "/schedules"),

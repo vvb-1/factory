@@ -102,6 +102,12 @@ export const api = {
   // Re-plan a dead_lettered or human_needed event (404 unknown, 409 wrong status).
   requeue: (source: string, eventId: string) =>
     call<{ requeued: boolean }>("POST", "/events/requeue", { source, eventId }),
+  // Preserve a dead letter in history while removing it from active anomalies.
+  archive: (source: string, eventId: string) =>
+    call<{ archived: boolean }>("POST", "/events/archive", { source, eventId }),
+  // Requeue/fail the run held by a stale worker and retire its registry row.
+  releaseWorker: (workerId: string, runId: string) =>
+    call<{ released: boolean; runId: string }>("POST", `/workers/${encodeURIComponent(workerId)}/release`, { runId }),
   // The agent registry, fully readable: definitions, prompts, schemas, pins.
   agents: () => call<AgentsView>("GET", "/agents"),
   // Configured factory repositories (config/repos.yaml) — context tabs open from this list.

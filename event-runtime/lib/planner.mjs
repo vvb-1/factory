@@ -694,10 +694,33 @@ export function requeueEvent(db, { source, eventId }, { actor = "operator", now 
        WHERE event_source = ? AND event_id = ? AND status = 'open'`,
     ).run(new Date(now).toISOString(), actor, source, eventId);
     db.query(
-      `UPDATE events SET status = 'admitted', plan_failures = 0, last_plan_error = NULL
+      `UPDATE events
+       SET status = 'admitted', plan_failures = 0, last_plan_error = NULL, archived_at = NULL
        WHERE source = ? AND event_id = ?`,
     ).run(source, eventId);
     return { requeued: true };
+  });
+}
+
+/**
+ * Acknowledge a dead-letter without rewriting its historical status or error.
+ * The archive marker removes it from the active doctor deck while preserving
+ * the event in the ledger and allowing a later explicit requeue.
+ */
+export function archiveDeadLetteredEvent(db, { source, eventId }, { now = Date.now() } = {}) {
+  return txImmediate(db, () => {
+    const event = db
+      .query(`SELECT status, archived_at FROM events WHERE source = ? AND event_id = ?`)
+      .get(source, eventId);
+    if (!event) throw new Error(`unknown event (${source}, ${eventId})`);
+    if (event.status !== "dead_lettered") {
+      throw new Error(`archive applies to dead_lettered events, not ${event.status}`);
+    }
+    if (!event.archived_at) {
+      db.query(`UPDATE events SET archived_at = ? WHERE source = ? AND event_id = ?`)
+        .run(new Date(now).toISOString(), source, eventId);
+    }
+    return { archived: true };
   });
 }
 

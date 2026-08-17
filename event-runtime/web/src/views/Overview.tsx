@@ -252,6 +252,8 @@ export interface AnomalyRow {
   text: string;
   links: { label: string; go: () => void }[];
   requeue?: { source: string; eventId: string };
+  archive?: { source: string; eventId: string };
+  releaseWorker?: { workerId: string; runId: string };
   dismissProposalId?: string;
   proposalId?: string;
   proposal?: Proposal;
@@ -333,6 +335,7 @@ export function buildAnomalyRows(
       text: `dead-lettered (${d.source}, ${d.eventId}): ${d.lastError ?? "unknown error"}`,
       links: [{ label: "View event", go: () => callbacks.onJumpEvents({ source: d.source, eventId: d.eventId }) }],
       requeue: { source: d.source, eventId: d.eventId },
+      archive: { source: d.source, eventId: d.eventId },
     });
   }
   for (const w of anomalies.stalledWorkers) {
@@ -343,6 +346,7 @@ export function buildAnomalyRows(
         { label: "View worker", go: () => callbacks.onNavigate("workers") },
         { label: "View run", go: () => callbacks.onJumpRun(w.runId) },
       ],
+      releaseWorker: { workerId: w.workerId, runId: w.runId },
     });
   }
   for (const a of anomalies.ambiguousOpenProposals) {
@@ -568,6 +572,22 @@ export function Overview({
       queryClient.invalidateQueries();
       notify(`Requeued event ${eventId}`, "ok");
       await pollRequeue(source, eventId);
+    },
+    onError: () => queryClient.invalidateQueries(),
+  });
+
+  const resolveAnomaly = useMutation({
+    mutationFn: (
+      target:
+        | { kind: "archive"; source: string; eventId: string }
+        | { kind: "release"; workerId: string; runId: string },
+    ) => {
+      if (target.kind === "archive") return api.archive(target.source, target.eventId).then(() => undefined);
+      return api.releaseWorker(target.workerId, target.runId).then(() => undefined);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      notify("Anomaly resolved", "ok");
     },
     onError: () => queryClient.invalidateQueries(),
   });
@@ -850,12 +870,28 @@ export function Overview({
                       Reject…
                     </Button>
                   )}
+                  {a.archive && (
+                    <Button
+                      disabled={!connected || resolveAnomaly.isPending}
+                      onClick={() => resolveAnomaly.mutate({ kind: "archive", ...a.archive! })}
+                    >
+                      Archive
+                    </Button>
+                  )}
                   {a.requeue && (
                     <Button
                       disabled={!connected || requeue.isPending}
                       onClick={() => requeue.mutate(a.requeue!)}
                     >
                       Requeue
+                    </Button>
+                  )}
+                  {a.releaseWorker && (
+                    <Button
+                      disabled={!connected || resolveAnomaly.isPending}
+                      onClick={() => resolveAnomaly.mutate({ kind: "release", ...a.releaseWorker! })}
+                    >
+                      Release lease
                     </Button>
                   )}
                   {a.links.map((l, idx) => (
@@ -871,7 +907,7 @@ export function Overview({
               </div>
             ))}
           </div>
-          <VerbError error={requeue.error} />
+          <VerbError error={resolveAnomaly.error ?? reject.error ?? requeue.error} />
         </div>
       ) : (
         <div className="mb-5 flex items-center justify-between rounded-lg border border-(--border) bg-(--surface-1) px-3.5 py-2.5 text-[12px] text-(--text-dim)">
