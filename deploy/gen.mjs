@@ -18,14 +18,21 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { loadSchedule, toSeconds, ROOT } from "../lib/schedule.mjs";
 const OUT = path.join(ROOT, "deploy", "launchd");
-const INSTALL = process.argv.includes("--install");
+const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
 const expand = (p) => p.replace(/^~/, homedir());
 
-
 const xml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function plist(job, defaults) {
+export function launchdPath(environmentPath = process.env.PATH, home = homedir()) {
+  const entries = (environmentPath || DEFAULT_PATH).split(":").filter(Boolean);
+  for (const entry of [path.join(home, ".bun", "bin"), path.join(home, ".local", "bin")]) {
+    if (!entries.includes(entry)) entries.push(entry);
+  }
+  return entries.join(":");
+}
+
+export function plist(job, defaults, environmentPath = launchdPath()) {
   const label = `${defaults.label_prefix}.${job.name}`;
   const logDir = expand(defaults.log_dir || "~/Library/Logs");
   const args = ["/bin/bash", "-lc", `cd ${ROOT} && ${job.command}`];
@@ -48,6 +55,12 @@ ${args.map((a) => `        <string>${xml(a)}</string>`).join("\n")}
     <key>RunAtLoad</key>
     <${defaults.run_at_load === true ? "true" : "false"}/>
 
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${xml(environmentPath)}</string>
+    </dict>
+
     <!-- .out.log, not .log: a job whose wrapper already writes its own
          structured log would otherwise have two writers on one file. -->
     <key>StandardOutPath</key>
@@ -64,34 +77,46 @@ ${args.map((a) => `        <string>${xml(a)}</string>`).join("\n")}
 `;
 }
 
-const { defaults, jobs } = loadSchedule();
-mkdirSync(OUT, { recursive: true });
-
-const enabled = jobs.filter((j) => j.enabled !== false);
-const skipped = jobs.filter((j) => j.enabled === false);
-
-for (const job of enabled) {
-  const file = path.join(OUT, `${defaults.label_prefix}.${job.name}.plist`);
-  const next = plist(job, defaults);
-  const prev = existsSync(file) ? readFileSync(file, "utf8") : null;
-  writeFileSync(file, next);
-  console.log(`${prev === next ? "  unchanged" : prev ? "  updated  " : "  created  "} ${path.basename(file)}  (every ${job.every})`);
-}
-for (const job of skipped) console.log(`  disabled  ${job.name}  — ${String(job.why || "").slice(0, 60)}`);
-
-if (!INSTALL) {
-  console.log(`\n${enabled.length} job(s) rendered to deploy/launchd/. Re-run with --install to load them.`);
-  process.exit(0);
+export function installPlists(enabled, defaults, {
+  outDir = OUT,
+  agentsDir = path.join(homedir(), "Library/LaunchAgents"),
+  run = execFileSync,
+  uid = process.getuid(),
+} = {}) {
+  mkdirSync(agentsDir, { recursive: true });
+  for (const job of enabled) {
+    const label = `${defaults.label_prefix}.${job.name}`;
+    const src = path.join(outDir, `${label}.plist`);
+    const dst = path.join(agentsDir, `${label}.plist`);
+    writeFileSync(dst, readFileSync(src));
+    try { run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch {}
+    run("launchctl", ["bootstrap", `gui/${uid}`, dst]);
+    console.log(`  loaded    ${label}`);
+  }
 }
 
-const AGENTS = path.join(homedir(), "Library/LaunchAgents");
-for (const job of enabled) {
-  const label = `${defaults.label_prefix}.${job.name}`;
-  const src = path.join(OUT, `${label}.plist`);
-  const dst = path.join(AGENTS, `${label}.plist`);
-  writeFileSync(dst, readFileSync(src));
-  const uid = process.getuid();
-  try { execFileSync("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch {}
-  execFileSync("launchctl", ["bootstrap", `gui/${uid}`, dst]);
-  console.log(`  loaded    ${label}`);
+export function main({ install = process.argv.includes("--install") } = {}) {
+  const { defaults, jobs } = loadSchedule();
+  mkdirSync(OUT, { recursive: true });
+
+  const enabled = jobs.filter((j) => j.enabled !== false);
+  const skipped = jobs.filter((j) => j.enabled === false);
+
+  for (const job of enabled) {
+    const file = path.join(OUT, `${defaults.label_prefix}.${job.name}.plist`);
+    const next = plist(job, defaults);
+    const prev = existsSync(file) ? readFileSync(file, "utf8") : null;
+    writeFileSync(file, next);
+    console.log(`${prev === next ? "  unchanged" : prev ? "  updated  " : "  created  "} ${path.basename(file)}  (every ${job.every})`);
+  }
+  for (const job of skipped) console.log(`  disabled  ${job.name}  — ${String(job.why || "").slice(0, 60)}`);
+
+  if (!install) {
+    console.log(`\n${enabled.length} job(s) rendered to deploy/launchd/. Re-run with --install to load them.`);
+    return;
+  }
+
+  installPlists(enabled, defaults);
 }
+
+if (import.meta.main) main();
