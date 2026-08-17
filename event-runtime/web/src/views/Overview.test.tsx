@@ -1,12 +1,6 @@
 import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Overview,
@@ -16,7 +10,6 @@ import {
   groupDeadLetters,
   stripAnomalyKindPrefix,
 } from "./Overview";
-import { shortId } from "../components/ui";
 import { api } from "../api";
 import type { OperatorContext } from "../context";
 import { scopedCount, scopedTally } from "../context";
@@ -462,7 +455,7 @@ describe("Overview keyboard navigation (WM-292)", () => {
     }
   });
 
-  test(". cycles anomaly focus and r requeues only a focused dead-letter event", async () => {
+  test("Runtime attention rows open their linked targets", async () => {
     const restore = stubOverviewApis(
       baseStatus({
         expiredOpenProposals: ["prop_expired"],
@@ -475,39 +468,13 @@ describe("Overview keyboard navigation (WM-292)", () => {
         ],
       }),
     );
-    const requeue = mock(
-      (_source: string, _eventId: string) =>
-        new Promise<{ requeued: boolean }>(() => {}),
-    );
-    api.requeue = requeue;
+    const onJumpEvents = mock(() => {});
 
     try {
-      const view = renderOverview();
-      await waitFor(() => view.getByText(/Anomalies · 2 active issues/));
-
-      const first = view
-        .getByRole("button", { name: "expired open" })
-        .closest('[tabindex="-1"]');
-      const second = view
-        .getByRole("button", { name: /github.*planner failed/ })
-        .closest('[tabindex="-1"]');
-      expect(first).toBeTruthy();
-      expect(second).toBeTruthy();
-
-      fireEvent.keyDown(document.body, { key: "." });
-      expect(document.activeElement).toBe(first);
-      fireEvent.keyDown(document.body, { key: "r" });
-      expect(requeue).not.toHaveBeenCalled();
-
-      fireEvent.keyDown(document.body, { key: "." });
-      expect(document.activeElement).toBe(second);
-      fireEvent.keyDown(document.body, { key: "r" });
-      await waitFor(() =>
-        expect(requeue).toHaveBeenCalledWith("github", "evt_dead"),
-      );
-
-      fireEvent.keyDown(document.body, { key: "." });
-      expect(document.activeElement).toBe(first);
+      const view = renderOverview({ kind: "all" }, { onJumpEvents });
+      await waitFor(() => view.getByRole("button", { name: /github.*planner failed/ }));
+      fireEvent.click(view.getByRole("button", { name: "View event" }));
+      expect(onJumpEvents).toHaveBeenCalledWith({ source: "github", eventId: "evt_dead" });
     } finally {
       restore();
     }
@@ -515,7 +482,7 @@ describe("Overview keyboard navigation (WM-292)", () => {
 });
 
 describe("Overview anomaly deck (WM-95)", () => {
-  test("enriches an expired-proposal row with agent, decision/reason, origin, and age; demotes the raw id", async () => {
+  test("folds expired proposals into the Runtime group", async () => {
     const origStatus = api.status;
     const origProposals = api.proposals;
     const origOutbox = api.outbox;
@@ -525,91 +492,47 @@ describe("Overview anomaly deck (WM-95)", () => {
     api.proposals = async () => ({ proposals: [stubProposal] });
     api.outbox = async () => ({ outbox: [] });
     api.journal = async () => ({ entries: [], head: 0 });
-
-    try {
-      const { getByText, queryByTitle } = renderOverview();
-
-      await waitFor(() => getByText(/agent: triage-scan/));
-
-      expect(getByText(/agent: triage-scan/)).toBeTruthy();
-      expect(getByText(/human_needed/)).toBeTruthy();
-      expect(getByText(/ambiguous repo pin/)).toBeTruthy();
-      const originId = queryByTitle("evt-789");
-      expect(originId).toBeTruthy();
-      expect(originId?.parentElement?.textContent).toBe(
-        "origin github/evt-789",
-      );
-
-      // Raw id is demoted to secondary, copyable text rather than the primary label.
-      const idNode = queryByTitle(`${stubProposal.id} — click to copy`);
-      expect(idNode).toBeTruthy();
-      expect(idNode?.textContent).toBe(shortId(stubProposal.id));
-    } finally {
-      api.status = origStatus;
-      api.proposals = origProposals;
-      api.outbox = origOutbox;
-      api.journal = origJournal;
-    }
-  });
-
-  test("rejects an expired proposal only after collecting a non-empty reason", async () => {
-    const origStatus = api.status;
-    const origProposals = api.proposals;
-    const origOutbox = api.outbox;
-    const origJournal = api.journal;
-    const origReject = api.reject;
-    api.status = async () =>
-      baseStatus({ expiredOpenProposals: [stubProposal.id] });
-    api.proposals = async () => ({ proposals: [stubProposal] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-
-    const rejectedCalls: { id: string; why?: string }[] = [];
-    api.reject = async (id: string, why?: string) => {
-      rejectedCalls.push({ id, why });
-      return { rejected: true };
-    };
 
     try {
       const view = renderOverview();
-      const reject = await waitFor(() =>
-        view.getByRole("button", { name: "Reject…" }),
-      );
-
-      expect(view.queryByRole("button", { name: "Dismiss" })).toBeNull();
-      fireEvent.click(reject);
-
-      const confirm = view.getByRole("button", {
-        name: "Reject proposal",
-      }) as HTMLButtonElement;
-      const reasonInput = view.getByLabelText(
-        "Rejection reason",
-      ) as HTMLInputElement;
-      expect(reasonInput.placeholder).toMatch(/Reason \(required/i);
-      expect(confirm.disabled).toBe(true);
-
-      await act(async () => changeInput(reasonInput, "   "));
-      fireEvent.click(confirm);
-      expect(rejectedCalls).toEqual([]);
-
-      await act(async () => changeInput(reasonInput, " No longer actionable "));
-      await waitFor(() => expect(confirm.disabled).toBe(false));
-      await act(async () => fireEvent.click(confirm));
-      await waitFor(() =>
-        expect(rejectedCalls).toEqual([
-          { id: stubProposal.id, why: "No longer actionable" },
-        ]),
-      );
+      await waitFor(() => view.getByText(`expired open proposal ${stubProposal.id}`));
+      expect(view.getByRole("heading", { name: "Runtime" })).toBeTruthy();
+      expect(view.getByRole("button", { name: "View proposal" })).toBeTruthy();
     } finally {
       api.status = origStatus;
       api.proposals = origProposals;
       api.outbox = origOutbox;
       api.journal = origJournal;
-      api.reject = origReject;
     }
   });
 
-  test("shows a fallback for a proposal id with no match in the proposals list", async () => {
+  test("Runtime proposals have a single primary navigation verb", async () => {
+    const origStatus = api.status;
+    const origProposals = api.proposals;
+    const origOutbox = api.outbox;
+    const origJournal = api.journal;
+    api.status = async () =>
+      baseStatus({ expiredOpenProposals: [stubProposal.id] });
+    api.proposals = async () => ({ proposals: [stubProposal] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+
+    const onJumpProposal = mock(() => {});
+
+    try {
+      const view = renderOverview({ kind: "all" }, { onJumpProposal });
+      fireEvent.click(await waitFor(() => view.getByRole("button", { name: "View proposal" })));
+      expect(onJumpProposal).toHaveBeenCalledWith(stubProposal.id);
+      expect(view.queryByRole("button", { name: "Reject…" })).toBeNull();
+    } finally {
+      api.status = origStatus;
+      api.proposals = origProposals;
+      api.outbox = origOutbox;
+      api.journal = origJournal;
+    }
+  });
+
+  test("renders unmatched proposal ids in the Runtime group", async () => {
     const origStatus = api.status;
     const origProposals = api.proposals;
     const origOutbox = api.outbox;
@@ -621,12 +544,9 @@ describe("Overview anomaly deck (WM-95)", () => {
     api.journal = async () => ({ entries: [], head: 0 });
 
     try {
-      const { getByText, queryByTitle } = renderOverview();
-
-      await waitFor(() => queryByTitle("prop_missing — click to copy"));
-
-      expect(getByText(/agent: —/)).toBeTruthy();
-      expect(getByText(/origin —\/—/)).toBeTruthy();
+      const view = renderOverview();
+      await waitFor(() => view.getByText("expired open proposal prop_missing"));
+      expect(view.getByRole("heading", { name: "Runtime" })).toBeTruthy();
     } finally {
       api.status = origStatus;
       api.proposals = origProposals;
@@ -635,7 +555,7 @@ describe("Overview anomaly deck (WM-95)", () => {
     }
   });
 
-  test("collapses matching dead letters, expands short event ids, and confirms bulk actions with the count", async () => {
+  test("groups matching dead letters as Runtime rows", async () => {
     const originals = {
       status: api.status,
       proposals: api.proposals,
@@ -669,32 +589,9 @@ describe("Overview anomaly deck (WM-95)", () => {
 
     try {
       const view = renderOverview({ kind: "all" }, { onJumpEvents });
-      const group = await waitFor(() =>
-        view.getByRole("button", {
-          name: /3 dead-lettered.*chain.*duplicate key/,
-        }),
-      );
-
-      expect(
-        view.getByText(/Anomalies · 2 active issues · \(4 events\)/),
-      ).toBeTruthy();
-      expect(group.getAttribute("aria-expanded")).toBe("false");
-      fireEvent.click(group);
-      expect(group.getAttribute("aria-expanded")).toBe("true");
-
-      const firstEvent = view.getByTitle(eventIds[0]!);
-      expect(firstEvent.textContent).toBe(shortId(eventIds[0]!));
-      fireEvent.click(firstEvent);
-      expect(onJumpEvents).toHaveBeenCalledWith({
-        source: "chain",
-        eventId: eventIds[0],
-      });
-
-      fireEvent.click(view.getByRole("button", { name: "Archive all" }));
-      expect(view.getByText("Archive 3 dead-lettered events?")).toBeTruthy();
-      expect(
-        view.getByRole("button", { name: "Archive 3 events" }),
-      ).toBeTruthy();
+      await waitFor(() => view.getByText(/3 dead-lettered · chain · duplicate key/));
+      fireEvent.click(view.getAllByRole("button", { name: "View event" })[0]!);
+      expect(onJumpEvents).toHaveBeenCalledWith({ source: "chain", eventId: eventIds[0] });
     } finally {
       api.status = originals.status;
       api.proposals = originals.proposals;
@@ -793,7 +690,7 @@ describe("Overview anomaly deck (WM-95)", () => {
     }
   });
 
-  test("archives dead letters and releases stalled worker leases, removing both rows (WM-326)", async () => {
+  test("keeps runtime anomalies inside the shared compact grammar", async () => {
     const mutableApi = api as typeof api & {
       archive: (
         source: string,
@@ -858,24 +755,10 @@ describe("Overview anomaly deck (WM-95)", () => {
 
     try {
       const view = renderOverview();
-      await waitFor(() => view.getByRole("button", { name: "Archive" }));
-
-      expect(
-        view.getByRole("button", { name: /github.*historical failure/ }),
-      ).toBeTruthy();
-      view.getByRole("button", { name: "Archive" }).click();
-      await waitFor(() =>
-        expect(
-          view.queryByRole("button", { name: /github.*historical failure/ }),
-        ).toBeNull(),
-      );
-
-      const releaseLease = await waitFor(() =>
-        view.getByRole("button", { name: "Release lease" }),
-      );
-      releaseLease.click();
-      await waitFor(() => view.getByText(/Doctor: All systems nominal/));
-      expect(view.queryByText(/stalled worker worker-1/)).toBeNull();
+      await waitFor(() => view.getByText(/github · historical failure/));
+      expect(view.getByText(/stalled worker worker-1/)).toBeTruthy();
+      expect(view.queryByRole("button", { name: "Archive" })).toBeNull();
+      expect(view.queryByRole("button", { name: "Release lease" })).toBeNull();
     } finally {
       api.status = originals.status;
       api.proposals = originals.proposals;
@@ -1152,24 +1035,20 @@ describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
     }
   });
 
-  test("repo tab: anomaly deck heading is marked factory-wide; All is not", async () => {
+  test("repo tab: Runtime remains visible alongside the scope notice", async () => {
     const restore = stubApis({
       status: baseStatus({ staleLeases: 1 }),
     });
 
     try {
       const repo = renderOverview({ kind: "repo", name: "bj29" });
-      await waitFor(() => repo.getByText(/Anomalies ·/));
-      expect(repo.getByText(/Anomalies ·/).textContent?.toLowerCase()).toMatch(
-        /factory-wide/,
-      );
+      await waitFor(() => repo.getByRole("heading", { name: /Runtime/ }));
+      expect(repo.getByRole("heading", { name: /Runtime/ })).toBeTruthy();
       repo.unmount();
 
       const all = renderOverview({ kind: "all" });
-      await waitFor(() => all.getByText(/Anomalies ·/));
-      expect(
-        all.getByText(/Anomalies ·/).textContent?.toLowerCase(),
-      ).not.toMatch(/factory-wide/);
+      await waitFor(() => all.getByRole("heading", { name: "Runtime" }));
+      expect(all.getByRole("heading", { name: "Runtime" })).toBeTruthy();
     } finally {
       restore();
     }
@@ -1346,7 +1225,7 @@ describe("Overview 4-Band layout & telemetry (WM-205)", () => {
     });
   });
 
-  test("renders nominal status banner when no anomalies are present", async () => {
+  test("renders a calm Needs-you line when no anomalies are present", async () => {
     const origStatus = api.status;
     const origProposals = api.proposals;
     const origOutbox = api.outbox;
@@ -1357,10 +1236,9 @@ describe("Overview 4-Band layout & telemetry (WM-205)", () => {
     api.journal = async () => ({ entries: [], head: 0 });
 
     try {
-      const { getByText } = renderOverview();
-      await waitFor(() => getByText(/Doctor: All systems nominal/));
-      expect(getByText(/Doctor: All systems nominal/)).toBeTruthy();
-      expect(getByText(/scope: all repos/)).toBeTruthy();
+      const { getByText, queryByText } = renderOverview();
+      await waitFor(() => getByText(/Nothing needs you · last decision/));
+      expect(queryByText(/Doctor: All systems nominal/)).toBeNull();
     } finally {
       api.status = origStatus;
       api.proposals = origProposals;
