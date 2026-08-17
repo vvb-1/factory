@@ -341,16 +341,6 @@ export function RunFull({
               </li>
             </ol>
           </nav>
-          {d && (
-            <span className="text-[12px] text-(--text-faint)">
-              <AgentHoverCard
-                agentRef={d.run.spec.agent}
-                onJumpAgent={onJumpAgent}
-              />{" "}
-              · {d.run.spec.adapter} · {d.run.attempts}/{d.run.spec.maxAttempts}{" "}
-              attempts
-            </span>
-          )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {d && (
