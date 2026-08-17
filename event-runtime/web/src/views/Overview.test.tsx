@@ -16,7 +16,7 @@ import { scopedCount, scopedTally } from "../context";
 import { changeInput, withApi } from "../test-render";
 import type {
   AdmittedEvent,
-  EventFocus,
+  InboxItem,
   JournalEntry,
   Proposal,
   RunListItem,
