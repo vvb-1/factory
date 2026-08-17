@@ -47,13 +47,20 @@ function makeRepo() {
   return { dir, first, head: git(["rev-parse", "HEAD"], dir) };
 }
 
+function makeBareRemote(src) {
+  const remote = path.join(tmp("evrt-remote-"), "repo.git");
+  git(["clone", "--bare", "--quiet", src.dir, remote]);
+  return { path: remote, url: `file://${remote}` };
+}
+
 /** A repos.yaml pointing at it, so the loader is exercised for real too. */
-function makeFactoryRoot(repoPath, name = "testrepo") {
+function makeFactoryRoot(repoPath, name = "testrepo", github = `watt-mind/${name}`) {
   const root = tmp("evrt-factory-");
   mkdirSync(path.join(root, "config"), { recursive: true });
+  const githubLine = github ? `    github: ${github}\n` : "";
   writeFileSync(
     path.join(root, "config", "repos.yaml"),
-    `repos:\n  - name: ${name}\n    path: ${repoPath}\n    github: watt-mind/${name}\n    base: main\n    worktree_up: bin/worktree-up.sh\n    verify: echo ok\n`,
+    `repos:\n  - name: ${name}\n    path: ${repoPath}\n${githubLine}    base: main\n    worktree_up: bin/worktree-up.sh\n    verify: echo ok\n`,
   );
   return root;
 }
@@ -85,6 +92,58 @@ describe("repos.yaml is read, not owned", () => {
 });
 
 describe("mirror + pinned checkout", () => {
+  test("clones a missing mirror from the configured GitHub remote when the checkout is absent", () => {
+    const src = makeRepo();
+    const remote = makeBareRemote(src);
+    const mirrors = tmp("evrt-mirrors-");
+    const missing = path.join(tmp("evrt-missing-"), "does-not-exist");
+    const repo = { name: "testrepo", path: missing, github: remote.url, base: "main" };
+
+    const mirror = syncMirror(repo, { root: mirrors });
+
+    expect(resolveRef(repo, "main", { root: mirrors }).sha).toBe(src.head);
+    expect(git(["remote", "get-url", "origin"], mirror)).toBe(remote.url);
+  }, { timeout: GIT_MS });
+
+  test("prefers the local checkout when both local and remote sources exist", () => {
+    const local = makeRepo();
+    const remote = makeBareRemote(makeRepo());
+    const mirrors = tmp("evrt-mirrors-");
+    const repo = { name: "testrepo", path: local.dir, github: remote.url, base: "main" };
+
+    const mirror = syncMirror(repo, { root: mirrors });
+
+    expect(git(["remote", "get-url", "origin"], mirror)).toBe(local.dir);
+    expect(resolveRef(repo, "main", { root: mirrors }).sha).toBe(local.head);
+  }, { timeout: GIT_MS });
+
+  test("names both missing sources when neither checkout nor GitHub remote is available", () => {
+    const missing = path.join(tmp("evrt-missing-"), "does-not-exist");
+    const repo = { name: "testrepo", path: missing, github: null, base: "main" };
+
+    expect(() => syncMirror(repo, { root: tmp("evrt-mirrors-") })).toThrow(
+      new RegExp(`no checkout at ${missing}.*no github remote`),
+    );
+  });
+
+  test("never rewrites an existing mirror's origin", () => {
+    const original = makeRepo();
+    const replacement = makeBareRemote(makeRepo());
+    const mirrors = tmp("evrt-mirrors-");
+    const mirror = mirrorPath("testrepo", mirrors);
+    git(["clone", "--mirror", "--quiet", original.dir, mirror]);
+    const repo = {
+      name: "testrepo",
+      path: path.join(tmp("evrt-missing-"), "does-not-exist"),
+      github: replacement.url,
+      base: "main",
+    };
+
+    syncMirror(repo, { root: mirrors });
+
+    expect(git(["remote", "get-url", "origin"], mirror)).toBe(original.dir);
+  }, { timeout: GIT_MS });
+
   test("mirrors on first use, fetches thereafter, and never writes to the source", () => {
     const src = makeRepo();
     const mirrors = tmp("evrt-mirrors-");
@@ -139,7 +198,7 @@ describe("mirror + pinned checkout", () => {
 
   test("fallback checkout is an empty Git repository for integrity checks", () => {
     const missing = path.join(tmp("evrt-missing-"), "does-not-exist");
-    const reposRoot = makeFactoryRoot(missing);
+    const reposRoot = makeFactoryRoot(missing, "testrepo", null);
     const workspaceDir = tmp("evrt-ws-");
     const checkout = materializeCheckout({
       workspaceDir, repoName: "testrepo", sha: "0".repeat(40), reposRoot,
