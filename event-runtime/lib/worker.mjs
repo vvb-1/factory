@@ -1203,7 +1203,7 @@ export function retryRun(db, runId, { actor, force = false, now = () => Date.now
   const row = db.query(`SELECT state, spec_json, attempts FROM runs WHERE run_id = ?`).get(runId);
   if (!row) throw new Error(`unknown run ${runId}`);
   const spec = JSON.parse(row.spec_json);
-  if (!force && failureCount(db, runId, "agent_error") >= spec.maxAttempts) {
+  if (!force && (failureCount(db, runId, "agent_error") >= spec.maxAttempts || failureCount(db, runId, "fatal") > 0)) {
     throw new Error("attempts_exhausted");
   }
   if (row.state === "VERIFYING") {

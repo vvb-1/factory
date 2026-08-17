@@ -76,13 +76,13 @@ describe("reaper (OPS-416)", () => {
       .query(`SELECT from_state, to_state, reason FROM lifecycle_events WHERE run_id = ? ORDER BY seq`)
       .all(spec.runId);
     const lastTwo = events.slice(-2);
-    expect(lastTwo[0]).toEqual({ from_state: "VERIFYING", to_state: "FAILED", reason: "lease_expired" });
-    expect(lastTwo[1]).toEqual({ from_state: "FAILED", to_state: "QUEUED", reason: "retry" });
+    expect(lastTwo[0]).toEqual({ from_state: "VERIFYING", to_state: "FAILED", reason: "failure:environment:lease_expired" });
+    expect(lastTwo[1]).toEqual({ from_state: "FAILED", to_state: "QUEUED", reason: "retry:environment" });
   });
 
   test("reaps stranded VERIFYING run and dead-letters to FAILED when maxAttempts reached", () => {
     const db = openDb(":memory:");
-    const spec = makeSpec({ maxAttempts: 1 });
+    const spec = makeSpec({ maxAttempts: 1, maxEnvironmentRetries: 0 });
     setupVerifyingRun(db, spec, { now: T0, expired: true });
 
     expect(runState(db, spec.runId)).toBe("VERIFYING");
