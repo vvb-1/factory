@@ -349,6 +349,217 @@ export function inboxAge(iso: string, now: number): string {
   return `${days}d ${hours}h ago`;
 }
 
+/**
+ * The compact attention grammar shared by Inbox-adjacent surfaces.  Overview
+ * intentionally owns neither another inbox list nor another kind palette:
+ * it supplies the navigation/action wiring while this component keeps the
+ * visual and keyboard semantics aligned with the Inbox ledger.
+ */
+export interface NeedsYouRowProps {
+  kind: string;
+  title: string;
+  age?: React.ReactNode;
+  hue?: string;
+  selected?: boolean;
+  onOpen?: () => void;
+  primaryAction?: { label: string; onClick: () => void };
+  onAck?: () => void;
+  children?: React.ReactNode;
+}
+
+export function NeedsYouRow({
+  kind,
+  title,
+  age,
+  hue,
+  selected = false,
+  onOpen,
+  primaryAction,
+  onAck,
+  children,
+}: NeedsYouRowProps) {
+  const hues = hue ? { ...INBOX_KIND_HUES, [kind]: hue } : INBOX_KIND_HUES;
+  const open = () => onOpen?.();
+  return (
+    <div
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      aria-selected={onOpen ? selected : undefined}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" || !onOpen) return;
+        event.preventDefault();
+        open();
+      }}
+      className={`group flex min-w-0 items-center gap-2 border-b border-(--border) px-3 py-2 last:border-0 ${
+        onOpen ? "cursor-pointer hover:bg-(--surface-2) focus-visible:outline-2 focus-visible:outline-(--accent)" : ""
+      } ${selected ? "row-selected" : ""}`}
+    >
+      <StateBadge state={kind} hues={hues} dot={false} />
+      <span className="min-w-0 flex-1 truncate text-[12px] text-(--text)" title={title}>{title}</span>
+      {age && <span className="mono shrink-0 text-[11px] text-(--text-faint)">{age}</span>}
+      {primaryAction && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            primaryAction.onClick();
+          }}
+          className="shrink-0 cursor-pointer rounded bg-(--surface-3) px-2 py-1 text-[11px] font-medium text-(--text) hover:bg-(--accent) hover:text-(--surface-0) focus-visible:outline-2 focus-visible:outline-(--accent)"
+        >
+          {primaryAction.label}
+        </button>
+      )}
+      {onAck && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onAck();
+          }}
+          className="shrink-0 cursor-pointer rounded px-1.5 py-1 text-[11px] text-(--text-faint) hover:bg-(--surface-3) hover:text-(--text) focus-visible:outline-2 focus-visible:outline-(--accent)"
+        >
+          ack
+        </button>
+      )}
+      {children}
+    </div>
+  );
+}
+
+export function NeedsYouGroup({
+  label,
+  hue,
+  count,
+  moreHref = "#/inbox",
+  children,
+}: {
+  label: string;
+  hue: string;
+  count: number;
+  moreHref?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-md border border-(--border) bg-(--surface-1)">
+      <div className="flex items-center gap-2 border-b border-(--border) px-3 py-1.5 text-[11px]">
+        <span className="size-1.5 rounded-full" style={{ background: hue }} />
+        <h3 className="font-semibold text-(--text-dim)">{label}</h3>
+        <span className="mono text-(--text-faint)">{count}</span>
+        {count > 5 && (
+          <a href={moreHref} className="ml-auto cursor-pointer text-(--text-faint) hover:text-(--text) hover:underline">
+            {count - 5} more →
+          </a>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export interface OverviewNeedsYouProps {
+  items: InboxItem[];
+  runtimeItems: Array<{
+    id: string;
+    title: string;
+    primaryAction?: { label: string; onClick: () => void };
+  }>;
+  now: number;
+  lastDecision: string | null;
+  runtimeLabel?: string;
+  connected: boolean;
+  onOpenItem: (id: string) => void;
+  onAck: (id: string) => void;
+}
+
+/**
+ * Overview is deliberately a thin, lazy consumer of the Inbox's compact
+ * grammar. Keeping this with the ledger avoids a second row implementation
+ * while retaining the Inbox view as its own bundle.
+ */
+export function OverviewNeedsYou({
+  items,
+  runtimeItems,
+  now,
+  lastDecision,
+  runtimeLabel = "Runtime",
+  connected,
+  onOpenItem,
+  onAck,
+}: OverviewNeedsYouProps) {
+  const groups = useMemo(() => groupItems(items), [items]);
+  const navigable = useMemo(
+    () => [
+      ...groups.flatMap(({ items: groupItems }) =>
+        groupItems.slice(0, 5).map((item) => ({ id: item.id, open: () => onOpenItem(item.id) })),
+      ),
+      ...runtimeItems.slice(0, 5).flatMap((item) =>
+        item.primaryAction ? [{ id: item.id, open: item.primaryAction.onClick }] : [],
+      ),
+    ],
+    [groups, onOpenItem, runtimeItems],
+  );
+  const [selected, setSelected] = useState(0);
+  const selectedIndex = Math.min(selected, Math.max(0, navigable.length - 1));
+  useListKeys({
+    count: navigable.length,
+    selected: selectedIndex,
+    onSelect: setSelected,
+    onOpen: () => navigable[selectedIndex]?.open(),
+  });
+
+  return (
+    <section className="mb-6" aria-label="Needs you">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h2>
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-(--text-faint)">Needs you</span>
+        </h2>
+        {items.length > 0 && <span className="text-[11px] text-(--text-faint)">{items.length} open</span>}
+      </div>
+      {items.length === 0 && runtimeItems.length === 0 ? (
+        <div className="flex items-center gap-2 px-1 py-2 text-[12px] text-(--text-muted)">
+          <span className="size-1.5 rounded-full bg-(--hue-ok)" />
+          Nothing needs you · last decision {lastDecision ? <Ago iso={lastDecision} now={now} /> : "—"}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {groups.map(({ group, items: groupItems }) => (
+            <NeedsYouGroup key={group.id} label={group.label} hue={group.hue} count={groupItems.length}>
+              {groupItems.slice(0, 5).map((item) => (
+                <NeedsYouRow
+                  key={item.id}
+                  kind={item.kind}
+                  title={item.title}
+                  age={<Ago iso={item.createdAt} now={now} />}
+                  selected={navigable[selectedIndex]?.id === item.id}
+                  onOpen={() => onOpenItem(item.id)}
+                  primaryAction={{ label: "Open", onClick: () => onOpenItem(item.id) }}
+                  onAck={connected ? () => onAck(item.id) : undefined}
+                />
+              ))}
+            </NeedsYouGroup>
+          ))}
+          {runtimeItems.length > 0 && (
+            <NeedsYouGroup label={runtimeLabel} hue="var(--hue-warn)" count={runtimeItems.length}>
+              {runtimeItems.slice(0, 5).map((item) => (
+                <NeedsYouRow
+                  key={item.id}
+                  kind="Runtime"
+                  hue="var(--hue-warn)"
+                  title={item.title}
+                  selected={navigable[selectedIndex]?.id === item.id}
+                  onOpen={item.primaryAction?.onClick}
+                  primaryAction={item.primaryAction}
+                />
+              ))}
+            </NeedsYouGroup>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 const isTypingTarget = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
   Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
