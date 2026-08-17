@@ -71,7 +71,7 @@ export function transcriptSessionId(transcriptPath, adapter) {
     return null;
   } finally {
     if (fd !== undefined) {
-      try { closeSync(fd); } catch {}
+      try { closeSync(fd); } catch { /* intentionally ignored */ }
     }
   }
   return null;

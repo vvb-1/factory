@@ -343,6 +343,7 @@ function enableWal(db, { attempts = 20, waitMs = 50 } = {}) {
       if (i === attempts - 1) {
         throw new Error(
           `could not switch the database to WAL after ${attempts} attempts: ${err.message}`,
+          { cause: err },
         );
       }
       Bun.sleepSync(waitMs);

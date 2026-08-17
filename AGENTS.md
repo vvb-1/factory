@@ -1,3 +1,9 @@
+## Commands
+
+- `bun run lint` — ESLint over root JS and `event-runtime/web` TSX (`bun run lint:fix` to autofix). CI runs it with a `--max-warnings` ratchet (WM-607); see `docs/ci.md`.
+- `bun test --timeout 20000 --max-concurrency=4 event-runtime/lib` — fast unit tests.
+- `bun run check` — generated-tree drift check (`shared/` vs. emitted output).
+
 <!-- FACTORY:FLOOR:BEGIN -->
 <!-- Generated from watt-mind/factory shared/floor.md. Do not edit here — edit
      the source and re-run `node build/emit.mjs`, or your change is lost on the

@@ -66,7 +66,7 @@ if (import.meta.main) {
       const profile = (o.command.match(/--user-data-dir=([^ ]+)/) ?? [])[1] ?? "?";
       console.log(`  ${APPLY ? "killing" : "would kill"} pid ${o.pid}  ${profile}`);
       if (!APPLY) continue;
-      try { process.kill(o.pid, "SIGTERM"); } catch {}
+      try { process.kill(o.pid, "SIGTERM"); } catch { /* intentionally ignored */ }
     }
     if (APPLY) {
       // TERM first so Chrome flushes its profile; KILL whatever ignores it.

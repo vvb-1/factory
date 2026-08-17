@@ -56,7 +56,7 @@ if (argv.includes("--gate")) {
   if (existsSync(ROLLUP)) {
     for (const line of readFileSync(ROLLUP, "utf8").split("\n")) {
       if (!line.startsWith("{")) continue;
-      try { seen.add(JSON.parse(line).file); } catch {}
+      try { seen.add(JSON.parse(line).file); } catch { /* intentionally ignored */ }
     }
   }
   const unrolled = readdirSync(LOG_DIR)
@@ -89,7 +89,7 @@ if (ROLL) {
   if (existsSync(ROLLUP)) {
     for (const line of readFileSync(ROLLUP, "utf8").split("\n")) {
       if (!line.startsWith("{")) continue;
-      try { seen.add(JSON.parse(line).file); } catch {}
+      try { seen.add(JSON.parse(line).file); } catch { /* intentionally ignored */ }
     }
   }
   let added = 0, inFlight = 0;

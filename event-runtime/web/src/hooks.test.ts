@@ -368,7 +368,7 @@ describe("useListKeys + routing integration — Safari rapid j/k keydown hold si
   test("simulated history.replaceState SecurityError does not freeze selection movement", () => {
     const originalReplaceState = history.replaceState;
     // Simulate Safari history write rate-limit SecurityError
-    let throwError = true;
+    const throwError = true;
     history.replaceState = function (...args) {
       if (throwError) {
         throw new DOMException(

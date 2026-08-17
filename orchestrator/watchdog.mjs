@@ -157,7 +157,7 @@ export async function runWatchdogCheck({
           });
         }
       }
-    } catch {}
+    } catch { /* intentionally ignored */ }
   }
 
   const hasCritical = issues.some((i) => i.severity === "CRITICAL");

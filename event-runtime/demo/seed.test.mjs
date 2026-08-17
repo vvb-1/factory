@@ -49,7 +49,7 @@ async function waitForPublishedOutbox(port) {
       const response = await fetch(`http://127.0.0.1:${port}/status`);
       const status = await response.json();
       if (response.ok && status.anomalies?.unpublishedOutbox === 0) return;
-    } catch {}
+    } catch { /* intentionally ignored */ }
     await Bun.sleep(50);
   }
   expect.fail("seeded runtime did not publish its outbox within 5 seconds");
@@ -133,7 +133,7 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
           up = true;
           break;
         }
-      } catch {}
+      } catch { /* intentionally ignored */ }
       await Bun.sleep(100);
     }
     expect(up).toBe(true);
@@ -155,7 +155,7 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
           workerReady = true;
           break;
         }
-      } catch {}
+      } catch { /* intentionally ignored */ }
       await Bun.sleep(50);
     }
     expect(workerReady).toBe(true);
@@ -165,12 +165,12 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     if (serveChild) {
       try {
         serveChild.kill("SIGKILL");
-      } catch {}
+      } catch { /* intentionally ignored */ }
     }
     if (workerChild) {
       try {
         workerChild.kill("SIGKILL");
-      } catch {}
+      } catch { /* intentionally ignored */ }
     }
   });
 

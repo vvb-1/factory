@@ -371,7 +371,7 @@ export async function execute({
         try {
           events = mapStreamEvent(parsed);
         } catch {
-          events = [];
+          /* malformed event: events stays [] from the initializer */
         }
         for (const event of events) {
           try {

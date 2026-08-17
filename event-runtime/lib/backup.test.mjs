@@ -68,7 +68,7 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
     copyFileSync(liveDbFile, naiveDbFile);
     const naiveDb = new Database(naiveDbFile);
     // Naive copy cannot see uncheckpointed table/data or has 0 rows
-    let naiveCount = 0;
+    let naiveCount;
     try {
       naiveCount = naiveDb.query("SELECT COUNT(*) AS n FROM events").get()?.n ?? 0;
     } catch {

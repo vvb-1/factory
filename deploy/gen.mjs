@@ -92,7 +92,7 @@ export function installPlists(enabled, defaults, {
     const src = path.join(outDir, `${label}.plist`);
     const dst = path.join(agentsDir, `${label}.plist`);
     writeFileSync(dst, readFileSync(src));
-    try { run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch {}
+    try { run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch { /* intentionally ignored */ }
     run("launchctl", ["bootstrap", `gui/${uid}`, dst]);
     console.log(`  loaded    ${label}`);
   }

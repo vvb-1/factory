@@ -301,7 +301,7 @@ export async function reclaim(issue, todoStateId, minutes, apply, quiet = false,
   if (todoStateId && !agentReadyLabelId && apply) {
     try {
       agentReadyLabelId = await fetchAgentReadyLabelId();
-    } catch {}
+    } catch { /* intentionally ignored */ }
   }
 
   const keep = computeReclaimLabelIds(issue, Boolean(todoStateId), agentReadyLabelId);
@@ -424,7 +424,7 @@ Options:
   if (args.apply) {
     try {
       agentReadyLabelId = await fetchAgentReadyLabelId();
-    } catch {}
+    } catch { /* intentionally ignored */ }
   }
   let issues = await fetchInProgress(args.team, args.anyAssignee);
   const now = new Date();

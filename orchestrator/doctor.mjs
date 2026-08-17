@@ -161,7 +161,7 @@ for (const repo of repos) {
   for (const name of expectedCommands) {
     const target = path.join(commandsDir, `${name}.md`);
     let st = null;
-    try { st = lstatSync(target); } catch {}
+    try { st = lstatSync(target); } catch { /* intentionally ignored */ }
     if (!st) { missing.push(name); continue; }
     if (st.isSymbolicLink() && !existsSync(target)) broken.push(name); // dangling symlink
   }
@@ -220,11 +220,11 @@ for (const repo of repos) {
       "check team key and project name against linear.md §1–2 (CW projects carry a 'Coach Watts - ' prefix)");
   }
 
-  check(Boolean(repo.verify) ? true : (repo.report_only ? "warn" : false), "verification command", repo.verify ?? "",
+  check(repo.verify ? true : (repo.report_only ? "warn" : false), "verification command", repo.verify ?? "",
     repo.verify ? null : repo.report_only
       ? "report_only repo — set `verify:` before flipping dispatch on"
       : "set `verify:` in repos.yaml — agents must never open a PR without clean output");
-  check(Boolean(repo.smoke_workflow) ? true : "warn", "post-deploy smoke check", repo.smoke_workflow ?? "none",
+  check(repo.smoke_workflow ? true : "warn", "post-deploy smoke check", repo.smoke_workflow ?? "none",
     repo.smoke_workflow ? null : "without one, Done means merged rather than running");
 }
 

@@ -126,7 +126,7 @@ export function loadWorkerPolicy({ root = reposRoot() } = {}) {
   try {
     parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new Error(`${file}: unparseable policy.yaml — ${err.message}`);
+    throw new Error(`${file}: unparseable policy.yaml — ${err.message}`, { cause: err });
   }
   const block = parsed?.workers;
   if (block === undefined || block === null) return null;

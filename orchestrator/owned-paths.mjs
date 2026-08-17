@@ -214,7 +214,7 @@ function parsePinnedPaths(manifestPath) {
   try {
     payload = JSON.parse(readFileSync(manifestPath, "utf8"));
   } catch (err) {
-    throw new Error(`owned-path closure check failed: cannot parse pin manifest ${manifestPath}: ${err.message}`);
+    throw new Error(`owned-path closure check failed: cannot parse pin manifest ${manifestPath}: ${err.message}`, { cause: err });
   }
   const raw = payload?.pins;
   if (raw == null) return [];

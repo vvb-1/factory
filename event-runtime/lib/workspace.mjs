@@ -294,7 +294,7 @@ export function destroyWorkspace(
     try {
       record = JSON.parse(readFileSync(marker, "utf8"));
     } catch {
-      record = null;
+      /* malformed marker: record stays null from the initializer */
     }
     if (!record?.down || !record?.ticket) return false;
     const down = spawnSync("/bin/bash", [record.down, record.ticket], {

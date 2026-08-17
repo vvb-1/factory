@@ -70,6 +70,7 @@ export class ContractViolation extends Error {
 
 function normalizeFailureOutput(output) {
   return String(output ?? "")
+    // eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
     .replace(/\x1b\[[0-9;]*m/g, "")
     .split("\n")
     .map((line) => line.trim())
@@ -131,6 +132,7 @@ function boundedDiagnostic(lines) {
  */
 function repoVerifyFailureExcerpt(output) {
   const lines = String(output ?? "")
+    // eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
     .replace(/\x1b\[[0-9;]*m/g, "")
     .split("\n")
     .map((line) => line.trimEnd())
@@ -496,7 +498,7 @@ function verifyCompleted({
   if (!worktreeRecord && existsSync(markerPath)) {
     try {
       worktreeRecord = JSON.parse(readFileSync(markerPath, "utf8"));
-    } catch {}
+    } catch { /* intentionally ignored */ }
   }
 
   let repoVerifyPassed = false;

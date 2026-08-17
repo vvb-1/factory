@@ -219,7 +219,7 @@ export function acquireClaimLock(
       if (alive && now() - at < 120_000) return false;
 
       onStale(valid ? pid : null);
-      try { unlinkSync(lock); } catch {}
+      try { unlinkSync(lock); } catch { /* intentionally ignored */ }
     }
   }
   return false;
@@ -501,7 +501,7 @@ async function runTicket(t) {
     // Flags differ per harness; the PROMPT does not. That is the whole reason
     // the command bodies are harness-neutral markdown, and why run-agent.sh
     // can already drive agy. Mirrors run-agent.sh's non-claude invocation.
-    let harnessArgs = [];
+    let harnessArgs;
     if (HARNESS === "claude") {
       harnessArgs = [
         "-p", promptFor(t.identifier),
@@ -723,7 +723,7 @@ async function shutdown(sig) {
   shuttingDown = true;
   console.log(c.yellow(`\n  ${sig} — releasing ${inFlight.size} claim(s) before exit. Ctrl-C again to abandon them.`));
 
-  for (const ch of children) { try { ch.kill("SIGTERM"); } catch {} }
+  for (const ch of children) { try { ch.kill("SIGTERM"); } catch { /* intentionally ignored */ } }
 
   const deadline = Date.now() + 10_000;
   while (running.size && Date.now() < deadline) await Bun.sleep(250);
@@ -767,7 +767,7 @@ let drained = false;
 const LOCK = path.join(homedir(), ".factory/locks", `${repo.name}.dispatch.lock`);
 mkdirSync(path.dirname(LOCK), { recursive: true });
 
-const releaseClaimLock = () => { try { unlinkSync(LOCK); } catch {} };
+const releaseClaimLock = () => { try { unlinkSync(LOCK); } catch { /* intentionally ignored */ } };
 
 async function fill() {
   if (startedCount >= MAX || tripped || shuttingDown) return;
