@@ -16,7 +16,7 @@ Do not add more lock lanes unless the `shadow` label is moved to multiple physic
 
 ## Lint
 
-`Verify` runs `bun run lint --max-warnings=605` (WM-607) right after installing
+`Verify` runs `bun run lint --max-warnings=608` (WM-607) right after installing
 `event-runtime/web` deps and before the prettier check. `eslint.config.mjs` at
 repo root covers `**/*.{mjs,js,jsx}` with `@eslint/js` recommended, and
 `event-runtime/web/**/*.{ts,tsx}` with `typescript-eslint` recommended plus
