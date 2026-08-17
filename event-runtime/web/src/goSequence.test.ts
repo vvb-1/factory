@@ -48,7 +48,7 @@ describe("goSequence", () => {
       new Response(JSON.stringify([]), {
         status: 200,
         headers: { "content-type": "application/json" },
-      })) as typeof fetch;
+      })) as unknown as typeof fetch;
     window.location.href = "http://localhost/#/events";
 
     try {
