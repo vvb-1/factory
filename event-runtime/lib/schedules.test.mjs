@@ -471,6 +471,66 @@ describe("scheduleView (§9)", () => {
 });
 
 describe("registry validation of schedules.json", () => {
+  test("the factory supply loops are enabled, automatic, singleton schedules", () => {
+    expect(base.schedules["work-factory"]).toEqual({
+      every: "30m",
+      eventType: "factory.work.requested",
+      payload: { repo: "factory" },
+      catchUp: "none",
+      singleton: true,
+      approval: "auto",
+      enabled: true,
+    });
+    expect(base.schedules["triage-factory"]).toEqual({
+      every: "2h",
+      eventType: "factory.triage.requested",
+      payload: { repo: "factory" },
+      catchUp: "none",
+      singleton: true,
+      approval: "auto",
+      enabled: true,
+    });
+
+    const otherRepoSchedules = Object.values(base.schedules).filter(
+      (schedule) => schedule.payload?.repo && schedule.payload.repo !== "factory",
+    );
+    expect(otherRepoSchedules.length).toBeGreaterThan(0);
+    expect(otherRepoSchedules.every((schedule) => schedule.enabled === false)).toBe(true);
+  });
+
+  test("work-factory emits once per slot, skips catch-up bursts, and remains singleton", () => {
+    const d = db();
+    const registry = {
+      ...base,
+      schedules: { "work-factory": base.schedules["work-factory"] },
+    };
+    const firstSlot = at("2026-08-14T01:00:00Z");
+
+    expect(emitDueTicks(d, registry, { now: firstSlot }).emitted).toHaveLength(1);
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+    expect(autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV }).approved).toHaveLength(1);
+
+    // Re-evaluating the same slot is idempotent.
+    expect(emitDueTicks(d, registry, { now: firstSlot + 10_000 }).emitted).toEqual([]);
+
+    // Six missed half-hour boundaries collapse into one current-slot event.
+    const afterDowntime = emitDueTicks(d, registry, { now: at("2026-08-14T04:00:00Z") });
+    expect(afterDowntime.emitted).toHaveLength(1);
+    const envelope = JSON.parse(
+      d.query(`SELECT envelope_json FROM events ORDER BY admitted_at DESC, event_id DESC LIMIT 1`).get()
+        .envelope_json,
+    );
+    expect(envelope.payload).toMatchObject({ loop: "work-factory", skippedSlots: 5 });
+
+    // The previous run is still queued, so singleton planning refuses a duplicate run.
+    planAdmittedEvents(d, registry, { policyVersion: PV });
+    const noop = d
+      .query(`SELECT decision, reason FROM proposals WHERE decision = 'noop' ORDER BY rowid DESC LIMIT 1`)
+      .get();
+    expect(noop.reason).toBe("previous_run_in_flight");
+    expect(d.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
+  });
+
   test("the shipped reaper loop is registered, watched, and off by default", () => {
     expect(base.schedules.reaper).toMatchObject({
       every: "60m",

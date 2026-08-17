@@ -142,6 +142,24 @@
     "approval": "watched",
     "enabled": false
   },
+  "work-factory": {
+    "every": "30m",
+    "eventType": "factory.work.requested",
+    "payload": { "repo": "factory" },
+    "catchUp": "none",
+    "singleton": true,
+    "approval": "auto",
+    "enabled": true
+  },
+  "triage-factory": {
+    "every": "2h",
+    "eventType": "factory.triage.requested",
+    "payload": { "repo": "factory" },
+    "catchUp": "none",
+    "singleton": true,
+    "approval": "auto",
+    "enabled": true
+  },
   "merge-factory": {
     "every": "30m",
     "eventType": "factory.merge.requested",
