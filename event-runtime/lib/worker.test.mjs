@@ -16,8 +16,9 @@ import { computeDefHash } from "./receipts.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
 import {
   acquireClaimLock, cancelRun, claimNext, CODE_RELOAD_EXIT, codeStamp, codeStampFiles, codeStampRoot,
-  createReloadWatcher, defaultLocksDir, dispatchLockPath, executeClaimed, reapExpiredLeases,
-  releaseClaimLock, repositoryIsClean, repositoryStatus, retryRun, runOnce,
+  createReloadWatcher, DEFAULT_MAX_ENVIRONMENT_RETRIES, defaultLocksDir, dispatchLockPath,
+  executeClaimed, classifyFailureCause, reapExpiredLeases, releaseClaimLock, repositoryIsClean,
+  repositoryStatus, retryRun, runOnce,
 } from "./worker.mjs";
 import { liveWorkerLeases, writeWorkerLease } from "../../lib/worker-leases.mjs";
 
@@ -269,7 +270,7 @@ describe("worker", () => {
 
   test("policy denial is terminal and is never retried as an opaque agent exit", async () => {
     const db = openDb(":memory:");
-    const spec = queueRun(db, makeSpec({ adapter: "policy" }));
+    const spec = queueRun(db, makeSpec({ adapter: "policy", maxAttempts: 5 }));
     const policyAdapter = {
       execute: async () => ({
         // Adapters report policyDenials only when they are the verdict — the
@@ -287,6 +288,7 @@ describe("worker", () => {
     expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ?`).get(spec.runId).reason_code).toBe("policy_denied:Bash");
     expect(db.query(`SELECT * FROM results WHERE run_id = ?`).get(spec.runId)).toBeNull();
     expect(db.query(`SELECT * FROM outbox`).all()).toHaveLength(0);
+    expect(claimNext(db, opts())).toBeNull();
   });
 
   test("refuse: REFUSED, results row stored, no outbox row, workspace destroyed", async () => {
@@ -521,12 +523,11 @@ describe("worker", () => {
     expect(db.query(`SELECT status FROM proposals WHERE id = 'p2'`).get().status).toBe("open");
   });
 
-  test("retryRun: exhausted attempts throw without force, re-queue with force", () => {
+  test("retryRun: exhausted agent attempts throw without force, re-queue with force", async () => {
     const db = openDb(":memory:");
-    const spec = queueRun(db, makeSpec({ maxAttempts: 1 }));
-    claimNext(db, opts());
-    transition(db, { runId: spec.runId, to: "RUNNING", expectFrom: "LEASED", actor: "test", now: T0 });
-    transition(db, { runId: spec.runId, to: "FAILED", expectFrom: "RUNNING", actor: "test", now: T0 });
+    const spec = queueRun(db, makeSpec({ input: { repos: ["crash"] }, maxAttempts: 1 }));
+    await runOnce(db, registry, adapters, opts());
+    expect(runState(db, spec.runId)).toBe("FAILED");
 
     expect(() => retryRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 }))
       .toThrow("attempts_exhausted");
@@ -536,45 +537,144 @@ describe("worker", () => {
     expect(runState(db, spec.runId)).toBe("QUEUED");
   });
 
-  test("adapter exception: FAILED/adapter_error, workspace destroyed, not wedged in RUNNING (OPS-405)", async () => {
+  test("retryRun does not treat environment attempts as exhausted agent attempts", async () => {
     const db = openDb(":memory:");
-    const throwingAdapter = {
-      execute: async () => {
-        throw new Error("simulated transport explosion");
-      },
-    };
-    const throwingAdapters = { throwing: throwingAdapter };
-    const spec = queueRun(db, makeSpec({ adapter: "throwing", maxAttempts: 1, workspace: { type: "ephemeral", retainOnFailure: false } }));
-    const o = opts();
-
-    const summary = await runOnce(db, registry, throwingAdapters, o);
-    expect(summary.terminalState).toBe("FAILED");
-    expect(summary.reasonCode).toBe("adapter_error");
+    const throwingAdapter = { execute: async () => { throw new Error("network dropped"); } };
+    const spec = queueRun(db, makeSpec({ adapter: "throwing", maxAttempts: 1, maxEnvironmentRetries: 0 }));
+    await runOnce(db, registry, { throwing: throwingAdapter }, opts());
     expect(runState(db, spec.runId)).toBe("FAILED");
 
-    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
-    expect(attempt.terminal_state).toBe("FAILED");
-    expect(attempt.reason_code).toBe("adapter_error");
-    expect(attempt.finished_at).toBeTruthy();
-    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+    const retried = retryRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    expect(retried.to).toBe("QUEUED");
   });
 
-  test("adapter exception with retries: auto re-QUEUED, workspace cleaned (OPS-405)", async () => {
+  test("failure cause taxonomy classifies retryable and fatal worker failures", () => {
+    expect(classifyFailureCause("adapter_error")).toBe("environment");
+    expect(classifyFailureCause("lease_expired")).toBe("environment");
+    expect(classifyFailureCause("agent_exit_1")).toBe("agent_error");
+    expect(classifyFailureCause("contract_violation")).toBe("agent_error");
+    for (const reason of [
+      "cli_not_found",
+      "unknown_adapter",
+      "agent_definition_mismatch",
+      "policy_denied:Bash",
+      "workspace_integrity_violation",
+    ]) {
+      expect(classifyFailureCause(reason)).toBe("fatal");
+    }
+    expect(DEFAULT_MAX_ENVIRONMENT_RETRIES).toBe(3);
+  });
+
+  test("adapter_error with maxAttempts 1 requeues and succeeds without consuming the agent budget", async () => {
+    const db = openDb(":memory:");
+    let calls = 0;
+    const flakyAdapter = {
+      async execute(args) {
+        calls += 1;
+        if (calls === 1) throw new Error("simulated transport explosion");
+        return fake.execute(args);
+      },
+    };
+    const spec = queueRun(db, makeSpec({
+      adapter: "flaky",
+      maxAttempts: 1,
+      maxEnvironmentRetries: 1,
+      workspace: { type: "ephemeral", retainOnFailure: false },
+    }));
+    const o = opts();
+
+    const first = await runOnce(db, registry, { flaky: flakyAdapter }, o);
+    expect(first).toMatchObject({ terminalState: "FAILED", reasonCode: "adapter_error" });
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(lifecycleOf(db, spec.runId).at(-1).reason).toBe("retry:environment");
+
+    const second = await runOnce(db, registry, { flaky: flakyAdapter }, o);
+    expect(second.terminalState).toBe("COMPLETED");
+    expect(runState(db, spec.runId)).toBe("COMPLETED");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ? ORDER BY attempt`).all(spec.runId))
+      .toEqual([{ reason_code: "adapter_error" }, { reason_code: "ok" }]);
+  });
+
+  test("repeated environment failures dead-letter after the dedicated retry ceiling", async () => {
     const db = openDb(":memory:");
     const throwingAdapter = {
       execute: async () => {
         throw new Error("simulated transport explosion");
       },
     };
-    const throwingAdapters = { throwing: throwingAdapter };
-    const spec = queueRun(db, makeSpec({ adapter: "throwing", maxAttempts: 2, workspace: { type: "ephemeral", retainOnFailure: false } }));
+    const spec = queueRun(db, makeSpec({
+      adapter: "throwing",
+      maxAttempts: 1,
+      maxEnvironmentRetries: 2,
+      workspace: { type: "ephemeral", retainOnFailure: false },
+    }));
     const o = opts();
 
-    const summary = await runOnce(db, registry, throwingAdapters, o);
-    expect(summary.terminalState).toBe("FAILED");
-    expect(summary.reasonCode).toBe("adapter_error");
+    expect((await runOnce(db, registry, { throwing: throwingAdapter }, o)).reasonCode).toBe("adapter_error");
     expect(runState(db, spec.runId)).toBe("QUEUED");
-    expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
+    expect((await runOnce(db, registry, { throwing: throwingAdapter }, o)).reasonCode).toBe("adapter_error");
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect((await runOnce(db, registry, { throwing: throwingAdapter }, o)).reasonCode).toBe("adapter_error");
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(db.query(`SELECT COUNT(*) AS n FROM attempts WHERE run_id = ?`).get(spec.runId).n).toBe(3);
+    expect(lifecycleOf(db, spec.runId).filter((event) => event.reason === "retry:environment")).toHaveLength(2);
+  });
+
+  test("environment failures do not consume agent_exit retry attempts", async () => {
+    const db = openDb(":memory:");
+    let calls = 0;
+    const mixedAdapter = {
+      async execute() {
+        calls += 1;
+        if (calls === 1) throw new Error("network dropped");
+        return { exitCode: 1, timedOut: false };
+      },
+    };
+    const spec = queueRun(db, makeSpec({ adapter: "mixed", maxAttempts: 2, maxEnvironmentRetries: 1 }));
+    const o = opts();
+
+    await runOnce(db, registry, { mixed: mixedAdapter }, o);
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    await runOnce(db, registry, { mixed: mixedAdapter }, o);
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(lifecycleOf(db, spec.runId).at(-1).reason).toBe("retry:agent_error");
+    await runOnce(db, registry, { mixed: mixedAdapter }, o);
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ? ORDER BY attempt`).all(spec.runId))
+      .toEqual([
+        { reason_code: "adapter_error" },
+        { reason_code: "agent_exit_1" },
+        { reason_code: "agent_exit_1" },
+      ]);
+  });
+
+  test("contract violations consume maxAttempts independently of environment failures", async () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(db, makeSpec({ input: { repos: ["invalid-artifact"] }, maxAttempts: 2 }));
+    const o = opts();
+
+    await runOnce(db, registry, adapters, o);
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(lifecycleOf(db, spec.runId).at(-1).reason).toBe("retry:agent_error");
+    await runOnce(db, registry, adapters, o);
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ? ORDER BY attempt`).all(spec.runId))
+      .toEqual([{ reason_code: "contract_violation" }, { reason_code: "contract_violation" }]);
+  });
+
+  test("fatal errors never requeue regardless of either retry budget", async () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(db, makeSpec({
+      adapter: "nonexistent",
+      maxAttempts: 5,
+      maxEnvironmentRetries: 5,
+    }));
+
+    const summary = await runOnce(db, registry, adapters, opts());
+    expect(summary).toMatchObject({ terminalState: "FAILED", reasonCode: "unknown_adapter" });
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(claimNext(db, opts())).toBeNull();
+    expect(lifecycleOf(db, spec.runId).some((event) => event.reason?.startsWith("retry:"))).toBe(false);
   });
 
   test("post-VERIFYING exception finalizes the attempt and re-queues instead of stranding it (WM-261)", async () => {
@@ -601,22 +701,25 @@ describe("worker", () => {
     expect(existsSync(path.join(o.workspacesRoot, `${spec.runId}-a1`))).toBe(false);
   });
 
-  test("reapExpiredLeases dead-letters when maxAttempts is reached (OPS-405)", () => {
+  test("lease_expired uses the environment retry ceiling instead of maxAttempts", () => {
     const db = openDb(":memory:");
-    const spec = queueRun(db, makeSpec({ maxAttempts: 1 }));
+    const spec = queueRun(db, makeSpec({ maxAttempts: 1, maxEnvironmentRetries: 1 }));
     const o = opts();
-    const claim = claimNext(db, o);
+    claimNext(db, o);
     expect(runState(db, spec.runId)).toBe("LEASED");
 
-    const afterExpiry = T0 + (spec.timeoutSeconds + 120) * 1000 + 1;
-    expect(reapExpiredLeases(db, { now: afterExpiry, policyVersion: "test" })).toBe(1);
-    expect(runState(db, spec.runId)).toBe("FAILED");
+    const firstExpiry = T0 + (spec.timeoutSeconds + 120) * 1000 + 1;
+    expect(reapExpiredLeases(db, { now: firstExpiry, policyVersion: "test" })).toBe(1);
+    expect(runState(db, spec.runId)).toBe("QUEUED");
+    expect(lifecycleOf(db, spec.runId).at(-1).reason).toBe("retry:environment");
 
-    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
-    expect(attempt.terminal_state).toBe("FAILED");
-    expect(attempt.reason_code).toBe("lease_expired");
-    // Does not re-queue again
-    expect(reapExpiredLeases(db, { now: afterExpiry + 1000, policyVersion: "test" })).toBe(0);
+    const secondClaim = claimNext(db, { ...o, now: firstExpiry });
+    const secondExpiry = firstExpiry + (spec.timeoutSeconds + 120) * 1000 + 1;
+    expect(secondClaim.attempt).toBe(2);
+    expect(reapExpiredLeases(db, { now: secondExpiry, policyVersion: "test" })).toBe(1);
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(db.query(`SELECT reason_code FROM attempts WHERE run_id = ? ORDER BY attempt`).all(spec.runId))
+      .toEqual([{ reason_code: "lease_expired" }, { reason_code: "lease_expired" }]);
     expect(claimNext(db, opts())).toBeNull();
   });
 
@@ -835,6 +938,10 @@ describe("worker", () => {
     const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
     expect(attempt.terminal_state).toBe("REFUSED");
     expect(attempt.reason_code).toBe("agent_definition_mismatch");
+    expect(lifecycleOf(db, spec.runId).slice(-2).map((event) => event.reason)).toEqual([
+      "failure:fatal:agent_definition_mismatch",
+      "failure:fatal:agent_definition_mismatch",
+    ]);
   });
 
   test("fencing on contract violation: stale worker cannot overwrite newer attempt (OPS-413)", async () => {
