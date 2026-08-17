@@ -11,7 +11,13 @@ import {
   nodeAccessibleName,
 } from "./nodes";
 import type { GraphNode } from "./model";
-import { Graph, focusedNodeFit, useSelectedNodeReveal } from "../views/Graph";
+import {
+  Graph,
+  focusedNodeFit,
+  graphDisplayFromHash,
+  graphHashWithDisplay,
+  useSelectedNodeReveal,
+} from "../views/Graph";
 import {
   changeInput,
   createAgentsFixture,
@@ -26,6 +32,8 @@ import type { AgentsView } from "../types";
 afterEach(() => {
   cleanup();
   restoreApi();
+  localStorage.clear();
+  window.location.hash = "";
 });
 
 function renderNode(ui: React.ReactElement) {
@@ -391,6 +399,73 @@ function renderGraph(props: Partial<Parameters<typeof Graph>[0]> = {}) {
 }
 
 describe("Graph view inspect loop", () => {
+  test("graph display hash helpers preserve selection and unrelated query keys", () => {
+    expect(
+      graphHashWithDisplay("#/graph/agent%3Adoctor%401?project=factory", {
+        overlay: "health",
+        window: "7d",
+      }),
+    ).toBe("#/graph/agent%3Adoctor%401?project=factory&overlay=health&window=7d");
+    expect(
+      graphDisplayFromHash("#/graph?overlay=latency&window=30d", {
+        overlay: "activity",
+        window: "1h",
+      }),
+    ).toEqual({ overlay: "latency", window: "30d" });
+  });
+
+  test("overlay and window selectors initialize from and write back to the hash", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({ rows: [] }), { status: 200 })) as any;
+    window.location.hash = "#/graph?overlay=health&window=7d";
+    try {
+      await withApi(
+        { agents: async () => graphAgents(), status: async () => createStatusFixture() },
+        async () => {
+          const { getByLabelText } = renderGraph();
+          const overlay = (await waitFor(() => getByLabelText("Graph overlay"))) as HTMLSelectElement;
+          const windowSelect = getByLabelText("Graph time window") as HTMLSelectElement;
+          expect(overlay.value).toBe("health");
+          expect(windowSelect.value).toBe("7d");
+          expect(windowSelect.disabled).toBe(false);
+
+          fireEvent.change(overlay, { target: { value: "activity" } });
+          await waitFor(() => expect(window.location.hash).toContain("overlay=activity"));
+          expect(window.location.hash).toContain("window=7d");
+          expect(JSON.parse(localStorage.getItem("evrt-display-graph") ?? "null")).toEqual({
+            overlay: "activity",
+            window: "7d",
+          });
+        },
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test("an unreachable metrics endpoint falls back to Live with an inline notice", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mock(async () => new Response("unavailable", { status: 503 })) as any;
+    window.location.hash = "#/graph?overlay=cost&window=24h";
+    try {
+      await withApi(
+        { agents: async () => graphAgents(), status: async () => createStatusFixture() },
+        async () => {
+          const { getByLabelText, getByText } = renderGraph();
+          const notice = await waitFor(() => getByText(/Historical metrics unavailable/));
+          expect(notice.textContent).toContain("Historical metrics unavailable");
+          const overlay = getByLabelText("Graph overlay") as HTMLSelectElement;
+          const windowSelect = getByLabelText("Graph time window") as HTMLSelectElement;
+          expect(overlay.value).toBe("live");
+          expect(windowSelect.disabled).toBe(true);
+          expect(window.location.hash).toContain("overlay=live");
+        },
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test("deep-link focus fit centres only the requested node at the current zoom", () => {
     expect(focusedNodeFit("event:gh.failed", 0.8)).toEqual({
       nodes: [{ id: "event:gh.failed" }],

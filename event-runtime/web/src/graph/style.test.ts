@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { EDGE_STYLES, NODE_STYLES, legendEntries, nodeStyleKey } from "./style";
+import { EDGE_STYLES, NODE_STYLES, historicalColor, historicalRamp, legendEntries, nodeStyleKey } from "./style";
 import type { CapabilityGraph, GraphNode } from "./model";
 
 const agent = (ref: string, mutating: boolean): GraphNode => ({
@@ -144,5 +144,27 @@ describe("legendEntries", () => {
       nodes: [],
       edges: [],
     });
+  });
+});
+
+describe("historical ramps", () => {
+  test("uses theme variables for sequential and health ramps", () => {
+    expect(historicalColor({ mode: "activity", value: 5, intensity: 0.5, formatted: "5", label: "runs", faint: false }))
+      .toContain("var(--accent)");
+    expect(historicalColor({ mode: "health", value: 0.5, intensity: 0.5, formatted: "50%", label: "failure rate", faint: false }))
+      .toBe("color-mix(in oklch, var(--hue-err) 50%, var(--hue-ok))");
+  });
+
+  test("finds the visible min and max for the legend", () => {
+    const low = { mode: "cost", value: 0, intensity: 0, formatted: "$0.000", label: "spend", faint: false } as const;
+    const high = { mode: "cost", value: 4, intensity: 1, formatted: "$4.00", label: "spend", faint: false } as const;
+    const graph: CapabilityGraph = {
+      nodes: [
+        { id: "event:a", kind: "eventType", label: "a", adapter: "claude", scope: [], ttl: null, historical: low },
+        { ...agent("a@1", false), historical: high },
+      ],
+      edges: [],
+    };
+    expect(historicalRamp(graph)).toEqual({ min: low, max: high });
   });
 });

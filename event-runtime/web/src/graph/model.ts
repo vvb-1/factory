@@ -5,6 +5,7 @@ import type {
   RunListItem,
   StatusView,
 } from "../types";
+import type { GraphOverlay } from "../displayOptions";
 
 // The capability map: what this runtime can do, derived from the registry,
 // overlaid with live runtime state (OPS-227 phase 2): active run state badges,
@@ -13,7 +14,19 @@ import type {
 // Kept as plain data, separate from React Flow, so it stays testable and the
 // rendering layer can be swapped without touching the topology rules.
 
-export type GraphNode =
+export interface HistoricalOverlayValue {
+  mode: Exclude<GraphOverlay, "live">;
+  /** Value displayed to the operator: count, rate, dollars, or milliseconds. */
+  value: number;
+  /** 0–1 position within this response's visible ramp. */
+  intensity: number;
+  formatted: string;
+  label: string;
+  /** Activity alone deliberately fades zero-use topology. */
+  faint: boolean;
+}
+
+export type GraphNode = (
   | {
       id: string;
       kind: "eventType";
@@ -47,7 +60,7 @@ export type GraphNode =
       agentRef: string | null;
       eventType: string | null;
       proposal: Proposal;
-    };
+    }) & { historical?: HistoricalOverlayValue };
 
 export type GraphEdge = {
   id: string;
@@ -56,6 +69,7 @@ export type GraphEdge = {
   kind: "routes" | "recommends" | "proposal";
   label?: string;
   invocations?: number;
+  historical?: HistoricalOverlayValue;
 };
 
 export interface CapabilityGraph {
@@ -70,9 +84,125 @@ export interface LiveGraphState {
   status?: StatusView;
 }
 
+export interface BreakdownRows {
+  rows: Array<{ key: string; value: number }>;
+}
+
+/** All server-side aggregates needed for one historical overlay refresh. */
+export interface HistoricalBreakdowns {
+  agents?: BreakdownRows;
+  eventTypes?: BreakdownRows;
+  edges?: BreakdownRows;
+  agentRuns?: BreakdownRows;
+  eventTypeRuns?: BreakdownRows;
+  edgeRuns?: BreakdownRows;
+}
+
 export const eventNodeId = (type: string) => `event:${type}`;
 export const agentNodeId = (ref: string) => `agent:${ref}`;
 export const proposalNodeId = (id: string) => `proposal:${id}`;
+
+const rowsMap = (data?: BreakdownRows) =>
+  new Map((data?.rows ?? []).map((row) => [row.key, Number(row.value) || 0]));
+
+function overlayFormat(mode: Exclude<GraphOverlay, "live">, value: number): string {
+  if (mode === "health") return `${Math.round(value * 100)}%`;
+  if (mode === "cost") return `$${value < 0.01 ? value.toFixed(3) : value.toFixed(2)}`;
+  if (mode === "latency") return `${value < 1000 ? (value / 1000).toFixed(2) : (value / 1000).toFixed(1)}s`;
+  return String(Math.round(value));
+}
+
+const overlayLabel = (mode: Exclude<GraphOverlay, "live">) =>
+  mode === "activity"
+    ? "runs"
+    : mode === "health"
+      ? "failure rate"
+      : mode === "cost"
+        ? "spend"
+        : "p95 execution";
+
+function valueFor(
+  mode: Exclude<GraphOverlay, "live">,
+  values: Map<string, number>,
+  totals: Map<string, number>,
+  key: string,
+): number {
+  const value = values.get(key) ?? 0;
+  return mode === "health" ? (totals.get(key) ?? 0) > 0 ? value / totals.get(key)! : 0 : value;
+}
+
+function overlayValues(
+  mode: Exclude<GraphOverlay, "live">,
+  keyed: Array<{ key: string; value: number }>,
+): Map<string, HistoricalOverlayValue> {
+  const max = Math.max(0, ...keyed.map((entry) => entry.value));
+  const min = Math.min(...keyed.map((entry) => entry.value), 0);
+  const span = max - min;
+  return new Map(
+    keyed.map(({ key, value }) => [
+      key,
+      {
+        mode,
+        value,
+        intensity: span > 0 ? (value - min) / span : 0,
+        formatted: overlayFormat(mode, value),
+        label: overlayLabel(mode),
+        faint: mode === "activity" && value === 0,
+      },
+    ]),
+  );
+}
+
+/**
+ * Add a historical overlay without changing topology. Missing rows are real
+ * zeroes (the breakdown endpoint omits empty groups), which is what makes dead
+ * routes visible instead of silently leaving them uncoloured.
+ */
+export function applyHistoricalOverlay(
+  graph: CapabilityGraph,
+  mode: Exclude<GraphOverlay, "live">,
+  breakdowns: HistoricalBreakdowns,
+): CapabilityGraph {
+  const agents = rowsMap(breakdowns.agents);
+  const eventTypes = rowsMap(breakdowns.eventTypes);
+  const edgeValues = rowsMap(breakdowns.edges);
+  const agentRuns = rowsMap(breakdowns.agentRuns);
+  const eventTypeRuns = rowsMap(breakdowns.eventTypeRuns);
+  const edgeRuns = rowsMap(breakdowns.edgeRuns);
+
+  const rawNodes = graph.nodes.map((node) => {
+    const eligible = node.kind === "agent" || node.kind === "eventType";
+    const key = node.label;
+    const value =
+      node.kind === "agent"
+        ? valueFor(mode, agents, agentRuns, key)
+        : node.kind === "eventType"
+          ? valueFor(mode, eventTypes, eventTypeRuns, key)
+          : 0;
+    return { node, key: node.id, value, eligible };
+  });
+  const nodeOverlay = overlayValues(mode, rawNodes.filter(({ eligible }) => eligible).map(({ key, value }) => ({ key, value })));
+
+  const rawEdges = graph.edges.map((edge) => {
+    let metricKey = "";
+    if (edge.kind === "recommends") {
+      const source = edge.source.replace(/^agent:/, "");
+      const target = edge.target.replace(/^event:/, "");
+      metricKey = `${source}→${target}`;
+    } else if (edge.kind === "routes") {
+      metricKey = edge.source.replace(/^event:/, "");
+    }
+    const values = edge.kind === "routes" ? eventTypes : edgeValues;
+    const totals = edge.kind === "routes" ? eventTypeRuns : edgeRuns;
+    return { edge, key: edge.id, value: valueFor(mode, values, totals, metricKey) };
+  });
+  const edgeOverlay = overlayValues(mode, rawEdges.map(({ key, value }) => ({ key, value })));
+
+  return {
+    nodes: rawNodes.map(({ node, eligible }) => eligible ? { ...node, historical: nodeOverlay.get(node.id) } : node),
+    edges: rawEdges.map(({ edge }) => ({ ...edge, historical: edgeOverlay.get(edge.id) })),
+  };
+}
 
 /** How an agent actually executes — the honest distinction for the map. */
 function executionOf(

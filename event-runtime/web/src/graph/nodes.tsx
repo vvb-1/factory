@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { GraphNode } from "./model";
-import { NODE_STYLES } from "./style";
+import { NODE_STYLES, historicalColor } from "./style";
 import { DECISION_HUES, STATE_HUES, StateBadge } from "../components/ui";
 
 // Custom nodes: plain components on the app's OKLCH tokens, so the canvas
@@ -20,6 +20,7 @@ const searchCurrentOf = (data: NodeProps["data"]) =>
   Boolean((data as { searchCurrent?: boolean }).searchCurrent);
 
 function materialState(node: GraphNode): string {
+  if (node.historical) return `${node.historical.label} ${node.historical.formatted}`;
   switch (node.kind) {
     case "eventType": {
       const admitted = node.admittedCount ?? 0;
@@ -58,6 +59,7 @@ export function Shell({
   searchHit,
   searchCurrent,
   accessibleName,
+  historical,
 }: {
   children: React.ReactNode;
   accent: string;
@@ -66,6 +68,7 @@ export function Shell({
   searchHit?: boolean;
   searchCurrent?: boolean;
   accessibleName: string;
+  historical?: GraphNode["historical"];
 }) {
   return (
     <div
@@ -80,7 +83,7 @@ export function Shell({
       style={{
         width: 236,
         height: 92,
-        background: "var(--surface-1)",
+        background: historical ? historicalColor(historical) : "var(--surface-1)",
         border: `1px ${dashed ? "dashed" : "solid"} ${selected ? accent : "var(--border)"}`,
         boxShadow: selected ? `0 0 0 1px ${accent}` : "none",
         borderLeft: `3px solid ${accent}`,
@@ -92,6 +95,7 @@ export function Shell({
             : undefined,
         outlineColor: searchHit || searchCurrent ? "var(--accent)" : undefined,
         outlineOffset: searchHit || searchCurrent ? 2 : undefined,
+        opacity: historical?.faint ? 0.34 : 1,
       }}
     >
       {children}
@@ -129,6 +133,7 @@ export function EventTypeNode({ data, selected }: NodeProps) {
       searchHit={searchHitOf(data)}
       searchCurrent={searchCurrentOf(data)}
       accessibleName={nodeAccessibleName(node)}
+      historical={node.historical}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div className="flex items-center justify-between gap-1">
@@ -138,7 +143,14 @@ export function EventTypeNode({ data, selected }: NodeProps) {
         >
           event type
         </span>
-        {hasCounts && (
+        {node.historical ? (
+          <span
+            className="rounded px-1 text-[11px] font-semibold tabular-nums"
+            style={{ color: "var(--text)", background: "color-mix(in oklch, var(--surface-0) 75%, transparent)" }}
+          >
+            {node.historical.formatted}
+          </span>
+        ) : hasCounts && (
           <span className="flex items-center gap-1">
             {admitted > 0 && (
               <span
@@ -195,6 +207,7 @@ export function AgentNode({ data, selected }: NodeProps) {
       searchHit={searchHitOf(data)}
       searchCurrent={searchCurrentOf(data)}
       accessibleName={nodeAccessibleName(node)}
+      historical={node.historical}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div className="flex items-center justify-between gap-2">
@@ -207,6 +220,14 @@ export function AgentNode({ data, selected }: NodeProps) {
             : `agent · ${node.execution}`}
         </span>
         <div className="flex items-center gap-1">
+          {node.historical && (
+            <span
+              className="rounded px-1 text-[11px] font-semibold tabular-nums"
+              style={{ color: "var(--text)", background: "color-mix(in oklch, var(--surface-0) 75%, transparent)" }}
+            >
+              {node.historical.formatted}
+            </span>
+          )}
           {node.mutating && (
             <span
               className="rounded px-1 text-[11px] font-semibold tracking-wide uppercase"
@@ -223,7 +244,9 @@ export function AgentNode({ data, selected }: NodeProps) {
       <div className="mono truncate text-[12px]" title={node.label}>
         {node.label}
       </div>
-      {activeRuns.length > 0 ? (
+      {node.historical ? (
+        <Line dim>{node.historical.label}</Line>
+      ) : activeRuns.length > 0 ? (
         <div className="flex items-center gap-1 py-0.5 flex-wrap">
           {activeRuns.map(({ state, count }) => (
             <StateBadge

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildCapabilityGraph } from "./model";
+import { applyHistoricalOverlay, buildCapabilityGraph } from "./model";
 import type { AgentsView, RunListItem, RunState } from "../types";
 
 // The topology rules are pure data — tested without React or a browser.
@@ -528,5 +528,71 @@ describe("buildCapabilityGraph", () => {
     );
     expect(propToAgentEdge).toBeDefined();
     expect(propToAgentEdge?.kind).toBe("proposal");
+  });
+});
+
+describe("applyHistoricalOverlay (WM-291)", () => {
+  const topology = () =>
+    buildCapabilityGraph(
+      view({
+        agents: [agent({ ref: "doctor@1" }), agent({ ref: "idle@1" })],
+        eventTypes: [
+          { type: "ci.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
+          { type: "ci.idle", agent: "idle@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
+        ],
+        edges: {
+          "doctor@1": {
+            recommendationField: "verdict",
+            edges: { RETRY: { eventType: "ci.idle", input: {} } },
+          },
+        },
+      }),
+    );
+
+  test("maps activity counts and explicitly fades zero-activity nodes", () => {
+    const graph = applyHistoricalOverlay(topology(), "activity", {
+      agents: { rows: [{ key: "doctor@1", value: 12 }] },
+      eventTypes: { rows: [{ key: "ci.failed", value: 12 }] },
+      edges: { rows: [{ key: "doctor@1→ci.idle", value: 3 }] },
+    });
+    expect(graph.nodes.find((n) => n.id === "agent:doctor@1")?.historical).toMatchObject({
+      formatted: "12",
+      intensity: 1,
+      faint: false,
+    });
+    expect(graph.nodes.find((n) => n.id === "agent:idle@1")?.historical).toMatchObject({
+      value: 0,
+      faint: true,
+    });
+    expect(graph.edges.find((e) => e.kind === "recommends")?.historical).toMatchObject({
+      value: 3,
+      intensity: 0.25,
+    });
+  });
+
+  test("maps health as failures divided by runs and formats latency/cost units", () => {
+    const health = applyHistoricalOverlay(topology(), "health", {
+      agents: { rows: [{ key: "doctor@1", value: 2 }] },
+      agentRuns: { rows: [{ key: "doctor@1", value: 8 }] },
+      eventTypes: { rows: [{ key: "ci.failed", value: 1 }] },
+      eventTypeRuns: { rows: [{ key: "ci.failed", value: 4 }] },
+      edges: { rows: [{ key: "doctor@1→ci.idle", value: 1 }] },
+      edgeRuns: { rows: [{ key: "doctor@1→ci.idle", value: 2 }] },
+    });
+    expect(health.nodes.find((n) => n.id === "agent:doctor@1")?.historical).toMatchObject({
+      value: 0.25,
+      formatted: "25%",
+    });
+    expect(health.edges.find((e) => e.kind === "recommends")?.historical?.formatted).toBe("50%");
+
+    const cost = applyHistoricalOverlay(topology(), "cost", {
+      agents: { rows: [{ key: "doctor@1", value: 1.25 }] },
+    });
+    expect(cost.nodes.find((n) => n.id === "agent:doctor@1")?.historical?.formatted).toBe("$1.25");
+
+    const latency = applyHistoricalOverlay(topology(), "latency", {
+      agents: { rows: [{ key: "doctor@1", value: 2500 }] },
+    });
+    expect(latency.nodes.find((n) => n.id === "agent:doctor@1")?.historical?.formatted).toBe("2.5s");
   });
 });

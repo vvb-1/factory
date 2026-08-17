@@ -1,4 +1,4 @@
-import type { CapabilityGraph, GraphEdge, GraphNode } from "./model";
+import type { CapabilityGraph, GraphEdge, GraphNode, HistoricalOverlayValue } from "./model";
 
 // The single source of truth for what node/edge colors and dashes *mean*
 // (WM-99). Node components, edge mapping, and the legend all read from here,
@@ -53,6 +53,27 @@ export const EDGE_STYLES: Record<
     strokeDasharray: "3 3",
   },
 };
+
+/** Theme-token ramps resolve at paint time, so dark, light, and high-contrast
+ * all use their own --accent/semantic hues rather than baked RGB values. */
+export function historicalColor(value: HistoricalOverlayValue): string {
+  const pct = Math.round(Math.max(0, Math.min(1, value.intensity)) * 100);
+  return value.mode === "health"
+    ? `color-mix(in oklch, var(--hue-err) ${pct}%, var(--hue-ok))`
+    : `color-mix(in oklch, var(--accent) ${15 + Math.round(pct * 0.85)}%, var(--surface-1))`;
+}
+
+export function historicalRamp(graph: CapabilityGraph): {
+  min: HistoricalOverlayValue;
+  max: HistoricalOverlayValue;
+} | null {
+  const values = graph.nodes.flatMap((node) => node.historical ? [node.historical] : []);
+  if (values.length === 0) return null;
+  return {
+    min: values.reduce((a, b) => b.value < a.value ? b : a),
+    max: values.reduce((a, b) => b.value > a.value ? b : a),
+  };
+}
 
 export interface LegendEntries {
   nodes: Array<{ key: NodeStyleKey } & (typeof NODE_STYLES)[NodeStyleKey]>;
