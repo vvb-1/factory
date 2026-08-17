@@ -16,6 +16,7 @@ import {
   sourceRunId,
 } from "./Inbox";
 import { api } from "../api";
+import { clearToasts, ToastContainer } from "../components/ui";
 import type { InboxItem } from "../types";
 import { changeInput } from "../test-render";
 
@@ -146,6 +147,7 @@ const origResolve = api.resolveInbox;
 let ledger: InboxItem[] = [];
 
 beforeEach(() => {
+  clearToasts();
   localStorage.clear();
   ledger = [
     item({ id: "inbox_open_1", kind: "BLOCKED", title: "BLOCKED WM-1: decide X", body: "Choose a safe recovery", createdAt: T0, refs: { runId: "run_a", issue: "WM-1", repo: "factory" } }),
@@ -186,9 +188,10 @@ function renderInbox(props: Partial<React.ComponentProps<typeof Inbox>> = {}) {
         {...jumps}
         {...props}
       />
+      <ToastContainer />
     </QueryClientProvider>,
   );
-  return { view, jumps };
+  return { view, jumps, client };
 }
 
 describe("Inbox view", () => {
@@ -339,8 +342,8 @@ describe("Inbox view", () => {
 
   test("unknown deep link shows an inline notice, not a blank list", async () => {
     const { view } = renderInbox({ focusItemId: "inbox_nope" });
-    await waitFor(() => view.getByRole("status"));
-    expect(view.getByRole("status").textContent).toContain("No inbox item");
+    await waitFor(() => view.getByText(/^No inbox item/));
+    expect(view.getByText(/^No inbox item/).textContent).toContain("No inbox item");
     expect(view.getByText("decide X")).toBeTruthy();
   });
 
@@ -352,7 +355,7 @@ describe("Inbox view", () => {
     });
     await waitFor(() => expect(api.ackInbox).toHaveBeenCalledWith("inbox_open_1"));
     await waitFor(() => expect(view.getByRole("tab", { selected: true }).textContent).toContain("Acked"));
-    expect(view.queryByRole("button", { name: /^Ack/ })).toBeNull();
+    expect(view.queryByRole("button", { name: /^Ack(?:\s|$)/ })).toBeNull();
   });
 
   test("x opens the resolve confirm; Enter resolves", async () => {
@@ -368,6 +371,77 @@ describe("Inbox view", () => {
     await waitFor(() => expect(api.resolveInbox).toHaveBeenCalledWith("inbox_open_1"));
     await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(view.getByRole("tab", { selected: true }).textContent).toContain("Resolved"));
+  });
+
+  test("select-all selects every visible actionable inbox item", async () => {
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+
+    expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("2 selected");
+    expect((view.getByLabelText("Select inbox item inbox_open_1") as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText("Select inbox item inbox_open_2") as HTMLInputElement).checked).toBe(true);
+  });
+
+  test("* a selects all without acking the focused item", async () => {
+    const { view } = renderInbox({ focusItemId: "inbox_open_1" });
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "*", bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    });
+
+    await waitFor(() => expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("2 selected"));
+    expect(api.ackInbox).not.toHaveBeenCalled();
+  });
+
+  test("A acks each selected id sequentially", async () => {
+    const calls: string[] = [];
+    api.ackInbox = mock(async (id: string) => {
+      calls.push(id);
+      ledger = ledger.map((it) => (it.id === id ? { ...it, ackedAt: T2 } : it));
+      return { item: ledger.find((it) => it.id === id)! };
+    });
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "A", shiftKey: true, bubbles: true }));
+    });
+
+    await waitFor(() => expect(calls).toEqual(["inbox_open_1", "inbox_open_2"]));
+    expect(view.getByRole("button", { name: "Ack: 2 done / 0 failed" })).toBeTruthy();
+  });
+
+  test("bulk ack reports one done / failed summary toast", async () => {
+    api.ackInbox = mock(async (id: string) => {
+      if (id === "inbox_open_2") throw new Error("race");
+      return { item: ledger.find((it) => it.id === id)! };
+    });
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+
+    fireEvent.click(view.getByRole("button", { name: /^Ack$/ }));
+
+    await waitFor(() => expect(api.ackInbox).toHaveBeenCalledTimes(2));
+    expect(view.getByRole("button", { name: "Ack: 1 done / 1 failed" })).toBeTruthy();
+  });
+
+  test("background refetch preserves selected ids and prunes ids that leave the tab", async () => {
+    const { view, client } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+    expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("2 selected");
+
+    ledger = ledger.filter((it) => it.id !== "inbox_open_2");
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+
+    await waitFor(() => expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("1 selected"));
+    expect((view.getByLabelText("Select inbox item inbox_open_1") as HTMLInputElement).checked).toBe(true);
   });
 
   test("verbs are disabled while disconnected", async () => {
