@@ -213,6 +213,7 @@ export function App() {
   }, [openRepos, project]);
 
   const [theme, cycleTheme] = useTheme();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [injectOpen, setInjectOpen] = useState(false);
   const [injectSeed, setInjectSeed] = useState<
     Record<string, unknown> | undefined
@@ -224,7 +225,62 @@ export function App() {
   const [filterFocus, setFilterFocus] = useState(false);
   const [viewAnnouncement, setViewAnnouncement] = useState("");
   const mainRef = useRef<HTMLElement>(null);
+  const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
+  const mobileNavCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileNavRef = useRef<HTMLElement>(null);
+  const mobileNavWasOpenRef = useRef(false);
   const previousViewRef = useRef(view);
+
+  useEffect(() => {
+    function closeMobileNavOnDesktopResize() {
+      if (window.innerWidth >= 768) setMobileNavOpen(false);
+    }
+    window.addEventListener("resize", closeMobileNavOnDesktopResize);
+    return () =>
+      window.removeEventListener("resize", closeMobileNavOnDesktopResize);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      if (mobileNavWasOpenRef.current) mobileNavToggleRef.current?.focus();
+      mobileNavWasOpenRef.current = false;
+      return;
+    }
+    mobileNavWasOpenRef.current = true;
+    mobileNavCloseRef.current?.focus();
+
+    function handleMobileNavKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileNavOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        mobileNavRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (!mobileNavRef.current?.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleMobileNavKey);
+    return () => window.removeEventListener("keydown", handleMobileNavKey);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const root = mainRef.current;
@@ -505,6 +561,7 @@ export function App() {
   useEffect(() => {
     if (previousViewRef.current === view) return;
     previousViewRef.current = view;
+    setMobileNavOpen(false);
     setViewAnnouncement(`${viewLabel} view`);
     // `/` intentionally sends focus to the destination view's filter instead.
     // Fall back to main when a lazy destination has not mounted its filter yet.
@@ -519,6 +576,7 @@ export function App() {
       if (goPrefixActive()) return;
       if (e.key === "i") {
         e.preventDefault();
+        setMobileNavOpen(false);
         setInjectOpen(true);
       } else if (e.key === "?") {
         e.preventDefault();
@@ -616,23 +674,39 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <ContextTabs
-        repos={reposQ.data?.repos ?? []}
-        reposError={reposQ.isError}
-        openRepos={openRepos}
-        active={context}
-        onSelect={selectContext}
-        onOpen={openRepo}
-        onClose={closeRepo}
-        goArmed={goArmed}
-      />
-      <div className="flex min-h-0 flex-1">
+      <div
+        aria-hidden={mobileNavOpen ? true : undefined}
+        inert={mobileNavOpen ? true : undefined}
+      >
+        <ContextTabs
+          repos={reposQ.data?.repos ?? []}
+          reposError={reposQ.isError}
+          openRepos={openRepos}
+          active={context}
+          onSelect={selectContext}
+          onOpen={openRepo}
+          onClose={closeRepo}
+          goArmed={goArmed}
+        />
+      </div>
+      <div className="relative flex min-h-0 flex-1">
+        {mobileNavOpen && (
+          <button
+            type="button"
+            aria-label="Dismiss navigation"
+            tabIndex={-1}
+            className="absolute inset-0 z-10 bg-black/45 md:hidden"
+            onClick={() => setMobileNavOpen(false)}
+          />
+        )}
         <nav
+          ref={mobileNavRef}
+          id="primary-navigation"
           aria-label="Primary"
-          className="flex w-52 shrink-0 flex-col border-r border-(--border) bg-(--surface-1)"
+          className={`${mobileNavOpen ? "flex" : "hidden"} absolute inset-y-0 left-0 z-20 w-64 shrink-0 flex-col overflow-y-auto border-r border-(--border) bg-(--surface-1) shadow-xl md:static md:flex md:w-52 md:overflow-y-visible md:shadow-none`}
         >
           <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <img
                 src="/watt-mind-logo.svg"
                 alt="Watt Mind"
@@ -640,25 +714,38 @@ export function App() {
               />
               <span className="display text-[14px] font-semibold">factory</span>
             </div>
-            <PrimitiveButton
-              bare
-              type="button"
-              className="rounded px-1.5 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
-              title={
-                env
-                  ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
-                  : healthPending
-                    ? "connecting to the runtime…"
-                    : "runtime unreachable"
-              }
-              style={{
-                color: envHue,
-                background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
-              }}
-              onClick={() => env?.home && copyText(env.home, "runtime home")}
-            >
-              {envLabel}
-            </PrimitiveButton>
+            <div className="flex items-center gap-1">
+              <PrimitiveButton
+                bare
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
+                title={
+                  env
+                    ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
+                    : healthPending
+                      ? "connecting to the runtime…"
+                      : "runtime unreachable"
+                }
+                style={{
+                  color: envHue,
+                  background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
+                }}
+                onClick={() => env?.home && copyText(env.home, "runtime home")}
+              >
+                {envLabel}
+              </PrimitiveButton>
+              {mobileNavOpen && (
+                <button
+                  ref={mobileNavCloseRef}
+                  type="button"
+                  aria-label="Close navigation"
+                  className="flex size-11 items-center justify-center rounded text-lg text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text) md:hidden"
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex-1 px-2">
             {NAV.map((n) => {
@@ -673,8 +760,11 @@ export function App() {
                   aria-describedby={
                     badge.count > 0 ? `nav-badge-${n.key}` : undefined
                   }
-                  onClick={() => navigate(n.key)}
-                  className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] ${
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    navigate(n.key);
+                  }}
+                  className={`flex min-h-11 w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] md:min-h-0 ${
                     current
                       ? "bg-(--surface-3) font-medium text-(--text)"
                       : "text-(--text-dim) hover:bg-(--surface-2)"
@@ -683,10 +773,10 @@ export function App() {
                   <span>{n.label}</span>
                   {badge.count > 0 && (
                     /* aria-hidden keeps the count out of the accessible name —
-                     "Events" must not announce as "Events 6" — while the
-                     aria-describedby reference above still reads it back as
-                     the button's description (accname spec includes hidden
-                     nodes referenced by labelledby/describedby). */
+                       "Events" must not announce as "Events 6" — while the
+                       aria-describedby reference above still reads it back as
+                       the button's description (accname spec includes hidden
+                       nodes referenced by labelledby/describedby). */
                     <NavCount id={`nav-badge-${n.key}`} badge={badge} />
                   )}
                 </PrimitiveButton>
@@ -695,8 +785,11 @@ export function App() {
             <PrimitiveButton
               bare
               type="button"
-              onClick={() => setInjectOpen(true)}
-              className="mt-2 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2)"
+              onClick={() => {
+                setMobileNavOpen(false);
+                setInjectOpen(true);
+              }}
+              className="mt-2 min-h-11 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2) md:min-h-0"
             >
               Inject event…{" "}
               <span className="mono ml-1 text-(--text-faint)">i</span>
@@ -707,8 +800,28 @@ export function App() {
         <main
           ref={mainRef}
           tabIndex={-1}
+          aria-hidden={mobileNavOpen ? true : undefined}
+          inert={mobileNavOpen ? true : undefined}
           className="flex min-w-0 flex-1 flex-col focus:outline-none"
         >
+          <div className="flex h-12 shrink-0 items-center gap-3 border-b border-(--border) bg-(--surface-1) px-2 md:hidden">
+            <button
+              ref={mobileNavToggleRef}
+              type="button"
+              aria-label="Open navigation"
+              aria-controls="primary-navigation"
+              aria-expanded={mobileNavOpen}
+              className="flex size-11 items-center justify-center rounded-md text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <span aria-hidden="true" className="text-lg leading-none">
+                ☰
+              </span>
+            </button>
+            <span className="display truncate text-[13px] font-semibold">
+              {viewLabel}
+            </span>
+          </div>
           <div aria-live="polite" aria-atomic="true" className="sr-only">
             {viewAnnouncement}
           </div>
@@ -1034,9 +1147,11 @@ export function App() {
       <footer
         role="contentinfo"
         aria-label="Status bar"
-        className="flex h-7 shrink-0 items-center justify-between border-t border-(--border) bg-(--surface-1) px-3 text-[11px] select-none"
+        aria-hidden={mobileNavOpen ? true : undefined}
+        inert={mobileNavOpen ? true : undefined}
+        className="flex h-7 shrink-0 items-center justify-between overflow-hidden border-t border-(--border) bg-(--surface-1) px-3 text-[11px] select-none"
       >
-        <div className="flex items-center gap-2 text-(--text-dim)">
+        <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-(--text-dim)">
           <div className="flex items-center gap-1.5">
             <span
               className="size-2 shrink-0 rounded-full"
@@ -1086,7 +1201,7 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="text-(--text-faint)">
+          <div className="hidden text-(--text-faint) md:block">
             <span className="mono">⌘K</span> commands ·{" "}
             <span className="mono">i</span> inject ·{" "}
             <span className="mono">g</span> go · <span className="mono">?</span>{" "}
