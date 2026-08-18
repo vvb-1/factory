@@ -58,17 +58,88 @@ jobs:
           # Reuse their lock: a second lock lane would allow CPU-heavy suites
           # to overlap on the same machine and recreate the flake this protects.
           lock="/tmp/factory-verify-host.lock"
+          : >> "$lock"
+
+          # Remove only an init-adopted legacy/new guardian whose Runner.Worker
+          # is gone. lslocks excludes queued waiters; lsof guards against PID
+          # reuse between discovering and inspecting the holder.
+          holder="$(lslocks -n -o PID,MODE,PATH 2>/dev/null | awk -v lock="$lock" '$2 == "WRITE" && $3 == lock { print $1; exit }')"
+          if [ -n "$holder" ] && lsof -t "$lock" 2>/dev/null | grep -qx "$holder"; then
+            ppid="$(awk '/^PPid:/ { print $2 }' "/proc/$holder/status" 2>/dev/null || true)"
+            holder_start="$(cut -d\  -f22 "/proc/$holder/stat" 2>/dev/null || true)"
+            cmdline="$(tr '\0' ' ' < "/proc/$holder/cmdline" 2>/dev/null || true)"
+            guardian="$(tr '\0' '\n' < "/proc/$holder/environ" 2>/dev/null | awk -F= '$1 == "FACTORY_VERIFY_GUARDIAN" { print $2; exit }' || true)"
+            job_pid="$(tr '\0' '\n' < "/proc/$holder/environ" 2>/dev/null | awk -F= '$1 == "FACTORY_VERIFY_JOB_PID" { print $2; exit }' || true)"
+            job_exe="$(tr '\0' '\n' < "/proc/$holder/environ" 2>/dev/null | awk -F= '$1 == "FACTORY_VERIFY_JOB_EXE" { sub(/^[^=]*=/, ""); print; exit }' || true)"
+            job_start="$(tr '\0' '\n' < "/proc/$holder/environ" 2>/dev/null | awk -F= '$1 == "FACTORY_VERIFY_JOB_START" { print $2; exit }' || true)"
+            runner_temp="$(tr '\0' '\n' < "/proc/$holder/environ" 2>/dev/null | awk -F= '$1 == "RUNNER_TEMP" { sub(/^[^=]*=/, ""); print; exit }' || true)"
+            legacy=0
+            case "$cmdline" in
+              *"tail -f /dev/null"*) legacy=1 ;;
+            esac
+            worker_live=0
+            if [[ "$job_pid" =~ ^[0-9]+$ ]] && [ -n "$job_exe" ] && [ -n "$job_start" ] && [ "$(readlink "/proc/$job_pid/exe" 2>/dev/null || true)" = "$job_exe" ] && [ "$(awk '{ print $22 }' "/proc/$job_pid/stat" 2>/dev/null || true)" = "$job_start" ]; then
+              worker_live=1
+            elif [ "$legacy" -eq 1 ] && [ "${runner_temp%/_work/_temp}" != "$runner_temp" ]; then
+              legacy_worker="${runner_temp%/_work/_temp}/bin/Runner.Worker"
+              for worker_exe in /proc/[0-9]*/exe; do
+                worker_pid="${worker_exe#/proc/}"
+                worker_pid="${worker_pid%/exe}"
+                worker_start="$(cut -d\  -f22 "/proc/$worker_pid/stat" 2>/dev/null || true)"
+                if [ "$(readlink "$worker_exe" 2>/dev/null || true)" = "$legacy_worker" ] && [[ "$holder_start" =~ ^[0-9]+$ ]] && [[ "$worker_start" =~ ^[0-9]+$ ]] && [ "$worker_start" -le "$holder_start" ]; then
+                  worker_live=1
+                  break
+                fi
+              done
+            fi
+            if [ "$ppid" = "1" ] && { [ "$guardian" = "1" ] || [ "$legacy" -eq 1 ]; } && [ "$worker_live" -eq 0 ]; then
+              echo "::warning::Killing stale host Verify lock guardian PID $holder before acquisition: $cmdline"
+              kill "$holder" 2>/dev/null || true
+            fi
+          fi
+
           state_dir="$(mktemp -d "$RUNNER_TEMP/factory-e2e-lock.XXXXXX")"
           ready="$state_dir/ready"
           mkfifo "$ready"
-          (
-            flock 9
-            printf 'acquired\n' > "$ready"
-            exec tail -f /dev/null >/dev/null 2>&1
-          ) 9>"$lock" &
-          guardian=$!
-          read -r _ < "$ready"
+          job_pid="$PPID"
+          job_exe="$(readlink "/proc/$job_pid/exe" 2>/dev/null || true)"
+          job_start="$(awk '{ print $22 }' "/proc/$job_pid/stat" 2>/dev/null || true)"
+          case "$job_exe" in
+            */bin/Runner.Worker) ;;
+            *) echo "::error::Cannot identify Runner.Worker parent PID $job_pid ($job_exe); refusing to create an untracked lock guardian."; exit 1 ;;
+          esac
+          exec 8<>"$ready"
           rm -f "$ready"
+          env FACTORY_VERIFY_GUARDIAN=1 FACTORY_VERIFY_JOB_PID="$job_pid" FACTORY_VERIFY_JOB_EXE="$job_exe" FACTORY_VERIFY_JOB_START="$job_start" \
+            bash -c '
+              worker_alive() {
+                kill -0 "$FACTORY_VERIFY_JOB_PID" 2>/dev/null &&
+                  [ "$(readlink "/proc/$FACTORY_VERIFY_JOB_PID/exe" 2>/dev/null || true)" = "$FACTORY_VERIFY_JOB_EXE" ] &&
+                  [ "$(cut -d\  -f22 "/proc/$FACTORY_VERIFY_JOB_PID/stat" 2>/dev/null || true)" = "$FACTORY_VERIFY_JOB_START" ]
+              }
+              flock 9 8>&- &
+              waiter=$!
+              while worker_alive && kill -0 "$waiter" 2>/dev/null; do
+                sleep 5 8>&- 9>&-
+              done
+              if ! worker_alive; then
+                kill "$waiter" 2>/dev/null || true
+                wait "$waiter" 2>/dev/null || true
+                exit 0
+              fi
+              if ! wait "$waiter"; then
+                printf "failed\n" >&8
+                exit 1
+              fi
+              printf "acquired\n" >&8
+              while worker_alive; do
+                sleep 5 8>&- 9>&-
+              done
+            ' 8>&8 9>"$lock" &
+          guardian=$!
+          read -r lock_status <&8
+          exec 8>&-
+          [ "$lock_status" = "acquired" ]
           echo "guardian=$guardian" >> "$GITHUB_OUTPUT"
           echo "state_dir=$state_dir" >> "$GITHUB_OUTPUT"
 

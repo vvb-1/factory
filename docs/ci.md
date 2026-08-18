@@ -8,7 +8,9 @@ Treat runner names as parallel executors, not independent machines. CPU, memory,
 
 ## Verify serialization
 
-Both test jobs acquire `/tmp/factory-verify-host.lock` with `flock` before installing dependencies or running tests. A guardian process holds the descriptor across GitHub Actions steps; the final `always()` step releases it, and runner process cleanup releases it after cancellation or failure.
+Both test jobs acquire `/tmp/factory-verify-host.lock` with `flock` before installing dependencies or running tests. A guardian process holds the descriptor across GitHub Actions steps. The guardian records the job's `Runner.Worker` PID, executable, and process start time and checks that identity every five seconds, both while queued and after acquisition. If the worker disappears (including a crash that prevents `always()` cleanup), the guardian cancels its pending `flock` or exits and releases an acquired lock within about ten seconds. The final `always()` step still terminates the guardian on normal completion.
+
+Before blocking, each acquisition checks the current holder with `lslocks` and `lsof`. It kills only a recognized legacy `tail -f /dev/null` or current Factory guardian that has been adopted by PID 1 and has no live recorded `Runner.Worker`, logging the stale PID and command. The `shadow-runner-health` job independently fails when such an orphan has held the lock for more than ten minutes, so a broken liveness rule becomes an explicit check rather than a host-wide silent queue.
 
 The lock is intentionally host-local rather than a GitHub Actions `concurrency` group. A concurrency group keeps only one pending job and replaces older pending jobs when more runs arrive. The host lock lets every started workflow wait its turn while ensuring that no two Factory test critical sections execute on the shared host at once. Job timeouts include lock wait, so they include generous multi-PR queue headroom.
 
