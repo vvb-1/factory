@@ -25,8 +25,16 @@ const registry = loadRegistry();
 const PV = "git:test-pv";
 // See repository.test.mjs: neutralise the operator's global git config so a
 // signing key or a global hooks path cannot hang the fixture (OPS-441).
-const HERMETIC = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.template="];
-const git = (args, cwd) => execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
+const HERMETIC = [
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.template=",
+];
+const git = (args, cwd) =>
+  execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
 
 // Hermetic repo fixtures: a real git repo (the scan's repository workspace
 // pins a SHA) whose config also carries the worktree scripts and team/project
@@ -110,7 +118,9 @@ beforeAll(() => {
   previousReposRoot = process.env.FACTORY_REPOS_ROOT;
   process.env.FACTORY_REPOS_ROOT = root;
   previousEventHome = process.env.FACTORY_EVENT_HOME;
-  process.env.FACTORY_EVENT_HOME = mkdtempSync(path.join(os.tmpdir(), "evrt-work-home-"));
+  process.env.FACTORY_EVENT_HOME = mkdtempSync(
+    path.join(os.tmpdir(), "evrt-work-home-"),
+  );
   fixtures.push(process.env.FACTORY_EVENT_HOME);
 });
 
@@ -162,7 +172,10 @@ function workScanEvidence(repo) {
     ];
     inFlightSeen = 3;
   } else {
-    candidates = [seenCandidate(FIRST, "selected"), seenCandidate(SECOND, "selected")];
+    candidates = [
+      seenCandidate(FIRST, "selected"),
+      seenCandidate(SECOND, "selected"),
+    ];
   }
   return {
     commands: ["fake"],
@@ -255,8 +268,16 @@ function workScanArtifact(repo) {
     repo,
     ticket: FIRST,
     plan: [
-      { ticket: FIRST, ownedPaths: ["src/feature-a/**"], reason: "fake: priority 1, disjoint" },
-      { ticket: SECOND, ownedPaths: ["src/feature-b/**"], reason: "fake: priority 2, disjoint" },
+      {
+        ticket: FIRST,
+        ownedPaths: ["src/feature-a/**"],
+        reason: "fake: priority 1, disjoint",
+      },
+      {
+        ticket: SECOND,
+        ownedPaths: ["src/feature-b/**"],
+        reason: "fake: priority 2, disjoint",
+      },
     ],
     deferred: [],
     readyCandidates: 2,
@@ -271,13 +292,17 @@ const workFake = {
     if (spec.outputContract === "factory.work-plan/v1") {
       writeFileSync(
         path.join(workspaceDir, "result.json"),
-        `${JSON.stringify({
-          schemaVersion: "factory.agent-result/v1",
-          terminalState: "completed",
-          reasonCode: "ok",
-          artifact: workScanArtifact(spec.input.repo),
-          evidence: workScanEvidence(spec.input.repo),
-        }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            schemaVersion: "factory.agent-result/v1",
+            terminalState: "completed",
+            reasonCode: "ok",
+            artifact: workScanArtifact(spec.input.repo),
+            evidence: workScanEvidence(spec.input.repo),
+          },
+          null,
+          2,
+        )}\n`,
         "utf8",
       );
       return { exitCode: 0, timedOut: false };
@@ -285,20 +310,28 @@ const workFake = {
     if (spec.outputContract === "factory.dispatch-result/v1") {
       writeFileSync(
         path.join(workspaceDir, "result.json"),
-        `${JSON.stringify({
-          schemaVersion: "factory.agent-result/v1",
-          terminalState: "completed",
-          reasonCode: "ok",
-          artifact: {
-            outcome: "PR_OPEN",
-            repo: spec.input.repo,
-            ticket: spec.input.ticket,
-            prUrl: `https://github.com/watt-mind/${spec.input.repo}/pull/1`,
-            verification: { command: "echo verified", passed: true, output: "verified" },
-            summary: `fake dispatch of ${spec.input.ticket}`,
+        `${JSON.stringify(
+          {
+            schemaVersion: "factory.agent-result/v1",
+            terminalState: "completed",
+            reasonCode: "ok",
+            artifact: {
+              outcome: "PR_OPEN",
+              repo: spec.input.repo,
+              ticket: spec.input.ticket,
+              prUrl: `https://github.com/watt-mind/${spec.input.repo}/pull/1`,
+              verification: {
+                command: "echo verified",
+                passed: true,
+                output: "verified",
+              },
+              summary: `fake dispatch of ${spec.input.ticket}`,
+            },
+            evidence: { commands: ["echo verified"] },
           },
-          evidence: { commands: ["echo verified"] },
-        }, null, 2)}\n`,
+          null,
+          2,
+        )}\n`,
         "utf8",
       );
       return { exitCode: 0, timedOut: false };
@@ -321,7 +354,10 @@ const openWorld = {
     state: { name: "Todo" },
     assignee: null,
     labels: { nodes: [{ name: "ai:agent-ready" }] },
-    description: ticketId === SECOND ? "## Owned Paths\n- src/feature-b/**\n" : "## Owned Paths\n- src/feature-a/**\n",
+    description:
+      ticketId === SECOND
+        ? "## Owned Paths\n- src/feature-b/**\n"
+        : "## Owned Paths\n- src/feature-a/**\n",
   }),
   fetchInFlight: () => [],
   countLeases: () => 0,
@@ -332,15 +368,29 @@ function harness() {
   const db = openDb(path.join(dir, "runtime.db"));
   const workspaces = mkdtempSync(path.join(os.tmpdir(), "evrt-work-ws-"));
   const adapters = { pi: workFake };
-  const workerOpts = { workspacesRoot: workspaces, owner: "w-test", policyVersion: PV, dispatch: openWorld };
+  const workerOpts = {
+    workspacesRoot: workspaces,
+    owner: "w-test",
+    policyVersion: PV,
+    dispatch: openWorld,
+  };
 
-  const planAll = () => planAdmittedEvents(db, registry, { policyVersion: PV, dispatch: openWorld });
+  const planAll = () =>
+    planAdmittedEvents(db, registry, {
+      policyVersion: PV,
+      dispatch: openWorld,
+    });
 
   async function approveNext(agentRef) {
     planAll();
-    const proposal = openProposals(db, {}).find((p) => p.spec?.agent === agentRef);
+    const proposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === agentRef,
+    );
     expect(proposal).toBeTruthy();
-    const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
+    const approved = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
     const summary = await runOnce(db, registry, adapters, workerOpts);
     return { proposal, runId: approved.runId, summary };
   }
@@ -364,7 +414,11 @@ describe("work-scan registration (WM-110)", () => {
     expect(def.mutating).toBe(false);
     // It verifies Owned Paths globs against real paths, so it reads the
     // pinned tree — repository checkout, never a mutable worktree.
-    expect(def.workspace).toEqual({ type: "repository", checkoutDir: "repo", retainOnFailure: true });
+    expect(def.workspace).toEqual({
+      type: "repository",
+      checkoutDir: "repo",
+      retainOnFailure: true,
+    });
     expect(def.output_contract).toBe("factory.work-plan/v1");
     expect(def.capabilities.services).toEqual(["linear:read", "repo:read"]);
   });
@@ -399,7 +453,9 @@ describe("work-scan registration (WM-110)", () => {
     // route, so a pi+worktree+mutating definition is admitted and its strong
     // tier resolves against models.pi.
     expect(def.model_tier).toBe("strong");
-    expect(resolveModel(def, "pi", registry.modelTiers)).toBe(registry.modelTiers.pi.strong);
+    expect(resolveModel(def, "pi", registry.modelTiers)).toBe(
+      registry.modelTiers.pi.strong,
+    );
   });
 
   test("every LLM route is the pi adapter; command/actions routes are untouched (WM-215)", () => {
@@ -416,18 +472,38 @@ describe("work-scan registration (WM-110)", () => {
     // Every pi route resolves a model: loadRegistry fails closed otherwise,
     // but assert the values so a silently-null resolution can't pass.
     for (const ref of byAdapter.pi) {
-      const resolved = resolveModel(registry.agents.get(ref), "pi", registry.modelTiers);
+      const resolved = resolveModel(
+        registry.agents.get(ref),
+        "pi",
+        registry.modelTiers,
+      );
       expect(Object.values(registry.modelTiers.pi)).toContain(resolved);
     }
   });
 
   test("the plan item shape pins {ticket, ownedPaths, reason}; NOOP reasons are the closed set", () => {
     const schema = registry.agents.get("work-scan@1").outputSchema;
-    expect(schema.properties.plan.items.required).toEqual(["ticket", "ownedPaths", "reason"]);
-    expect(schema.properties.plan.items.properties.ticket.pattern).toBe("^[A-Z]+-[0-9]+$");
-    expect(schema.properties.deferred.items.required).toEqual(["ticket", "reason"]);
-    expect(schema.properties.deferred.items.properties.reason.enum).toEqual(["cap_full", "owned_paths_overlap"]);
-    expect(schema.properties.noopReason.enum).toEqual(["queue_empty", "cap_full", "all_overlapping"]);
+    expect(schema.properties.plan.items.required).toEqual([
+      "ticket",
+      "ownedPaths",
+      "reason",
+    ]);
+    expect(schema.properties.plan.items.properties.ticket.pattern).toBe(
+      "^[A-Z]+-[0-9]+$",
+    );
+    expect(schema.properties.deferred.items.required).toEqual([
+      "ticket",
+      "reason",
+    ]);
+    expect(schema.properties.deferred.items.properties.reason.enum).toEqual([
+      "cap_full",
+      "owned_paths_overlap",
+    ]);
+    expect(schema.properties.noopReason.enum).toEqual([
+      "queue_empty",
+      "cap_full",
+      "all_overlapping",
+    ]);
   });
 
   test("DISPATCH remains multi-emit and LOW_SUPPLY chains to triage", () => {
@@ -460,21 +536,35 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     expect(scan.summary.terminalState).toBe("COMPLETED");
     // The scan run's spec pins an immutable SHA (OPS-228): reproducible, and
     // dedup distinguishes "same repo, new commit".
-    expect(scan.proposal.spec.input.repoPin).toMatchObject({ repo: "wm29", ref: "develop" });
+    expect(scan.proposal.spec.input.repoPin).toMatchObject({
+      repo: "wm29",
+      ref: "develop",
+    });
     expect(scan.proposal.spec.input.repoPin.sha).toMatch(/^[0-9a-f]{40}$/);
 
     // Multi-emit fan-out: every item in plan becomes an admitted internal event.
-    const result = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+    const result = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(scan.runId).result_json,
+    );
     expect(result.artifact.plan).toHaveLength(2);
 
-    expect(resolveChains(db, registry)).toEqual({ emitted: 2, skipped: 0, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 2,
+      skipped: 0,
+      errors: [],
+    });
     const chainEvent1 = db
       .query(`SELECT * FROM events WHERE source = 'chain' AND event_id = ?`)
       .get(`chain-${scan.runId}-${FIRST}`);
     expect(chainEvent1.type).toBe("factory.dispatch.requested");
     expect(chainEvent1.correlation_id).toBe("work-1"); // inherited from the scan's event
     expect(chainEvent1.causation_id).toBe(scan.runId);
-    expect(JSON.parse(chainEvent1.envelope_json).payload).toEqual({ repo: "wm29", ticket: FIRST });
+    expect(JSON.parse(chainEvent1.envelope_json).payload).toEqual({
+      repo: "wm29",
+      ticket: FIRST,
+    });
 
     const chainEvent2 = db
       .query(`SELECT * FROM events WHERE source = 'chain' AND event_id = ?`)
@@ -482,22 +572,33 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     expect(chainEvent2.type).toBe("factory.dispatch.requested");
     expect(chainEvent2.correlation_id).toBe("work-1");
     expect(chainEvent2.causation_id).toBe(scan.runId);
-    expect(JSON.parse(chainEvent2.envelope_json).payload).toEqual({ repo: "wm29", ticket: SECOND });
+    expect(JSON.parse(chainEvent2.envelope_json).payload).toEqual({
+      repo: "wm29",
+      ticket: SECOND,
+    });
 
     // Both chained events are planned through WM-108's gate (injected world) and
     // land as watched proposals with their respective dispatch input shape.
     planAll();
-    const dispatches = openProposals(db, {}).filter((p) => p.spec?.agent === "dispatch@1");
+    const dispatches = openProposals(db, {}).filter(
+      (p) => p.spec?.agent === "dispatch@1",
+    );
     expect(dispatches).toHaveLength(2);
     for (const dispatch of dispatches) {
       expect(dispatch.status).toBe("open"); // watched: nothing mutates without approval
       expect(dispatch.spec.workspace.type).toBe("worktree");
       expect(dispatch.spec.input.repo).toBe("wm29");
     }
-    expect(dispatches.map((p) => p.spec.input.ticket).sort()).toEqual([FIRST, SECOND].sort());
+    expect(dispatches.map((p) => p.spec.input.ticket).sort()).toEqual(
+      [FIRST, SECOND].sort(),
+    );
 
     // One chain pass per run: re-resolving emits nothing new.
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 0, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 0,
+      errors: [],
+    });
   });
 
   test("a LOW_SUPPLY scan chains to one triage scan", async () => {
@@ -505,19 +606,29 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     admitEvent(db, registry, workEnvelope("low", "work-low-1"));
     const scan = await approveNext("work-scan@1");
     expect(scan.summary.terminalState).toBe("COMPLETED");
-    const scanResult = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+    const scanResult = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(scan.runId).result_json,
+    );
     expect(scanResult.artifact.readyCandidates).toBe(0);
     expect(scanResult.artifact.triageBacklog).toBe(3);
 
     const chain = resolveChains(db, registry);
     expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
 
-    const chainEvent = db.query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`).get(scan.runId);
+    const chainEvent = db
+      .query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`)
+      .get(scan.runId);
     expect(chainEvent.type).toBe("factory.triage.requested");
-    expect(JSON.parse(chainEvent.envelope_json).payload).toEqual({ repo: "low" });
+    expect(JSON.parse(chainEvent.envelope_json).payload).toEqual({
+      repo: "low",
+    });
 
     planAll();
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeTruthy();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1"),
+    ).toBeTruthy();
   });
 
   test("cap-overlap NOOP outcomes still do not fallback to triage", async () => {
@@ -529,7 +640,11 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
       admitEvent(db, registry, workEnvelope(repo, `work-${repo}-1`));
       const scan = await approveNext("work-scan@1");
       expect(scan.summary.terminalState).toBe("COMPLETED");
-      const scanResult = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+      const scanResult = JSON.parse(
+        db
+          .query(`SELECT result_json FROM results WHERE run_id = ?`)
+          .get(scan.runId).result_json,
+      );
       expect(scanResult.artifact.noopReason).toBe(reason);
       expect(scanResult.artifact.readyCandidates).toBe(2);
       expect(scanResult.artifact.triageBacklog).toBe(0);
@@ -538,8 +653,12 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
       expect(chain).toEqual({ emitted: 0, skipped: 1, errors: [] });
 
       planAll();
-      expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeUndefined();
-      expect(openProposals(db, {}).find((p) => p.spec?.agent === "dispatch@1")).toBeUndefined();
+      expect(
+        openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1"),
+      ).toBeUndefined();
+      expect(
+        openProposals(db, {}).find((p) => p.spec?.agent === "dispatch@1"),
+      ).toBeUndefined();
     }
   });
 
@@ -552,17 +671,25 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
 
     const chain = resolveChains(db, registry);
     expect(chain).toEqual({ emitted: 0, skipped: 0, errors: [] });
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1"),
+    ).toBeUndefined();
 
     const journal = db
-      .query(`SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`)
+      .query(
+        `SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`,
+      )
       .get(scan.runId);
     expect(journal.reason).toContain("low_supply_readyCandidates_must_be_0");
   });
 
   test("three ready tickets plus two in progress cannot complete as queue_empty", async () => {
     const { db, approveNext } = harness();
-    admitEvent(db, registry, workEnvelope("contradiction", "work-contradiction-1"));
+    admitEvent(
+      db,
+      registry,
+      workEnvelope("contradiction", "work-contradiction-1"),
+    );
     const scan = await approveNext("work-scan@1");
     expect(scan.summary.terminalState).toBe("FAILED");
     expect(scan.summary.reasonCode).toBe("contract_violation");
@@ -570,7 +697,9 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     const chain = resolveChains(db, registry);
     expect(chain).toEqual({ emitted: 0, skipped: 0, errors: [] });
     const journal = db
-      .query(`SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`)
+      .query(
+        `SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`,
+      )
       .get(scan.runId);
     expect(journal.reason).toContain("queue_empty_candidatesSeen_must_be_0");
   });
@@ -581,18 +710,30 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     const scan = await approveNext("work-scan@1");
     expect(scan.summary.terminalState).toBe("COMPLETED");
 
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 1,
+      errors: [],
+    });
     planAll();
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "dispatch@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "dispatch@1"),
+    ).toBeUndefined();
   });
 
   test("re-injecting the same envelope converges: one event, one scan proposal", async () => {
     const { db, planAll } = harness();
-    expect(admitEvent(db, registry, workEnvelope("wm29", "work-3")).admitted).toBe(true);
-    expect(admitEvent(db, registry, workEnvelope("wm29", "work-3")).duplicate).toBe(true);
+    expect(
+      admitEvent(db, registry, workEnvelope("wm29", "work-3")).admitted,
+    ).toBe(true);
+    expect(
+      admitEvent(db, registry, workEnvelope("wm29", "work-3")).duplicate,
+    ).toBe(true);
     planAll();
     expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(1);
-    expect(openProposals(db, {}).filter((p) => p.spec?.agent === "work-scan@1")).toHaveLength(1);
+    expect(
+      openProposals(db, {}).filter((p) => p.spec?.agent === "work-scan@1"),
+    ).toHaveLength(1);
   });
 
   test("a re-fired scan (new eventId, same repo) plans a NEW run — rolling re-fires are not deduped away", async () => {
@@ -605,7 +746,9 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     // re-fire re-reads the queue instead of resolving as duplicate_run.
     admitEvent(db, registry, workEnvelope("wm29", "work-5"));
     planAll();
-    const again = openProposals(db, {}).find((p) => p.spec?.agent === "work-scan@1" && p.decision === "run");
+    const again = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "work-scan@1" && p.decision === "run",
+    );
     expect(again).toBeTruthy();
     expect(again.reason).toBeNull();
   });
@@ -620,7 +763,9 @@ describe("work chain: scan → chained dispatch proposal (WM-110, WM-119)", () =
     const dispatch = await approveNext("dispatch@1");
     expect(dispatch.summary.terminalState).toBe("COMPLETED");
     expect(dispatch.summary.reasonCode).toBe("ok");
-    const resultRow = db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(dispatch.runId);
+    const resultRow = db
+      .query(`SELECT result_json FROM results WHERE run_id = ?`)
+      .get(dispatch.runId);
     const result = JSON.parse(resultRow.result_json);
     expect(result.artifact.outcome).toBe("PR_OPEN");
     expect(result.verification.checks).toContain("repo_verify_passed");

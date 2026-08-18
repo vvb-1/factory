@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { hashJson, sha256Hex } from "./canonical.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
-import { ContractViolation, normalizeFailureOutput, verifyResult } from "./verify.mjs";
+import {
+  ContractViolation,
+  normalizeFailureOutput,
+  verifyResult,
+} from "./verify.mjs";
 
 const registry = loadRegistry();
 const def = getAgent(registry, "factory-status-report@1");
@@ -33,13 +37,19 @@ function makeSpec(input = { repos: ["bj29"] }) {
 function makeWorkspace(result) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-verify-"));
   if (result !== undefined) {
-    writeFileSync(path.join(dir, "result.json"), JSON.stringify(result), "utf8");
+    writeFileSync(
+      path.join(dir, "result.json"),
+      JSON.stringify(result),
+      "utf8",
+    );
   }
   return dir;
 }
 
 const VALID_ARTIFACT = {
-  repos: [{ name: "bj29", triage: 1, agentReady: 2, inProgress: 0, blocked: 0 }],
+  repos: [
+    { name: "bj29", triage: 1, agentReady: 2, inProgress: 0, blocked: 0 },
+  ],
   recommendedAction: "dispatch",
 };
 
@@ -52,7 +62,10 @@ const VALID_DECISION = {
       id: "authorise",
       label: "Authorise",
       effect: "authorise",
-      scope: { paths: ["event-runtime/lib/verify.mjs"], summary: "Apply the scoped change." },
+      scope: {
+        paths: ["event-runtime/lib/verify.mjs"],
+        summary: "Apply the scoped change.",
+      },
     },
     { id: "dismiss", label: "Dismiss", effect: "dismiss" },
   ],
@@ -72,7 +85,14 @@ describe("verifyResult", () => {
     writeFileSync(path.join(dir, "logs", "agent.log"), "hello\n", "utf8");
 
     const spec = makeSpec();
-    const out = verifyResult({ spec, def, registry, workspaceDir: dir, attempt: 1, journalHead: "sha256:head" });
+    const out = verifyResult({
+      spec,
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+      journalHead: "sha256:head",
+    });
     expect(out.kind).toBe("completed");
     expect(out.result.terminalState).toBe("completed");
     expect(out.result.reasonCode).toBe("ok");
@@ -80,7 +100,11 @@ describe("verifyResult", () => {
     expect(out.result.evidenceSetHash).toBe(hashJson(evidence));
     expect(out.result.verification.status).toBe("passed");
     expect(out.result.artifacts).toEqual([
-      { kind: "log", uri: `file://${path.join(dir, "logs", "agent.log")}`, sha256: sha256Hex("hello\n") },
+      {
+        kind: "log",
+        uri: `file://${path.join(dir, "logs", "agent.log")}`,
+        sha256: sha256Hex("hello\n"),
+      },
     ]);
     expect(out.receipt).toEqual({
       runId: spec.runId,
@@ -98,7 +122,13 @@ describe("verifyResult", () => {
       terminalState: "completed",
       artifact: VALID_ARTIFACT,
     });
-    const out = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+    const out = verifyResult({
+      spec: makeSpec(),
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
     expect(out.result.evidenceSetHash).toBeNull();
     expect(out.receipt.journalHead).toBeNull();
   });
@@ -126,29 +156,45 @@ describe("verifyResult", () => {
       artifact,
       evidence,
     });
-    return verifyResult({ spec: workPlanSpec, def: workScanDef, registry, workspaceDir: dir, attempt: 1 });
+    return verifyResult({
+      spec: workPlanSpec,
+      def: workScanDef,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
   }
 
   test("valid DISPATCH accounts for every candidate through plan or typed deferral", () => {
-    const out = verifyWorkPlan({
-      recommendation: "DISPATCH",
-      repo: "factory",
-      ticket: "WM-345",
-      plan: [
-        { ticket: "WM-345", ownedPaths: ["src/a/**"], reason: "priority Urgent, disjoint" },
-      ],
-      deferred: [
-        { ticket: "WM-294", reason: "owned_paths_overlap" },
-        { ticket: "WM-131", reason: "cap_full" },
-      ],
-      readyCandidates: 3,
-      triageBacklog: 0,
-      summary: "one candidate starts and two are accounted for",
-    }, candidateEvidence([
-      candidate("WM-345", "selected"),
-      candidate("WM-294", "owned_paths_overlap"),
-      candidate("WM-131", "cap_full"),
-    ], { inFlightSeen: 2 }));
+    const out = verifyWorkPlan(
+      {
+        recommendation: "DISPATCH",
+        repo: "factory",
+        ticket: "WM-345",
+        plan: [
+          {
+            ticket: "WM-345",
+            ownedPaths: ["src/a/**"],
+            reason: "priority Urgent, disjoint",
+          },
+        ],
+        deferred: [
+          { ticket: "WM-294", reason: "owned_paths_overlap" },
+          { ticket: "WM-131", reason: "cap_full" },
+        ],
+        readyCandidates: 3,
+        triageBacklog: 0,
+        summary: "one candidate starts and two are accounted for",
+      },
+      candidateEvidence(
+        [
+          candidate("WM-345", "selected"),
+          candidate("WM-294", "owned_paths_overlap"),
+          candidate("WM-131", "cap_full"),
+        ],
+        { inFlightSeen: 2 },
+      ),
+    );
 
     expect(out.kind).toBe("completed");
     expect(out.result.verification.checks).toContain("evidence_recomputed");
@@ -156,42 +202,57 @@ describe("verifyResult", () => {
 
   test("regression: three ready tickets plus two in progress cannot validate as queue_empty", () => {
     try {
-      verifyWorkPlan({
-        recommendation: "NOOP",
-        repo: "factory",
-        ticket: null,
-        plan: [],
-        deferred: [],
-        noopReason: "queue_empty",
-        readyCandidates: 3,
-        triageBacklog: 0,
-        summary: "incorrectly discarded three ready candidates",
-      }, candidateEvidence([
-        candidate("WM-345", "selected"),
-        candidate("WM-294", "selected"),
-        candidate("WM-131", "selected"),
-      ], { inFlightSeen: 2 }));
+      verifyWorkPlan(
+        {
+          recommendation: "NOOP",
+          repo: "factory",
+          ticket: null,
+          plan: [],
+          deferred: [],
+          noopReason: "queue_empty",
+          readyCandidates: 3,
+          triageBacklog: 0,
+          summary: "incorrectly discarded three ready candidates",
+        },
+        candidateEvidence(
+          [
+            candidate("WM-345", "selected"),
+            candidate("WM-294", "selected"),
+            candidate("WM-131", "selected"),
+          ],
+          { inFlightSeen: 2 },
+        ),
+      );
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.violations).toContain("queue_empty_readyCandidates_must_be_0 (got 3)");
-      expect(err.violations).toContain("queue_empty_candidatesSeen_must_be_0 (got 3)");
+      expect(err.violations).toContain(
+        "queue_empty_readyCandidates_must_be_0 (got 3)",
+      );
+      expect(err.violations).toContain(
+        "queue_empty_candidatesSeen_must_be_0 (got 3)",
+      );
     }
   });
 
   test("queue_empty requires complete candidate evidence to agree with the artifact", () => {
     try {
-      verifyWorkPlan({
-        recommendation: "NOOP",
-        repo: "factory",
-        ticket: null,
-        plan: [],
-        deferred: [],
-        noopReason: "queue_empty",
-        readyCandidates: 0,
-        triageBacklog: 0,
-        summary: "artifact says empty but evidence saw a candidate",
-      }, candidateEvidence([candidate("WM-345", "selected")], { candidatesSeen: 0 }));
+      verifyWorkPlan(
+        {
+          recommendation: "NOOP",
+          repo: "factory",
+          ticket: null,
+          plan: [],
+          deferred: [],
+          noopReason: "queue_empty",
+          readyCandidates: 0,
+          triageBacklog: 0,
+          summary: "artifact says empty but evidence saw a candidate",
+        },
+        candidateEvidence([candidate("WM-345", "selected")], {
+          candidatesSeen: 0,
+        }),
+      );
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -204,21 +265,27 @@ describe("verifyResult", () => {
 
   test("cap_full cannot hide startable candidates when capacity evidence shows a free slot", () => {
     try {
-      verifyWorkPlan({
-        recommendation: "NOOP",
-        repo: "factory",
-        ticket: null,
-        plan: [],
-        deferred: [],
-        noopReason: "cap_full",
-        readyCandidates: 3,
-        triageBacklog: 0,
-        summary: "incorrectly claims the cap is full",
-      }, candidateEvidence([
-        candidate("WM-345", "cap_full"),
-        candidate("WM-294", "cap_full"),
-        candidate("WM-131", "cap_full"),
-      ], { inFlightSeen: 2, maxInFlight: 3 }));
+      verifyWorkPlan(
+        {
+          recommendation: "NOOP",
+          repo: "factory",
+          ticket: null,
+          plan: [],
+          deferred: [],
+          noopReason: "cap_full",
+          readyCandidates: 3,
+          triageBacklog: 0,
+          summary: "incorrectly claims the cap is full",
+        },
+        candidateEvidence(
+          [
+            candidate("WM-345", "cap_full"),
+            candidate("WM-294", "cap_full"),
+            candidate("WM-131", "cap_full"),
+          ],
+          { inFlightSeen: 2, maxInFlight: 3 },
+        ),
+      );
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -230,22 +297,32 @@ describe("verifyResult", () => {
 
   test("DISPATCH rejects an unaccounted candidate", () => {
     try {
-      verifyWorkPlan({
-        recommendation: "DISPATCH",
-        repo: "factory",
-        ticket: "WM-345",
-        plan: [
-          { ticket: "WM-345", ownedPaths: ["src/a/**"], reason: "priority Urgent, disjoint" },
-        ],
-        deferred: [{ ticket: "WM-294", reason: "owned_paths_overlap" }],
-        readyCandidates: 3,
-        triageBacklog: 0,
-        summary: "one candidate disappeared",
-      }, candidateEvidence([
-        candidate("WM-345", "selected"),
-        candidate("WM-294", "owned_paths_overlap"),
-        candidate("WM-131", "cap_full"),
-      ], { inFlightSeen: 2 }));
+      verifyWorkPlan(
+        {
+          recommendation: "DISPATCH",
+          repo: "factory",
+          ticket: "WM-345",
+          plan: [
+            {
+              ticket: "WM-345",
+              ownedPaths: ["src/a/**"],
+              reason: "priority Urgent, disjoint",
+            },
+          ],
+          deferred: [{ ticket: "WM-294", reason: "owned_paths_overlap" }],
+          readyCandidates: 3,
+          triageBacklog: 0,
+          summary: "one candidate disappeared",
+        },
+        candidateEvidence(
+          [
+            candidate("WM-345", "selected"),
+            candidate("WM-294", "owned_paths_overlap"),
+            candidate("WM-131", "cap_full"),
+          ],
+          { inFlightSeen: 2 },
+        ),
+      );
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -257,25 +334,35 @@ describe("verifyResult", () => {
 
   test("invalid LOW_SUPPLY counts violate work-scan semantics", () => {
     try {
-      verifyWorkPlan({
-        recommendation: "LOW_SUPPLY",
-        repo: "low",
-        ticket: null,
-        plan: [],
-        deferred: [],
-        summary: "low supply with bad counts",
-        readyCandidates: 3,
-        triageBacklog: 0,
-      }, candidateEvidence([
-        candidate("WM-345", "selected"),
-        candidate("WM-294", "selected"),
-        candidate("WM-131", "selected"),
-      ], { commands: ["linear queue", "linear triage"] }));
+      verifyWorkPlan(
+        {
+          recommendation: "LOW_SUPPLY",
+          repo: "low",
+          ticket: null,
+          plan: [],
+          deferred: [],
+          summary: "low supply with bad counts",
+          readyCandidates: 3,
+          triageBacklog: 0,
+        },
+        candidateEvidence(
+          [
+            candidate("WM-345", "selected"),
+            candidate("WM-294", "selected"),
+            candidate("WM-131", "selected"),
+          ],
+          { commands: ["linear queue", "linear triage"] },
+        ),
+      );
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.violations).toContain("low_supply_readyCandidates_must_be_0 (got 3)");
-      expect(err.violations).toContain("low_supply_candidatesSeen_must_be_0 (got 3)");
+      expect(err.violations).toContain(
+        "low_supply_readyCandidates_must_be_0 (got 3)",
+      );
+      expect(err.violations).toContain(
+        "low_supply_candidatesSeen_must_be_0 (got 3)",
+      );
     }
   });
 
@@ -283,16 +370,33 @@ describe("verifyResult", () => {
     const dir = makeWorkspace({
       schemaVersion: "factory.agent-result/v1",
       terminalState: "completed",
-      artifact: { repos: [{ name: "x", triage: -1, agentReady: 0, inProgress: 0, blocked: 0 }] },
+      artifact: {
+        repos: [
+          { name: "x", triage: -1, agentReady: 0, inProgress: 0, blocked: 0 },
+        ],
+      },
     });
-    expect(() => verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 }))
-      .toThrow(ContractViolation);
+    expect(() =>
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      }),
+    ).toThrow(ContractViolation);
   });
 
   test("missing result.json → ContractViolation [missing_result]", () => {
     const dir = makeWorkspace();
     try {
-      verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -303,8 +407,15 @@ describe("verifyResult", () => {
   test("unparseable result.json → ContractViolation", () => {
     const dir = makeWorkspace();
     writeFileSync(path.join(dir, "result.json"), "{not json", "utf8");
-    expect(() => verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 }))
-      .toThrow(ContractViolation);
+    expect(() =>
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      }),
+    ).toThrow(ContractViolation);
   });
 
   test("refused with a valid reasonCode → kind refused, no artifact fields", () => {
@@ -313,7 +424,13 @@ describe("verifyResult", () => {
       terminalState: "refused",
       reasonCode: "needs_human",
     });
-    const out = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 2 });
+    const out = verifyResult({
+      spec: makeSpec(),
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 2,
+    });
     expect(out.kind).toBe("refused");
     expect(out.reasonCode).toBe("needs_human");
     expect(out.result.terminalState).toBe("refused");
@@ -330,7 +447,13 @@ describe("verifyResult", () => {
       decision: VALID_DECISION,
     });
     const spec = makeSpec({ repo: "factory", ticket: "WM-389" });
-    const out = verifyResult({ spec, def, registry, workspaceDir: dir, attempt: 1 });
+    const out = verifyResult({
+      spec,
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
     expect(out.kind).toBe("refused");
     expect(out.result.decision).toEqual(VALID_DECISION);
     expect(out.result.decisionErrors).toBeUndefined();
@@ -345,7 +468,13 @@ describe("verifyResult", () => {
       decision,
     });
     const spec = makeSpec({ repo: "factory", ticket: "WM-389" });
-    const out = verifyResult({ spec, def, registry, workspaceDir: dir, attempt: 1 });
+    const out = verifyResult({
+      spec,
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
     expect(out.kind).toBe("refused");
     expect(out.result.decision).toBeUndefined();
     expect(out.result.decisionErrors).toBeArray();
@@ -360,11 +489,19 @@ describe("verifyResult", () => {
       decision: VALID_DECISION,
     });
     try {
-      verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.violations).toEqual(["decision_not_allowed_on_completed_result"]);
+      expect(err.violations).toEqual([
+        "decision_not_allowed_on_completed_result",
+      ]);
     }
   });
 
@@ -374,8 +511,15 @@ describe("verifyResult", () => {
       terminalState: "refused",
       reasonCode: "felt_like_it",
     });
-    expect(() => verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 }))
-      .toThrow(ContractViolation);
+    expect(() =>
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      }),
+    ).toThrow(ContractViolation);
   });
 
   test("refused carrying run_6fe0cdb4's dispatch artifact shape → REFUSED with context retained", () => {
@@ -387,12 +531,17 @@ describe("verifyResult", () => {
       verification: {
         command: null,
         passed: false,
-        output: "Not run: production infrastructure and credential handling require a human.",
+        output:
+          "Not run: production infrastructure and credential handling require a human.",
       },
-      summary: "Human approval is required for production launchd and SSH credential changes.",
+      summary:
+        "Human approval is required for production launchd and SSH credential changes.",
     };
     const evidence = {
-      commands: ["gh auth status", "launchctl print gui/$(id -u)/com.wattmind.factory"],
+      commands: [
+        "gh auth status",
+        "launchctl print gui/$(id -u)/com.wattmind.factory",
+      ],
     };
     const dir = makeWorkspace({
       schemaVersion: "factory.agent-result/v1",
@@ -401,9 +550,18 @@ describe("verifyResult", () => {
       artifact,
       evidence,
     });
-    const spec = { ...makeSpec({ repo: "factory", ticket: "WM-139" }), outputContract: "factory.dispatch-result/v1" };
+    const spec = {
+      ...makeSpec({ repo: "factory", ticket: "WM-139" }),
+      outputContract: "factory.dispatch-result/v1",
+    };
 
-    const out = verifyResult({ spec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+    const out = verifyResult({
+      spec,
+      def: dispatchDef,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
 
     expect(out.kind).toBe("refused");
     expect(out.reasonCode).toBe("needs_human");
@@ -422,9 +580,19 @@ describe("verifyResult", () => {
       reasonCode: "needs_human",
       artifact: { outcome: "BLOCKED", repo: "factory" },
     });
-    const spec = { ...makeSpec({ repo: "factory", ticket: "WM-139" }), outputContract: "factory.dispatch-result/v1" };
-    expect(() => verifyResult({ spec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 }))
-      .toThrow(ContractViolation);
+    const spec = {
+      ...makeSpec({ repo: "factory", ticket: "WM-139" }),
+      outputContract: "factory.dispatch-result/v1",
+    };
+    expect(() =>
+      verifyResult({
+        spec,
+        def: dispatchDef,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      }),
+    ).toThrow(ContractViolation);
   });
 
   test("artifact path escaping the workspace → ContractViolation", () => {
@@ -436,7 +604,13 @@ describe("verifyResult", () => {
     });
     writeFileSync(path.resolve(dir, "..", "outside.txt"), "escaped\n", "utf8");
     try {
-      verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -451,19 +625,30 @@ describe("verifyResult", () => {
       artifact: VALID_ARTIFACT,
       artifacts: [{ kind: "log", path: "missing.log" }],
     });
-    expect(() => verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 }))
-      .toThrow(ContractViolation);
+    expect(() =>
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      }),
+    ).toThrow(ContractViolation);
   });
 });
 
 describe("failure normalization", () => {
   test("drops ANSI-colored warn lines so run-varying diagnostics do not change the signature", () => {
-    expect(normalizeFailureOutput(
-      "\u001b[33mwarn:\u001b[0m recorded ports 7740 / 7741 are occupied\nentry chunk exceeds budget\n",
-    )).toEqual(["entry chunk exceeds budget"]);
-    expect(normalizeFailureOutput(
-      "warn: recorded ports 8120 / 8121 are occupied\nentry chunk exceeds budget\n",
-    )).toEqual(["entry chunk exceeds budget"]);
+    expect(
+      normalizeFailureOutput(
+        "\u001b[33mwarn:\u001b[0m recorded ports 7740 / 7741 are occupied\nentry chunk exceeds budget\n",
+      ),
+    ).toEqual(["entry chunk exceeds budget"]);
+    expect(
+      normalizeFailureOutput(
+        "warn: recorded ports 8120 / 8121 are occupied\nentry chunk exceeds budget\n",
+      ),
+    ).toEqual(["entry chunk exceeds budget"]);
   });
 });
 
@@ -477,7 +662,11 @@ describe("worktree baseline verification (WM-334)", () => {
       repo: "factory",
       ticket: "WM-334",
       prUrl: "https://github.com/watt-mind/factory/pull/334",
-      verification: { command: "bun test", passed: true, output: "agent verification passed" },
+      verification: {
+        command: "bun test",
+        passed: true,
+        output: "agent verification passed",
+      },
       summary: "implemented WM-334",
     },
   };
@@ -491,17 +680,31 @@ describe("worktree baseline verification (WM-334)", () => {
     const dir = makeWorkspace(dispatchResult);
     const repo = path.join(dir, "repo");
     mkdirSync(repo);
-    writeFileSync(path.join(dir, ".worktree.json"), JSON.stringify({ path: repo, verify, baseline }), "utf8");
+    writeFileSync(
+      path.join(dir, ".worktree.json"),
+      JSON.stringify({ path: repo, verify, baseline }),
+      "utf8",
+    );
     return dir;
   }
 
   test("a matching pre-existing failure is rejected with the distinct baseline_red reason", () => {
     const dir = worktreeWorkspace(
       "printf 'entry chunk exceeds budget\\n' >&2; exit 9",
-      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+      {
+        status: "red",
+        check: "web_build",
+        output: "entry chunk exceeds budget",
+      },
     );
     try {
-      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: dispatchSpec,
+        def: dispatchDef,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -513,10 +716,20 @@ describe("worktree baseline verification (WM-334)", () => {
   test("shared baseline output plus a new failure does not classify as baseline_red", () => {
     const dir = worktreeWorkspace(
       "printf 'entry chunk exceeds budget\\nnew failure in CI\\n' >&2; exit 9",
-      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
+      {
+        status: "red",
+        check: "web_build",
+        output: "entry chunk exceeds budget",
+      },
     );
     try {
-      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: dispatchSpec,
+        def: dispatchDef,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -530,11 +743,18 @@ describe("worktree baseline verification (WM-334)", () => {
       {
         status: "red",
         check: "web_build",
-        output: "entry chunk exceeds budget\nerror: script \"build\" exited with code 1",
+        output:
+          'entry chunk exceeds budget\nerror: script "build" exited with code 1',
       },
     );
     try {
-      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: dispatchSpec,
+        def: dispatchDef,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
@@ -548,11 +768,19 @@ describe("worktree baseline verification (WM-334)", () => {
       null,
     );
     try {
-      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: dispatchSpec,
+        def: dispatchDef,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.violations[0]).toContain("(fail) totals > rejects an invalid total");
+      expect(err.violations[0]).toContain(
+        "(fail) totals > rejects an invalid total",
+      );
       expect(err.violations[0]).toContain("error: expected 400, received 200");
     }
 
@@ -569,21 +797,36 @@ describe("worktree baseline verification (WM-334)", () => {
       null,
     );
     try {
-      verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: dispatchSpec,
+        def: dispatchDef,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.violations[0]).toContain("(fail) billing > rejects a duplicate charge");
+      expect(err.violations[0]).toContain(
+        "(fail) billing > rejects a duplicate charge",
+      );
       expect(err.violations[0].split("\n").length).toBeLessThanOrEqual(40);
     }
   });
 
   test("a recorded red baseline never weakens a now-green post-agent verification", () => {
-    const dir = worktreeWorkspace(
-      "printf 'verification repaired\\n'",
-      { status: "red", check: "web_build", output: "entry chunk exceeds budget" },
-    );
-    const out = verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+    const dir = worktreeWorkspace("printf 'verification repaired\\n'", {
+      status: "red",
+      check: "web_build",
+      output: "entry chunk exceeds budget",
+    });
+    const out = verifyResult({
+      spec: dispatchSpec,
+      def: dispatchDef,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
     expect(out.kind).toBe("completed");
     expect(out.result.verification.checks).toContain("repo_verify_passed");
   });
@@ -595,15 +838,24 @@ describe("worktree baseline verification (WM-334)", () => {
     const started = Date.now();
     try {
       try {
-        verifyResult({ spec: dispatchSpec, def: dispatchDef, registry, workspaceDir: dir, attempt: 1 });
+        verifyResult({
+          spec: dispatchSpec,
+          def: dispatchDef,
+          registry,
+          workspaceDir: dir,
+          attempt: 1,
+        });
         throw new Error("expected ContractViolation");
       } catch (err) {
         expect(err).toBeInstanceOf(ContractViolation);
-        expect(err.violations).toEqual(["repo_verify_failed: timed out after 25ms"]);
+        expect(err.violations).toEqual([
+          "repo_verify_failed: timed out after 25ms",
+        ]);
         expect(Date.now() - started).toBeLessThan(1_000);
       }
     } finally {
-      if (previous === undefined) delete process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS;
+      if (previous === undefined)
+        delete process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS;
       else process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS = previous;
     }
   });
@@ -620,7 +872,13 @@ describe("evidence retention (OPS-206)", () => {
   test("declared evidence is retained in the result and its hash recomputes from the stored bytes", () => {
     const evidence = { queries: ["df -h", "docker system df"] };
     const dir = makeWorkspace(completedWith(evidence));
-    const { result } = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+    const { result } = verifyResult({
+      spec: makeSpec(),
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
     expect(result.evidence).toEqual(evidence);
     expect(hashJson(result.evidence)).toBe(result.evidenceSetHash);
     expect(result.verification.checks).toContain("evidence_retained");
@@ -628,7 +886,13 @@ describe("evidence retention (OPS-206)", () => {
 
   test("absent evidence stores null hash and no evidence field", () => {
     const dir = makeWorkspace(completedWith(undefined));
-    const { result } = verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+    const { result } = verifyResult({
+      spec: makeSpec(),
+      def,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
     expect(result.evidenceSetHash).toBeNull();
     expect("evidence" in result).toBe(false);
     expect(result.verification.checks).not.toContain("evidence_retained");
@@ -636,10 +900,23 @@ describe("evidence retention (OPS-206)", () => {
 
   test("oversize evidence fails closed as a contract violation", () => {
     const dir = makeWorkspace(completedWith({ blob: "x".repeat(300 * 1024) }));
-    expect(() => verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 }))
-      .toThrow(ContractViolation);
+    expect(() =>
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      }),
+    ).toThrow(ContractViolation);
     try {
-      verifyResult({ spec: makeSpec(), def, registry, workspaceDir: dir, attempt: 1 });
+      verifyResult({
+        spec: makeSpec(),
+        def,
+        registry,
+        workspaceDir: dir,
+        attempt: 1,
+      });
     } catch (err) {
       expect(err.violations[0]).toStartWith("evidence_too_large:");
     }

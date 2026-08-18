@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +21,11 @@ let createdDistIndex = false;
 const received = [];
 
 function reservePort() {
-  const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+  const probe = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(),
+  });
   const port = probe.port;
   probe.stop(true);
   return port;
@@ -30,15 +40,23 @@ function requestProxy(method, pathname, body) {
     }
 
     const req = http.request(
-      { hostname: "127.0.0.1", port: webPort, method, path: `/api${pathname}`, headers },
+      {
+        hostname: "127.0.0.1",
+        port: webPort,
+        method,
+        path: `/api${pathname}`,
+        headers,
+      },
       (res) => {
         const chunks = [];
         res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
       },
     );
     req.on("error", reject);
@@ -73,9 +91,13 @@ beforeAll(async () => {
   const startup = await reader.read();
   reader.releaseLock();
   if (startup.done) {
-    throw new Error(`proxy exited during startup: ${await new Response(proxy.stderr).text()}`);
+    throw new Error(
+      `proxy exited during startup: ${await new Response(proxy.stderr).text()}`,
+    );
   }
-  expect(new TextDecoder().decode(startup.value)).toContain(`http://127.0.0.1:${webPort}`);
+  expect(new TextDecoder().decode(startup.value)).toContain(
+    `http://127.0.0.1:${webPort}`,
+  );
 });
 
 afterAll(async () => {
@@ -94,7 +116,9 @@ afterAll(async () => {
 
 describe("event-runtime web static files", () => {
   test("returns an honest 404 for a stale content-hashed asset", async () => {
-    const response = await fetch(`http://127.0.0.1:${webPort}/assets/Proposals-stale.js`);
+    const response = await fetch(
+      `http://127.0.0.1:${webPort}/assets/Proposals-stale.js`,
+    );
 
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("asset not found");
@@ -148,20 +172,23 @@ describe("event-runtime web API proxy", () => {
     ["GET", "ignored get payload"],
     ["HEAD", undefined],
     ["HEAD", "ignored head payload"],
-  ])("forwards %s without a request body even when the client sends one", async (method, body) => {
-    const pathname = `/bodyless-${method.toLowerCase()}-${body === undefined ? "empty" : "supplied"}`;
-    const response = await requestProxy(method, pathname, body);
+  ])(
+    "forwards %s without a request body even when the client sends one",
+    async (method, body) => {
+      const pathname = `/bodyless-${method.toLowerCase()}-${body === undefined ? "empty" : "supplied"}`;
+      const response = await requestProxy(method, pathname, body);
 
-    expect(response.status).toBe(201);
-    expect(response.headers["x-upstream-method"]).toBe(method);
-    const forwarded = received.find((entry) => entry.pathname === pathname);
-    expect(forwarded).toEqual({
-      method,
-      pathname,
-      body: "",
-      marker: `${method.toLowerCase()}-marker`,
-    });
-  });
+      expect(response.status).toBe(201);
+      expect(response.headers["x-upstream-method"]).toBe(method);
+      const forwarded = received.find((entry) => entry.pathname === pathname);
+      expect(forwarded).toEqual({
+        method,
+        pathname,
+        body: "",
+        marker: `${method.toLowerCase()}-marker`,
+      });
+    },
+  );
 
   test.each([
     ["POST", "post payload"],

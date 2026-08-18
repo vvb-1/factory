@@ -88,7 +88,15 @@ export function useSelectedNodeReveal(
   return revealSelected;
 }
 
-function flowEdges(graph: { edges: Array<{ id: string; source: string; target: string; kind: keyof typeof EDGE_STYLES; label?: string }> }): Edge[] {
+function flowEdges(graph: {
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    kind: keyof typeof EDGE_STYLES;
+    label?: string;
+  }>;
+}): Edge[] {
   return graph.edges.map((edge) => ({
     id: edge.id,
     source: edge.source,
@@ -107,11 +115,17 @@ function flowEdges(graph: { edges: Array<{ id: string; source: string; target: s
 
 function applyGraphOverlay(
   prev: { nodes: Node[]; edges: Edge[] } | null,
-  graph: { nodes: GraphNode[]; edges: Parameters<typeof flowEdges>[0]["edges"] },
+  graph: {
+    nodes: GraphNode[];
+    edges: Parameters<typeof flowEdges>[0]["edges"];
+  },
 ): { nodes: Node[]; edges: Edge[] } | null {
   if (!prev) return prev;
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  if (prev.nodes.length !== graph.nodes.length || prev.nodes.some((n) => !byId.has(n.id))) {
+  if (
+    prev.nodes.length !== graph.nodes.length ||
+    prev.nodes.some((n) => !byId.has(n.id))
+  ) {
     return prev;
   }
   return {
@@ -145,15 +159,40 @@ export function Graph({
   onJumpAgent: (ref: string) => void;
   onJumpEvents: (focus: EventFocus) => void;
 }) {
-  const registry = useQuery({ queryKey: ["agents"], queryFn: api.agents, ...refetchIntervals.secondary });
-  const runsQ = useQuery({ queryKey: ["runs"], queryFn: () => api.runs(), ...refetchIntervals.fast });
-  const eventsQ = useQuery({ queryKey: ["events"], queryFn: () => api.events(), ...refetchIntervals.fast });
-  const proposalsQ = useQuery({ queryKey: ["proposals"], queryFn: api.proposals, ...refetchIntervals.fast });
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, ...refetchIntervals.secondary });
+  const registry = useQuery({
+    queryKey: ["agents"],
+    queryFn: api.agents,
+    ...refetchIntervals.secondary,
+  });
+  const runsQ = useQuery({
+    queryKey: ["runs"],
+    queryFn: () => api.runs(),
+    ...refetchIntervals.fast,
+  });
+  const eventsQ = useQuery({
+    queryKey: ["events"],
+    queryFn: () => api.events(),
+    ...refetchIntervals.fast,
+  });
+  const proposalsQ = useQuery({
+    queryKey: ["proposals"],
+    queryFn: api.proposals,
+    ...refetchIntervals.fast,
+  });
+  const statusQ = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    ...refetchIntervals.secondary,
+  });
   const now = useNow();
 
-  const [positioned, setPositioned] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
-  const [layoutError, setLayoutError] = useState<"chunk" | "layout" | "mapping" | null>(null);
+  const [positioned, setPositioned] = useState<{
+    nodes: Node[];
+    edges: Edge[];
+  } | null>(null);
+  const [layoutError, setLayoutError] = useState<
+    "chunk" | "layout" | "mapping" | null
+  >(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
   const lastIdentityRef = useRef<string | null>(null);
   const epochLaidOutRef = useRef(0);
@@ -187,53 +226,54 @@ export function Graph({
     // async chunk (OPS-255) — fetched the first time there is a graph to lay
     // out, never by the list views. Overlay polls reuse positions when
     // node/edge identity is unchanged (WM-154).
-    import("../graph/layout")
-      .then(
-        ({ layoutGraphIfIdentityChanged, NODE_HEIGHT, NODE_WIDTH }) => {
-          const prevIdentity =
-            layoutEpoch !== epochLaidOutRef.current ? null : lastIdentityRef.current;
-          return layoutGraphIfIdentityChanged(graph, prevIdentity)
-            .then((result) => {
+    import("../graph/layout").then(
+      ({ layoutGraphIfIdentityChanged, NODE_HEIGHT, NODE_WIDTH }) => {
+        const prevIdentity =
+          layoutEpoch !== epochLaidOutRef.current
+            ? null
+            : lastIdentityRef.current;
+        return layoutGraphIfIdentityChanged(graph, prevIdentity)
+          .then((result) => {
+            if (cancelled) return;
+            lastIdentityRef.current = result.identity;
+            epochLaidOutRef.current = layoutEpoch;
+            if (!result.positions) {
+              setPositioned((prev) => applyGraphOverlay(prev, graph));
+              return;
+            }
+            const positions = result.positions;
+            try {
+              setPositioned({
+                nodes: graph.nodes.map((node) => ({
+                  id: node.id,
+                  type: node.kind,
+                  position: positions.get(node.id) ?? { x: 0, y: 0 },
+                  data: { node },
+                  draggable: true,
+                  width: NODE_WIDTH,
+                  height: NODE_HEIGHT,
+                })),
+                edges: flowEdges(graph),
+              });
+              setCompletedLayoutEpoch(layoutEpoch);
+            } catch (err) {
               if (cancelled) return;
-              lastIdentityRef.current = result.identity;
-              epochLaidOutRef.current = layoutEpoch;
-              if (!result.positions) {
-                setPositioned((prev) => applyGraphOverlay(prev, graph));
-                return;
-              }
-              const positions = result.positions;
-              try {
-                setPositioned({
-                  nodes: graph.nodes.map((node) => ({
-                    id: node.id,
-                    type: node.kind,
-                    position: positions.get(node.id) ?? { x: 0, y: 0 },
-                    data: { node },
-                    draggable: true,
-                    width: NODE_WIDTH,
-                    height: NODE_HEIGHT,
-                  })),
-                  edges: flowEdges(graph),
-                });
-                setCompletedLayoutEpoch(layoutEpoch);
-              } catch (err) {
-                if (cancelled) return;
-                console.error("graph node/edge positioning failed", err);
-                setLayoutError("mapping");
-              }
-            })
-            .catch((err: unknown) => {
-              if (cancelled) return;
-              console.error("graph layout calculation failed", err);
-              setLayoutError("layout");
-            });
-        },
-        (err: unknown) => {
-          if (cancelled) return;
-          console.error("graph layout chunk import failed", err);
-          setLayoutError("chunk");
-        },
-      );
+              console.error("graph node/edge positioning failed", err);
+              setLayoutError("mapping");
+            }
+          })
+          .catch((err: unknown) => {
+            if (cancelled) return;
+            console.error("graph layout calculation failed", err);
+            setLayoutError("layout");
+          });
+      },
+      (err: unknown) => {
+        if (cancelled) return;
+        console.error("graph layout chunk import failed", err);
+        setLayoutError("chunk");
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -243,7 +283,10 @@ export function Graph({
   // highlighted on canvas, Enter cycles through them.
   const [query, setQuery] = useState("");
   const [matchIdx, setMatchIdx] = useState(0);
-  const matches = useMemo(() => (graph ? matchNodes(graph.nodes, query) : []), [graph, query]);
+  const matches = useMemo(
+    () => (graph ? matchNodes(graph.nodes, query) : []),
+    [graph, query],
+  );
   const matchSet = useMemo(() => new Set(matches), [matches]);
   const safeMatchIdx = matches.length ? matchIdx % matches.length : 0;
   const currentMatch = matches[safeMatchIdx] ?? null;
@@ -255,14 +298,21 @@ export function Graph({
         ? positioned.nodes.map((n) => ({
             ...n,
             selected: n.id === focusNodeId,
-            data: { ...n.data, searchHit: matchSet.has(n.id), searchCurrent: n.id === currentMatch },
+            data: {
+              ...n.data,
+              searchHit: matchSet.has(n.id),
+              searchCurrent: n.id === currentMatch,
+            },
           }))
         : [],
     [positioned, focusNodeId, matchSet, currentMatch],
   );
 
-  const selected: GraphNode | undefined = graph?.nodes.find((n) => n.id === focusNodeId);
-  const graphLoaded = Boolean(graph) && !registry.isPending && !proposalsQ.isPending;
+  const selected: GraphNode | undefined = graph?.nodes.find(
+    (n) => n.id === focusNodeId,
+  );
+  const graphLoaded =
+    Boolean(graph) && !registry.isPending && !proposalsQ.isPending;
   const staleFocus = missingFocusNode(graph?.nodes, focusNodeId, graphLoaded);
   const agentDef =
     selected?.kind === "agent"
@@ -285,7 +335,10 @@ export function Graph({
         e.key === "Enter" &&
         Boolean(target?.closest("button, a, [role=button], [role=link]")) &&
         !target?.closest(".react-flow__node");
-      if ((e.key === "z" || (e.key === "Enter" && !enterActivatesControl)) && focusNodeId) {
+      if (
+        (e.key === "z" || (e.key === "Enter" && !enterActivatesControl)) &&
+        focusNodeId
+      ) {
         e.preventDefault();
         revealSelected();
         return;
@@ -309,7 +362,10 @@ export function Graph({
       }
       const order = positioned
         ? [...positioned.nodes]
-            .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+            .sort(
+              (a, b) =>
+                a.position.y - b.position.y || a.position.x - b.position.x,
+            )
             .map((n) => n.id)
         : (graph?.nodes.map((n) => n.id) ?? []);
       if (!order.length) return;
@@ -339,7 +395,8 @@ export function Graph({
       !positioned ||
       !graph ||
       graph.nodes.length === 0
-    ) return;
+    )
+      return;
     lastFittedLayoutEpoch.current = layoutEpoch;
     flowRef.current.fitView({ padding: GRAPH_FIT_PADDING, maxZoom: 1 });
   }, [completedLayoutEpoch, flowReady, graph, layoutEpoch, positioned]);
@@ -382,7 +439,8 @@ export function Graph({
         <div className="absolute top-4 left-5 z-10 rounded-md bg-(--surface-0)/85 px-2.5 py-2 backdrop-blur-sm">
           <h1 className="display text-lg font-semibold">Graph</h1>
           <div className="text-[11px] text-(--text-faint)">
-            what this runtime can do — registered routes and recommendation edges
+            what this runtime can do — registered routes and recommendation
+            edges
           </div>
           <ScopeCaption context={context} surface="graph" />
           {staleFocus && (
@@ -391,7 +449,8 @@ export function Graph({
               role="status"
               style={{
                 color: "var(--hue-warn)",
-                background: "color-mix(in oklch, var(--hue-warn) 10%, transparent)",
+                background:
+                  "color-mix(in oklch, var(--hue-warn) 10%, transparent)",
               }}
             >
               <span>Node not found</span>
@@ -408,7 +467,11 @@ export function Graph({
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
-                    const result = searchEnter(matches, safeMatchIdx, focusNodeId);
+                    const result = searchEnter(
+                      matches,
+                      safeMatchIdx,
+                      focusNodeId,
+                    );
                     if (result) {
                       e.preventDefault();
                       setMatchIdx(result.nextIdx);
@@ -431,22 +494,33 @@ export function Graph({
                   className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] tabular-nums text-(--text-faint)"
                   aria-live="polite"
                 >
-                  {matches.length ? `${safeMatchIdx + 1} / ${matches.length}` : "no matches"}
+                  {matches.length
+                    ? `${safeMatchIdx + 1} / ${matches.length}`
+                    : "no matches"}
                 </span>
               )}
             </div>
             {positioned && graph && graph.nodes.length > 0 && (
-              <Button onClick={() => setLayoutEpoch((n) => n + 1)}>Reset layout</Button>
+              <Button onClick={() => setLayoutEpoch((n) => n + 1)}>
+                Reset layout
+              </Button>
             )}
           </div>
-          {positioned && graph && graph.nodes.length > 0 && legend && (legend.nodes.length > 0 || legend.edges.length > 0) && (
+          {positioned &&
+            graph &&
+            graph.nodes.length > 0 &&
+            legend &&
+            (legend.nodes.length > 0 || legend.edges.length > 0) && (
               <div
                 className="flex flex-col gap-1 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-2"
                 role="img"
                 aria-label="Graph legend"
               >
                 {legend.nodes.map((entry) => (
-                  <div key={entry.key} className="flex items-center gap-2 text-[11px] text-(--text-dim)">
+                  <div
+                    key={entry.key}
+                    className="flex items-center gap-2 text-[11px] text-(--text-dim)"
+                  >
                     <span
                       aria-hidden
                       className="inline-block shrink-0 rounded-xs"
@@ -462,7 +536,10 @@ export function Graph({
                   </div>
                 ))}
                 {legend.edges.map((entry) => (
-                  <div key={entry.kind} className="flex items-center gap-2 text-[11px] text-(--text-dim)">
+                  <div
+                    key={entry.kind}
+                    className="flex items-center gap-2 text-[11px] text-(--text-dim)"
+                  >
                     <span
                       aria-hidden
                       className="inline-block shrink-0"
@@ -476,7 +553,7 @@ export function Graph({
                 ))}
               </div>
             )}
-          </div>
+        </div>
         {positioned && graph && graph.nodes.length > 0 ? (
           <ReactFlow
             nodes={nodes}
@@ -485,7 +562,9 @@ export function Graph({
             onNodeClick={(_, node) => onSelectNode(node.id)}
             onPaneClick={() => onSelectNode(null)}
             onNodesChange={(changes: NodeChange[]) => {
-              const kept = changes.filter((c) => c.type === "position" || c.type === "dimensions");
+              const kept = changes.filter(
+                (c) => c.type === "position" || c.type === "dimensions",
+              );
               if (kept.length === 0) return;
               setPositioned((prev) => {
                 if (!prev) return prev;
@@ -504,14 +583,20 @@ export function Graph({
             <Background color="var(--border)" gap={20} size={1} />
             <Controls
               showInteractive={false}
-              style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
+              style={{
+                background: "var(--surface-1)",
+                border: "1px solid var(--border)",
+              }}
             />
             {/* Minimap paints into SVG where var()/color-mix do not resolve —
                 style its nodes by class instead (see theme.css). */}
             <MiniMap
               pannable
               zoomable
-              style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
+              style={{
+                background: "var(--surface-1)",
+                border: "1px solid var(--border)",
+              }}
               maskColor="rgba(0, 0, 0, 0.55)"
               nodeClassName={(n) => `minimap-node minimap-${n.type}`}
             />
@@ -529,7 +614,13 @@ export function Graph({
           title={selected.label}
           actions={
             <Button onClick={revealSelected}>
-              Show on canvas <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">z</span>
+              Show on canvas{" "}
+              <span
+                className="mono ml-1 text-(--text-faint)"
+                aria-hidden="true"
+              >
+                z
+              </span>
             </Button>
           }
           utility={
@@ -540,14 +631,19 @@ export function Graph({
           }
           close={<Button onClick={() => onSelectNode(null)}>Close</Button>}
         >
-
           {selected.kind === "eventType" && (
             <>
               <Section title="Event type">
                 <KV k="type" v={selected.label} />
                 <KV k="adapter" v={selected.adapter} />
-                <KV k="idempotency scope" v={selected.scope.join(" + ") || "—"} />
-                <KV k="proposal ttl" v={selected.ttl ? `${selected.ttl}s` : "—"} />
+                <KV
+                  k="idempotency scope"
+                  v={selected.scope.join(" + ") || "—"}
+                />
+                <KV
+                  k="proposal ttl"
+                  v={selected.ttl ? `${selected.ttl}s` : "—"}
+                />
                 {selected.admittedCount !== undefined && (
                   <KV k="admitted events" v={String(selected.admittedCount)} />
                 )}
@@ -564,8 +660,9 @@ export function Graph({
           {selected.kind === "terminal" && (
             <Section title="Terminal">
               <div className="text-[12px] text-(--text-dim)">
-                Recommendation values with no registered edge: <span className="mono">{selected.reason}</span>. A
-                run that returns one of these completes and chains no further.
+                Recommendation values with no registered edge:{" "}
+                <span className="mono">{selected.reason}</span>. A run that
+                returns one of these completes and chains no further.
               </div>
             </Section>
           )}
@@ -574,12 +671,23 @@ export function Graph({
             <>
               <Section title="Pending proposal">
                 <KV k="id" v={selected.proposalId} />
-                <KV k="decision" v={<StateBadge state={selected.decision} hues={DECISION_HUES} />} />
+                <KV
+                  k="decision"
+                  v={
+                    <StateBadge
+                      state={selected.decision}
+                      hues={DECISION_HUES}
+                    />
+                  }
+                />
                 <KV
                   k="agent"
                   v={
                     selected.agentRef ? (
-                      <JumpLink onClick={() => onJumpAgent(selected.agentRef!)} title="Open in Agents">
+                      <JumpLink
+                        onClick={() => onJumpAgent(selected.agentRef!)}
+                        title="Open in Agents"
+                      >
                         {selected.agentRef}
                       </JumpLink>
                     ) : (
@@ -591,18 +699,25 @@ export function Graph({
                   k="origin"
                   v={`${selected.proposal.eventSource ?? "—"} · ${selected.proposal.eventId ?? "—"}`}
                 />
-                <KV k="created" v={<Ago iso={selected.proposal.created_at} now={now} />} />
+                <KV
+                  k="created"
+                  v={<Ago iso={selected.proposal.created_at} now={now} />}
+                />
                 <KV
                   k="ttl"
                   v={`${selected.proposal.ttl_seconds}s ${selected.proposal.expired ? "(expired)" : "remaining"}`}
                 />
-                {selected.proposal.reason && <KV k="reason" v={selected.proposal.reason} />}
+                {selected.proposal.reason && (
+                  <KV k="reason" v={selected.proposal.reason} />
+                )}
                 {selected.eventType && (
                   <KV
                     k="event type"
                     v={
                       <JumpLink
-                        onClick={() => onJumpEvents({ type: selected.eventType! })}
+                        onClick={() =>
+                          onJumpEvents({ type: selected.eventType! })
+                        }
                         title="Open in Events"
                       >
                         {selected.eventType}
@@ -617,9 +732,15 @@ export function Graph({
                 </Section>
               )}
               {selected.agentRef && (
-                <Button onClick={() => onJumpAgent(selected.agentRef!)}>Open in Agents</Button>
+                <Button onClick={() => onJumpAgent(selected.agentRef!)}>
+                  Open in Agents
+                </Button>
               )}
-              <Button onClick={() => jumpHash(hashPath("proposals", selected.proposalId))}>
+              <Button
+                onClick={() =>
+                  jumpHash(hashPath("proposals", selected.proposalId))
+                }
+              >
                 Open in Proposals
               </Button>
             </>
@@ -631,7 +752,10 @@ export function Graph({
                 <KV
                   k="ref"
                   v={
-                    <JumpLink onClick={() => onJumpAgent(agentDef.ref)} title="Open in Agents">
+                    <JumpLink
+                      onClick={() => onJumpAgent(agentDef.ref)}
+                      title="Open in Agents"
+                    >
                       {agentDef.ref}
                     </JumpLink>
                   }
@@ -639,8 +763,14 @@ export function Graph({
                 <KV k="execution" v={selected.execution} />
                 <KV k="output contract" v={agentDef.outputContract} />
                 <KV k="mutating" v={agentDef.mutating ? "yes" : "no"} />
-                <KV k="capabilities" v={agentDef.capabilities?.services?.join(", ") ?? "—"} />
-                <KV k="timeout" v={`${agentDef.limits?.timeout_seconds ?? "—"}s`} />
+                <KV
+                  k="capabilities"
+                  v={agentDef.capabilities?.services?.join(", ") ?? "—"}
+                />
+                <KV
+                  k="timeout"
+                  v={`${agentDef.limits?.timeout_seconds ?? "—"}s`}
+                />
                 <KV k="attempts" v={String(agentDef.limits?.attempts ?? "—")} />
                 {selected.activeRuns && selected.activeRuns.length > 0 && (
                   <KV
@@ -653,7 +783,8 @@ export function Graph({
                             state={count > 1 ? `${state} ${count}` : state}
                             hues={{
                               ...STATE_HUES,
-                              [`${state} ${count}`]: STATE_HUES[state] ?? "var(--hue-idle)",
+                              [`${state} ${count}`]:
+                                STATE_HUES[state] ?? "var(--hue-idle)",
                             }}
                           />
                         ))}
@@ -668,7 +799,10 @@ export function Graph({
                 </Section>
               )}
               {agentDef.actionRegistry && (
-                <Section title={`Closed action registry · hosts ${agentDef.hosts?.join(", ")}`} card={false}>
+                <Section
+                  title={`Closed action registry · hosts ${agentDef.hosts?.join(", ")}`}
+                  card={false}
+                >
                   <JsonBlock value={agentDef.actionRegistry} />
                 </Section>
               )}
@@ -677,7 +811,9 @@ export function Graph({
                   {agentDef.prompt}
                 </pre>
               </Section>
-              <Button onClick={() => onJumpAgent(agentDef.ref)}>Open in Agents</Button>
+              <Button onClick={() => onJumpAgent(agentDef.ref)}>
+                Open in Agents
+              </Button>
             </>
           )}
         </DetailPane>

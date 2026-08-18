@@ -15,7 +15,9 @@ let defaultIsolatedHome = null;
  */
 export function ensureHermeticHome() {
   if (!defaultIsolatedHome) {
-    defaultIsolatedHome = mkdtempSync(path.join(os.tmpdir(), "evrt-hermetic-home-"));
+    defaultIsolatedHome = mkdtempSync(
+      path.join(os.tmpdir(), "evrt-hermetic-home-"),
+    );
   }
   process.env.FACTORY_EVENT_HOME = defaultIsolatedHome;
   process.env.FACTORY_HOME = defaultIsolatedHome;
@@ -26,7 +28,10 @@ export function ensureHermeticHome() {
 }
 
 // Automatically ensure hermetic home is active on module import if unset or pointing to homedir
-if (!process.env.FACTORY_EVENT_HOME || process.env.FACTORY_EVENT_HOME.startsWith(homedir())) {
+if (
+  !process.env.FACTORY_EVENT_HOME ||
+  process.env.FACTORY_EVENT_HOME.startsWith(homedir())
+) {
   ensureHermeticHome();
 }
 
@@ -65,13 +70,16 @@ export async function withIsolatedHome(fn, prefix = "evrt-scope-home-") {
 /**
  * Returns snapshot stats of ~/.factory to verify hermeticity (guard test).
  */
-export function realFactorySnapshot(factoryHome = path.join(homedir(), ".factory")) {
+export function realFactorySnapshot(
+  factoryHome = path.join(homedir(), ".factory"),
+) {
   const eventHome = path.join(factoryHome, "event-runtime");
   let eventStat;
   try {
     eventStat = statSync(eventHome);
   } catch (error) {
-    if (error?.code === "ENOENT") return { exists: false, mtime: 0, dbMtime: 0 };
+    if (error?.code === "ENOENT")
+      return { exists: false, mtime: 0, dbMtime: 0 };
     return { exists: true, mtime: 0, dbMtime: 0 };
   }
 

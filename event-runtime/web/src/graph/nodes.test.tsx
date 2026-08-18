@@ -3,7 +3,13 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useRef } from "react";
-import { AgentNode, EventTypeNode, ProposalNode, TerminalNode, nodeAccessibleName } from "./nodes";
+import {
+  AgentNode,
+  EventTypeNode,
+  ProposalNode,
+  TerminalNode,
+  nodeAccessibleName,
+} from "./nodes";
 import type { GraphNode } from "./model";
 import { Graph, focusedNodeFit, useSelectedNodeReveal } from "../views/Graph";
 import {
@@ -237,10 +243,19 @@ describe("node accessible names and selection", () => {
 
   test("each kind exposes the accessible name and aria-selected on the node", () => {
     const cases: Array<{ ui: React.ReactElement; name: RegExp }> = [
-      { ui: <EventTypeNode {...nodeProps(eventNode)} selected />, name: /event type/i },
+      {
+        ui: <EventTypeNode {...nodeProps(eventNode)} selected />,
+        name: /event type/i,
+      },
       { ui: <AgentNode {...nodeProps(agentNode)} selected />, name: /agent/i },
-      { ui: <TerminalNode {...nodeProps(terminalNode)} selected />, name: /terminal/i },
-      { ui: <ProposalNode {...nodeProps(proposalNode)} selected />, name: /proposal/i },
+      {
+        ui: <TerminalNode {...nodeProps(terminalNode)} selected />,
+        name: /terminal/i,
+      },
+      {
+        ui: <ProposalNode {...nodeProps(proposalNode)} selected />,
+        name: /proposal/i,
+      },
     ];
     for (const { ui, name } of cases) {
       const { getByRole, unmount } = renderNode(ui);
@@ -252,13 +267,23 @@ describe("node accessible names and selection", () => {
   });
 
   test("unselected nodes set aria-selected false", () => {
-    const { getByRole } = renderNode(<EventTypeNode {...nodeProps(eventNode)} />);
-    expect(getByRole("button", { name: /event type/i }).getAttribute("aria-selected")).toBe("false");
-    expect(getByRole("button", { name: /event type/i }).getAttribute("aria-pressed")).toBe("false");
+    const { getByRole } = renderNode(
+      <EventTypeNode {...nodeProps(eventNode)} />,
+    );
+    expect(
+      getByRole("button", { name: /event type/i }).getAttribute(
+        "aria-selected",
+      ),
+    ).toBe("false");
+    expect(
+      getByRole("button", { name: /event type/i }).getAttribute("aria-pressed"),
+    ).toBe("false");
   });
 
   test("the current search match is visually distinct from other hits", () => {
-    const hit = renderNode(<EventTypeNode {...nodeProps(eventNode, { searchHit: true })} />);
+    const hit = renderNode(
+      <EventTypeNode {...nodeProps(eventNode, { searchHit: true })} />,
+    );
     const hitEl = hit.getByRole("button", { name: /event type/i });
     expect(hitEl.getAttribute("data-search-hit")).toBe("true");
     expect(hitEl.getAttribute("data-search-current")).toBeNull();
@@ -266,7 +291,9 @@ describe("node accessible names and selection", () => {
     hit.unmount();
 
     const current = renderNode(
-      <EventTypeNode {...nodeProps(eventNode, { searchHit: true, searchCurrent: true })} />,
+      <EventTypeNode
+        {...nodeProps(eventNode, { searchHit: true, searchCurrent: true })}
+      />,
     );
     const currentEl = current.getByRole("button", { name: /event type/i });
     expect(currentEl.getAttribute("data-search-current")).toBe("true");
@@ -409,7 +436,9 @@ describe("Graph view inspect loop", () => {
       },
       async () => {
         const { getByLabelText, getByText } = renderGraph();
-        const input = (await waitFor(() => getByLabelText("Search graph nodes"))) as HTMLInputElement;
+        const input = (await waitFor(() =>
+          getByLabelText("Search graph nodes"),
+        )) as HTMLInputElement;
 
         changeInput(input, "agent:");
         const counter = await waitFor(() => getByText("1 / 2"));
@@ -431,7 +460,9 @@ describe("Graph view inspect loop", () => {
       },
       async () => {
         const { getByLabelText } = renderGraph();
-        const input = (await waitFor(() => getByLabelText("Search graph nodes"))) as HTMLInputElement;
+        const input = (await waitFor(() =>
+          getByLabelText("Search graph nodes"),
+        )) as HTMLInputElement;
         input.focus();
         changeInput(input, "agent:");
 
@@ -454,7 +485,9 @@ describe("Graph view inspect loop", () => {
       },
       async () => {
         const { getByLabelText } = renderGraph({ onSelectNode });
-        const input = (await waitFor(() => getByLabelText("Search graph nodes"))) as HTMLInputElement;
+        const input = (await waitFor(() =>
+          getByLabelText("Search graph nodes"),
+        )) as HTMLInputElement;
         changeInput(input, "agent:");
         fireEvent.keyDown(input, { key: "Enter" });
         expect(onSelectNode).toHaveBeenCalledWith("agent:doctor@1");
@@ -509,7 +542,10 @@ describe("Graph view inspect loop", () => {
   });
 
   test("selected proposal node shows Open in Proposals jumping via hashPath", async () => {
-    const proposal = createProposalFixture({ id: "prop_abc", agent: "doctor@1" });
+    const proposal = createProposalFixture({
+      id: "prop_abc",
+      agent: "doctor@1",
+    });
     await withApi(
       {
         agents: async () => graphAgents(),
@@ -518,7 +554,9 @@ describe("Graph view inspect loop", () => {
       },
       async () => {
         const { getByRole } = renderGraph({ focusNodeId: "proposal:prop_abc" });
-        const btn = await waitFor(() => getByRole("button", { name: "Open in Proposals" }));
+        const btn = await waitFor(() =>
+          getByRole("button", { name: "Open in Proposals" }),
+        );
         window.location.hash = "#/graph/proposal:prop_abc";
         fireEvent.click(btn);
         expect(window.location.hash).toBe("#/proposals/prop_abc");

@@ -11,9 +11,15 @@ const CONTEXT_CHORDS: { chord: string; label: string }[] = [
 const ACTIONS: { keys: string; does: string }[] = [
   { keys: "⌘K", does: "command palette" },
   { keys: "c l", does: "copy link to this page" },
-  { keys: "footer theme button", does: "cycle theme (dark → light → contrast)" },
+  {
+    keys: "footer theme button",
+    does: "cycle theme (dark → light → contrast)",
+  },
   { keys: "i", does: "inject event" },
-  { keys: "/", does: "focus this view's filter (Artifacts, Events, Runs, and other lists)" },
+  {
+    keys: "/",
+    does: "focus this view's filter (Artifacts, Events, Runs, and other lists)",
+  },
   { keys: "v", does: "display options" },
   { keys: "j k  ↑↓", does: "move list (or graph) selection" },
   { keys: "[ ]", does: "previous / next status tab" },
@@ -22,11 +28,26 @@ const ACTIONS: { keys: string; does: string }[] = [
   { keys: "o", does: "open current run (Workers) · full run view (Runs)" },
   { keys: "r", does: "run schedule now (Schedules)" },
   { keys: "a", does: "approve proposal (Proposals) · ack item (Inbox)" },
-  { keys: "x", does: "reject proposal (Proposals) · cancel run (Runs) · resolve item (Inbox)" },
-  { keys: "Space / Shift+Space", does: "toggle highlighted proposal selection · toggle highlighted inbox item selection" },
-  { keys: "* a / ⌘A", does: "select all actionable proposals · select all actionable inbox items" },
-  { keys: "* n / Esc", does: "clear proposal selection · clear inbox selection" },
-  { keys: "A / X", does: "approve / reject selected proposals · ack / resolve selected inbox items" },
+  {
+    keys: "x",
+    does: "reject proposal (Proposals) · cancel run (Runs) · resolve item (Inbox)",
+  },
+  {
+    keys: "Space / Shift+Space",
+    does: "toggle highlighted proposal selection · toggle highlighted inbox item selection",
+  },
+  {
+    keys: "* a / ⌘A",
+    does: "select all actionable proposals · select all actionable inbox items",
+  },
+  {
+    keys: "* n / Esc",
+    does: "clear proposal selection · clear inbox selection",
+  },
+  {
+    keys: "A / X",
+    does: "approve / reject selected proposals · ack / resolve selected inbox items",
+  },
   { keys: "q", does: "requeue event (Events)" },
   { keys: "p", does: "pin / unpin selected run (Runs)" },
   { keys: "z / Enter", does: "reveal selected node on canvas (Graph)" },
@@ -38,13 +59,19 @@ const ACTIONS: { keys: string; does: string }[] = [
   { keys: "d j", does: "dispatch janitor scan (Projects)" },
   { keys: "g h", does: "open repository on GitHub (Projects)" },
   { keys: "⌘+Shift+F", does: "format JSON (Inject dialog)" },
-  { keys: "⌘↵", does: "confirm inject (Inject dialog) · confirm reject (Proposals)" },
+  {
+    keys: "⌘↵",
+    does: "confirm inject (Inject dialog) · confirm reject (Proposals)",
+  },
   { keys: "Esc", does: "close panel, clear filter, or close dialog" },
   { keys: "?", does: "this list" },
 ];
 
 const OVERVIEW_KEYS: { keys: string; does: string }[] = [
-  { keys: "1–5", does: "open pipeline stage views (Events, Proposals, queued, running, outcomes)" },
+  {
+    keys: "1–5",
+    does: "open pipeline stage views (Events, Proposals, queued, running, outcomes)",
+  },
   { keys: ".", does: "focus next anomaly" },
   { keys: "r", does: "requeue focused dead-letter event" },
 ];
@@ -54,11 +81,17 @@ const CONTEXT_STRIP: { keys: string; does: string }[] = [
   { keys: "← →", does: "move focus among All / repos / In flight tabs" },
   { keys: "Home / End", does: "first / last context tab" },
   { keys: "Enter / Space", does: "activate focused filter" },
-  { keys: "Delete / ⌫", does: "close focused repo tab (focus returns to active tab)" },
+  {
+    keys: "Delete / ⌫",
+    does: "close focused repo tab (focus returns to active tab)",
+  },
 ];
 
 const TRACE_KEYS: { keys: string; does: string }[] = [
-  { keys: "1–5", does: "switch trace kind (All, Tools, Reasoning, Errors, Usage)" },
+  {
+    keys: "1–5",
+    does: "switch trace kind (All, Tools, Reasoning, Errors, Usage)",
+  },
   { keys: "[ ]", does: "previous / next trace filter tab (on run view)" },
   { keys: "/", does: "focus trace search" },
   { keys: "e", does: "toggle expand / collapse trace details" },
@@ -113,99 +146,111 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
           data-testid="shortcuts-scroll"
           className="max-h-[calc(85vh-5rem)] space-y-5 overflow-y-auto pr-2 pb-8 text-[12px] text-(--text-dim)"
         >
-        <section aria-label="Navigation chords">
-          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-            Navigation chords
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4">
-            {NAV.map((n) => (
-              <div
-                key={n.key}
-                className="flex items-baseline justify-between gap-2 border-b border-(--border) py-1.5"
-              >
-                <span className="mono text-(--text)">g {n.go}</span>
-                <span className="text-right text-(--text-faint)">{n.label}</span>
-              </div>
-            ))}
-            {CONTEXT_CHORDS.map((c) => (
-              <div
-                key={c.chord}
-                className="flex items-baseline justify-between gap-2 border-b border-(--border) py-1.5"
-              >
-                <span className="mono text-(--text)">{c.chord}</span>
-                <span className="text-right text-(--text-faint)">{c.label}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          <section aria-label="Navigation chords">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              Navigation chords
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4">
+              {NAV.map((n) => (
+                <div
+                  key={n.key}
+                  className="flex items-baseline justify-between gap-2 border-b border-(--border) py-1.5"
+                >
+                  <span className="mono text-(--text)">g {n.go}</span>
+                  <span className="text-right text-(--text-faint)">
+                    {n.label}
+                  </span>
+                </div>
+              ))}
+              {CONTEXT_CHORDS.map((c) => (
+                <div
+                  key={c.chord}
+                  className="flex items-baseline justify-between gap-2 border-b border-(--border) py-1.5"
+                >
+                  <span className="mono text-(--text)">{c.chord}</span>
+                  <span className="text-right text-(--text-faint)">
+                    {c.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
 
-        <section aria-label="Actions">
-          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-            Actions
-          </div>
-          <div>
-            {ACTIONS.map((r) => (
-              <div
-                key={`${r.keys}::${r.does}`}
-                className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
-              >
-                <span className="mono text-(--text)">{r.keys}</span>
-                <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          <section aria-label="Actions">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              Actions
+            </div>
+            <div>
+              {ACTIONS.map((r) => (
+                <div
+                  key={`${r.keys}::${r.does}`}
+                  className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
+                >
+                  <span className="mono text-(--text)">{r.keys}</span>
+                  <span className="text-left sm:text-right text-(--text-faint)">
+                    {r.does}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
 
-        <section aria-label="Overview">
-          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-            Overview
-          </div>
-          <div>
-            {OVERVIEW_KEYS.map((r) => (
-              <div
-                key={`${r.keys}::${r.does}`}
-                className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
-              >
-                <span className="mono text-(--text)">{r.keys}</span>
-                <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          <section aria-label="Overview">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              Overview
+            </div>
+            <div>
+              {OVERVIEW_KEYS.map((r) => (
+                <div
+                  key={`${r.keys}::${r.does}`}
+                  className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
+                >
+                  <span className="mono text-(--text)">{r.keys}</span>
+                  <span className="text-left sm:text-right text-(--text-faint)">
+                    {r.does}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
 
-        <section aria-label="Context strip">
-          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-            Context strip
-          </div>
-          <div>
-            {CONTEXT_STRIP.map((r) => (
-              <div
-                key={`${r.keys}::${r.does}`}
-                className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
-              >
-                <span className="mono text-(--text)">{r.keys}</span>
-                <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          <section aria-label="Context strip">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              Context strip
+            </div>
+            <div>
+              {CONTEXT_STRIP.map((r) => (
+                <div
+                  key={`${r.keys}::${r.does}`}
+                  className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
+                >
+                  <span className="mono text-(--text)">{r.keys}</span>
+                  <span className="text-left sm:text-right text-(--text-faint)">
+                    {r.does}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
 
-        <section aria-label="Run & Trace">
-          <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-            Run & Trace
-          </div>
-          <div>
-            {TRACE_KEYS.map((r) => (
-              <div
-                key={`${r.keys}::${r.does}`}
-                className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
-              >
-                <span className="mono text-(--text)">{r.keys}</span>
-                <span className="text-left sm:text-right text-(--text-faint)">{r.does}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+          <section aria-label="Run & Trace">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+              Run & Trace
+            </div>
+            <div>
+              {TRACE_KEYS.map((r) => (
+                <div
+                  key={`${r.keys}::${r.does}`}
+                  className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 border-b border-(--border) py-1.5 last:border-0"
+                >
+                  <span className="mono text-(--text)">{r.keys}</span>
+                  <span className="text-left sm:text-right text-(--text-faint)">
+                    {r.does}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
         <div
           data-testid="shortcuts-scroll-fade"
@@ -216,4 +261,3 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     </Dialog>
   );
 }
-

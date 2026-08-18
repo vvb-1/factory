@@ -29,8 +29,18 @@ const triageArtifact = {
   summary: "Three issues moved; one needs a human.",
   plan: [
     { issueId: "WM-1", action: "label-agent-ready", reason: "Complete spec." },
-    { issueId: "WM-2", action: "needs-human", reason: "Scope unclear.", detail: "## Acceptance Criteria\n- x" },
-    { issueId: "WM-3", action: "label-agent-ready", reason: "Ready.", ownedPaths: ["a.ts", "b.ts"] },
+    {
+      issueId: "WM-2",
+      action: "needs-human",
+      reason: "Scope unclear.",
+      detail: "## Acceptance Criteria\n- x",
+    },
+    {
+      issueId: "WM-3",
+      action: "label-agent-ready",
+      reason: "Ready.",
+      ownedPaths: ["a.ts", "b.ts"],
+    },
   ],
 };
 
@@ -56,7 +66,14 @@ const mergeArtifact = {
       ownedPaths: ["src/a.ts"],
     },
   ],
-  escalate: [{ pr: 471, ticket: "WM-210", headSha: "c".repeat(40), reason: "Draft hold." }],
+  escalate: [
+    {
+      pr: 471,
+      ticket: "WM-210",
+      headSha: "c".repeat(40),
+      reason: "Draft hold.",
+    },
+  ],
   summary: "One escalation.",
 };
 
@@ -104,8 +121,14 @@ describe("formatValue", () => {
       text: "#471",
       href: "https://github.com/watt-mind/factory/pull/471",
     });
-    expect(formatValue("#9", "pr")).toMatchObject({ kind: "chip", text: "#9", href: null });
-    expect(formatValue("run_44fa5716-0304-49b1-8b65-a45500d0d784", "run")).toMatchObject({
+    expect(formatValue("#9", "pr")).toMatchObject({
+      kind: "chip",
+      text: "#9",
+      href: null,
+    });
+    expect(
+      formatValue("run_44fa5716-0304-49b1-8b65-a45500d0d784", "run"),
+    ).toMatchObject({
       kind: "chip",
       chip: "run",
       id: "run_44fa5716-0304-49b1-8b65-a45500d0d784",
@@ -114,22 +137,61 @@ describe("formatValue", () => {
   });
 
   test("state / sha / url / duration / datetime / bytes / count use the app's formatters", () => {
-    expect(formatValue("COMPLETED", "state")).toEqual({ kind: "state", state: "COMPLETED" });
-    expect(formatValue("c".repeat(40), "sha")).toEqual({ kind: "text", text: "c".repeat(12), mono: true, title: "c".repeat(40) });
-    expect(formatValue("https://x.test/a", "url")).toEqual({ kind: "link", href: "https://x.test/a", text: "https://x.test/a" });
-    expect(formatValue(90, "duration")).toMatchObject({ kind: "text", text: "1:30", title: "90s" });
-    expect(formatValue(1536, "bytes")).toMatchObject({ kind: "text", text: "1.5 KB" });
-    expect(formatValue(1234567, "count")).toMatchObject({ kind: "text", text: (1234567).toLocaleString(), mono: true });
+    expect(formatValue("COMPLETED", "state")).toEqual({
+      kind: "state",
+      state: "COMPLETED",
+    });
+    expect(formatValue("c".repeat(40), "sha")).toEqual({
+      kind: "text",
+      text: "c".repeat(12),
+      mono: true,
+      title: "c".repeat(40),
+    });
+    expect(formatValue("https://x.test/a", "url")).toEqual({
+      kind: "link",
+      href: "https://x.test/a",
+      text: "https://x.test/a",
+    });
+    expect(formatValue(90, "duration")).toMatchObject({
+      kind: "text",
+      text: "1:30",
+      title: "90s",
+    });
+    expect(formatValue(1536, "bytes")).toMatchObject({
+      kind: "text",
+      text: "1.5 KB",
+    });
+    expect(formatValue(1234567, "count")).toMatchObject({
+      kind: "text",
+      text: (1234567).toLocaleString(),
+      mono: true,
+    });
     const dt = formatValue("2026-08-17T10:00:00.000Z", "datetime");
     expect(dt.kind).toBe("text");
     if (dt.kind === "text") expect(dt.title).toBe("2026-08-17T10:00:00.000Z");
-    expect(formatValue("not a date", "datetime")).toEqual({ kind: "text", text: "not a date", mono: false });
+    expect(formatValue("not a date", "datetime")).toEqual({
+      kind: "text",
+      text: "not a date",
+      mono: false,
+    });
   });
 
   test("no format: prose is proportional, identifiers and numbers are mono, nested values are json, absent is empty", () => {
-    expect(formatValue("Scope unclear.")).toEqual({ kind: "text", text: "Scope unclear.", mono: false });
-    expect(formatValue("feat/x")).toEqual({ kind: "text", text: "feat/x", mono: true });
-    expect(formatValue(true)).toEqual({ kind: "text", text: "true", mono: true });
+    expect(formatValue("Scope unclear.")).toEqual({
+      kind: "text",
+      text: "Scope unclear.",
+      mono: false,
+    });
+    expect(formatValue("feat/x")).toEqual({
+      kind: "text",
+      text: "feat/x",
+      mono: true,
+    });
+    expect(formatValue(true)).toEqual({
+      kind: "text",
+      text: "true",
+      mono: true,
+    });
     expect(formatValue({ a: 1 })).toEqual({ kind: "json", value: { a: 1 } });
     expect(formatValue(undefined)).toEqual({ kind: "empty" });
     expect(formatValue(null, "issue")).toEqual({ kind: "empty" });
@@ -146,7 +208,7 @@ describe("formatValue", () => {
 
 describe("toneFor / githubOf", () => {
   test("matches by string form, ignores unknown tones and non-maps", () => {
-    const map = { "true": "ok", "false": "warn", weird: "purple" };
+    const map = { true: "ok", false: "warn", weird: "purple" };
     expect(toneFor(true, map)).toBe("ok");
     expect(toneFor("false", map)).toBe("warn");
     expect(toneFor("weird", map)).toBeUndefined();
@@ -167,9 +229,21 @@ describe("headerFor", () => {
     const h = headerFor(triageView, triageArtifact, { title: "schema title" });
     expect(h.title).toBe("Triage plan");
     expect(h.summary).toBe("Three issues moved; one needs a human.");
-    expect(h.status).toEqual({ label: "recommendation", value: "TRIAGE", tone: "ok" });
-    const bare = headerFor({ schemaVersion: "factory.artifact-view/v1", sections: [] }, {}, { title: "schema title" });
-    expect(bare).toEqual({ title: "schema title", summary: null, status: null });
+    expect(h.status).toEqual({
+      label: "recommendation",
+      value: "TRIAGE",
+      tone: "ok",
+    });
+    const bare = headerFor(
+      { schemaVersion: "factory.artifact-view/v1", sections: [] },
+      {},
+      { title: "schema title" },
+    );
+    expect(bare).toEqual({
+      title: "schema title",
+      summary: null,
+      status: null,
+    });
     const noStatus = headerFor(mergeView, { summary: "s" });
     expect(noStatus.status).toBeNull();
     expect(noStatus.summary).toBe("s");
@@ -185,12 +259,19 @@ describe("sectionsFor with the shipped triage-scan view", () => {
     expect(table.label).toBe("Plan");
     expect(table.columns).toEqual(["issueId", "action", "reason"]);
     expect(table.rows).toHaveLength(3);
-    expect(table.rows[0].cells[0].value).toMatchObject({ kind: "chip", chip: "issue", id: "WM-1" });
+    expect(table.rows[0].cells[0].value).toMatchObject({
+      kind: "chip",
+      chip: "issue",
+      id: "WM-1",
+    });
     expect(table.rows[0].cells[1].tone).toBe("ok");
     expect(table.rows[1].cells[1].tone).toBe("warn");
     expect(table.rows[0].expand).toEqual([]);
     expect(table.rows[1].expand.map((c) => c.key)).toEqual(["detail"]);
-    expect(table.rows[2].expand[0]).toMatchObject({ key: "ownedPaths", value: { kind: "json", value: ["a.ts", "b.ts"] } });
+    expect(table.rows[2].expand[0]).toMatchObject({
+      key: "ownedPaths",
+      value: { kind: "json", value: ["a.ts", "b.ts"] },
+    });
     expect(table.hasExpand).toBe(true);
     // Grouped in first-seen order, group tone from the column's tone map.
     expect(table.groups?.map((g) => [g.label, g.rows.length, g.tone])).toEqual([
@@ -202,11 +283,21 @@ describe("sectionsFor with the shipped triage-scan view", () => {
 
     const repo = sections[1];
     if (repo.as !== "keyvalue") throw new Error("expected keyvalue");
-    expect(repo.entries).toEqual([{ key: "Repo", value: { kind: "text", text: "factory", mono: true }, tone: undefined }]);
+    expect(repo.entries).toEqual([
+      {
+        key: "Repo",
+        value: { kind: "text", text: "factory", mono: true },
+        tone: undefined,
+      },
+    ]);
   });
 
   test("a section whose pointer is absent in this artifact is dropped, not invented", () => {
-    const sections = sectionsFor(triageView, { recommendation: "NOOP", summary: "Nothing to do.", repo: "factory" });
+    const sections = sectionsFor(triageView, {
+      recommendation: "NOOP",
+      summary: "Nothing to do.",
+      repo: "factory",
+    });
     expect(sections.map((s) => s.as)).toEqual(["keyvalue"]);
     expect(sectionsFor(triageView, { plan: "not-an-array" })).toEqual([]);
     expect(sectionsFor(triageView, null)).toEqual([]);
@@ -214,35 +305,79 @@ describe("sectionsFor with the shipped triage-scan view", () => {
 
   test("groupRows parks rows without the property under — at the end", () => {
     const sections = sectionsFor(triageView, {
-      plan: [{ issueId: "WM-9", reason: "r" }, { issueId: "WM-8", action: "move-to-todo", reason: "r" }],
+      plan: [
+        { issueId: "WM-9", reason: "r" },
+        { issueId: "WM-8", action: "move-to-todo", reason: "r" },
+      ],
     });
     const table = sections[0];
     if (table.as !== "table") throw new Error("expected table");
     expect(table.groups?.map((g) => g.label)).toEqual(["move-to-todo", "—"]);
-    expect(groupRows(table.rows, "action").map((g) => g.rows.length)).toEqual([1, 1]);
+    expect(groupRows(table.rows, "action").map((g) => g.rows.length)).toEqual([
+      1, 1,
+    ]);
   });
 });
 
 describe("sectionsFor with the shipped merge-scan view", () => {
   test("empty tables stay (as empty), pr chips link to the artifact's github, keyvalue over the whole artifact keeps only present keys", () => {
     const sections = sectionsFor(mergeView, mergeArtifact);
-    expect(sections.map((s) => s.label)).toEqual(["Merge", "Fix", "Escalate", "Repo"]);
+    expect(sections.map((s) => s.label)).toEqual([
+      "Merge",
+      "Fix",
+      "Escalate",
+      "Repo",
+    ]);
     const [plan, fix, escalate, repo] = sections;
-    if (plan.as !== "table" || fix.as !== "table" || escalate.as !== "table" || repo.as !== "keyvalue") throw new Error("shape");
+    if (
+      plan.as !== "table" ||
+      fix.as !== "table" ||
+      escalate.as !== "table" ||
+      repo.as !== "keyvalue"
+    )
+      throw new Error("shape");
     expect(plan.rows).toEqual([]);
     expect(plan.groups).toBeNull();
-    expect(fix.rows[0].cells.map((c) => c.key)).toEqual(["pr", "ticket", "round", "mechanical", "finding"]);
-    expect(fix.rows[0].cells[0].value).toMatchObject({ kind: "chip", chip: "pr", href: "https://github.com/watt-mind/factory/pull/12" });
-    expect(fix.rows[0].cells[3]).toMatchObject({ tone: "ok", value: { kind: "text", text: "true" } });
-    expect(fix.rows[0].expand.find((c) => c.key === "withinOwnedPaths")?.tone).toBe("error");
-    expect(fix.rows[0].expand.find((c) => c.key === "headSha")?.value).toMatchObject({ kind: "text", text: "a".repeat(12) });
-    expect(escalate.rows[0].cells[1].value).toMatchObject({ kind: "chip", chip: "issue", id: "WM-210" });
-    expect(repo.entries.map((e) => e.key)).toEqual(["repo", "github", "base", "deployBranch"]);
+    expect(fix.rows[0].cells.map((c) => c.key)).toEqual([
+      "pr",
+      "ticket",
+      "round",
+      "mechanical",
+      "finding",
+    ]);
+    expect(fix.rows[0].cells[0].value).toMatchObject({
+      kind: "chip",
+      chip: "pr",
+      href: "https://github.com/watt-mind/factory/pull/12",
+    });
+    expect(fix.rows[0].cells[3]).toMatchObject({
+      tone: "ok",
+      value: { kind: "text", text: "true" },
+    });
+    expect(
+      fix.rows[0].expand.find((c) => c.key === "withinOwnedPaths")?.tone,
+    ).toBe("error");
+    expect(
+      fix.rows[0].expand.find((c) => c.key === "headSha")?.value,
+    ).toMatchObject({ kind: "text", text: "a".repeat(12) });
+    expect(escalate.rows[0].cells[1].value).toMatchObject({
+      kind: "chip",
+      chip: "issue",
+      id: "WM-210",
+    });
+    expect(repo.entries.map((e) => e.key)).toEqual([
+      "repo",
+      "github",
+      "base",
+      "deployBranch",
+    ]);
   });
 
   test("viewApplies gates the Artifacts inspector: a merge plan yes, a transcript-shaped object no", () => {
     expect(viewApplies(mergeView, mergeArtifact)).toBe(true);
-    expect(viewApplies(mergeView, { type: "assistant", message: "hi" })).toBe(false);
+    expect(viewApplies(mergeView, { type: "assistant", message: "hi" })).toBe(
+      false,
+    );
     expect(viewApplies(mergeView, "string")).toBe(false);
     expect(viewApplies(null, mergeArtifact)).toBe(false);
     expect(viewApplies(undefined, mergeArtifact)).toBe(false);
@@ -253,12 +388,28 @@ describe("the other section kinds", () => {
   const view: ArtifactView = {
     schemaVersion: "factory.artifact-view/v1",
     sections: [
-      { path: "/verdict", as: "badge", label: "Verdict", tone: { PASS: "ok", FAIL: "error" } },
+      {
+        path: "/verdict",
+        as: "badge",
+        label: "Verdict",
+        tone: { PASS: "ok", FAIL: "error" },
+      },
       { path: "/log", as: "code", label: "Log", language: "text" },
       { path: "/notes", as: "prose" },
       { path: "/files", as: "list", label: "Files" },
-      { path: "/checks", as: "list", label: "Checks", itemLabel: "name", tone: { name: { lint: "ok" } } },
-      { path: "/count", as: "keyvalue", label: "Count", formats: { "": "count" } },
+      {
+        path: "/checks",
+        as: "list",
+        label: "Checks",
+        itemLabel: "name",
+        tone: { name: { lint: "ok" } },
+      },
+      {
+        path: "/count",
+        as: "keyvalue",
+        label: "Count",
+        formats: { "": "count" },
+      },
       { path: "/blob", as: "code" },
     ],
   };
@@ -280,20 +431,51 @@ describe("the other section kinds", () => {
         as: "list",
         label: "Files",
         items: [
-          { key: "0", value: { kind: "text", text: "a.ts", mono: true }, tone: undefined },
-          { key: "1", value: { kind: "text", text: "b.ts", mono: true }, tone: undefined },
+          {
+            key: "0",
+            value: { kind: "text", text: "a.ts", mono: true },
+            tone: undefined,
+          },
+          {
+            key: "1",
+            value: { kind: "text", text: "b.ts", mono: true },
+            tone: undefined,
+          },
         ],
       },
       {
         as: "list",
         label: "Checks",
         items: [
-          { key: "0", value: { kind: "text", text: "lint", mono: true }, tone: "ok" },
-          { key: "1", value: { kind: "text", text: "typecheck", mono: true }, tone: undefined },
+          {
+            key: "0",
+            value: { kind: "text", text: "lint", mono: true },
+            tone: "ok",
+          },
+          {
+            key: "1",
+            value: { kind: "text", text: "typecheck", mono: true },
+            tone: undefined,
+          },
         ],
       },
-      { as: "keyvalue", label: undefined, entries: [{ key: "Count", value: { kind: "text", text: (4200).toLocaleString(), mono: true }, tone: undefined }] },
-      { as: "code", label: undefined, text: JSON.stringify({ k: 1 }, null, 2), language: "json" },
+      {
+        as: "keyvalue",
+        label: undefined,
+        entries: [
+          {
+            key: "Count",
+            value: { kind: "text", text: (4200).toLocaleString(), mono: true },
+            tone: undefined,
+          },
+        ],
+      },
+      {
+        as: "code",
+        label: undefined,
+        text: JSON.stringify({ k: 1 }, null, 2),
+        language: "json",
+      },
     ]);
   });
 });

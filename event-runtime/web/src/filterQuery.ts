@@ -14,7 +14,8 @@
 import type { AdmittedEvent, InboxItem, Proposal, RunListItem } from "./types";
 
 /** What a field accessor may return: one value, several, or nothing. */
-export type FieldValue = string | null | undefined | readonly (string | null | undefined)[];
+export type FieldValue =
+  string | null | undefined | readonly (string | null | undefined)[];
 
 export interface FilterFacets<T, C = undefined> {
   /**
@@ -42,10 +43,34 @@ export interface FilterSuggestion {
   hue?: string;
 }
 
-const RUN_STATES = ["proposed", "approved", "queued", "leased", "running", "verifying", "completed", "refused", "failed", "timed_out", "cancelled"] as const;
+const RUN_STATES = [
+  "proposed",
+  "approved",
+  "queued",
+  "leased",
+  "running",
+  "verifying",
+  "completed",
+  "refused",
+  "failed",
+  "timed_out",
+  "cancelled",
+] as const;
 const ADAPTERS = ["claude", "codex", "fake", "actions", "command"] as const;
-const EVENT_STATUSES = ["admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
-const PROPOSAL_STATUSES = ["open", "approved", "rejected", "superseded", "resolved"] as const;
+const EVENT_STATUSES = [
+  "admitted",
+  "planned",
+  "noop",
+  "human_needed",
+  "dead_lettered",
+] as const;
+const PROPOSAL_STATUSES = [
+  "open",
+  "approved",
+  "rejected",
+  "superseded",
+  "resolved",
+] as const;
 const DECISIONS = ["run", "human_needed", "noop"] as const;
 
 export const DEFAULT_FIELD_VALUES: Record<string, readonly string[]> = {
@@ -89,11 +114,20 @@ interface Span {
 
 export type FilterToken =
   | ({ kind: "text"; value: string } & Span)
-  | ({ kind: "field"; key: string; typedKey: string; value: string; supported: boolean } & Span)
+  | ({
+      kind: "field";
+      key: string;
+      typedKey: string;
+      value: string;
+      supported: boolean;
+    } & Span)
   | ({ kind: "flag"; flag: string; help: string; supported: boolean } & Span);
 
 /** The tokens that get a chip: everything the operator spelled as a filter. */
-export type FilterChipToken = Extract<FilterToken, { kind: "field" } | { kind: "flag" }>;
+export type FilterChipToken = Extract<
+  FilterToken,
+  { kind: "field" } | { kind: "flag" }
+>;
 
 export interface FilterQuery {
   tokens: FilterToken[];
@@ -151,7 +185,10 @@ export function getActiveFilterToken(input: string, cursorPos: number): Span {
   return { raw: "", start: safeCursor, end: safeCursor };
 }
 
-export function parseFilterQuery<T, C>(input: string, facets: FilterFacets<T, C>): FilterQuery {
+export function parseFilterQuery<T, C>(
+  input: string,
+  facets: FilterFacets<T, C>,
+): FilterQuery {
   const tokens: FilterToken[] = [];
   for (const span of splitWords(input)) {
     const keyed = KEYED.exec(span.raw);
@@ -159,7 +196,10 @@ export function parseFilterQuery<T, C>(input: string, facets: FilterFacets<T, C>
     const key = facets.aliases?.[typedKey] ?? typedKey;
     const value = keyed ? unquote(keyed[2]).trim() : "";
 
-    if (keyed && (key === "is" || FILTER_KEYS.has(key) || key in facets.fields)) {
+    if (
+      keyed &&
+      (key === "is" || FILTER_KEYS.has(key) || key in facets.fields)
+    ) {
       // `agent:` with nothing after it is half-typed, not a filter that matches
       // nothing: the list must not blank out between `agent:` and `agent:c`.
       if (!value) continue;
@@ -199,11 +239,16 @@ export function parseFilterQuery<T, C>(input: string, facets: FilterFacets<T, C>
   };
 }
 
-const read = <T,>(field: Extract<keyof T, string> | ((row: T) => FieldValue), row: T): FieldValue =>
+const read = <T>(
+  field: Extract<keyof T, string> | ((row: T) => FieldValue),
+  row: T,
+): FieldValue =>
   typeof field === "function" ? field(row) : (row[field] as FieldValue);
 
 const asList = (value: FieldValue): string[] =>
-  (Array.isArray(value) ? value : [value]).filter((v): v is string => typeof v === "string" && v !== "");
+  (Array.isArray(value) ? value : [value]).filter(
+    (v): v is string => typeof v === "string" && v !== "",
+  );
 
 /**
  * A keyed value matches its field whole or at a word start inside it:
@@ -262,12 +307,16 @@ export function matchesFilterQuery<T, C = undefined>(
 
 /** Dismiss one chip by cutting its word back out of the raw query. */
 export function removeFilterToken(input: string, token: FilterToken): string {
-  return `${input.slice(0, token.start)} ${input.slice(token.end)}`.replace(/\s+/g, " ").trim();
+  return `${input.slice(0, token.start)} ${input.slice(token.end)}`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** What the chip says — the key as typed, so chip and input never disagree. */
 export const chipLabel = (token: FilterChipToken): string =>
-  token.kind === "flag" ? `is:${token.flag}` : `${token.typedKey}:${token.value}`;
+  token.kind === "flag"
+    ? `is:${token.flag}`
+    : `${token.typedKey}:${token.value}`;
 
 /** Why this chip does (or cannot) narrow anything, on hover and for screen readers. */
 export function chipHelp(token: FilterChipToken, query: FilterQuery): string {
@@ -356,8 +405,15 @@ export const INBOX_FACETS: FilterFacets<InboxItem, undefined> = {
   text: (item) => [item.title, item.body],
   values: {
     kind: [
-      "decision_needed", "proposal_expired", "BLOCKED", "ESCALATED", "human_needed",
-      "CI RED", "SMOKE RED", "CIRCUIT BREAKER", "RC READY",
+      "decision_needed",
+      "proposal_expired",
+      "BLOCKED",
+      "ESCALATED",
+      "human_needed",
+      "CI RED",
+      "SMOKE RED",
+      "CIRCUIT BREAKER",
+      "RC READY",
     ],
   },
 };
@@ -462,7 +518,10 @@ export function getFilterSuggestions<T, C>(
     }
     // Facet aliases
     for (const [alias, canonical] of Object.entries(aliases)) {
-      if (!fields.includes(alias) && (!prefix || alias.toLowerCase().startsWith(prefix))) {
+      if (
+        !fields.includes(alias) &&
+        (!prefix || alias.toLowerCase().startsWith(prefix))
+      ) {
         suggestions.push({
           id: `facet:${alias}`,
           kind: "facet",
@@ -475,7 +534,12 @@ export function getFilterSuggestions<T, C>(
     // 2. Flags (e.g. is:stale)
     for (const flag of flags) {
       const flagLabel = `is:${flag}`;
-      if (!prefix || flagLabel.startsWith(prefix) || flag.toLowerCase().startsWith(prefix) || "is:".startsWith(prefix)) {
+      if (
+        !prefix ||
+        flagLabel.startsWith(prefix) ||
+        flag.toLowerCase().startsWith(prefix) ||
+        "is:".startsWith(prefix)
+      ) {
         suggestions.push({
           id: `flag:${flag}`,
           kind: "flag",
@@ -503,7 +567,11 @@ export function getFilterSuggestions<T, C>(
         }
       }
     } else {
-      const enumVals = values[canonicalKey] ?? values[rawKey] ?? DEFAULT_FIELD_VALUES[canonicalKey] ?? [];
+      const enumVals =
+        values[canonicalKey] ??
+        values[rawKey] ??
+        DEFAULT_FIELD_VALUES[canonicalKey] ??
+        [];
       for (const val of enumVals) {
         if (!valPrefix || val.toLowerCase().startsWith(valPrefix)) {
           const hue = customHues?.(canonicalKey, val);
@@ -523,4 +591,3 @@ export function getFilterSuggestions<T, C>(
 
   return suggestions;
 }
-

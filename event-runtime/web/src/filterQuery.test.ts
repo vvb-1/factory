@@ -90,11 +90,30 @@ const noStale = { staleRuns: new Set<string>() };
 const matchRun = (input: string, row = run(), ctx = noStale) =>
   matchesFilterQuery(row, parseFilterQuery(input, RUN_FACETS), RUN_FACETS, ctx);
 const matchEvent = (input: string, row = event()) =>
-  matchesFilterQuery(row, parseFilterQuery(input, EVENT_FACETS), EVENT_FACETS, undefined);
-const matchProposal = (input: string, row = proposal(), runStates = new Map<string, string>()) =>
-  matchesFilterQuery(row, parseFilterQuery(input, PROPOSAL_FACETS), PROPOSAL_FACETS, { runStates });
+  matchesFilterQuery(
+    row,
+    parseFilterQuery(input, EVENT_FACETS),
+    EVENT_FACETS,
+    undefined,
+  );
+const matchProposal = (
+  input: string,
+  row = proposal(),
+  runStates = new Map<string, string>(),
+) =>
+  matchesFilterQuery(
+    row,
+    parseFilterQuery(input, PROPOSAL_FACETS),
+    PROPOSAL_FACETS,
+    { runStates },
+  );
 const matchInbox = (input: string, row = inboxItem()) =>
-  matchesFilterQuery(row, parseFilterQuery(input, INBOX_FACETS), INBOX_FACETS, undefined);
+  matchesFilterQuery(
+    row,
+    parseFilterQuery(input, INBOX_FACETS),
+    INBOX_FACETS,
+    undefined,
+  );
 
 describe("parseFilterQuery", () => {
   test("keyed tokens, flags and leftover words, each keeping its offsets", () => {
@@ -133,7 +152,12 @@ describe("parseFilterQuery", () => {
 
   test("aliases resolve to the canonical key; the chip still reads as typed", () => {
     const q = parseFilterQuery("STATUS:Failed", RUN_FACETS);
-    expect(q.tokens[0]).toMatchObject({ kind: "field", key: "state", typedKey: "status", value: "failed" });
+    expect(q.tokens[0]).toMatchObject({
+      kind: "field",
+      key: "state",
+      typedKey: "status",
+      value: "failed",
+    });
     expect(chipLabel(q.chips[0])).toBe("status:failed");
   });
 
@@ -145,25 +169,40 @@ describe("parseFilterQuery", () => {
 
   test("quotes hold a value together and are not part of it", () => {
     const q = parseFilterQuery('subject:"var full" plain', EVENT_FACETS);
-    expect(q.tokens[0]).toMatchObject({ kind: "field", key: "subject", value: "var full" });
+    expect(q.tokens[0]).toMatchObject({
+      kind: "field",
+      key: "subject",
+      value: "var full",
+    });
     expect(q.tokens[1]).toMatchObject({ kind: "text", value: "plain" });
   });
 
   test("a colon that was never a filter key stays free text", () => {
     const q = parseFilterQuery("https://linear.app/watt-mind", RUN_FACETS);
     expect(q.tokens).toHaveLength(1);
-    expect(q.tokens[0]).toMatchObject({ kind: "text", value: "https://linear.app/watt-mind" });
+    expect(q.tokens[0]).toMatchObject({
+      kind: "text",
+      value: "https://linear.app/watt-mind",
+    });
   });
 
   test("a known key this list has no field for is flagged, not silently dropped", () => {
     const q = parseFilterQuery("agent:ci-doctor", EVENT_FACETS);
-    expect(q.chips[0]).toMatchObject({ kind: "field", key: "agent", supported: false });
+    expect(q.chips[0]).toMatchObject({
+      kind: "field",
+      key: "agent",
+      supported: false,
+    });
     expect(matchEvent("agent:ci-doctor")).toBe(false);
   });
 
   test("an is: flag this list cannot answer is flagged the same way", () => {
     const q = parseFilterQuery("is:expired", RUN_FACETS);
-    expect(q.chips[0]).toMatchObject({ kind: "flag", flag: "expired", supported: false });
+    expect(q.chips[0]).toMatchObject({
+      kind: "flag",
+      flag: "expired",
+      supported: false,
+    });
     expect(matchRun("is:expired")).toBe(false);
   });
 });
@@ -187,8 +226,12 @@ describe("matchesFilterQuery", () => {
     expect(matchRun("agent:octor")).toBe(false);
     expect(matchRun("state:fail")).toBe(true);
     expect(matchRun("state:ail")).toBe(false);
-    expect(matchEvent("status:human", event({ status: "human_needed" }))).toBe(true);
-    expect(matchEvent("status:needed", event({ status: "human_needed" }))).toBe(true);
+    expect(matchEvent("status:human", event({ status: "human_needed" }))).toBe(
+      true,
+    );
+    expect(matchEvent("status:needed", event({ status: "human_needed" }))).toBe(
+      true,
+    );
   });
 
   test("case never matters", () => {
@@ -224,48 +267,113 @@ describe("matchesFilterQuery", () => {
 
   test("Runs is:stale is the stalled-worker projection, not a guess", () => {
     expect(matchRun("is:stale")).toBe(false);
-    expect(matchRun("is:stale", run(), { staleRuns: new Set(["run_48ac91"]) })).toBe(true);
-    expect(matchRun("is:stale state:completed", run({ state: "COMPLETED" }), {
-      staleRuns: new Set(["run_48ac91"]),
-    })).toBe(true);
+    expect(
+      matchRun("is:stale", run(), { staleRuns: new Set(["run_48ac91"]) }),
+    ).toBe(true);
+    expect(
+      matchRun("is:stale state:completed", run({ state: "COMPLETED" }), {
+        staleRuns: new Set(["run_48ac91"]),
+      }),
+    ).toBe(true);
   });
 
   test("Events is:stale is an admitted event with nothing behind it", () => {
     expect(matchEvent("is:stale")).toBe(false);
     expect(
-      matchEvent("is:stale", event({ status: "admitted", proposalId: null, runId: null })),
+      matchEvent(
+        "is:stale",
+        event({ status: "admitted", proposalId: null, runId: null }),
+      ),
     ).toBe(true);
     expect(matchEvent("is:stale", event({ status: "admitted" }))).toBe(false);
   });
 
   test("Proposals is:stale and is:expired answer the two ways an open row is dead", () => {
     expect(matchProposal("is:stale")).toBe(false);
-    expect(matchProposal("is:stale", proposal(), new Map([["run_48ac91", "CANCELLED"]]))).toBe(true);
-    expect(matchProposal("is:stale", proposal(), new Map([["run_48ac91", "PROPOSED"]]))).toBe(false);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal(),
+        new Map([["run_48ac91", "CANCELLED"]]),
+      ),
+    ).toBe(true);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal(),
+        new Map([["run_48ac91", "PROPOSED"]]),
+      ),
+    ).toBe(false);
     expect(matchProposal("is:expired")).toBe(false);
     expect(matchProposal("is:expired", proposal({ expired: true }))).toBe(true);
   });
 
   test("Proposals is:stale only flags open proposals whose run left PROPOSED, not decided history rows", () => {
-    expect(matchProposal("is:stale", proposal({ status: "open" }), new Map([["run_48ac91", "CANCELLED"]]))).toBe(true);
-    expect(matchProposal("is:stale", proposal({ status: "open" }), new Map([["run_48ac91", "PROPOSED"]]))).toBe(false);
-    expect(matchProposal("is:stale", proposal({ status: "approved" }), new Map([["run_48ac91", "COMPLETED"]]))).toBe(false);
-    expect(matchProposal("is:stale", proposal({ status: "rejected" }), new Map([["run_48ac91", "FAILED"]]))).toBe(false);
-    expect(matchProposal("is:stale", proposal({ status: "expired" }), new Map([["run_48ac91", "CANCELLED"]]))).toBe(false);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal({ status: "open" }),
+        new Map([["run_48ac91", "CANCELLED"]]),
+      ),
+    ).toBe(true);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal({ status: "open" }),
+        new Map([["run_48ac91", "PROPOSED"]]),
+      ),
+    ).toBe(false);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal({ status: "approved" }),
+        new Map([["run_48ac91", "COMPLETED"]]),
+      ),
+    ).toBe(false);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal({ status: "rejected" }),
+        new Map([["run_48ac91", "FAILED"]]),
+      ),
+    ).toBe(false);
+    expect(
+      matchProposal(
+        "is:stale",
+        proposal({ status: "expired" }),
+        new Map([["run_48ac91", "CANCELLED"]]),
+      ),
+    ).toBe(false);
   });
 
   test("Inbox facets cover kind, status, references, and title/body text", () => {
-    expect(matchInbox("kind:blocked repo:factory issue:WM-616 is:open")).toBe(true);
+    expect(matchInbox("kind:blocked repo:factory issue:WM-616 is:open")).toBe(
+      true,
+    );
     expect(matchInbox("chrome parity")).toBe(true);
     expect(matchInbox("repo:bj29")).toBe(false);
     expect(matchInbox("is:acked")).toBe(false);
-    expect(matchInbox("is:acked", inboxItem({ ackedAt: "2026-08-14T10:00:00.000Z" }))).toBe(true);
-    expect(matchInbox("is:resolved", inboxItem({ resolvedAt: "2026-08-14T11:00:00.000Z" }))).toBe(true);
-    expect(matchInbox("is:open", inboxItem({ ackedAt: "2026-08-14T10:00:00.000Z" }))).toBe(false);
+    expect(
+      matchInbox(
+        "is:acked",
+        inboxItem({ ackedAt: "2026-08-14T10:00:00.000Z" }),
+      ),
+    ).toBe(true);
+    expect(
+      matchInbox(
+        "is:resolved",
+        inboxItem({ resolvedAt: "2026-08-14T11:00:00.000Z" }),
+      ),
+    ).toBe(true);
+    expect(
+      matchInbox("is:open", inboxItem({ ackedAt: "2026-08-14T10:00:00.000Z" })),
+    ).toBe(false);
   });
 
   test("Proposals keyed fields cover the columns the list shows", () => {
-    expect(matchProposal("agent:ci-doctor decision:run status:open")).toBe(true);
+    expect(matchProposal("agent:ci-doctor decision:run status:open")).toBe(
+      true,
+    );
     expect(matchProposal("decision:human_needed")).toBe(false);
     expect(matchProposal("source:keephq event:evt_7719")).toBe(true);
     expect(matchProposal("proposal:prop_8f12")).toBe(true);
@@ -287,7 +395,9 @@ describe("removeFilterToken", () => {
     const q = parseFilterQuery(input, RUN_FACETS);
     expect(removeFilterToken(input, q.tokens[0])).toBe("is:stale 48ac");
     expect(removeFilterToken(input, q.tokens[1])).toBe("agent:ci-doctor 48ac");
-    expect(removeFilterToken(input, q.tokens[2])).toBe("agent:ci-doctor is:stale");
+    expect(removeFilterToken(input, q.tokens[2])).toBe(
+      "agent:ci-doctor is:stale",
+    );
   });
 
   test("a quoted value is one word, and removal leaves no double space", () => {
@@ -328,40 +438,102 @@ describe("chip and input copy", () => {
 
 describe("proposalRunState", () => {
   test("only a run that left PROPOSED is stale; an unknown run is not", () => {
-    expect(proposalRunState({ runId: "r1" }, new Map([["r1", "PROPOSED"]]))).toBeNull();
-    expect(proposalRunState({ runId: "r1" }, new Map([["r1", "RUNNING"]]))).toBe("RUNNING");
+    expect(
+      proposalRunState({ runId: "r1" }, new Map([["r1", "PROPOSED"]])),
+    ).toBeNull();
+    expect(
+      proposalRunState({ runId: "r1" }, new Map([["r1", "RUNNING"]])),
+    ).toBe("RUNNING");
     expect(proposalRunState({ runId: "r1" }, new Map())).toBeNull();
-    expect(proposalRunState({ runId: null }, new Map([["r1", "RUNNING"]]))).toBeNull();
+    expect(
+      proposalRunState({ runId: null }, new Map([["r1", "RUNNING"]])),
+    ).toBeNull();
   });
 
   test("decided proposals (status !== 'open') are never stale even if run is terminal", () => {
-    expect(proposalRunState({ runId: "r1", status: "open" }, new Map([["r1", "COMPLETED"]]))).toBe("COMPLETED");
-    expect(proposalRunState({ runId: "r1", status: "approved" }, new Map([["r1", "COMPLETED"]]))).toBeNull();
-    expect(proposalRunState({ runId: "r1", status: "rejected" }, new Map([["r1", "FAILED"]]))).toBeNull();
-    expect(proposalRunState({ runId: "r1", status: "expired" }, new Map([["r1", "CANCELLED"]]))).toBeNull();
+    expect(
+      proposalRunState(
+        { runId: "r1", status: "open" },
+        new Map([["r1", "COMPLETED"]]),
+      ),
+    ).toBe("COMPLETED");
+    expect(
+      proposalRunState(
+        { runId: "r1", status: "approved" },
+        new Map([["r1", "COMPLETED"]]),
+      ),
+    ).toBeNull();
+    expect(
+      proposalRunState(
+        { runId: "r1", status: "rejected" },
+        new Map([["r1", "FAILED"]]),
+      ),
+    ).toBeNull();
+    expect(
+      proposalRunState(
+        { runId: "r1", status: "expired" },
+        new Map([["r1", "CANCELLED"]]),
+      ),
+    ).toBeNull();
   });
 });
 
 describe("getActiveFilterToken", () => {
   test("finds active token under cursor when typing inside a word", () => {
     const input = "state:failed agent:ci";
-    expect(getActiveFilterToken(input, 5)).toMatchObject({ raw: "state:failed", start: 0, end: 12 });
-    expect(getActiveFilterToken(input, 12)).toMatchObject({ raw: "state:failed", start: 0, end: 12 });
-    expect(getActiveFilterToken(input, 13)).toMatchObject({ raw: "agent:ci", start: 13, end: 21 });
-    expect(getActiveFilterToken(input, 21)).toMatchObject({ raw: "agent:ci", start: 13, end: 21 });
+    expect(getActiveFilterToken(input, 5)).toMatchObject({
+      raw: "state:failed",
+      start: 0,
+      end: 12,
+    });
+    expect(getActiveFilterToken(input, 12)).toMatchObject({
+      raw: "state:failed",
+      start: 0,
+      end: 12,
+    });
+    expect(getActiveFilterToken(input, 13)).toMatchObject({
+      raw: "agent:ci",
+      start: 13,
+      end: 21,
+    });
+    expect(getActiveFilterToken(input, 21)).toMatchObject({
+      raw: "agent:ci",
+      start: 13,
+      end: 21,
+    });
   });
 
   test("returns empty token when cursor is in whitespace", () => {
     const input = "state:failed  agent:ci";
-    expect(getActiveFilterToken(input, 13)).toMatchObject({ raw: "", start: 13, end: 13 });
-    expect(getActiveFilterToken("   ", 1)).toMatchObject({ raw: "", start: 1, end: 1 });
-    expect(getActiveFilterToken("", 0)).toMatchObject({ raw: "", start: 0, end: 0 });
+    expect(getActiveFilterToken(input, 13)).toMatchObject({
+      raw: "",
+      start: 13,
+      end: 13,
+    });
+    expect(getActiveFilterToken("   ", 1)).toMatchObject({
+      raw: "",
+      start: 1,
+      end: 1,
+    });
+    expect(getActiveFilterToken("", 0)).toMatchObject({
+      raw: "",
+      start: 0,
+      end: 0,
+    });
   });
 
   test("handles quotes properly", () => {
     const input = 'subject:"disk pressure" state:fail';
-    expect(getActiveFilterToken(input, 10)).toMatchObject({ raw: 'subject:"disk pressure"', start: 0, end: 23 });
-    expect(getActiveFilterToken(input, 30)).toMatchObject({ raw: "state:fail", start: 24, end: 34 });
+    expect(getActiveFilterToken(input, 10)).toMatchObject({
+      raw: 'subject:"disk pressure"',
+      start: 0,
+      end: 23,
+    });
+    expect(getActiveFilterToken(input, 30)).toMatchObject({
+      raw: "state:fail",
+      start: 24,
+      end: 34,
+    });
   });
 });
 
@@ -382,8 +554,16 @@ describe("getFilterSuggestions", () => {
   });
 
   test("suggests enum values with state hues when typing a facet value", () => {
-    const stateSugs = getFilterSuggestions("state:", RUN_FACETS, undefined, (_field, val) =>
-      val === "failed" ? "var(--hue-err)" : val === "completed" ? "var(--hue-ok)" : undefined,
+    const stateSugs = getFilterSuggestions(
+      "state:",
+      RUN_FACETS,
+      undefined,
+      (_field, val) =>
+        val === "failed"
+          ? "var(--hue-err)"
+          : val === "completed"
+            ? "var(--hue-ok)"
+            : undefined,
     );
     expect(stateSugs.length).toBeGreaterThan(0);
     const failedSug = stateSugs.find((s) => s.label === "failed");
@@ -410,7 +590,11 @@ describe("getFilterSuggestions", () => {
 
   test("suggests enum values for Proposals and Events", () => {
     const decisionSugs = getFilterSuggestions("decision:", PROPOSAL_FACETS);
-    expect(decisionSugs.map((s) => s.label)).toEqual(["run", "human_needed", "noop"]);
+    expect(decisionSugs.map((s) => s.label)).toEqual([
+      "run",
+      "human_needed",
+      "noop",
+    ]);
 
     const eventStatusSugs = getFilterSuggestions("status:", EVENT_FACETS);
     expect(eventStatusSugs.map((s) => s.label)).toEqual([
@@ -423,22 +607,49 @@ describe("getFilterSuggestions", () => {
   });
 });
 
-
 describe("events reason: facet (WM-594)", () => {
   const rows = [
-    { ...event({ eventId: "evt_a", status: "noop" }), decisionReason: "owned_paths_overlap" },
-    { ...event({ eventId: "evt_b", status: "noop" }), decisionReason: "ticket_dispatch_already_live:run_x:same_ticket_worktree_held" },
-    { ...event({ eventId: "evt_c", status: "planned" }), decisionReason: "auto_approval_ineligible:proposal_expired" },
+    {
+      ...event({ eventId: "evt_a", status: "noop" }),
+      decisionReason: "owned_paths_overlap",
+    },
+    {
+      ...event({ eventId: "evt_b", status: "noop" }),
+      decisionReason:
+        "ticket_dispatch_already_live:run_x:same_ticket_worktree_held",
+    },
+    {
+      ...event({ eventId: "evt_c", status: "planned" }),
+      decisionReason: "auto_approval_ineligible:proposal_expired",
+    },
     event({ eventId: "evt_d", status: "admitted" }),
   ];
 
   test("reason:<code> matches the head code and word starts inside a chained reason", () => {
-    const overlap = parseFilterQuery("reason:owned_paths_overlap", EVENT_FACETS);
-    expect(rows.filter((r) => matchesFilterQuery(r, overlap, EVENT_FACETS, undefined)).map((r) => r.eventId)).toEqual(["evt_a"]);
-    const live = parseFilterQuery("reason:ticket_dispatch_already_live", EVENT_FACETS);
-    expect(rows.filter((r) => matchesFilterQuery(r, live, EVENT_FACETS, undefined)).map((r) => r.eventId)).toEqual(["evt_b"]);
+    const overlap = parseFilterQuery(
+      "reason:owned_paths_overlap",
+      EVENT_FACETS,
+    );
+    expect(
+      rows
+        .filter((r) => matchesFilterQuery(r, overlap, EVENT_FACETS, undefined))
+        .map((r) => r.eventId),
+    ).toEqual(["evt_a"]);
+    const live = parseFilterQuery(
+      "reason:ticket_dispatch_already_live",
+      EVENT_FACETS,
+    );
+    expect(
+      rows
+        .filter((r) => matchesFilterQuery(r, live, EVENT_FACETS, undefined))
+        .map((r) => r.eventId),
+    ).toEqual(["evt_b"]);
     const expired = parseFilterQuery("reason:proposal_expired", EVENT_FACETS);
-    expect(rows.filter((r) => matchesFilterQuery(r, expired, EVENT_FACETS, undefined)).map((r) => r.eventId)).toEqual(["evt_c"]);
+    expect(
+      rows
+        .filter((r) => matchesFilterQuery(r, expired, EVENT_FACETS, undefined))
+        .map((r) => r.eventId),
+    ).toEqual(["evt_c"]);
   });
 
   test("a row without a decision reason never matches reason:", () => {
@@ -447,8 +658,18 @@ describe("events reason: facet (WM-594)", () => {
   });
 
   test("reason: is offered as a facet and takes caller-supplied value suggestions", () => {
-    expect(getFilterSuggestions("rea", EVENT_FACETS).map((s) => s.insertText)).toContain("reason:");
-    const facets = { ...EVENT_FACETS, values: { ...EVENT_FACETS.values, reason: ["owned_paths_overlap", "ticket_assigned"] } };
-    expect(getFilterSuggestions("reason:own", facets).map((s) => s.insertText)).toEqual(["reason:owned_paths_overlap "]);
+    expect(
+      getFilterSuggestions("rea", EVENT_FACETS).map((s) => s.insertText),
+    ).toContain("reason:");
+    const facets = {
+      ...EVENT_FACETS,
+      values: {
+        ...EVENT_FACETS.values,
+        reason: ["owned_paths_overlap", "ticket_assigned"],
+      },
+    };
+    expect(
+      getFilterSuggestions("reason:own", facets).map((s) => s.insertText),
+    ).toEqual(["reason:owned_paths_overlap "]);
   });
 });

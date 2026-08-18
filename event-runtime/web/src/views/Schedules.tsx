@@ -49,12 +49,24 @@ export function scheduleFilterTokens(s: ScheduleItem): string[] {
     s.approval,
     s.catchUp,
     s.enabled ? "enabled" : "disabled",
-    s.error ? "error" : !s.enabled ? "not scheduled" : s.stopped ? "stopped" : "running",
+    s.error
+      ? "error"
+      : !s.enabled
+        ? "not scheduled"
+        : s.stopped
+          ? "stopped"
+          : "running",
   ];
 }
 
 const scheduleState = (schedule: ScheduleItem): string =>
-  schedule.error ? "error" : !schedule.enabled ? "not scheduled" : schedule.stopped ? "stopped" : "running";
+  schedule.error
+    ? "error"
+    : !schedule.enabled
+      ? "not scheduled"
+      : schedule.stopped
+        ? "stopped"
+        : "running";
 
 type ScheduleTab = "all" | "enabled" | "disabled";
 const SCHEDULE_TABS: readonly ScheduleTab[] = ["all", "enabled", "disabled"];
@@ -64,8 +76,10 @@ export function compareSchedules(a: ScheduleItem, b: ScheduleItem): number {
   if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
   // Disabled schedules are not due, even if the API retains a historical
   // nextDue value; the table renders the shared empty value for them, so name is their tie-break.
-  const parsedADue = a.enabled && a.nextDue ? Date.parse(a.nextDue) : Number.POSITIVE_INFINITY;
-  const parsedBDue = b.enabled && b.nextDue ? Date.parse(b.nextDue) : Number.POSITIVE_INFINITY;
+  const parsedADue =
+    a.enabled && a.nextDue ? Date.parse(a.nextDue) : Number.POSITIVE_INFINITY;
+  const parsedBDue =
+    b.enabled && b.nextDue ? Date.parse(b.nextDue) : Number.POSITIVE_INFINITY;
   const aDue = Number.isNaN(parsedADue) ? Number.POSITIVE_INFINITY : parsedADue;
   const bDue = Number.isNaN(parsedBDue) ? Number.POSITIVE_INFINITY : parsedBDue;
   if (aDue !== bDue) return aDue - bDue;
@@ -84,10 +98,16 @@ function ScheduleStateBadge({
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium"
-      style={{ color: hue, background: `color-mix(in oklch, ${hue} 12%, transparent)` }}
+      style={{
+        color: hue,
+        background: `color-mix(in oklch, ${hue} 12%, transparent)`,
+      }}
       title={title}
     >
-      <span className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
+      <span
+        className="size-1.5 shrink-0 rounded-full bg-current"
+        aria-hidden="true"
+      />
       {state}
     </span>
   );
@@ -97,16 +117,36 @@ const SCHEDULES_SORT: DisplayConfig<ScheduleItem> = {
   view: "schedules-table-sort",
   groups: [],
   sorts: [
-    { key: "loop", label: "Loop", get: (schedule) => schedule.loop, column: "loop" },
+    {
+      key: "loop",
+      label: "Loop",
+      get: (schedule) => schedule.loop,
+      column: "loop",
+    },
     {
       key: "cadence",
       label: "Cadence",
       get: (schedule) => schedule.cadenceSeconds ?? Number.POSITIVE_INFINITY,
       column: "cadence",
     },
-    { key: "enabled", label: "Enabled", get: (schedule) => Number(schedule.enabled), column: "enabled" },
-    { key: "approval", label: "Approval", get: (schedule) => schedule.approval, column: "approval" },
-    { key: "catchUp", label: "Catch-up", get: (schedule) => schedule.catchUp, column: "catchUp" },
+    {
+      key: "enabled",
+      label: "Enabled",
+      get: (schedule) => Number(schedule.enabled),
+      column: "enabled",
+    },
+    {
+      key: "approval",
+      label: "Approval",
+      get: (schedule) => schedule.approval,
+      column: "approval",
+    },
+    {
+      key: "catchUp",
+      label: "Catch-up",
+      get: (schedule) => schedule.catchUp,
+      column: "catchUp",
+    },
     {
       key: "lastFire",
       label: "Last fire",
@@ -194,30 +234,43 @@ export function Schedules({
     return rows.filter((schedule) => {
       if (tab === "enabled" && !schedule.enabled) return false;
       if (tab === "disabled" && schedule.enabled) return false;
-      return !q || scheduleFilterTokens(schedule).some((value) => value.toLowerCase().includes(q));
+      return (
+        !q ||
+        scheduleFilterTokens(schedule).some((value) =>
+          value.toLowerCase().includes(q),
+        )
+      );
     });
   }, [rows, tab, filter]);
   const [sort, setSort] = useState(() => defaultDisplayState(SCHEDULES_SORT));
   const visible = useMemo(
-    () => sort.sortBy === DEFAULT_ORDER
-      ? [...filtered].sort(compareSchedules)
-      : sortRows(filtered, SCHEDULES_SORT, sort),
+    () =>
+      sort.sortBy === DEFAULT_ORDER
+        ? [...filtered].sort(compareSchedules)
+        : sortRows(filtered, SCHEDULES_SORT, sort),
     [filtered, sort],
   );
   const nextSchedule = useMemo(
-    () => [...rows]
-      .filter((schedule) => schedule.enabled && schedule.nextDue && !Number.isNaN(Date.parse(schedule.nextDue)))
-      .sort(compareSchedules)[0] ?? null,
+    () =>
+      [...rows]
+        .filter(
+          (schedule) =>
+            schedule.enabled &&
+            schedule.nextDue &&
+            !Number.isNaN(Date.parse(schedule.nextDue)),
+        )
+        .sort(compareSchedules)[0] ?? null,
     [rows],
   );
   const nextFireSeconds = nextSchedule?.nextDue
     ? Math.max(0, Math.floor((Date.parse(nextSchedule.nextDue) - now) / 1000))
     : null;
-  const nextFireLabel = nextFireSeconds === null
-    ? "not scheduled"
-    : nextFireSeconds === 0
-      ? "due now"
-      : `in ${Math.floor(nextFireSeconds / 60)}:${String(nextFireSeconds % 60).padStart(2, "0")}`;
+  const nextFireLabel =
+    nextFireSeconds === null
+      ? "not scheduled"
+      : nextFireSeconds === 0
+        ? "due now"
+        : `in ${Math.floor(nextFireSeconds / 60)}:${String(nextFireSeconds % 60).padStart(2, "0")}`;
 
   const selectedLoop = focusScheduleLoop;
   const selectedIndex = useMemo(
@@ -229,20 +282,29 @@ export function Schedules({
   // Find agent corresponding to the selected schedule's eventType
   const selAgent: AgentDef | undefined = useMemo(() => {
     if (!sel) return undefined;
-    return agents.find((a) => a.eventTypes.some((t) => t.type === sel.eventType));
+    return agents.find((a) =>
+      a.eventTypes.some((t) => t.type === sel.eventType),
+    );
   }, [sel, agents]);
 
   // Recent ticks for the selected loop
   const recentTicks: AdmittedEvent[] = useMemo(() => {
     if (!sel) return [];
     return allEvents
-      .filter((e) => e.type === sel.eventType || (e.envelope?.payload as Record<string, unknown> | undefined)?.loop === sel.loop)
+      .filter(
+        (e) =>
+          e.type === sel.eventType ||
+          (e.envelope?.payload as Record<string, unknown> | undefined)?.loop ===
+            sel.loop,
+      )
       .slice(0, 10);
   }, [sel, allEvents]);
 
   const [confirmLoop, setConfirmLoop] = useState<ScheduleItem | null>(null);
   const [prNumbersInput, setPrNumbersInput] = useState("");
-  const [triggerInputError, setTriggerInputError] = useState<string | null>(null);
+  const [triggerInputError, setTriggerInputError] = useState<string | null>(
+    null,
+  );
 
   const triggerMut = useMutation({
     mutationFn: ({ loop, prNumbers }: { loop: string; prNumbers?: number[] }) =>
@@ -255,7 +317,10 @@ export function Schedules({
       queryClient.invalidateQueries({ queryKey: ["status"] });
       setConfirmLoop(null);
       if (outcome.decision === "noop") {
-        notify(`Schedule "${loop}" was not started: ${outcome.reason ?? "previous run in flight"}`, "info");
+        notify(
+          `Schedule "${loop}" was not started: ${outcome.reason ?? "previous run in flight"}`,
+          "info",
+        );
       } else if (outcome.proposalId) {
         notify(`Triggered "${loop}" · proposal ${outcome.proposalId}`, "ok");
         onJumpProposal(outcome.proposalId);
@@ -271,13 +336,17 @@ export function Schedules({
   }, [confirmLoop]);
 
   useEffect(() => {
-    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
+    document
+      .querySelector("tr.row-selected")
+      ?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex, rejumpEpoch]);
 
   useEffect(() => {
     if (!focusScheduleLoop) return;
     setFilter("");
-    const focused = rows.find((schedule) => schedule.loop === focusScheduleLoop);
+    const focused = rows.find(
+      (schedule) => schedule.loop === focusScheduleLoop,
+    );
     // Keep deep-linked selections visible, but preserve an explicit All choice.
     if (focused && tab !== "all" && focused.enabled !== (tab === "enabled")) {
       setTab(focused.enabled ? "enabled" : "disabled");
@@ -298,12 +367,18 @@ export function Schedules({
     }
     const tokens = raw.split(/[\s,]+/);
     if (tokens.some((token) => !/^\d+$/.test(token))) {
-      setTriggerInputError("Enter positive PR numbers separated by commas or spaces.");
+      setTriggerInputError(
+        "Enter positive PR numbers separated by commas or spaces.",
+      );
       return;
     }
     const prNumbers = tokens.map(Number);
-    if (prNumbers.some((number) => !Number.isSafeInteger(number) || number <= 0)) {
-      setTriggerInputError("Enter positive PR numbers separated by commas or spaces.");
+    if (
+      prNumbers.some((number) => !Number.isSafeInteger(number) || number <= 0)
+    ) {
+      setTriggerInputError(
+        "Enter positive PR numbers separated by commas or spaces.",
+      );
       return;
     }
     if (new Set(prNumbers).size !== prNumbers.length) {
@@ -331,7 +406,11 @@ export function Schedules({
         pendingC.current = Date.now();
       },
       l: () => {
-        if (sel && pendingC.current > 0 && Date.now() - pendingC.current < 800) {
+        if (
+          sel &&
+          pendingC.current > 0 &&
+          Date.now() - pendingC.current < 800
+        ) {
           copyLink();
           pendingC.current = 0;
         }
@@ -345,13 +424,24 @@ export function Schedules({
       setContextActions([]);
     } else {
       const copy = [
-        { label: `Copy ${sel.loop}`, hint: "c", run: () => copyText(sel.loop, "schedule loop") },
+        {
+          label: `Copy ${sel.loop}`,
+          hint: "c",
+          run: () => copyText(sel.loop, "schedule loop"),
+        },
         { label: "Copy link to this schedule", hint: "c l", run: copyLink },
       ];
       setContextActions(
         connected === false
           ? copy
-          : [{ label: `Run ${sel.loop} now…`, hint: "r", run: () => setConfirmLoop(sel) }, ...copy],
+          : [
+              {
+                label: `Run ${sel.loop} now…`,
+                hint: "r",
+                run: () => setConfirmLoop(sel),
+              },
+              ...copy,
+            ],
       );
     }
     return () => setContextActions([]);
@@ -368,13 +458,18 @@ export function Schedules({
               surface="registry"
               subject={{ label: "Schedules", plural: true }}
             />
-            <div className="mb-2 flex gap-1" role="tablist" aria-label="Schedule state">
+            <div
+              className="mb-2 flex gap-1"
+              role="tablist"
+              aria-label="Schedule state"
+            >
               {SCHEDULE_TABS.map((scheduleTab) => {
-                const count = scheduleTab === "all"
-                  ? rows.length
-                  : scheduleTab === "enabled"
-                    ? enabledCount
-                    : disabledCount;
+                const count =
+                  scheduleTab === "all"
+                    ? rows.length
+                    : scheduleTab === "enabled"
+                      ? enabledCount
+                      : disabledCount;
                 return (
                   <button
                     key={scheduleTab}
@@ -392,13 +487,19 @@ export function Schedules({
                     }`}
                   >
                     {scheduleTab[0]!.toUpperCase() + scheduleTab.slice(1)}
-                    <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>
+                    <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                      {count}
+                    </span>
                   </button>
                 );
               })}
             </div>
-            <p className="mb-3 text-[11px] text-(--text-faint)" aria-label="Schedule summary">
-              {enabledCount} enabled · {disabledCount} disabled · next fire {nextFireLabel}
+            <p
+              className="mb-3 text-[11px] text-(--text-faint)"
+              aria-label="Schedule summary"
+            >
+              {enabledCount} enabled · {disabledCount} disabled · next fire{" "}
+              {nextFireLabel}
               {nextSchedule && <> ({nextSchedule.loop})</>}
             </p>
             <div className="mb-3">
@@ -417,154 +518,182 @@ export function Schedules({
           role="tabpanel"
           aria-labelledby={`schedule-tab-${tab}`}
         >
-        <table className="w-full border-separate border-spacing-0">
-          <thead>
-            <tr className="text-left text-[11px] text-(--text-faint)">
-              {SCHEDULES_SORT.columns.map((column) => {
-                const field = SCHEDULES_SORT.sorts.find((candidate) => candidate.column === column.key)!;
-                const title =
-                  column.key === "enabled"
-                    ? "Config flag from event-runtime/schedules.json — edit that file (or use the CLI) to enable/disable; there is no toggle in this UI"
-                    : column.key === "state"
-                      ? "Runtime health of the scheduler loop: running, stopped (no ticks), not scheduled (disabled), or error"
-                      : undefined;
+          <table className="w-full border-separate border-spacing-0">
+            <thead>
+              <tr className="text-left text-[11px] text-(--text-faint)">
+                {SCHEDULES_SORT.columns.map((column) => {
+                  const field = SCHEDULES_SORT.sorts.find(
+                    (candidate) => candidate.column === column.key,
+                  )!;
+                  const title =
+                    column.key === "enabled"
+                      ? "Config flag from event-runtime/schedules.json — edit that file (or use the CLI) to enable/disable; there is no toggle in this UI"
+                      : column.key === "state"
+                        ? "Runtime health of the scheduler loop: running, stopped (no ticks), not scheduled (disabled), or error"
+                        : undefined;
+                  return (
+                    <Th
+                      key={column.key}
+                      label={column.label}
+                      title={title}
+                      dir={sort.sortBy === field.key ? sort.sortDir : null}
+                      naturalDir={field.defaultDir ?? "asc"}
+                      onSort={() =>
+                        setSort((state) =>
+                          cycleColumnSort(SCHEDULES_SORT, state, column.key),
+                        )
+                      }
+                    />
+                  );
+                })}
+                <Th label="Action" align="right" />
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((s, idx) => {
+                const isSel = idx === selectedIndex;
+                const isAuto = s.approval === "auto";
                 return (
-                  <Th
-                    key={column.key}
-                    label={column.label}
-                    title={title}
-                    dir={sort.sortBy === field.key ? sort.sortDir : null}
-                    naturalDir={field.defaultDir ?? "asc"}
-                    onSort={() => setSort((state) => cycleColumnSort(SCHEDULES_SORT, state, column.key))}
-                  />
+                  <tr
+                    key={s.loop}
+                    onClick={() => onSelectSchedule(s.loop)}
+                    aria-selected={isSel}
+                    className={`group cursor-pointer border-b border-(--border) text-[13px] hover:bg-(--surface-2) ${
+                      isSel ? "row-selected bg-(--surface-3)" : ""
+                    }`}
+                  >
+                    <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap font-medium text-(--text)">
+                      {s.loop}
+                    </td>
+                    <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
+                      {s.every}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      <ScheduleStateBadge
+                        state={s.enabled ? "enabled" : "disabled"}
+                        hue={s.enabled ? "var(--hue-ok)" : "var(--text-faint)"}
+                        title={
+                          s.enabled
+                            ? "enabled: true in event-runtime/schedules.json — the scheduler will fire this loop on cadence"
+                            : "enabled: false in event-runtime/schedules.json — edit that file (or use the CLI) to re-enable"
+                        }
+                      />
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      <ScheduleStateBadge
+                        state={isAuto ? "auto" : "watched"}
+                        hue={isAuto ? "var(--hue-warn)" : "var(--hue-info)"}
+                        title={
+                          isAuto
+                            ? "approval: auto — executes unattended without operator prompt"
+                            : "approval: watched — requires human approval"
+                        }
+                      />
+                    </td>
+                    <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-[11px] text-(--text-dim)">
+                      {s.catchUp}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-[11px] text-(--text-dim)">
+                      {s.lastSlot ? (
+                        <span title={s.lastSlot}>
+                          {formatRelative(s.lastSlot, now)}
+                        </span>
+                      ) : (
+                        <span className="text-(--text-faint)">never</span>
+                      )}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-[11px] text-(--text-dim)">
+                      {!s.enabled ? (
+                        <span className="text-(--text-faint)">{EMPTY}</span>
+                      ) : s.error ? (
+                        <span className="text-(--hue-err)">{EMPTY}</span>
+                      ) : s.nextDue && s.cadenceSeconds ? (
+                        <Countdown
+                          createdAt={
+                            s.lastSlot ??
+                            new Date(
+                              Date.parse(s.nextDue) - s.cadenceSeconds * 1000,
+                            ).toISOString()
+                          }
+                          ttlSeconds={s.cadenceSeconds}
+                        />
+                      ) : (
+                        EMPTY
+                      )}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      {s.error ? (
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-err)"
+                          style={{
+                            background:
+                              "color-mix(in oklch, var(--hue-err) 12%, transparent)",
+                          }}
+                          title={s.error}
+                        >
+                          error
+                        </span>
+                      ) : !s.enabled ? (
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--text-faint)"
+                          style={{ background: "var(--surface-2)" }}
+                          title="Not scheduled: enabled: false in event-runtime/schedules.json, so the scheduler loop is not running for this schedule"
+                        >
+                          not scheduled
+                        </span>
+                      ) : s.stopped ? (
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-err)"
+                          style={{
+                            background:
+                              "color-mix(in oklch, var(--hue-err) 12%, transparent)",
+                          }}
+                          title={`Stopped: enabled: true but the scheduler loop is not ticking — no ticks for ${s.intervalsLate} intervals. Check the event runtime serve process.`}
+                        >
+                          stopped ({s.intervalsLate} late)
+                        </span>
+                      ) : (
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-ok)"
+                          style={{
+                            background:
+                              "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
+                          }}
+                          title="Running: enabled: true and the scheduler loop is ticking on cadence"
+                        >
+                          running
+                        </span>
+                      )}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-right">
+                      <span className="pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+                        <Button
+                          disabled={connected === false}
+                          onClick={() => setConfirmLoop(s)}
+                        >
+                          Run now…
+                        </Button>
+                      </span>
+                    </td>
+                  </tr>
                 );
               })}
-              <Th label="Action" align="right" />
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((s, idx) => {
-              const isSel = idx === selectedIndex;
-              const isAuto = s.approval === "auto";
-              return (
-                <tr
-                  key={s.loop}
-                  onClick={() => onSelectSchedule(s.loop)}
-                  aria-selected={isSel}
-                  className={`group cursor-pointer border-b border-(--border) text-[13px] hover:bg-(--surface-2) ${
-                    isSel ? "row-selected bg-(--surface-3)" : ""
-                  }`}
-                >
-                  <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap font-medium text-(--text)">
-                    {s.loop}
-                  </td>
-                  <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
-                    {s.every}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                    <ScheduleStateBadge
-                      state={s.enabled ? "enabled" : "disabled"}
-                      hue={s.enabled ? "var(--hue-ok)" : "var(--text-faint)"}
-                      title={s.enabled
-                        ? "enabled: true in event-runtime/schedules.json — the scheduler will fire this loop on cadence"
-                        : "enabled: false in event-runtime/schedules.json — edit that file (or use the CLI) to re-enable"}
-                    />
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                    <ScheduleStateBadge
-                      state={isAuto ? "auto" : "watched"}
-                      hue={isAuto ? "var(--hue-warn)" : "var(--hue-info)"}
-                      title={isAuto
-                        ? "approval: auto — executes unattended without operator prompt"
-                        : "approval: watched — requires human approval"}
-                    />
-                  </td>
-                  <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-[11px] text-(--text-dim)">
-                    {s.catchUp}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-[11px] text-(--text-dim)">
-                    {s.lastSlot ? <span title={s.lastSlot}>{formatRelative(s.lastSlot, now)}</span> : <span className="text-(--text-faint)">never</span>}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-[11px] text-(--text-dim)">
-                    {!s.enabled ? (
-                      <span className="text-(--text-faint)">{EMPTY}</span>
-                    ) : s.error ? (
-                      <span className="text-(--hue-err)">{EMPTY}</span>
-                    ) : s.nextDue && s.cadenceSeconds ? (
-                      <Countdown
-                        createdAt={
-                          s.lastSlot ?? new Date(Date.parse(s.nextDue) - s.cadenceSeconds * 1000).toISOString()
-                        }
-                        ttlSeconds={s.cadenceSeconds}
-                      />
-                    ) : (
-                      EMPTY
-                    )}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                    {s.error ? (
-                      <span
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-err)"
-                        style={{ background: "color-mix(in oklch, var(--hue-err) 12%, transparent)" }}
-                        title={s.error}
-                      >
-                        error
-                      </span>
-                    ) : !s.enabled ? (
-                      <span
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--text-faint)"
-                        style={{ background: "var(--surface-2)" }}
-                        title="Not scheduled: enabled: false in event-runtime/schedules.json, so the scheduler loop is not running for this schedule"
-                      >
-                        not scheduled
-                      </span>
-                    ) : s.stopped ? (
-                      <span
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-err)"
-                        style={{ background: "color-mix(in oklch, var(--hue-err) 12%, transparent)" }}
-                        title={`Stopped: enabled: true but the scheduler loop is not ticking — no ticks for ${s.intervalsLate} intervals. Check the event runtime serve process.`}
-                      >
-                        stopped ({s.intervalsLate} late)
-                      </span>
-                    ) : (
-                      <span
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-(--hue-ok)"
-                        style={{ background: "color-mix(in oklch, var(--hue-ok) 12%, transparent)" }}
-                        title="Running: enabled: true and the scheduler loop is ticking on cadence"
-                      >
-                        running
-                      </span>
-                    )}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-right">
-                    <span className="pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-                      <Button
-                        disabled={connected === false}
-                        onClick={() => setConfirmLoop(s)}
-                      >
-                        Run now…
-                      </Button>
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-            {visible.length === 0 && (
-              <ListEmpty
-                colSpan={9}
-                query={schedulesQ}
-                filtered={rows.length > 0}
-                noun="schedules"
-                empty="No schedules registered (event-runtime/schedules.json)"
-              />
-            )}
-          </tbody>
-        </table>
-        <div className="px-3 py-2 text-[11px] text-(--text-faint)">
-          Enable or disable schedules in{" "}
-          <code className="mono">event-runtime/schedules.json</code> (or via the CLI) — there is no
-          toggle here.
-        </div>
+              {visible.length === 0 && (
+                <ListEmpty
+                  colSpan={9}
+                  query={schedulesQ}
+                  filtered={rows.length > 0}
+                  noun="schedules"
+                  empty="No schedules registered (event-runtime/schedules.json)"
+                />
+              )}
+            </tbody>
+          </table>
+          <div className="px-3 py-2 text-[11px] text-(--text-faint)">
+            Enable or disable schedules in{" "}
+            <code className="mono">event-runtime/schedules.json</code> (or via
+            the CLI) — there is no toggle here.
+          </div>
         </div>
       </ListPane>
 
@@ -581,8 +710,10 @@ export function Schedules({
                   className="rounded border px-1.5 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
                   style={{
                     color: "var(--hue-warn)",
-                    borderColor: "color-mix(in oklch, var(--hue-warn) 40%, var(--border))",
-                    background: "color-mix(in oklch, var(--hue-warn) 12%, transparent)",
+                    borderColor:
+                      "color-mix(in oklch, var(--hue-warn) 40%, var(--border))",
+                    background:
+                      "color-mix(in oklch, var(--hue-warn) 12%, transparent)",
                   }}
                 >
                   auto
@@ -596,7 +727,13 @@ export function Schedules({
               disabled={connected === false}
               onClick={() => setConfirmLoop(sel)}
             >
-              Run now… <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">r</span>
+              Run now…{" "}
+              <span
+                className="mono ml-1 text-(--text-faint)"
+                aria-hidden="true"
+              >
+                r
+              </span>
             </Button>
           }
           utility={<CopyActions id={sel.loop} idLabel="schedule loop" />}
@@ -604,21 +741,18 @@ export function Schedules({
         >
           <div className="space-y-6">
             {sel.stopped && (
-              <div
-                className="rounded-md border border-(--hue-err) bg-[color-mix(in_oklch,var(--hue-err)_8%,var(--surface-1))] p-3 text-[12px] text-(--hue-err)"
-              >
+              <div className="rounded-md border border-(--hue-err) bg-[color-mix(in_oklch,var(--hue-err)_8%,var(--surface-1))] p-3 text-[12px] text-(--hue-err)">
                 <div className="font-semibold">Schedule clock stopped</div>
                 <div className="mt-1 text-(--text-dim)">
-                  This loop is enabled but has been silent for {sel.intervalsLate} intervals (cadence: {sel.every}).
-                  Check that the event runtime serve process is running.
+                  This loop is enabled but has been silent for{" "}
+                  {sel.intervalsLate} intervals (cadence: {sel.every}). Check
+                  that the event runtime serve process is running.
                 </div>
               </div>
             )}
 
             {sel.error && (
-              <div
-                className="rounded-md border border-(--hue-err) bg-[color-mix(in_oklch,var(--hue-err)_8%,var(--surface-1))] p-3 text-[12px] text-(--hue-err)"
-              >
+              <div className="rounded-md border border-(--hue-err) bg-[color-mix(in_oklch,var(--hue-err)_8%,var(--surface-1))] p-3 text-[12px] text-(--hue-err)">
                 <div className="font-semibold">Cadence configuration error</div>
                 <div className="mono mt-1 text-(--text-dim)">{sel.error}</div>
               </div>
@@ -632,7 +766,10 @@ export function Schedules({
                   <span>
                     <span className="mono">{sel.every}</span>
                     {sel.cadenceSeconds && (
-                      <span className="ml-2 text-(--text-faint)" title={`${sel.cadenceSeconds}s`}>
+                      <span
+                        className="ml-2 text-(--text-faint)"
+                        title={`${sel.cadenceSeconds}s`}
+                      >
                         ({formatDuration(sel.cadenceSeconds)})
                       </span>
                     )}
@@ -669,14 +806,23 @@ export function Schedules({
                       auto (unattended execution)
                     </span>
                   ) : (
-                    <span className="text-(--text-dim)">watched (requires human approval)</span>
+                    <span className="text-(--text-dim)">
+                      watched (requires human approval)
+                    </span>
                   )
                 }
               />
-              <KV k="catch-up" v={<span className="mono">{sel.catchUp}</span>} />
+              <KV
+                k="catch-up"
+                v={<span className="mono">{sel.catchUp}</span>}
+              />
               <KV
                 k="singleton"
-                v={sel.singleton ? "true (previous run must finish before next starts)" : "false"}
+                v={
+                  sel.singleton
+                    ? "true (previous run must finish before next starts)"
+                    : "false"
+                }
               />
               <KV
                 k="enabled"
@@ -685,7 +831,8 @@ export function Schedules({
                     <span className="text-(--hue-ok)">true</span>
                   ) : (
                     <span className="text-(--text-faint)">
-                      false (disabled — re-enable in event-runtime/schedules.json or via the CLI)
+                      false (disabled — re-enable in
+                      event-runtime/schedules.json or via the CLI)
                     </span>
                   )
                 }
@@ -698,8 +845,12 @@ export function Schedules({
                 v={
                   sel.lastSlot ? (
                     <span>
-                      <span title={sel.lastSlot}>{formatRelative(sel.lastSlot, now)}</span>{" "}
-                      <span className="mono text-[11px] text-(--text-faint)">({sel.lastSlot})</span>
+                      <span title={sel.lastSlot}>
+                        {formatRelative(sel.lastSlot, now)}
+                      </span>{" "}
+                      <span className="mono text-[11px] text-(--text-faint)">
+                        ({sel.lastSlot})
+                      </span>
                     </span>
                   ) : (
                     <span className="text-(--text-faint)">never fired</span>
@@ -711,7 +862,9 @@ export function Schedules({
                 v={
                   sel.lastCompletedSlot ? (
                     <span>
-                      <span title={sel.lastCompletedSlot}>{formatRelative(sel.lastCompletedSlot, now)}</span>{" "}
+                      <span title={sel.lastCompletedSlot}>
+                        {formatRelative(sel.lastCompletedSlot, now)}
+                      </span>{" "}
                       <span className="mono text-[11px] text-(--text-faint)">
                         ({sel.lastCompletedSlot})
                       </span>
@@ -731,11 +884,15 @@ export function Schedules({
                       <Countdown
                         createdAt={
                           sel.lastSlot ??
-                          new Date(Date.parse(sel.nextDue) - sel.cadenceSeconds * 1000).toISOString()
+                          new Date(
+                            Date.parse(sel.nextDue) - sel.cadenceSeconds * 1000,
+                          ).toISOString()
                         }
                         ttlSeconds={sel.cadenceSeconds}
                       />{" "}
-                      <span className="mono text-[11px] text-(--text-faint)">({sel.nextDue})</span>
+                      <span className="mono text-[11px] text-(--text-faint)">
+                        ({sel.nextDue})
+                      </span>
                     </span>
                   ) : (
                     EMPTY
@@ -752,8 +909,11 @@ export function Schedules({
               ) : (
                 <div className="space-y-2">
                   {recentTicks.map((e) => {
-                    const payload = (e.envelope?.payload as Record<string, unknown> | undefined) ?? {};
-                    const isAdhoc = e.source === "operator" || payload.adhoc === true;
+                    const payload =
+                      (e.envelope?.payload as
+                        Record<string, unknown> | undefined) ?? {};
+                    const isAdhoc =
+                      e.source === "operator" || payload.adhoc === true;
                     return (
                       <div
                         key={`${e.source}:${e.eventId}`}
@@ -775,28 +935,35 @@ export function Schedules({
                             )}
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-(--text-dim)">
-                            <span title={e.occurredAt}>{formatRelative(e.occurredAt, now)}</span>
+                            <span title={e.occurredAt}>
+                              {formatRelative(e.occurredAt, now)}
+                            </span>
                             <span>·</span>
                             <span>source: {e.source}</span>
-                            {typeof payload.skippedSlots === "number" && payload.skippedSlots > 0 && (
-                              <>
-                                <span>·</span>
-                                <span className="text-(--hue-warn)">
-                                  skipped: {payload.skippedSlots}
-                                </span>
-                              </>
-                            )}
+                            {typeof payload.skippedSlots === "number" &&
+                              payload.skippedSlots > 0 && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-(--hue-warn)">
+                                    skipped: {payload.skippedSlots}
+                                  </span>
+                                </>
+                              )}
                           </div>
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                           <span
                             className="mono text-[11px]"
-                            style={{ color: EVENT_STATUS_HUES[e.status] ?? "inherit" }}
+                            style={{
+                              color: EVENT_STATUS_HUES[e.status] ?? "inherit",
+                            }}
                           >
                             {e.status}
                           </span>
                           {e.proposalId && (
-                            <JumpLink onClick={() => onJumpProposal(e.proposalId!)}>
+                            <JumpLink
+                              onClick={() => onJumpProposal(e.proposalId!)}
+                            >
                               proposal
                             </JumpLink>
                           )}
@@ -825,13 +992,16 @@ export function Schedules({
         >
           <div className="space-y-4 text-[13px]">
             <p className="text-(--text-dim)">
-              Triggering an ad-hoc run admits a new event immediately with source{" "}
+              Triggering an ad-hoc run admits a new event immediately with
+              source{" "}
               <code className="mono rounded bg-(--surface-2) px-1 py-0.5 text-(--text)">
                 operator
               </code>
-              . It {confirmLoop.approval === "watched"
+              . It{" "}
+              {confirmLoop.approval === "watched"
                 ? "creates an open proposal for review"
-                : "uses the schedule’s auto-approval policy"} and does not alter the schedule&apos;s normal slot timer.
+                : "uses the schedule’s auto-approval policy"}{" "}
+              and does not alter the schedule&apos;s normal slot timer.
             </p>
 
             {confirmLoop.eventType === "factory.merge.requested" && (
@@ -857,8 +1027,13 @@ export function Schedules({
                   placeholder="411, 426"
                   className="mono w-full rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1.5 text-[13px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--accent)"
                 />
-                <p id="schedule-pr-numbers-help" className="text-[11px] text-(--text-faint)">
-                  Enter unique positive PR numbers separated by commas or spaces. Leave blank to review all open PRs in {confirmLoop.repo ?? "the configured repository"}.
+                <p
+                  id="schedule-pr-numbers-help"
+                  className="text-[11px] text-(--text-faint)"
+                >
+                  Enter unique positive PR numbers separated by commas or
+                  spaces. Leave blank to review all open PRs in{" "}
+                  {confirmLoop.repo ?? "the configured repository"}.
                 </p>
                 {triggerInputError && (
                   <div
@@ -874,18 +1049,33 @@ export function Schedules({
 
             {confirmLoop.eventType === "factory.merge.requested" && (
               <div className="rounded-md border border-(--hue-warn) bg-[color-mix(in_oklch,var(--hue-warn)_10%,var(--surface-1))] p-3 text-[12px]">
-                <div className="font-semibold text-(--hue-warn)">Autonomous merge automation</div>
+                <div className="font-semibold text-(--hue-warn)">
+                  Autonomous merge automation
+                </div>
                 <p className="mt-1 text-(--text-dim)">
-                  The scanner is read-only, but a MERGE or FIX recommendation can launch mutating downstream automation without another confirmation.
-                  {confirmLoop.approval === "auto" && " This schedule is auto-approved, so the scan starts unattended."}
+                  The scanner is read-only, but a MERGE or FIX recommendation
+                  can launch mutating downstream automation without another
+                  confirmation.
+                  {confirmLoop.approval === "auto" &&
+                    " This schedule is auto-approved, so the scan starts unattended."}
                 </p>
               </div>
             )}
 
             {confirmLoop && (
               <div className="rounded-md border border-(--border) bg-(--surface-2) p-3 space-y-2">
-                <KV k="loop" v={<span className="mono font-semibold">{confirmLoop.loop}</span>} />
-                <KV k="event type" v={<span className="mono">{confirmLoop.eventType}</span>} />
+                <KV
+                  k="loop"
+                  v={
+                    <span className="mono font-semibold">
+                      {confirmLoop.loop}
+                    </span>
+                  }
+                />
+                <KV
+                  k="event type"
+                  v={<span className="mono">{confirmLoop.eventType}</span>}
+                />
                 {(() => {
                   const agent = agents.find((a) =>
                     a.eventTypes.some((t) => t.type === confirmLoop.eventType),
@@ -903,7 +1093,9 @@ export function Schedules({
                                 (mutating)
                               </span>
                             ) : (
-                              <span className="ml-2 text-(--text-faint)">(read-only)</span>
+                              <span className="ml-2 text-(--text-faint)">
+                                (read-only)
+                              </span>
                             )}
                           </span>
                         }
@@ -923,9 +1115,11 @@ export function Schedules({
                 })()}
                 {!confirmLoop.enabled && (
                   <div className="mt-2 rounded bg-(--surface-3) p-2 text-[12px] text-(--hue-warn)">
-                    Note: This schedule is disabled (<code className="mono">enabled: false</code> in{" "}
-                    <code className="mono">event-runtime/schedules.json</code>), so it is not
-                    scheduled to run on its own. Triggering ad-hoc will evaluate the loop once.
+                    Note: This schedule is disabled (
+                    <code className="mono">enabled: false</code> in{" "}
+                    <code className="mono">event-runtime/schedules.json</code>),
+                    so it is not scheduled to run on its own. Triggering ad-hoc
+                    will evaluate the loop once.
                   </div>
                 )}
               </div>

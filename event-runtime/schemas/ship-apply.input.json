@@ -1,7 +1,16 @@
 {
   "title": "ship-apply input — the approved, double-SHA-pinned release plan whose watched approval IS the human deploy-branch decision",
   "type": "object",
-  "required": ["repo", "github", "base", "deployBranch", "headSha", "deployHeadSha", "changelog", "plan"],
+  "required": [
+    "repo",
+    "github",
+    "base",
+    "deployBranch",
+    "headSha",
+    "deployHeadSha",
+    "changelog",
+    "plan"
+  ],
   "additionalProperties": false,
   "properties": {
     "repo": {

@@ -15,7 +15,13 @@
  */
 
 /** Closed kind set (factory.trace/v1). Anything else is dropped, counted. */
-export const TRACE_KINDS = ["assistant_text", "tool_use", "tool_result", "usage", "lifecycle"];
+export const TRACE_KINDS = [
+  "assistant_text",
+  "tool_use",
+  "tool_result",
+  "usage",
+  "lifecycle",
+];
 
 /** Hard per-attempt row cap (§14 size bound): after this, one marker row. */
 export const TRACE_EVENTS_CAP = 2000;
@@ -63,7 +69,10 @@ export function traceRecorder(db, { runId, attempt, now = () => Date.now() }) {
         capped = true;
         dropped += 1;
         insert.run(
-          runId, attempt, new Date(now()).toISOString(), "lifecycle",
+          runId,
+          attempt,
+          new Date(now()).toISOString(),
+          "lifecycle",
           JSON.stringify({ note: "trace_truncated", dropped }),
         );
         return;
@@ -99,9 +108,10 @@ export function traceRecorder(db, { runId, attempt, now = () => Date.now() }) {
 export function traceOf(db, runId, { since = 0, limit = 100 } = {}) {
   const from = Number.isFinite(since) ? since : 0;
   const cap = Math.min(Math.max(Number.isFinite(limit) ? limit : 100, 0), 500);
-  const head = db
-    .query(`SELECT MAX(seq) AS m FROM attempt_trace WHERE run_id = ?`)
-    .get(runId).m ?? 0;
+  const head =
+    db
+      .query(`SELECT MAX(seq) AS m FROM attempt_trace WHERE run_id = ?`)
+      .get(runId).m ?? 0;
   const rows = db
     .query(
       `SELECT seq, attempt, ts, kind, payload_json FROM attempt_trace

@@ -19,7 +19,8 @@ export const APPROVAL_MODES = ["watched", "auto"];
 /** "60m" / "30s" / "2h" / "1d" → seconds. Intervals only: no cron, no timezone. */
 export function parseCadence(every) {
   const match = /^(\d+)([smhd])$/.exec(String(every ?? "").trim());
-  if (!match) throw new Error(`unparseable cadence "${every}" — use 30s, 15m, 2h or 1d`);
+  if (!match)
+    throw new Error(`unparseable cadence "${every}" — use 30s, 15m, 2h or 1d`);
   const value = Number(match[1]);
   if (value <= 0) throw new Error(`cadence "${every}" must be positive`);
   return value * { s: 1, m: 60, h: 3600, d: 86400 }[match[2]];
@@ -52,13 +53,22 @@ export const DEFAULT_MAX_CATCH_UP = 24;
  *
  * @returns {{ slots: string[], skipped: number }}
  */
-export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none", maxCatchUp = DEFAULT_MAX_CATCH_UP }) {
+export function dueSlots({
+  lastSlot,
+  nowMs,
+  cadenceSeconds,
+  catchUp = "none",
+  maxCatchUp = DEFAULT_MAX_CATCH_UP,
+}) {
   const current = slotFor(nowMs, cadenceSeconds);
   if (!lastSlot) return { slots: [current], skipped: 0 };
-  if (Date.parse(lastSlot) >= Date.parse(current)) return { slots: [], skipped: 0 };
+  if (Date.parse(lastSlot) >= Date.parse(current))
+    return { slots: [], skipped: 0 };
 
   const period = cadenceSeconds * 1000;
-  const totalMissed = Math.round((Date.parse(current) - Date.parse(lastSlot)) / period);
+  const totalMissed = Math.round(
+    (Date.parse(current) - Date.parse(lastSlot)) / period,
+  );
   if (totalMissed <= 0) return { slots: [], skipped: 0 };
 
   if (catchUp === "all") {
@@ -80,8 +90,17 @@ export function dueSlots({ lastSlot, nowMs, cadenceSeconds, catchUp = "none", ma
 }
 
 /** The newest slot already admitted for a loop at or before now, or null if it never fired (OPS-437, WM-421). */
-export function lastAdmittedSlot(db, loop, { now = Date.now(), eventType } = {}) {
-  const nowMs = typeof now === "number" ? now : (typeof now === "string" ? Date.parse(now) : Date.now());
+export function lastAdmittedSlot(
+  db,
+  loop,
+  { now = Date.now(), eventType } = {},
+) {
+  const nowMs =
+    typeof now === "number"
+      ? now
+      : typeof now === "string"
+        ? Date.parse(now)
+        : Date.now();
   const maxIso = new Date(nowMs).toISOString();
   const minEventId = `clock:${loop}:`;
   const maxEventId = tickEventId(loop, maxIso);
@@ -93,7 +112,15 @@ export function lastAdmittedSlot(db, loop, { now = Date.now(), eventType } = {})
          AND (subject = ? OR type = ? OR (? IS NOT NULL AND type = ?))
        ORDER BY event_id DESC LIMIT 1`,
     )
-    .get(SCHEDULE_SOURCE, minEventId, maxEventId, loop, `clock.tick.${loop}`, eventType ?? null, eventType ?? "");
+    .get(
+      SCHEDULE_SOURCE,
+      minEventId,
+      maxEventId,
+      loop,
+      `clock.tick.${loop}`,
+      eventType ?? null,
+      eventType ?? "",
+    );
   // eventId is clock:<loop>:<ISO slot>; ISO sorts lexicographically, so the
   // newest row is the newest slot without parsing every payload.
   return row ? row.event_id.slice(`clock:${loop}:`.length) : null;
@@ -114,7 +141,10 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
     try {
       const cadenceSeconds = parseCadence(schedule.every);
       const { slots, skipped } = dueSlots({
-        lastSlot: lastAdmittedSlot(db, loop, { now, eventType: schedule.eventType }),
+        lastSlot: lastAdmittedSlot(db, loop, {
+          now,
+          eventType: schedule.eventType,
+        }),
         nowMs: now,
         cadenceSeconds,
         catchUp: schedule.catchUp,
@@ -138,12 +168,19 @@ export function emitDueTicks(db, registry, { now = Date.now() } = {}) {
             // A schedule's static payload (e.g. {repo}) rides along under the
             // tick fields, which always win — a schedule must not be able to
             // forge which slot it claims to be.
-            payload: { ...(schedule.payload ?? {}), loop, slot, cadenceSeconds, skippedSlots: skipped },
+            payload: {
+              ...(schedule.payload ?? {}),
+              loop,
+              slot,
+              cadenceSeconds,
+              skippedSlots: skipped,
+            },
           },
           { now },
         );
         if (outcome.admitted) emitted.push({ loop, slot, skipped });
-        else if (!outcome.duplicate) errors.push(`${loop}@${slot}: ${outcome.errors.join("; ")}`);
+        else if (!outcome.duplicate)
+          errors.push(`${loop}@${slot}: ${outcome.errors.join("; ")}`);
       }
     } catch (err) {
       errors.push(`${loop}: ${err.message}`);
@@ -202,7 +239,10 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
     } catch (err) {
       error = err.message;
     }
-    const lastSlot = lastAdmittedSlot(db, loop, { now, eventType: schedule.eventType });
+    const lastSlot = lastAdmittedSlot(db, loop, {
+      now,
+      eventType: schedule.eventType,
+    });
     const lastCompleted = lastCompletedSlot(db, loop);
     const nextDue =
       cadenceSeconds && lastSlot
@@ -214,7 +254,8 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
       cadenceSeconds && lastSlot
         ? Math.floor((now - Date.parse(lastSlot)) / (cadenceSeconds * 1000))
         : null;
-    const neverCompleted = Boolean(schedule.enabled) && lastSlot !== null && lastCompleted === null;
+    const neverCompleted =
+      Boolean(schedule.enabled) && lastSlot !== null && lastCompleted === null;
     return {
       loop,
       every: schedule.every,
@@ -231,7 +272,10 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
       intervalsLate,
       // Enabled, has fired before, and more than two intervals have passed:
       // the clock is not turning (serve down, machine asleep, bad cadence).
-      stopped: Boolean(schedule.enabled) && intervalsLate !== null && intervalsLate > 2,
+      stopped:
+        Boolean(schedule.enabled) &&
+        intervalsLate !== null &&
+        intervalsLate > 2,
       error,
     };
   });
@@ -247,7 +291,12 @@ export function scheduleView(db, registry, { now = Date.now() } = {}) {
  * never be indistinguishable from one a human approved — that distinction is
  * the audit trail.
  */
-export function autoApproveScheduled(db, registry, approve, { now = Date.now(), policyVersion } = {}) {
+export function autoApproveScheduled(
+  db,
+  registry,
+  approve,
+  { now = Date.now(), policyVersion } = {},
+) {
   const approved = [];
   const errors = [];
   const autoLoops = new Set(
@@ -268,8 +317,13 @@ export function autoApproveScheduled(db, registry, approve, { now = Date.now(), 
     const loop = JSON.parse(row.envelope_json).payload?.loop;
     if (!autoLoops.has(loop)) continue;
     try {
-      const outcome = approve(db, registry, row.id, { actor: SCHEDULE_SOURCE, now, policyVersion });
-      if (outcome.approved) approved.push({ loop, proposalId: row.id, runId: outcome.runId });
+      const outcome = approve(db, registry, row.id, {
+        actor: SCHEDULE_SOURCE,
+        now,
+        policyVersion,
+      });
+      if (outcome.approved)
+        approved.push({ loop, proposalId: row.id, runId: outcome.runId });
     } catch (err) {
       errors.push(`${loop}: ${err.message}`);
     }
@@ -286,7 +340,11 @@ export const DEFAULT_PROPOSALS_PILING_THRESHOLD = 3;
  *
  * @returns {Array<{ loop: string, count: number, threshold: number }>}
  */
-export function proposalsPilingUp(db, registry, { threshold = DEFAULT_PROPOSALS_PILING_THRESHOLD } = {}) {
+export function proposalsPilingUp(
+  db,
+  registry,
+  { threshold = DEFAULT_PROPOSALS_PILING_THRESHOLD } = {},
+) {
   const rows = db
     .query(
       `SELECT e.subject, e.envelope_json
@@ -325,4 +383,3 @@ export function proposalsPilingUp(db, registry, { threshold = DEFAULT_PROPOSALS_
   piling.sort((a, b) => a.loop.localeCompare(b.loop));
   return piling;
 }
-

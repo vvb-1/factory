@@ -82,9 +82,16 @@ beforeEach(() => {
     }
     if (url.includes("/api/repos")) return jsonResponse({ repos: [] });
     if (url.includes("/api/runs?ticket=")) {
-      const ticket = new URL(url, "http://localhost").searchParams.get("ticket") ?? "WM-0";
+      const ticket =
+        new URL(url, "http://localhost").searchParams.get("ticket") ?? "WM-0";
       return jsonResponse({
-        ticket: { id: ticket, title: null, state: null, createdAt: null, url: `https://linear.app/watt-mind/issue/${ticket}` },
+        ticket: {
+          id: ticket,
+          title: null,
+          state: null,
+          createdAt: null,
+          url: `https://linear.app/watt-mind/issue/${ticket}`,
+        },
         activity: false,
         events: [],
         proposals: [],
@@ -180,9 +187,9 @@ describe("bottom status bar", () => {
     const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
 
     await waitFor(() => {
-      expect(utils.sidebar.getByRole("button", { name: "Workers" }).textContent).toContain(
-        "1stale",
-      );
+      expect(
+        utils.sidebar.getByRole("button", { name: "Workers" }).textContent,
+      ).toContain("1stale");
       expect(statusBar.textContent).toContain("1 stale worker");
     });
     expect(statusBar.textContent).not.toContain("no workers");
@@ -357,7 +364,9 @@ describe("context strip fast jump chords (WM-235)", () => {
       fireEvent.keyDown(document.body, { key: "k" });
     });
     expect(window.location.hash).toBe("#/tickets");
-    const ticketInput = await utils.findByRole("textbox", { name: "Ticket id" });
+    const ticketInput = await utils.findByRole("textbox", {
+      name: "Ticket id",
+    });
     expect(document.activeElement === ticketInput).toBe(true);
   });
 
@@ -423,7 +432,9 @@ describe("ticket journey navigation (WM-595)", () => {
     const input = utils.getByPlaceholderText("Type a command…");
     fireEvent.input(input, { target: { value: "WM-595" } });
     // Two items name the ticket (WM-594 adds "Why isn't WM-595 running?"); both open the journey.
-    const [command, why] = await utils.findAllByText("WM-595", { selector: "span.mono" });
+    const [command, why] = await utils.findAllByText("WM-595", {
+      selector: "span.mono",
+    });
     expect(why.closest("[cmdk-item]")!.textContent).toContain("Why isn't");
     fireEvent.click(command.closest("[cmdk-item]")!);
     expect(window.location.hash).toBe("#/tickets/WM-595");
@@ -448,7 +459,9 @@ describe("view navigation landmark focus and announcement (WM-325, WM-542)", () 
   });
 
   test("theme suppresses the landmark ring without removing interactive focus rings", async () => {
-    const themeCss = await Bun.file(new URL("./theme.css", import.meta.url)).text();
+    const themeCss = await Bun.file(
+      new URL("./theme.css", import.meta.url),
+    ).text();
 
     expect(themeCss).toMatch(
       /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\);[^}]*\}/s,
@@ -458,4 +471,3 @@ describe("view navigation landmark focus and announcement (WM-325, WM-542)", () 
     );
   });
 });
-

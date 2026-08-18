@@ -48,11 +48,11 @@ comment, or notify.
    reads before approving.
 6. **Plan — the closed set, in order.**
 
-   | action | effect downstream (ship-apply) |
-   | :--- | :--- |
-   | `open_rc_pr` | probe base head still equals `headSha`, then `gh pr create` base=`deploy_branch` head=`base` (reuses an existing open release PR) |
+   | action        | effect downstream (ship-apply)                                                                                                                |
+   | :------------ | :-------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `open_rc_pr`  | probe base head still equals `headSha`, then `gh pr create` base=`deploy_branch` head=`base` (reuses an existing open release PR)             |
    | `merge_rc_pr` | probe deploy head still equals `deployHeadSha` and the PR head equals `headSha`, wait for the PR's checks, then merge with a **merge commit** |
-   | `smoke_check` | poll the deployment's revision endpoint until it serves the deployed branch's tip; red pushes `SMOKE RED` and fails |
+   | `smoke_check` | poll the deployment's revision endpoint until it serves the deployed branch's tip; red pushes `SMOKE RED` and fails                           |
 
    `open_rc_pr` carries `title` — `release: <base> → <deploy_branch> (<YYYY-MM-DD>)`
    — and `body`: the changelog, with each Linear ticket ID on its own line so
@@ -81,12 +81,26 @@ comment, or notify.
     "headSha": "<40-hex base tip>",
     "deployHeadSha": "<40-hex deploy tip>",
     "changelog": [
-      { "sha": "<40-hex>", "subject": "fix(app): guard null session (CLNT-123)", "ticket": "CLNT-123" }
+      {
+        "sha": "<40-hex>",
+        "subject": "fix(app): guard null session (CLNT-123)",
+        "ticket": "CLNT-123"
+      }
     ],
     "plan": [
-      { "action": "open_rc_pr", "title": "release: develop → master (2026-08-14)", "body": "..." },
+      {
+        "action": "open_rc_pr",
+        "title": "release: develop → master (2026-08-14)",
+        "body": "..."
+      },
       { "action": "merge_rc_pr" },
-      { "action": "smoke_check", "url": "https://bj29.projects.watt-mind.com", "smokeBranch": "master", "revisionField": "", "smokeDeadlineSeconds": 600 }
+      {
+        "action": "smoke_check",
+        "url": "https://bj29.projects.watt-mind.com",
+        "smokeBranch": "master",
+        "revisionField": "",
+        "smokeDeadlineSeconds": 600
+      }
     ],
     "summary": "one line the human reads before taking the deploy decision"
   },

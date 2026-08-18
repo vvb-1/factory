@@ -36,7 +36,10 @@ Something is broken.
 ## Verification Command
 
     npm test`;
-  expectEqual(parseOwnedPaths(desc), ["app/services/api.ts", "app/services/__tests__/*"]);
+  expectEqual(parseOwnedPaths(desc), [
+    "app/services/api.ts",
+    "app/services/__tests__/*",
+  ]);
 });
 
 test("missing section yields no paths (caller decides what that means)", () => {
@@ -45,7 +48,9 @@ test("missing section yields no paths (caller decides what that means)", () => {
 
 test("effectiveOwnedPaths turns unparseable into the maximal glob, not a skip", () => {
   expectEqual(effectiveOwnedPaths("## Problem\n\nno paths here"), ["**"]);
-  expectEqual(effectiveOwnedPaths("## Owned Paths\n\n- `app/api.ts`"), ["app/api.ts"]);
+  expectEqual(effectiveOwnedPaths("## Owned Paths\n\n- `app/api.ts`"), [
+    "app/api.ts",
+  ]);
 });
 
 test("identical and nested globs overlap", () => {
@@ -74,9 +79,16 @@ test("extensionless concrete files (Dockerfile, Makefile) match themselves", () 
 
 test("the case keyword matching gets wrong", () => {
   // Same vocabulary, unrelated files: must NOT collide.
-  expectTrue(!pathsCollide(["app/ui/LoginButton.tsx"], ["server/auth/middleware.ts"]));
+  expectTrue(
+    !pathsCollide(["app/ui/LoginButton.tsx"], ["server/auth/middleware.ts"]),
+  );
   // Different vocabulary, same files: MUST collide.
-  expectTrue(pathsCollide(["app/pages/onboarding/**"], ["app/pages/onboarding/step2.tsx"]));
+  expectTrue(
+    pathsCollide(
+      ["app/pages/onboarding/**"],
+      ["app/pages/onboarding/step2.tsx"],
+    ),
+  );
 });
 
 test("CW-363 and CLNT-609 are concurrent-safe (different repos, same globs)", () => {
@@ -91,8 +103,8 @@ test("nextDispatchable skips collisions but still picks up unparseable Owned Pat
   const inFlight = [{ id: "A", ownedPaths: ["app/services/**"] }];
   const candidates = [
     { id: "B", ownedPaths: ["app/services/api.ts"] }, // collides
-    { id: "C", ownedPaths: [] },                       // unparseable, but nothing else queued ahead of it collides
-    { id: "D", ownedPaths: ["docs/**"] },              // free
+    { id: "C", ownedPaths: [] }, // unparseable, but nothing else queued ahead of it collides
+    { id: "D", ownedPaths: ["docs/**"] }, // free
   ];
   // C is treated as owning everything, so it collides with A (in flight) too — D is next in queue order and free.
   expectEqual(nextDispatchable(candidates, inFlight)?.id, "D");
@@ -151,12 +163,14 @@ Everything else is off limits.`;
 });
 
 test("indented code blocks work too", () => {
-  const desc = "## Owned Paths\n\n    src/main.ts\n    src/**/*.test.ts\n\n## Next";
+  const desc =
+    "## Owned Paths\n\n    src/main.ts\n    src/**/*.test.ts\n\n## Next";
   expectEqual(parseOwnedPaths(desc), ["src/main.ts", "src/**/*.test.ts"]);
 });
 
 test("a trailing change-kind annotation doesn't sink the path (CLNT-765/768/764 shape)", () => {
-  const desc = "## Owned Paths\n\n* `src/analytics/kpis/avgBasePriceByProduct.ts` (new)\n* `src/analytics/kpis/existing.ts` (modified)\n";
+  const desc =
+    "## Owned Paths\n\n* `src/analytics/kpis/avgBasePriceByProduct.ts` (new)\n* `src/analytics/kpis/existing.ts` (modified)\n";
   expectEqual(parseOwnedPaths(desc), [
     "src/analytics/kpis/avgBasePriceByProduct.ts",
     "src/analytics/kpis/existing.ts",
@@ -167,31 +181,37 @@ test("owned path closure flags missing required direct outputs", () => {
   const policy = {
     direct: [{ source: "shared/**", requires: ["dist/**", "plugins/core/**"] }],
   };
-  expectEqual(ownedPathsClosureGaps({
-    ownedPaths: ["shared/**"],
-    ownedPathsPolicy: policy,
-  }), [
-    {
-      rule: "direct",
-      requiredPath: "dist/**",
-      requiredBy: "shared/**",
-    },
-    {
-      rule: "direct",
-      requiredPath: "plugins/core/**",
-      requiredBy: "shared/**",
-    },
-  ]);
+  expectEqual(
+    ownedPathsClosureGaps({
+      ownedPaths: ["shared/**"],
+      ownedPathsPolicy: policy,
+    }),
+    [
+      {
+        rule: "direct",
+        requiredPath: "dist/**",
+        requiredBy: "shared/**",
+      },
+      {
+        rule: "direct",
+        requiredPath: "plugins/core/**",
+        requiredBy: "shared/**",
+      },
+    ],
+  );
 });
 
 test("owned path closure passes when required paths are also owned", () => {
   const policy = {
     direct: [{ source: "shared/**", requires: ["dist/**", "plugins/core/**"] }],
   };
-  expectEqual(ownedPathsClosureGaps({
-    ownedPaths: ["shared/**", "dist/**", "plugins/core/**"],
-    ownedPathsPolicy: policy,
-  }), []);
+  expectEqual(
+    ownedPathsClosureGaps({
+      ownedPaths: ["shared/**", "dist/**", "plugins/core/**"],
+      ownedPathsPolicy: policy,
+    }),
+    [],
+  );
 });
 
 test("pin manifests require owning generated output manifests", () => {
@@ -202,7 +222,9 @@ test("pin manifests require owning generated output manifests", () => {
       path.join(repo, "event-runtime/agents/triage-scan.json"),
       `${JSON.stringify({ pins: { "event-runtime/schemas/triage-scan.output.json": "factory" } })}\n`,
     );
-    const requirements = readPinManifestRequirements(repo, ["event-runtime/agents/*.json"]);
+    const requirements = readPinManifestRequirements(repo, [
+      "event-runtime/agents/*.json",
+    ]);
     expectEqual(requirements, [
       {
         manifestPath: "event-runtime/agents/triage-scan.json",
@@ -213,7 +235,10 @@ test("pin manifests require owning generated output manifests", () => {
     expectEqual(
       ownedPathsClosureGaps({
         ownedPaths: ["event-runtime/schemas/triage-scan.output.json"],
-        ownedPathsPolicy: { direct: [], pinManifests: ["event-runtime/agents/*.json"] },
+        ownedPathsPolicy: {
+          direct: [],
+          pinManifests: ["event-runtime/agents/*.json"],
+        },
         pinManifestRequirements: requirements,
       }),
       [
@@ -279,7 +304,10 @@ test("supports level 4 numbered headers (#### 4. Owned Paths)", () => {
 // "textual overlap a rebase resolves" and "the same file, or everything".
 test("pathOverlaps returns every overlapping pair, in order", () => {
   expectEqual(
-    pathOverlaps(["src/api/**", "docs/a.md"], ["src/api/routes.ts", "docs/a.md", "lib/x.mjs"]),
+    pathOverlaps(
+      ["src/api/**", "docs/a.md"],
+      ["src/api/routes.ts", "docs/a.md", "lib/x.mjs"],
+    ),
     [
       { a: "src/api/**", b: "src/api/routes.ts" },
       { a: "docs/a.md", b: "docs/a.md" },
@@ -292,7 +320,10 @@ test("hardPathConflicts: ** on either side — nothing else", () => {
   // Containment, shared-prefix, same-glob, and even the SAME concrete file are
   // NOT hard: same file is not same lines, and a rebase resolves it.
   expectEqual(hardPathConflicts(["src/api/**"], ["src/api/routes.ts"]), []);
-  expectEqual(hardPathConflicts(["src/**/*.test.mjs"], ["src/lib/registry.test.mjs"]), []);
+  expectEqual(
+    hardPathConflicts(["src/**/*.test.mjs"], ["src/lib/registry.test.mjs"]),
+    [],
+  );
   expectEqual(hardPathConflicts(["views/*.tsx"], ["views/*.tsx"]), []);
   expectEqual(hardPathConflicts(["docs/a.md"], ["docs/a.md"]), []);
   // `**` on either side is hard against anything it reaches.

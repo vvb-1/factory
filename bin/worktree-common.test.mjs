@@ -1,4 +1,11 @@
-import { chmodSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, renameSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  renameSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, expect, test } from "bun:test";
@@ -12,7 +19,10 @@ const COMMON = path.resolve(import.meta.dir, "worktree-common.sh");
 // fixtures bind is free, and pass the band to the scripts via
 // FACTORY_PORT_BASE / FACTORY_PORT_SPAN. No absolute ports below.
 const PORT_SPAN = 200;
-const FIXTURE_OFFSETS = [352, 353, 360, 361, 362, 363, 364, 365, 366, 367, 372, 373, 374, 375, 396, 397];
+const FIXTURE_OFFSETS = [
+  352, 353, 360, 361, 362, 363, 364, 365, 366, 367, 372, 373, 374, 375, 396,
+  397,
+];
 
 function offsetsBindable(base) {
   for (const off of FIXTURE_OFFSETS) {
@@ -40,7 +50,9 @@ function pickPortBase() {
 }
 
 const PORT_BASE = pickPortBase();
-const PORT_RESERVATION_ROOT = mkdtempSync(path.join(tmpdir(), "factory-port-reservations-"));
+const PORT_RESERVATION_ROOT = mkdtempSync(
+  path.join(tmpdir(), "factory-port-reservations-"),
+);
 const P = (offset) => PORT_BASE + offset;
 const BAND_ENV = {
   FACTORY_PORT_BASE: String(PORT_BASE),
@@ -101,7 +113,9 @@ function expectPortBindable(port) {
 function mockLsofDir() {
   const dir = mkdtempSync(path.join(tmpdir(), "wm-473-lsof-"));
   const executable = path.join(dir, "lsof");
-  writeFileSync(executable, `#!/usr/bin/env bash
+  writeFileSync(
+    executable,
+    `#!/usr/bin/env bash
 pid=""
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == "-p" ]]; then pid="$2"; shift 2; else shift; fi
@@ -109,15 +123,15 @@ done
 pid="\${MOCK_LSOF_PID:-$pid}"
 printf '%s\\n' 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME'
 printf 'mock %s user 1u IPv4 0 0t0 TCP 127.0.0.1:%s (LISTEN)\\n' "$pid" "$MOCK_LSOF_PORT"
-`);
+`,
+  );
   chmodSync(executable, 0o755);
   return dir;
 }
 
-
 test("ticket_api_port hashes the full id so N and N+200 do not share a slot", () => {
-  const a = sh('ticket_api_port OPS-201');
-  const b = sh('ticket_api_port OPS-401');
+  const a = sh("ticket_api_port OPS-201");
+  const b = sh("ticket_api_port OPS-401");
   expect(a.status).toBe(0);
   expect(b.status).toBe(0);
   expect(a.stdout).not.toBe(b.stdout);
@@ -130,8 +144,8 @@ test("ticket_api_port hashes the full id so N and N+200 do not share a slot", ()
 });
 
 test("ticket_api_port treats OPS-123 and OPS-123-scratch as different tickets", () => {
-  const a = sh('ticket_api_port OPS-123');
-  const b = sh('ticket_api_port OPS-123-scratch');
+  const a = sh("ticket_api_port OPS-123");
+  const b = sh("ticket_api_port OPS-123-scratch");
   expect(a.status).toBe(0);
   expect(b.status).toBe(0);
   expect(a.stdout).not.toBe(b.stdout);
@@ -140,7 +154,9 @@ test("ticket_api_port treats OPS-123 and OPS-123-scratch as different tickets", 
 test("write_ports / read_ports round-trip", () => {
   const wt = mkdtempSync(path.join(tmpdir(), "ops-460-ports-"));
   try {
-    const written = sh(`write_ports "${wt}" ${P(352)} ${P(353)}\nread_ports "${wt}"`);
+    const written = sh(
+      `write_ports "${wt}" ${P(352)} ${P(353)}\nread_ports "${wt}"`,
+    );
     expect(written.status).toBe(0);
     expect(written.stdout.trim()).toBe(`${P(352)} ${P(353)}`);
   } finally {
@@ -170,10 +186,13 @@ test("listen_tcp_port rejects a recovered port outside the configured band", () 
   const dir = mockLsofDir();
   const pidfile = path.join(dir, "live.pid");
   try {
-    const r = sh(`printf '%s\\n' $$ > "${pidfile}"\nlisten_tcp_port "${pidfile}"`, {
-      PATH: `${dir}:${process.env.PATH}`,
-      MOCK_LSOF_PORT: String(PORT_BASE + 2 * PORT_SPAN),
-    });
+    const r = sh(
+      `printf '%s\\n' $$ > "${pidfile}"\nlisten_tcp_port "${pidfile}"`,
+      {
+        PATH: `${dir}:${process.env.PATH}`,
+        MOCK_LSOF_PORT: String(PORT_BASE + 2 * PORT_SPAN),
+      },
+    );
     expect(r.status).not.toBe(0);
     expect(r.stdout).toBe("");
   } finally {
@@ -185,10 +204,13 @@ test("listen_tcp_port accepts the fixed --here web port below the ticket band", 
   const dir = mockLsofDir();
   const pidfile = path.join(dir, "here.pid");
   try {
-    const r = sh(`printf '%s\\n' $$ > "${pidfile}"\nlisten_tcp_port "${pidfile}"`, {
-      PATH: `${dir}:${process.env.PATH}`,
-      MOCK_LSOF_PORT: "7392",
-    });
+    const r = sh(
+      `printf '%s\\n' $$ > "${pidfile}"\nlisten_tcp_port "${pidfile}"`,
+      {
+        PATH: `${dir}:${process.env.PATH}`,
+        MOCK_LSOF_PORT: "7392",
+      },
+    );
     expect(r.status).toBe(0);
     expect(r.stdout).toBe("7392");
   } finally {
@@ -199,12 +221,14 @@ test("listen_tcp_port accepts the fixed --here web port below the ticket band", 
 test("resolve_worktree_ports reuses free recorded ports for --here", () => {
   const wt = mkdtempSync(path.join(tmpdir(), "wm-176-recorded-"));
   try {
-    const r = sh([
-      `write_ports "${wt}" ${P(352)} ${P(353)}`,
-      `resolve_worktree_ports "${wt}" ${P(360)} "${wt}/.factory/event-runtime"`,
-      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
-      `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
-    ].join("\n"));
+    const r = sh(
+      [
+        `write_ports "${wt}" ${P(352)} ${P(353)}`,
+        `resolve_worktree_ports "${wt}" ${P(360)} "${wt}/.factory/event-runtime"`,
+        'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+        `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`resolved=${P(352)} ${P(353)}`);
     expect(r.stdout).toContain(`recorded=${P(352)} ${P(353)}`);
@@ -221,17 +245,22 @@ test("resolve_worktree_ports falls back when the preferred --here port is occupi
     port: preferred,
     fetch(req) {
       if (new URL(req.url).pathname === "/health") {
-        return Response.json({ ok: true, env: { home: "/other/checkout/.factory/event-runtime" } });
+        return Response.json({
+          ok: true,
+          env: { home: "/other/checkout/.factory/event-runtime" },
+        });
       }
       return new Response("not found", { status: 404 });
     },
   });
   try {
-    const r = await shAsync([
-      `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
-      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
-      `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
-    ].join("\n"));
+    const r = await shAsync(
+      [
+        `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
+        'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+        `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`resolved=${P(362)} ${P(363)}`);
     expect(r.stdout).toContain(`recorded=${P(362)} ${P(363)}`);
@@ -250,10 +279,12 @@ test("resolve_worktree_ports skips a preferred pair whose web port is occupied",
     socket: { data() {} },
   });
   try {
-    const r = await shAsync([
-      `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
-      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
-    ].join("\n"));
+    const r = await shAsync(
+      [
+        `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
+        'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`resolved=${P(362)} ${P(363)}`);
   } finally {
@@ -271,13 +302,16 @@ test("overlapping odd and even preferred pairs cannot be reserved concurrently",
   mkdirSync(wtOdd);
   mkdirSync(wtEven);
 
-  const contend = (wt, preferred, ownReady, otherReady) => shAsync([
-    `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
-    `touch "${ownReady}"`,
-    `for _ in {1..200}; do [[ -e "${otherReady}" ]] && break; sleep 0.01; done`,
-    `test -e "${otherReady}"`,
-    'printf "api=%s web=%s\\n" "$API_PORT" "$WEB_PORT"',
-  ].join("\n"));
+  const contend = (wt, preferred, ownReady, otherReady) =>
+    shAsync(
+      [
+        `resolve_worktree_ports "${wt}" ${preferred} "${wt}/.factory/event-runtime"`,
+        `touch "${ownReady}"`,
+        `for _ in {1..200}; do [[ -e "${otherReady}" ]] && break; sleep 0.01; done`,
+        `test -e "${otherReady}"`,
+        'printf "api=%s web=%s\\n" "$API_PORT" "$WEB_PORT"',
+      ].join("\n"),
+    );
 
   try {
     const [odd, even] = await Promise.all([
@@ -286,8 +320,12 @@ test("overlapping odd and even preferred pairs cannot be reserved concurrently",
     ]);
     expect(odd.status).toBe(0);
     expect(even.status).toBe(0);
-    const oddPorts = [...odd.stdout.matchAll(/(?:api|web)=(\d+)/g)].map((match) => Number(match[1]));
-    const evenPorts = [...even.stdout.matchAll(/(?:api|web)=(\d+)/g)].map((match) => Number(match[1]));
+    const oddPorts = [...odd.stdout.matchAll(/(?:api|web)=(\d+)/g)].map(
+      (match) => Number(match[1]),
+    );
+    const evenPorts = [...even.stdout.matchAll(/(?:api|web)=(\d+)/g)].map(
+      (match) => Number(match[1]),
+    );
     expect(oddPorts).toHaveLength(2);
     expect(evenPorts).toHaveLength(2);
     expect(oddPorts.some((port) => evenPorts.includes(port))).toBe(false);
@@ -304,12 +342,14 @@ test("resolve_worktree_ports replaces recorded ports when the web port is occupi
     socket: { data() {} },
   });
   try {
-    const r = await shAsync([
-      `write_ports "${wt}" ${P(364)} ${P(365)}`,
-      `resolve_worktree_ports "${wt}" ${P(372)} "${wt}/.factory/event-runtime"`,
-      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
-      `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
-    ].join("\n"));
+    const r = await shAsync(
+      [
+        `write_ports "${wt}" ${P(364)} ${P(365)}`,
+        `resolve_worktree_ports "${wt}" ${P(372)} "${wt}/.factory/event-runtime"`,
+        'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+        `printf "recorded=%s\\n" "$(read_ports "${wt}")"`,
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`resolved=${P(372)} ${P(373)}`);
     expect(r.stdout).toContain(`recorded=${P(372)} ${P(373)}`);
@@ -334,11 +374,13 @@ test("resolve_worktree_ports reuses recorded ports owned by this checkout", asyn
     },
   });
   try {
-    const r = await shAsync([
-      `write_ports "${wt}" ${api} ${P(375)}`,
-      `resolve_worktree_ports "${wt}" ${P(360)} "${home}"`,
-      'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
-    ].join("\n"));
+    const r = await shAsync(
+      [
+        `write_ports "${wt}" ${api} ${P(375)}`,
+        `resolve_worktree_ports "${wt}" ${P(360)} "${home}"`,
+        'printf "resolved=%s %s\\n" "$API_PORT" "$WEB_PORT"',
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`resolved=${api} ${P(375)}`);
   } finally {
@@ -357,24 +399,30 @@ test("colliding WM-294 and WM-345 startups reserve distinct pairs and stop indep
   expect(preferred1.stdout).toBe(preferred2.stdout);
   const preferred = Number(preferred1.stdout);
 
-  const launch = (wt) => shAsync([
-    `home="${wt}/.factory/event-runtime"`,
-    `resolve_worktree_ports "${wt}" ${preferred} "$home"`,
-    `spawn_daemon "$(run_dir "${wt}")/serve.pid" "$(run_dir "${wt}")/serve.log" "${wt}" env MOCK_HOME="$home" MOCK_PORT="$API_PORT" bun --eval 'Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.MOCK_PORT), fetch() { return Response.json({ env: { home: process.env.MOCK_HOME } }); } });'`,
-    `spawn_daemon "$(run_dir "${wt}")/web.pid" "$(run_dir "${wt}")/web.log" "${wt}" env MOCK_PORT="$WEB_PORT" bun --eval 'Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.MOCK_PORT), fetch() { return new Response("web"); } });'`,
-    'for _ in {1..100}; do port_listening "$API_PORT" && port_listening "$WEB_PORT" && break; sleep 0.01; done',
-    'port_listening "$API_PORT" && port_listening "$WEB_PORT"',
-    'printf "api=%s web=%s\\n" "$API_PORT" "$WEB_PORT"',
-  ].join("\n"));
+  const launch = (wt) =>
+    shAsync(
+      [
+        `home="${wt}/.factory/event-runtime"`,
+        `resolve_worktree_ports "${wt}" ${preferred} "$home"`,
+        `spawn_daemon "$(run_dir "${wt}")/serve.pid" "$(run_dir "${wt}")/serve.log" "${wt}" env MOCK_HOME="$home" MOCK_PORT="$API_PORT" bun --eval 'Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.MOCK_PORT), fetch() { return Response.json({ env: { home: process.env.MOCK_HOME } }); } });'`,
+        `spawn_daemon "$(run_dir "${wt}")/web.pid" "$(run_dir "${wt}")/web.log" "${wt}" env MOCK_PORT="$WEB_PORT" bun --eval 'Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.MOCK_PORT), fetch() { return new Response("web"); } });'`,
+        'for _ in {1..100}; do port_listening "$API_PORT" && port_listening "$WEB_PORT" && break; sleep 0.01; done',
+        'port_listening "$API_PORT" && port_listening "$WEB_PORT"',
+        'printf "api=%s web=%s\\n" "$API_PORT" "$WEB_PORT"',
+      ].join("\n"),
+    );
 
-  const stop = (wt) => sh([
-    `rdir="$(run_dir "${wt}")"`,
-    'term_daemon "$rdir/web.pid" "web"',
-    'term_daemon "$rdir/serve.pid" "serve"',
-    'await_daemon "$rdir/web.pid" "web"',
-    'await_daemon "$rdir/serve.pid" "serve"',
-    `release_port_reservation "${wt}"`,
-  ].join("\n"));
+  const stop = (wt) =>
+    sh(
+      [
+        `rdir="$(run_dir "${wt}")"`,
+        'term_daemon "$rdir/web.pid" "web"',
+        'term_daemon "$rdir/serve.pid" "serve"',
+        'await_daemon "$rdir/web.pid" "web"',
+        'await_daemon "$rdir/serve.pid" "serve"',
+        `release_port_reservation "${wt}"`,
+      ].join("\n"),
+    );
 
   try {
     const [a, b] = await Promise.all([launch(wt1), launch(wt2)]);
@@ -385,10 +433,12 @@ test("colliding WM-294 and WM-345 startups reserve distinct pairs and stop indep
     expect(api1).not.toBe(api2);
     expect(Math.abs(api1 - api2)).toBe(2);
 
-    const rerun = sh([
-      `resolve_worktree_ports "${wt1}" ${preferred} "${wt1}/.factory/event-runtime"`,
-      'printf "%s %s\\n" "$API_PORT" "$WEB_PORT"',
-    ].join("\n"));
+    const rerun = sh(
+      [
+        `resolve_worktree_ports "${wt1}" ${preferred} "${wt1}/.factory/event-runtime"`,
+        'printf "%s %s\\n" "$API_PORT" "$WEB_PORT"',
+      ].join("\n"),
+    );
     expect(rerun.status).toBe(0);
     expect(rerun.stdout).toContain(`${api1} ${api1 + 1}`);
 
@@ -407,17 +457,19 @@ test("colliding WM-294 and WM-345 startups reserve distinct pairs and stop indep
 test("failed startup cleanup removes partial pid and port reservation state", () => {
   const wt = mkdtempSync(path.join(tmpdir(), "wm-351-failed-startup-"));
   try {
-    const r = sh([
-      `resolve_worktree_ports "${wt}" ${P(360)} "${wt}/.factory/event-runtime"`,
-      `rdir="$(run_dir "${wt}")"`,
-      'printf "2147483647\\n" >"$rdir/serve.pid"',
-      `reservation="$(port_reservation_dir "$API_PORT")"`,
-      'rm -f "$rdir/ports"',
-      `release_worktree_ports_if_idle "${wt}"`,
-      'test ! -e "$rdir/serve.pid"',
-      'test ! -e "$rdir/ports"',
-      'test ! -e "$reservation"',
-    ].join("\n"));
+    const r = sh(
+      [
+        `resolve_worktree_ports "${wt}" ${P(360)} "${wt}/.factory/event-runtime"`,
+        `rdir="$(run_dir "${wt}")"`,
+        'printf "2147483647\\n" >"$rdir/serve.pid"',
+        `reservation="$(port_reservation_dir "$API_PORT")"`,
+        'rm -f "$rdir/ports"',
+        `release_worktree_ports_if_idle "${wt}"`,
+        'test ! -e "$rdir/serve.pid"',
+        'test ! -e "$rdir/ports"',
+        'test ! -e "$reservation"',
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
   } finally {
     rmSync(wt, { recursive: true, force: true });
@@ -425,8 +477,12 @@ test("failed startup cleanup removes partial pid and port reservation state", ()
 });
 
 test("assert_event_home dies when /health belongs to another checkout", () => {
-  const json = JSON.stringify({ env: { home: "/other/.factory/event-runtime" } });
-  const r = sh(`assert_event_home '${json}' '/this/.factory/event-runtime' ${P(352)}`);
+  const json = JSON.stringify({
+    env: { home: "/other/.factory/event-runtime" },
+  });
+  const r = sh(
+    `assert_event_home '${json}' '/this/.factory/event-runtime' ${P(352)}`,
+  );
   expect(r.status).not.toBe(0);
   expect(r.stderr).toContain("refusing to seed");
   expect(r.stderr).toContain("/other/.factory/event-runtime");
@@ -450,9 +506,11 @@ test("assert_event_adapter requires fake unless --live", () => {
 });
 
 test("adapter_banner reports the /health adapter, not the local flag", () => {
-  expect(sh('adapter_banner fake').stdout).toBe("(fake adapter — approvals are harmless)");
+  expect(sh("adapter_banner fake").stdout).toBe(
+    "(fake adapter — approvals are harmless)",
+  );
   expect(sh('adapter_banner ""').stdout).toBe("(live adapters)");
-  expect(sh('adapter_banner claude').stdout).toBe("(adapter claude)");
+  expect(sh("adapter_banner claude").stdout).toBe("(adapter claude)");
 });
 
 test("allocate_api_port returns the preferred slot when nothing answers /health", () => {
@@ -469,16 +527,24 @@ test("allocate_api_port skips port occupied by another runtime", async () => {
     port: heldPort,
     fetch(req) {
       if (new URL(req.url).pathname === "/health") {
-        return new Response(JSON.stringify({ ok: true, env: { home: "/other/worktree/.factory/event-runtime" } }), {
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            env: { home: "/other/worktree/.factory/event-runtime" },
+          }),
+          {
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       return new Response("not found", { status: 404 });
     },
   });
   try {
     const expectedPort = firstPortNotListening(heldPort + 2);
-    const r = await shAsync(`allocate_api_port ${heldPort} /this/worktree/.factory/event-runtime`);
+    const r = await shAsync(
+      `allocate_api_port ${heldPort} /this/worktree/.factory/event-runtime`,
+    );
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe(String(expectedPort));
   } finally {
@@ -497,7 +563,9 @@ test("allocate_api_port skips port squatted by an alien process that does not an
   });
   try {
     const expectedPort = firstPortNotListening(heldPort + 2);
-    const r = await shAsync(`allocate_api_port ${heldPort} /this/worktree/.factory/event-runtime`);
+    const r = await shAsync(
+      `allocate_api_port ${heldPort} /this/worktree/.factory/event-runtime`,
+    );
     expect(r.status).toBe(0);
     const allocatedPort = Number(r.stdout.trim());
     expect(allocatedPort).toBeGreaterThan(heldPort);
@@ -521,7 +589,9 @@ test("allocate_api_port skips port held by raw TCP listener", async () => {
   });
   try {
     const expectedPort = firstPortNotListening(heldPort + 2);
-    const r = await shAsync(`allocate_api_port ${heldPort} /this/worktree/.factory/event-runtime`);
+    const r = await shAsync(
+      `allocate_api_port ${heldPort} /this/worktree/.factory/event-runtime`,
+    );
     expect(r.status).toBe(0);
     // The skip property: allocation succeeds and lands off the held slot.
     expect(r.stdout.trim()).not.toBe(String(heldPort));
@@ -574,13 +644,19 @@ test("daemon health reads the recorded API/web pair", async () => {
     },
   });
   try {
-    const r = await shAsync([
-      `write_ports "${wt}" ${P(396)} ${P(397)}`,
-      `check_daemon_health "${wt}"`,
-    ].join("\n"));
+    const r = await shAsync(
+      [
+        `write_ports "${wt}" ${P(396)} ${P(397)}`,
+        `check_daemon_health "${wt}"`,
+      ].join("\n"),
+    );
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain(`serve:   running (pid ${process.pid}, port ${P(396)})`);
-    expect(r.stdout).toContain(`web:     running (pid ${process.pid}, port ${P(397)})`);
+    expect(r.stdout).toContain(
+      `serve:   running (pid ${process.pid}, port ${P(396)})`,
+    );
+    expect(r.stdout).toContain(
+      `web:     running (pid ${process.pid}, port ${P(397)})`,
+    );
     expect(r.stdout).toContain("anomalies: none");
   } finally {
     server.stop(true);
@@ -608,10 +684,10 @@ test("port_listening detects active and closed ports", async () => {
 });
 
 test("ticket_number extracts numeric ID from valid ticket strings", () => {
-  expect(sh('ticket_number OPS-123').stdout.trim()).toBe("123");
-  expect(sh('ticket_number CLNT-456').stdout.trim()).toBe("456");
-  expect(sh('ticket_number WM-1').stdout.trim()).toBe("1");
-  expect(sh('ticket_number OPS-999-scratch').stdout.trim()).toBe("999");
+  expect(sh("ticket_number OPS-123").stdout.trim()).toBe("123");
+  expect(sh("ticket_number CLNT-456").stdout.trim()).toBe("456");
+  expect(sh("ticket_number WM-1").stdout.trim()).toBe("1");
+  expect(sh("ticket_number OPS-999-scratch").stdout.trim()).toBe("999");
 });
 
 test("ticket_number dies on malformed ticket inputs", () => {
@@ -632,13 +708,25 @@ test("web_build_hash computes deterministic sha1 and changes on file rename or c
     mkdirSync(componentsDir, { recursive: true });
     mkdirSync(publicDir, { recursive: true });
 
-    writeFileSync(path.join(mockWebDir, "package.json"), JSON.stringify({ name: "mock-web" }));
+    writeFileSync(
+      path.join(mockWebDir, "package.json"),
+      JSON.stringify({ name: "mock-web" }),
+    );
     writeFileSync(path.join(mockWebDir, "bun.lock"), "lockfile-v1");
-    writeFileSync(path.join(mockWebDir, "vite.config.ts"), "export default {};");
+    writeFileSync(
+      path.join(mockWebDir, "vite.config.ts"),
+      "export default {};",
+    );
     writeFileSync(path.join(mockWebDir, "tsconfig.json"), "{}");
-    writeFileSync(path.join(mockWebDir, "index.html"), "<!DOCTYPE html><html></html>");
+    writeFileSync(
+      path.join(mockWebDir, "index.html"),
+      "<!DOCTYPE html><html></html>",
+    );
     writeFileSync(path.join(srcDir, "main.ts"), "console.log('init');");
-    writeFileSync(path.join(componentsDir, "Button.vue"), "<template><button>OK</button></template>");
+    writeFileSync(
+      path.join(componentsDir, "Button.vue"),
+      "<template><button>OK</button></template>",
+    );
     writeFileSync(path.join(publicDir, "favicon.ico"), "binary-icon-content");
 
     const initial = sh(`web_build_hash "${mockWebDir}"`);
@@ -657,7 +745,9 @@ test("web_build_hash computes deterministic sha1 and changes on file rename or c
 
     // Revert content edit -> restores initial hash
     writeFileSync(path.join(srcDir, "main.ts"), "console.log('init');");
-    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).toBe(initialHash);
+    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).toBe(
+      initialHash,
+    );
 
     // 2. File rename in src/components/
     const oldBtn = path.join(componentsDir, "Button.vue");
@@ -668,13 +758,19 @@ test("web_build_hash computes deterministic sha1 and changes on file rename or c
 
     // Revert rename -> restores initial hash
     renameSync(newBtn, oldBtn);
-    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).toBe(initialHash);
+    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).toBe(
+      initialHash,
+    );
 
     // 3. Edit root config files
-    writeFileSync(path.join(mockWebDir, "package.json"), JSON.stringify({ name: "mock-web-2" }));
-    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).not.toBe(initialHash);
+    writeFileSync(
+      path.join(mockWebDir, "package.json"),
+      JSON.stringify({ name: "mock-web-2" }),
+    );
+    expect(sh(`web_build_hash "${mockWebDir}"`).stdout.trim()).not.toBe(
+      initialHash,
+    );
   } finally {
     rmSync(mockWebDir, { recursive: true, force: true });
   }
 });
-

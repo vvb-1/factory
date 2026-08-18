@@ -33,10 +33,14 @@ describe("serve command", () => {
   test("serve --watch re-execs under bun --watch and binds", async () => {
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-watch-"));
     const port = String(59000 + (process.pid % 800));
-    const child = spawnTracked("bun", [CLI, "serve", "--watch", "--port", port], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnTracked(
+      "bun",
+      [CLI, "serve", "--watch", "--port", port],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let out = "";
     child.stdout.on("data", (b) => {
       out += b;

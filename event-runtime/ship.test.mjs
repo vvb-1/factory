@@ -9,7 +9,14 @@
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +26,11 @@ import { RUNTIME_ROOT } from "./lib/config.mjs";
 import { openDb } from "./lib/db.mjs";
 import { admitEvent } from "./lib/intake.mjs";
 import { planAdmittedEvents } from "./lib/planner.mjs";
-import { approveProposal, getProposal, openProposals } from "./lib/proposals.mjs";
+import {
+  approveProposal,
+  getProposal,
+  openProposals,
+} from "./lib/proposals.mjs";
 import { RegistryError, loadRegistry } from "./lib/registry.mjs";
 import { runState } from "./lib/lifecycle.mjs";
 import { SCHEDULE_SOURCE } from "./lib/schedules.mjs";
@@ -58,7 +69,11 @@ describe("ship-scan registration (WM-111)", () => {
     expect(props.deployHeadSha.pattern).toBe("^[0-9a-f]{40}$");
     expect(props.recommendation.enum).toEqual(["SHIP", "NOOP"]);
     // The plan is the closed ship set, nothing else nameable.
-    expect(props.plan.items.properties.action.enum).toEqual(["open_rc_pr", "merge_rc_pr", "smoke_check"]);
+    expect(props.plan.items.properties.action.enum).toEqual([
+      "open_rc_pr",
+      "merge_rc_pr",
+      "smoke_check",
+    ]);
     // NOOP is typed: not ahead, diverged, CI red/pending, no real checks, or no deploy config.
     expect(props.noopReason.enum).toEqual([
       "not_ahead",
@@ -103,7 +118,10 @@ else
 fi
 `,
   );
-  writeFileSync(path.join(shims, "factory"), `#!/bin/sh\necho "factory $*" >> "$SHIM_LOG"\n`);
+  writeFileSync(
+    path.join(shims, "factory"),
+    `#!/bin/sh\necho "factory $*" >> "$SHIM_LOG"\n`,
+  );
   chmodSync(path.join(shims, "gh"), 0o755);
   chmodSync(path.join(shims, "factory"), 0o755);
 
@@ -148,7 +166,11 @@ fi
     },
   });
   expect(proc.status).toBe(0);
-  return { outcome: JSON.parse(proc.stdout.trim().split("\n").at(-1)), workspaceDir, log };
+  return {
+    outcome: JSON.parse(proc.stdout.trim().split("\n").at(-1)),
+    workspaceDir,
+    log,
+  };
 }
 
 describe("ship-apply is closed by construction (WM-111)", () => {
@@ -159,16 +181,35 @@ describe("ship-apply is closed by construction (WM-111)", () => {
     // A release plan has one step per action, not one per ticket — the item
     // key IS the action id (recorded as issueId by the item-list adapter).
     expect(def.itemKey).toBe("action");
-    expect(Object.keys(def.actionRegistry).sort()).toEqual(["merge_rc_pr", "open_rc_pr", "smoke_check"]);
+    expect(Object.keys(def.actionRegistry).sort()).toEqual([
+      "merge_rc_pr",
+      "open_rc_pr",
+      "smoke_check",
+    ]);
     // Every script substitutes only trailing positional args — never into the script text.
     expect(def.actionRegistry.open_rc_pr.argv.slice(-6)).toEqual([
-      "{github}", "{base}", "{headSha}", "{deployBranch}", "{title}", "{body}",
+      "{github}",
+      "{base}",
+      "{headSha}",
+      "{deployBranch}",
+      "{title}",
+      "{body}",
     ]);
     expect(def.actionRegistry.merge_rc_pr.argv.slice(-5)).toEqual([
-      "{github}", "{deployBranch}", "{deployHeadSha}", "{base}", "{headSha}",
+      "{github}",
+      "{deployBranch}",
+      "{deployHeadSha}",
+      "{base}",
+      "{headSha}",
     ]);
     expect(def.actionRegistry.smoke_check.argv.slice(-7)).toEqual([
-      "{github}", "{smokeBranch}", "{url}", "{factoryRoot}", "{repo}", "{revisionField}", "{smokeDeadlineSeconds}",
+      "{github}",
+      "{smokeBranch}",
+      "{url}",
+      "{factoryRoot}",
+      "{repo}",
+      "{revisionField}",
+      "{smokeDeadlineSeconds}",
     ]);
     // A release PR merges with a merge commit — never squash, never
     // --delete-branch (its head is the integration branch): factory-ship §4.
@@ -178,7 +219,9 @@ describe("ship-apply is closed by construction (WM-111)", () => {
     expect(mergeScript).not.toContain("--squash");
     expect(mergeScript).not.toContain("--delete-branch");
     // Smoke reuses the factory-status freshness helpers, and never reverts.
-    expect(def.actionRegistry.smoke_check.argv[2]).toContain("lib/repo-status.mjs");
+    expect(def.actionRegistry.smoke_check.argv[2]).toContain(
+      "lib/repo-status.mjs",
+    );
     expect(def.actionRegistry.smoke_check.argv[2]).toContain("SMOKE RED");
   });
 
@@ -194,7 +237,11 @@ describe("ship-apply is closed by construction (WM-111)", () => {
 
   test("open_rc_pr probes the base head and opens the release PR when it matches the pin", async () => {
     const { outcome, log } = await runApply([
-      { action: "open_rc_pr", title: "release: develop → master (2026-08-14)", body: "the changelog" },
+      {
+        action: "open_rc_pr",
+        title: "release: develop → master (2026-08-14)",
+        body: "the changelog",
+      },
     ]);
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
     const shimLog = readFileSync(log, "utf8");
@@ -205,7 +252,13 @@ describe("ship-apply is closed by construction (WM-111)", () => {
 
   test("open_rc_pr reuses an existing open release PR instead of stacking a second", async () => {
     const { outcome, log } = await runApply(
-      [{ action: "open_rc_pr", title: "release: develop → master (2026-08-14)", body: "the changelog" }],
+      [
+        {
+          action: "open_rc_pr",
+          title: "release: develop → master (2026-08-14)",
+          body: "the changelog",
+        },
+      ],
       { FAKE_OPEN_PRS: "1" },
     );
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
@@ -214,42 +267,64 @@ describe("ship-apply is closed by construction (WM-111)", () => {
 
   test("a moved base head is a refusal, not a blind release: the PR never opens", async () => {
     const { outcome, workspaceDir, log } = await runApply(
-      [{ action: "open_rc_pr", title: "release: develop → master (2026-08-14)", body: "the changelog" }],
+      [
+        {
+          action: "open_rc_pr",
+          title: "release: develop → master (2026-08-14)",
+          body: "the changelog",
+        },
+      ],
       { FAKE_BASE_HEAD: MOVED_SHA },
     );
     expect(outcome.exitCode).toBe(1);
     expect(existsSync(log)).toBe(false);
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain("refusing open_rc_pr");
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("refusing open_rc_pr");
   });
 
   test("merge_rc_pr waits on the PR's checks, then merges with a merge commit", async () => {
-    const { outcome, log } = await runApply([{ action: "merge_rc_pr" }], { FAKE_OPEN_PRS: "1" });
+    const { outcome, log } = await runApply([{ action: "merge_rc_pr" }], {
+      FAKE_OPEN_PRS: "1",
+    });
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
     const shimLog = readFileSync(log, "utf8");
-    expect(shimLog).toContain("gh pr checks 7 --repo watt-mind/bj29 --watch --fail-fast");
+    expect(shimLog).toContain(
+      "gh pr checks 7 --repo watt-mind/bj29 --watch --fail-fast",
+    );
     expect(shimLog).toContain("gh pr merge 7 --repo watt-mind/bj29 --merge");
     expect(shimLog).not.toContain("--squash");
     expect(shimLog).not.toContain("--delete-branch");
   });
 
   test("a deploy branch that moved since the scan refuses the merge — someone committed to it directly", async () => {
-    const { outcome, workspaceDir, log } = await runApply([{ action: "merge_rc_pr" }], {
-      FAKE_OPEN_PRS: "1",
-      FAKE_DEPLOY_HEAD: MOVED_SHA,
-    });
+    const { outcome, workspaceDir, log } = await runApply(
+      [{ action: "merge_rc_pr" }],
+      {
+        FAKE_OPEN_PRS: "1",
+        FAKE_DEPLOY_HEAD: MOVED_SHA,
+      },
+    );
     expect(outcome.exitCode).toBe(1);
     expect(existsSync(log)).toBe(false); // the merge never executed
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain("refusing merge_rc_pr");
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("refusing merge_rc_pr");
   });
 
   test("a release PR head that is not the scanned pin refuses the merge", async () => {
-    const { outcome, workspaceDir, log } = await runApply([{ action: "merge_rc_pr" }], {
-      FAKE_OPEN_PRS: "1",
-      FAKE_PR_HEAD: MOVED_SHA,
-    });
+    const { outcome, workspaceDir, log } = await runApply(
+      [{ action: "merge_rc_pr" }],
+      {
+        FAKE_OPEN_PRS: "1",
+        FAKE_PR_HEAD: MOVED_SHA,
+      },
+    );
     expect(outcome.exitCode).toBe(1);
     expect(existsSync(log)).toBe(false);
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain("refusing release PR #7");
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("refusing release PR #7");
   });
 
   // The endpoint runs as a child process: runApply's spawnSync blocks this
@@ -285,8 +360,13 @@ describe("ship-apply is closed by construction (WM-111)", () => {
         },
       ]);
       expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-      const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
-      expect(result.artifact).toEqual({ repo: "bj29", applied: [{ issueId: "smoke_check", action: "smoke_check" }] });
+      const result = JSON.parse(
+        readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+      );
+      expect(result.artifact).toEqual({
+        repo: "bj29",
+        applied: [{ issueId: "smoke_check", action: "smoke_check" }],
+      });
     });
   }, 20_000);
 
@@ -302,8 +382,12 @@ describe("ship-apply is closed by construction (WM-111)", () => {
         },
       ]);
       expect(outcome.exitCode).toBe(1);
-      expect(readFileSync(log, "utf8")).toContain("factory notify SMOKE RED bj29:");
-      expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain("smoke red");
+      expect(readFileSync(log, "utf8")).toContain(
+        "factory notify SMOKE RED bj29:",
+      );
+      expect(
+        readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+      ).toContain("smoke red");
       // Never auto-revert: the only mutation a red smoke performs is the push.
       expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(1);
     });
@@ -321,8 +405,13 @@ describe("ship-apply is closed by construction (WM-111)", () => {
         },
       ]);
       expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-      const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
-      expect(result.artifact).toEqual({ repo: "bj29", applied: [{ issueId: "smoke_check", action: "smoke_check" }] });
+      const result = JSON.parse(
+        readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+      );
+      expect(result.artifact).toEqual({
+        repo: "bj29",
+        applied: [{ issueId: "smoke_check", action: "smoke_check" }],
+      });
     });
   }, 20_000);
 
@@ -333,9 +422,9 @@ describe("ship-apply is closed by construction (WM-111)", () => {
     ]);
     expect(outcome.exitCode).toBe(1);
     expect(existsSync(log)).toBe(false);
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain(
-      "not in the closed action registry",
-    );
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("not in the closed action registry");
   });
 });
 
@@ -354,9 +443,19 @@ const applyPayload = {
   deployBranch: "master",
   headSha: BASE_SHA,
   deployHeadSha: DEPLOY_SHA,
-  changelog: [{ sha: BASE_SHA, subject: "fix(app): guard null session (CLNT-123)", ticket: "CLNT-123" }],
+  changelog: [
+    {
+      sha: BASE_SHA,
+      subject: "fix(app): guard null session (CLNT-123)",
+      ticket: "CLNT-123",
+    },
+  ],
   plan: [
-    { action: "open_rc_pr", title: "release: develop → master (2026-08-14)", body: "the changelog" },
+    {
+      action: "open_rc_pr",
+      title: "release: develop → master (2026-08-14)",
+      body: "the changelog",
+    },
     { action: "merge_rc_pr" },
   ],
 };
@@ -373,7 +472,9 @@ function openShipApplyProposal(db) {
     payload: applyPayload,
   });
   planAdmittedEvents(db, registry, { policyVersion: PV });
-  const proposal = openProposals(db, {}).find((p) => p.spec?.agent === "ship-apply@1");
+  const proposal = openProposals(db, {}).find(
+    (p) => p.spec?.agent === "ship-apply@1",
+  );
   expect(proposal).toBeTruthy();
   return proposal;
 }
@@ -383,14 +484,24 @@ describe("ship-apply approval is structurally human-only (WM-111)", () => {
     // Copy the real registry into a temp root so the test can corrupt it safely.
     const root = mkdtempSync(path.join(os.tmpdir(), "evrt-ship-registry-"));
     for (const dir of ["agents", "schemas"]) {
-      cpSync(path.join(RUNTIME_ROOT, dir), path.join(root, dir), { recursive: true });
+      cpSync(path.join(RUNTIME_ROOT, dir), path.join(root, dir), {
+        recursive: true,
+      });
     }
-    cpSync(path.join(RUNTIME_ROOT, "event-types.json"), path.join(root, "event-types.json"));
+    cpSync(
+      path.join(RUNTIME_ROOT, "event-types.json"),
+      path.join(root, "event-types.json"),
+    );
     const withApproval = (approval) =>
       writeFileSync(
         path.join(root, "schedules.json"),
         JSON.stringify({
-          "ship-apply-creep": { every: "1h", eventType: "factory.ship-apply.requested", approval, enabled: true },
+          "ship-apply-creep": {
+            every: "1h",
+            eventType: "factory.ship-apply.requested",
+            approval,
+            enabled: true,
+          },
         }),
       );
     withApproval("auto");
@@ -410,7 +521,10 @@ describe("ship-apply approval is structurally human-only (WM-111)", () => {
     // "schedule" through approveProposal. There is no other approval path.
     let rejection;
     try {
-      approveProposal(db, registry, proposal.id, { actor: SCHEDULE_SOURCE, policyVersion: PV });
+      approveProposal(db, registry, proposal.id, {
+        actor: SCHEDULE_SOURCE,
+        policyVersion: PV,
+      });
     } catch (err) {
       rejection = err;
     }
@@ -424,12 +538,18 @@ describe("ship-apply approval is structurally human-only (WM-111)", () => {
 
     // Any other machine actor is rejected identically — the gate allowlists
     // the human operator; it does not blocklist known robots.
-    expect(() => approveProposal(db, registry, proposal.id, { actor: "chain", policyVersion: PV })).toThrow(
-      /human_approval_only/,
-    );
+    expect(() =>
+      approveProposal(db, registry, proposal.id, {
+        actor: "chain",
+        policyVersion: PV,
+      }),
+    ).toThrow(/human_approval_only/);
 
     // The human operator's approval — the deploy-branch decision — succeeds.
-    const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
+    const approved = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
     expect(approved).toEqual({ approved: true, runId: proposal.run_id });
   });
 });
@@ -446,16 +566,30 @@ const FAKE_HEAD_SHA = "d".repeat(40);
 const FAKE_DEPLOY_HEAD_SHA = "e".repeat(40);
 
 function writeResult(workspaceDir, result) {
-  writeFileSync(path.join(workspaceDir, "result.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  writeFileSync(
+    path.join(workspaceDir, "result.json"),
+    `${JSON.stringify(result, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function shipScanArtifact(repo) {
   const base = { repo, github: `watt-mind/${repo}`, changelog: [], plan: [] };
   if (repo === "clean") {
-    return { ...base, recommendation: "NOOP", summary: "fake: nothing to ship", noopReason: "not_ahead" };
+    return {
+      ...base,
+      recommendation: "NOOP",
+      summary: "fake: nothing to ship",
+      noopReason: "not_ahead",
+    };
   }
   if (repo === "diverged") {
-    return { ...base, recommendation: "NOOP", summary: "fake: branch diverged", noopReason: "diverged" };
+    return {
+      ...base,
+      recommendation: "NOOP",
+      summary: "fake: branch diverged",
+      noopReason: "diverged",
+    };
   }
   return {
     ...base,
@@ -464,9 +598,19 @@ function shipScanArtifact(repo) {
     deployBranch: "master",
     headSha: FAKE_HEAD_SHA,
     deployHeadSha: FAKE_DEPLOY_HEAD_SHA,
-    changelog: [{ sha: FAKE_HEAD_SHA, subject: "feat(app): fake thing (CLNT-901)", ticket: "CLNT-901" }],
+    changelog: [
+      {
+        sha: FAKE_HEAD_SHA,
+        subject: "feat(app): fake thing (CLNT-901)",
+        ticket: "CLNT-901",
+      },
+    ],
     plan: [
-      { action: "open_rc_pr", title: "release: develop → master (2026-08-14)", body: "- feat(app): fake thing\nCLNT-901" },
+      {
+        action: "open_rc_pr",
+        title: "release: develop → master (2026-08-14)",
+        body: "- feat(app): fake thing\nCLNT-901",
+      },
       { action: "merge_rc_pr" },
       {
         action: "smoke_check",
@@ -500,7 +644,10 @@ const shipFake = {
         reasonCode: "ok",
         artifact: {
           repo: spec.input.repo,
-          applied: (spec.input.plan ?? []).map((i) => ({ issueId: i.action, action: i.action })),
+          applied: (spec.input.plan ?? []).map((i) => ({
+            issueId: i.action,
+            action: i.action,
+          })),
         },
         evidence: { commands: ["fake"] },
       });
@@ -515,13 +662,22 @@ function harness() {
   const db = openDb(path.join(dir, "runtime.db"));
   const workspaces = mkdtempSync(path.join(os.tmpdir(), "evrt-ship-e2e-ws-"));
   const adapters = { pi: shipFake, actions: shipFake, command: shipFake };
-  const workerOpts = { workspacesRoot: workspaces, owner: "w-test", policyVersion: PV };
+  const workerOpts = {
+    workspacesRoot: workspaces,
+    owner: "w-test",
+    policyVersion: PV,
+  };
 
   async function approveNext(agentRef) {
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const proposal = openProposals(db, {}).find((p) => p.spec?.agent === agentRef);
+    const proposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === agentRef,
+    );
     expect(proposal).toBeTruthy();
-    const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
+    const approved = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
     const summary = await runOnce(db, registry, adapters, workerOpts);
     return { proposal, runId: approved.runId, summary };
   }
@@ -556,7 +712,9 @@ describe("ship chain: scan → human-approved apply (WM-111)", () => {
     expect(chainEvent.causation_id).toBe(scan.runId); // caused by the scan run
 
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const apply = openProposals(db, {}).find((p) => p.spec?.agent === "ship-apply@1");
+    const apply = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "ship-apply@1",
+    );
     expect(apply.status).toBe("open"); // never applied without the human
     expect(apply.spec.input).toEqual({
       repo: "bj29",
@@ -565,9 +723,19 @@ describe("ship chain: scan → human-approved apply (WM-111)", () => {
       deployBranch: "master",
       headSha: FAKE_HEAD_SHA, // the pin the probes hold the release to
       deployHeadSha: FAKE_DEPLOY_HEAD_SHA,
-      changelog: [{ sha: FAKE_HEAD_SHA, subject: "feat(app): fake thing (CLNT-901)", ticket: "CLNT-901" }],
+      changelog: [
+        {
+          sha: FAKE_HEAD_SHA,
+          subject: "feat(app): fake thing (CLNT-901)",
+          ticket: "CLNT-901",
+        },
+      ],
       plan: [
-        { action: "open_rc_pr", title: "release: develop → master (2026-08-14)", body: "- feat(app): fake thing\nCLNT-901" },
+        {
+          action: "open_rc_pr",
+          title: "release: develop → master (2026-08-14)",
+          body: "- feat(app): fake thing\nCLNT-901",
+        },
         { action: "merge_rc_pr" },
         {
           action: "smoke_check",
@@ -582,13 +750,18 @@ describe("ship chain: scan → human-approved apply (WM-111)", () => {
     // The chained proposal itself rejects the auto path — this approval IS
     // the human deploy-branch decision, and no schedule can take it.
     expect(() =>
-      approveProposal(db, registry, apply.id, { actor: SCHEDULE_SOURCE, policyVersion: PV }),
+      approveProposal(db, registry, apply.id, {
+        actor: SCHEDULE_SOURCE,
+        policyVersion: PV,
+      }),
     ).toThrow(/human_approval_only/);
     expect(getProposal(db, apply.id).status).toBe("open");
 
     const applied = await approveNext("ship-apply@1");
     expect(applied.summary.terminalState).toBe("COMPLETED");
-    const row = db.query(`SELECT result_json, receipt_json FROM results WHERE run_id = ?`).get(applied.runId);
+    const row = db
+      .query(`SELECT result_json, receipt_json FROM results WHERE run_id = ?`)
+      .get(applied.runId);
     expect(JSON.parse(row.result_json).artifact.applied).toEqual([
       { issueId: "open_rc_pr", action: "open_rc_pr" },
       { issueId: "merge_rc_pr", action: "merge_rc_pr" },
@@ -602,12 +775,22 @@ describe("ship chain: scan → human-approved apply (WM-111)", () => {
     admitEvent(db, registry, shipEnvelope("clean", "ship-2"));
     const scan = await approveNext("ship-scan@1");
     expect(scan.summary.terminalState).toBe("COMPLETED");
-    const result = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+    const result = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(scan.runId).result_json,
+    );
     expect(result.artifact.noopReason).toBe("not_ahead");
 
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 1,
+      errors: [],
+    });
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "ship-apply@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "ship-apply@1"),
+    ).toBeUndefined();
   });
 
   test("a diverged branch produces a NOOP with noopReason diverged and empty plan", async () => {
@@ -615,13 +798,23 @@ describe("ship chain: scan → human-approved apply (WM-111)", () => {
     admitEvent(db, registry, shipEnvelope("diverged", "ship-diverged"));
     const scan = await approveNext("ship-scan@1");
     expect(scan.summary.terminalState).toBe("COMPLETED");
-    const result = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(scan.runId).result_json);
+    const result = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(scan.runId).result_json,
+    );
     expect(result.artifact.recommendation).toBe("NOOP");
     expect(result.artifact.noopReason).toBe("diverged");
     expect(result.artifact.plan).toEqual([]);
 
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 1,
+      errors: [],
+    });
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "ship-apply@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "ship-apply@1"),
+    ).toBeUndefined();
   });
 });

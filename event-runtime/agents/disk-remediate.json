@@ -36,10 +36,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "infra:exec:lab",
-      "infra:exec:web"
-    ]
+    "services": ["infra:exec:lab", "infra:exec:web"]
   },
   "limits": {
     "timeout_seconds": 900,
@@ -47,8 +44,8 @@
   },
   "mutating": true,
   "pins": {
-    "agents/disk-remediate.md": "sha256:f886a34a264a2c83356b9e5cc5a96df7e994dbbbebd278afa5b4564c4b99c1e8",
-    "schemas/disk-remediate.input.json": "sha256:b73ad4bb5307bf6947b94df8ced5f475ad0c4852b083b09e963afb2252799844",
-    "schemas/disk-remediation.output.json": "sha256:2ead535aeab711c998a5f074ff0408acd9799ff18d95635f66bbde6116efb806"
+    "agents/disk-remediate.md": "sha256:1d8c7afa476ae5b41c62e92bc6b036993d129869fe3fbda2d5fa7ef04cebdffa",
+    "schemas/disk-remediate.input.json": "sha256:7edfcd06c8d3508355c02a92810ebd9dd621509d18cd6f871f107f38fea7265e",
+    "schemas/disk-remediation.output.json": "sha256:1339cd92145c5f30637ba92449e4b1fe1a3bb146af7fb81b45ff0f55da909610"
   }
 }

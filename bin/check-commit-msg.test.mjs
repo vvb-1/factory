@@ -92,12 +92,32 @@ test("breaking-change marker before the colon is accepted", () => {
 });
 
 test("comment lines above the subject are skipped", () => {
-  const r = run("# Please enter the commit message for your changes.\n# Lines starting with '#' will be ignored.\nfix(scope): thing (WM-1)\n#\n# On branch develop\n");
+  const r = run(
+    "# Please enter the commit message for your changes.\n# Lines starting with '#' will be ignored.\nfix(scope): thing (WM-1)\n#\n# On branch develop\n",
+  );
   expect(r.status).toBe(0);
 });
 
 test("every allowed type is accepted with a ticket ref", () => {
-  const types = ["feat", "fix", "chore", "docs", "test", "refactor", "perf", "ci", "build", "style", "revert", "sec", "maint", "ui", "ui-ux", "spike", "epic"];
+  const types = [
+    "feat",
+    "fix",
+    "chore",
+    "docs",
+    "test",
+    "refactor",
+    "perf",
+    "ci",
+    "build",
+    "style",
+    "revert",
+    "sec",
+    "maint",
+    "ui",
+    "ui-ux",
+    "spike",
+    "epic",
+  ];
   for (const type of types) {
     const r = run(`${type}: something (WM-1)\n`);
     expect(r.status).toBe(0);

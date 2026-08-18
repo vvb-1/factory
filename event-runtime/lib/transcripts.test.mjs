@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable, PassThrough } from "node:stream";
@@ -31,7 +37,11 @@ describe("transcripts (OPS-426)", () => {
     const ws = tmpWs();
     const { stream, filePath } = createTranscriptCapture(ws);
 
-    const chunk = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hello" }] } }) + "\n";
+    const chunk =
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "hello" }] },
+      }) + "\n";
     stream.write(chunk);
     stream.end();
 
@@ -46,7 +56,9 @@ describe("transcripts (OPS-426)", () => {
     const ws = tmpWs();
     const { stream, filePath } = createTranscriptCapture(ws);
 
-    const data = JSON.stringify({ type: "result", status: "success", count: 12345 }) + "\n";
+    const data =
+      JSON.stringify({ type: "result", status: "success", count: 12345 }) +
+      "\n";
     stream.write(data);
     stream.end();
 
@@ -61,7 +73,8 @@ describe("transcripts (OPS-426)", () => {
     const storeRoot = path.join(tmpWs(), "store");
     const { stream, filePath } = createTranscriptCapture(ws);
 
-    const payload = JSON.stringify({ message: "stored artifact verification test" }) + "\n";
+    const payload =
+      JSON.stringify({ message: "stored artifact verification test" }) + "\n";
     stream.write(payload);
 
     const stored = await flushAndStoreTranscript({
@@ -108,8 +121,15 @@ describe("transcripts (OPS-426)", () => {
       const readable = Readable.from(
         (async function* () {
           const chunkSize = 64 * 1024;
-          for (let offset = 0; offset < expectedBuffer.length; offset += chunkSize) {
-            yield expectedBuffer.subarray(offset, Math.min(offset + chunkSize, expectedBuffer.length));
+          for (
+            let offset = 0;
+            offset < expectedBuffer.length;
+            offset += chunkSize
+          ) {
+            yield expectedBuffer.subarray(
+              offset,
+              Math.min(offset + chunkSize, expectedBuffer.length),
+            );
           }
         })(),
       );

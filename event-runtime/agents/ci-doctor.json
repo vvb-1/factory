@@ -18,9 +18,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "gh:read"
-    ]
+    "services": ["gh:read"]
   },
   "limits": {
     "timeout_seconds": 600,
@@ -29,7 +27,7 @@
   "mutating": false,
   "pins": {
     "agents/ci-doctor.md": "sha256:e963bd86229798813c627f6381c4fbafdc846c83f708f2b3f5641325d072cbaf",
-    "schemas/ci-doctor.input.json": "sha256:7e30326cc9f4c1fd3d76f0b279b9b9821b6343867ee5bd679b2d3ddd191fd1b5",
+    "schemas/ci-doctor.input.json": "sha256:5ded6e89660119e54f7dc7d309fb4be46a2b8d80e729c1d2eb145840d2e28b08",
     "schemas/ci-doctor.output.json": "sha256:fa0d9eefc2ed4f68b97d5d7b9ec91f36a233bff945bba71b3d9e6e8343167680"
   }
 }

@@ -4,31 +4,61 @@ import type { CapabilityGraph, GraphEdge, GraphNode } from "./model";
 // (WM-99). Node components, edge mapping, and the legend all read from here,
 // so the legend can never drift from what the canvas actually draws.
 
-export type NodeStyleKey = "eventType" | "agentReadOnly" | "agentMutating" | "terminal" | "proposal";
+export type NodeStyleKey =
+  "eventType" | "agentReadOnly" | "agentMutating" | "terminal" | "proposal";
 
-export const NODE_STYLES: Record<NodeStyleKey, { label: string; accent: string; dashed: boolean }> = {
+export const NODE_STYLES: Record<
+  NodeStyleKey,
+  { label: string; accent: string; dashed: boolean }
+> = {
   eventType: { label: "event type", accent: "var(--hue-info)", dashed: false },
-  agentReadOnly: { label: "agent · read-only", accent: "var(--hue-ok)", dashed: false },
-  agentMutating: { label: "agent · mutating", accent: "var(--hue-warn)", dashed: false },
+  agentReadOnly: {
+    label: "agent · read-only",
+    accent: "var(--hue-ok)",
+    dashed: false,
+  },
+  agentMutating: {
+    label: "agent · mutating",
+    accent: "var(--hue-warn)",
+    dashed: false,
+  },
   terminal: { label: "chain ends", accent: "var(--hue-idle)", dashed: true },
-  proposal: { label: "pending proposal", accent: "var(--hue-info)", dashed: true },
+  proposal: {
+    label: "pending proposal",
+    accent: "var(--hue-info)",
+    dashed: true,
+  },
 };
 
 export const nodeStyleKey = (node: GraphNode): NodeStyleKey =>
-  node.kind === "agent" ? (node.mutating ? "agentMutating" : "agentReadOnly") : node.kind;
+  node.kind === "agent"
+    ? node.mutating
+      ? "agentMutating"
+      : "agentReadOnly"
+    : node.kind;
 
 export const EDGE_STYLES: Record<
   GraphEdge["kind"],
   { label: string; stroke: string; strokeDasharray?: string }
 > = {
   routes: { label: "routes to agent", stroke: "var(--border-strong)" },
-  recommends: { label: "recommendation", stroke: "var(--accent)", strokeDasharray: "4 3" },
-  proposal: { label: "pending execution", stroke: "var(--hue-info)", strokeDasharray: "3 3" },
+  recommends: {
+    label: "recommendation",
+    stroke: "var(--accent)",
+    strokeDasharray: "4 3",
+  },
+  proposal: {
+    label: "pending execution",
+    stroke: "var(--hue-info)",
+    strokeDasharray: "3 3",
+  },
 };
 
 export interface LegendEntries {
   nodes: Array<{ key: NodeStyleKey } & (typeof NODE_STYLES)[NodeStyleKey]>;
-  edges: Array<{ kind: GraphEdge["kind"] } & (typeof EDGE_STYLES)[GraphEdge["kind"]]>;
+  edges: Array<
+    { kind: GraphEdge["kind"] } & (typeof EDGE_STYLES)[GraphEdge["kind"]]
+  >;
 }
 
 /**

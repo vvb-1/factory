@@ -12,10 +12,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "ssh:read:lab",
-      "ssh:read:web"
-    ]
+    "services": ["ssh:read:lab", "ssh:read:web"]
   },
   "limits": {
     "timeout_seconds": 600,
@@ -23,8 +20,8 @@
   },
   "mutating": false,
   "pins": {
-    "agents/disk-diagnose.md": "sha256:606e047275affafd71a93fd167348836e6c76a5fa16982ac8d07b0c2b2e63098",
+    "agents/disk-diagnose.md": "sha256:8454c1519b8992f2b6e948b3f6ba147807d2ac49c7e192c431647e5e9ca37c43",
     "schemas/disk-diagnose.input.json": "sha256:b14b2a1cb4ffbc5f5666a1c56ef155fb048a421a47050a5623c11ab09b204e90",
-    "schemas/disk-diagnose.output.json": "sha256:934dfbd1a4e72ec1de1d1d1f85cfcbdd8a5dbbb3a779e8df1c70d9d68bd77ce7"
+    "schemas/disk-diagnose.output.json": "sha256:c5f6d4a93935d0f0a1ba7e3bc50d97a3f688afd78d0a4f373345a053780ac7b2"
   }
 }

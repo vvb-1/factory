@@ -21,30 +21,61 @@ import { validate } from "./schema.mjs";
 export const DECISION_REQUEST_SCHEMA_VERSION = "factory.decision-request/v1";
 export const DECISION_RESPONSE_SCHEMA_VERSION = "factory.decision-response/v1";
 export const DECISION_REQUEST_SCHEMA = JSON.parse(
-  readFileSync(path.join(RUNTIME_ROOT, "schemas", "factory.decision-request.v1.json"), "utf8"),
+  readFileSync(
+    path.join(RUNTIME_ROOT, "schemas", "factory.decision-request.v1.json"),
+    "utf8",
+  ),
 );
 export const DECISION_RESPONSE_SCHEMA = JSON.parse(
-  readFileSync(path.join(RUNTIME_ROOT, "schemas", "factory.decision-response.v1.json"), "utf8"),
+  readFileSync(
+    path.join(RUNTIME_ROOT, "schemas", "factory.decision-response.v1.json"),
+    "utf8",
+  ),
 );
 
 /** §2.1 `context` bound is a byte size, not a code-unit count. */
 export const CONTEXT_MAX_BYTES = 8 * 1024;
 /** §2.3 `text` defaults. */
 export const TEXT_DEFAULT_MAX_LENGTH = 2000;
-export const WIDGET_KINDS = ["text", "single-choice", "multi-choice", "confirm", "number"];
+export const WIDGET_KINDS = [
+  "text",
+  "single-choice",
+  "multi-choice",
+  "confirm",
+  "number",
+];
 export const EFFECTS = [
-  "authorise", "send_to_triage", "answer", "requeue", "approve_proposal", "reject_proposal", "dismiss",
+  "authorise",
+  "send_to_triage",
+  "answer",
+  "requeue",
+  "approve_proposal",
+  "reject_proposal",
+  "dismiss",
 ];
 
 const hasOwn = (value, key) =>
-  value !== null && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, key);
+  value !== null &&
+  typeof value === "object" &&
+  Object.prototype.hasOwnProperty.call(value, key);
 
 /** Keys every field may carry, plus the per-`kind` extras (§2.3 "Extra keys"). */
-const COMMON_FIELD_KEYS = new Set(["id", "kind", "label", "required", "whenOption"]);
+const COMMON_FIELD_KEYS = new Set([
+  "id",
+  "kind",
+  "label",
+  "required",
+  "whenOption",
+]);
 const FIELD_KEYS = {
   text: new Set([...COMMON_FIELD_KEYS, "placeholder", "maxLength"]),
   "single-choice": new Set([...COMMON_FIELD_KEYS, "choices"]),
-  "multi-choice": new Set([...COMMON_FIELD_KEYS, "choices", "minItems", "maxItems"]),
+  "multi-choice": new Set([
+    ...COMMON_FIELD_KEYS,
+    "choices",
+    "minItems",
+    "maxItems",
+  ]),
   confirm: COMMON_FIELD_KEYS,
   number: new Set([...COMMON_FIELD_KEYS, "minimum", "maximum", "integer"]),
 };
@@ -64,7 +95,11 @@ function result(errors) {
 }
 
 function usableRef(refs, key) {
-  return hasOwn(refs, key) && typeof refs[key] === "string" && refs[key].trim().length > 0;
+  return (
+    hasOwn(refs, key) &&
+    typeof refs[key] === "string" &&
+    refs[key].trim().length > 0
+  );
 }
 
 function duplicateValues(values) {
@@ -97,14 +132,23 @@ function checkRequest(request, { refs, checkEffectLegality }) {
   if (!shape.valid) return shape;
 
   const errors = [];
-  if (request.context !== undefined && Buffer.byteLength(request.context, "utf8") > CONTEXT_MAX_BYTES) {
-    errors.push(`$.context: longer than ${CONTEXT_MAX_BYTES} bytes when encoded as UTF-8`);
+  if (
+    request.context !== undefined &&
+    Buffer.byteLength(request.context, "utf8") > CONTEXT_MAX_BYTES
+  ) {
+    errors.push(
+      `$.context: longer than ${CONTEXT_MAX_BYTES} bytes when encoded as UTF-8`,
+    );
   }
   const optionIds = request.options.map((option) => option.id);
   const optionIdSet = new Set(optionIds);
 
-  for (const id of duplicateValues(optionIds)) errors.push(`$.options: duplicate option id "${id}"`);
-  if (request.recommended !== undefined && !optionIdSet.has(request.recommended)) {
+  for (const id of duplicateValues(optionIds))
+    errors.push(`$.options: duplicate option id "${id}"`);
+  if (
+    request.recommended !== undefined &&
+    !optionIdSet.has(request.recommended)
+  ) {
     errors.push(`$.recommended: unknown option id "${request.recommended}"`);
   }
 
@@ -125,14 +169,19 @@ function checkRequest(request, { refs, checkEffectLegality }) {
           /^[a-zA-Z]:[\\/]/.test(scopedPath) ||
           segments.includes("..")
         ) {
-          errors.push(`${path}.scope.paths: path must be repo-relative: "${scopedPath}"`);
+          errors.push(
+            `${path}.scope.paths: path must be repo-relative: "${scopedPath}"`,
+          );
         }
       }
     }
 
     if (checkEffectLegality) {
       for (const ref of EFFECT_REFS[option.effect]) {
-        if (!usableRef(refs, ref)) errors.push(`${path}.effect: "${option.effect}" requires refs.${ref}`);
+        if (!usableRef(refs, ref))
+          errors.push(
+            `${path}.effect: "${option.effect}" requires refs.${ref}`,
+          );
       }
     }
   }
@@ -145,7 +194,8 @@ function checkRequest(request, { refs, checkEffectLegality }) {
   for (const [index, field] of fields.entries()) {
     const path = `$.fields[${index}]`;
     for (const key of Object.keys(field)) {
-      if (!FIELD_KEYS[field.kind].has(key)) errors.push(`${path}.${key}: not allowed for kind "${field.kind}"`);
+      if (!FIELD_KEYS[field.kind].has(key))
+        errors.push(`${path}.${key}: not allowed for kind "${field.kind}"`);
     }
 
     if (field.whenOption !== undefined) {
@@ -153,7 +203,8 @@ function checkRequest(request, { refs, checkEffectLegality }) {
         errors.push(`${path}.whenOption: duplicate option id "${id}"`);
       }
       for (const id of field.whenOption) {
-        if (!optionIdSet.has(id)) errors.push(`${path}.whenOption: unknown option id "${id}"`);
+        if (!optionIdSet.has(id))
+          errors.push(`${path}.whenOption: unknown option id "${id}"`);
       }
     }
 
@@ -164,9 +215,13 @@ function checkRequest(request, { refs, checkEffectLegality }) {
         const minimum = field.kind === "single-choice" ? 2 : 1;
         const maximum = field.kind === "single-choice" ? 12 : 24;
         if (field.choices.length < minimum || field.choices.length > maximum) {
-          errors.push(`${path}.choices: ${field.kind} requires ${minimum}–${maximum} choices`);
+          errors.push(
+            `${path}.choices: ${field.kind} requires ${minimum}–${maximum} choices`,
+          );
         }
-        for (const id of duplicateValues(field.choices.map((choice) => choice.id))) {
+        for (const id of duplicateValues(
+          field.choices.map((choice) => choice.id),
+        )) {
           errors.push(`${path}.choices: duplicate choice id "${id}"`);
         }
       }
@@ -175,13 +230,21 @@ function checkRequest(request, { refs, checkEffectLegality }) {
     if (field.kind === "multi-choice" && field.choices !== undefined) {
       const minimum = field.minItems ?? 0;
       const maximum = field.maxItems ?? field.choices.length;
-      if (minimum > maximum) errors.push(`${path}: minItems cannot exceed maxItems`);
-      if (minimum > field.choices.length) errors.push(`${path}.minItems: cannot exceed the number of choices`);
-      if (maximum > field.choices.length) errors.push(`${path}.maxItems: cannot exceed the number of choices`);
+      if (minimum > maximum)
+        errors.push(`${path}: minItems cannot exceed maxItems`);
+      if (minimum > field.choices.length)
+        errors.push(`${path}.minItems: cannot exceed the number of choices`);
+      if (maximum > field.choices.length)
+        errors.push(`${path}.maxItems: cannot exceed the number of choices`);
     }
 
-    if (field.kind === "number" && field.minimum !== undefined && field.maximum !== undefined) {
-      if (field.minimum > field.maximum) errors.push(`${path}: minimum cannot exceed maximum`);
+    if (
+      field.kind === "number" &&
+      field.minimum !== undefined &&
+      field.maximum !== undefined
+    ) {
+      if (field.minimum > field.maximum)
+        errors.push(`${path}: minimum cannot exceed maximum`);
     }
   }
 
@@ -191,7 +254,8 @@ function checkRequest(request, { refs, checkEffectLegality }) {
       (field) =>
         field.kind === "text" &&
         field.required === true &&
-        (field.whenOption === undefined || field.whenOption.includes(option.id)),
+        (field.whenOption === undefined ||
+          field.whenOption.includes(option.id)),
     );
     if (!reasonField) {
       errors.push(
@@ -215,8 +279,10 @@ function validateFieldValue(field, value, path, errors) {
       return;
     }
     const maximum = field.maxLength ?? TEXT_DEFAULT_MAX_LENGTH;
-    if (field.required === true && value.length === 0) errors.push(`${path}: required text must not be empty`);
-    if (value.length > maximum) errors.push(`${path}: longer than maxLength ${maximum}`);
+    if (field.required === true && value.length === 0)
+      errors.push(`${path}: required text must not be empty`);
+    if (value.length > maximum)
+      errors.push(`${path}: longer than maxLength ${maximum}`);
     return;
   }
 
@@ -241,21 +307,25 @@ function validateFieldValue(field, value, path, errors) {
       return;
     }
     const duplicates = duplicateValues(value);
-    for (const id of duplicates) errors.push(`${path}: duplicate choice id "${id}"`);
+    for (const id of duplicates)
+      errors.push(`${path}: duplicate choice id "${id}"`);
     const choices = new Set(field.choices.map((choice) => choice.id));
     for (const id of value) {
       if (!choices.has(id)) errors.push(`${path}: unknown choice id "${id}"`);
     }
     const minimum = field.minItems ?? (field.required === true ? 1 : 0);
     const maximum = field.maxItems ?? field.choices.length;
-    if (value.length < minimum) errors.push(`${path}: fewer than minItems ${minimum}`);
-    if (value.length > maximum) errors.push(`${path}: more than maxItems ${maximum}`);
+    if (value.length < minimum)
+      errors.push(`${path}: fewer than minItems ${minimum}`);
+    if (value.length > maximum)
+      errors.push(`${path}: more than maxItems ${maximum}`);
     return;
   }
 
   if (field.kind === "confirm") {
     if (typeof value !== "boolean") errors.push(`${path}: expected boolean`);
-    else if (field.required === true && value !== true) errors.push(`${path}: required confirmation must be true`);
+    else if (field.required === true && value !== true)
+      errors.push(`${path}: required confirmation must be true`);
     return;
   }
 
@@ -269,7 +339,8 @@ function validateFieldValue(field, value, path, errors) {
   if (field.maximum !== undefined && value > field.maximum) {
     errors.push(`${path}: above maximum ${field.maximum}`);
   }
-  if (field.integer === true && !Number.isInteger(value)) errors.push(`${path}: expected an integer`);
+  if (field.integer === true && !Number.isInteger(value))
+    errors.push(`${path}: expected an integer`);
 }
 
 /**
@@ -281,38 +352,57 @@ export function validateDecisionResponse(response, request) {
   const responseShape = validate(DECISION_RESPONSE_SCHEMA, response);
   if (!responseShape.valid) return responseShape;
 
-  const requestCheck = checkRequest(request, { refs: {}, checkEffectLegality: false });
+  const requestCheck = checkRequest(request, {
+    refs: {},
+    checkEffectLegality: false,
+  });
   if (!requestCheck.valid) {
     return result(requestCheck.errors.map((error) => `request ${error}`));
   }
 
   const errors = [];
-  if (response.requestHash !== decisionRequestHash(request)) errors.push("$.requestHash: does not match request");
+  if (response.requestHash !== decisionRequestHash(request))
+    errors.push("$.requestHash: does not match request");
 
-  const option = request.options.find((candidate) => candidate.id === response.optionId);
+  const option = request.options.find(
+    (candidate) => candidate.id === response.optionId,
+  );
   if (option === undefined) {
     errors.push(`$.optionId: unknown option id "${response.optionId}"`);
     return result(errors);
   }
 
-  const declaredFields = new Map((request.fields ?? []).map((field) => [field.id, field]));
+  const declaredFields = new Map(
+    (request.fields ?? []).map((field) => [field.id, field]),
+  );
   const applicableFields = (request.fields ?? []).filter(
-    (field) => field.whenOption === undefined || field.whenOption.includes(option.id),
+    (field) =>
+      field.whenOption === undefined || field.whenOption.includes(option.id),
   );
   const applicableIds = new Set(applicableFields.map((field) => field.id));
 
   for (const key of Object.keys(response.fields)) {
-    if (!declaredFields.has(key)) errors.push(`$.fields.${key}: undeclared field`);
-    else if (!applicableIds.has(key)) errors.push(`$.fields.${key}: field does not apply to option "${option.id}"`);
+    if (!declaredFields.has(key))
+      errors.push(`$.fields.${key}: undeclared field`);
+    else if (!applicableIds.has(key))
+      errors.push(
+        `$.fields.${key}: field does not apply to option "${option.id}"`,
+      );
   }
 
   for (const field of applicableFields) {
     const present = hasOwn(response.fields, field.id);
     if (!present) {
-      if (field.required === true) errors.push(`$.fields.${field.id}: required field is missing`);
+      if (field.required === true)
+        errors.push(`$.fields.${field.id}: required field is missing`);
       continue;
     }
-    validateFieldValue(field, response.fields[field.id], `$.fields.${field.id}`, errors);
+    validateFieldValue(
+      field,
+      response.fields[field.id],
+      `$.fields.${field.id}`,
+      errors,
+    );
   }
 
   return result(errors);

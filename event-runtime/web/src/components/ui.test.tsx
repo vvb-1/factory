@@ -2,7 +2,25 @@ import "../test-dom";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
-import { Button, ChipInput, clearToasts, CopyActions, Countdown, DetailPane, Dialog, FilterInput, getValueHue, KV, KVGroup, notify, Section, shortId, StateBadge, SuggestInput, ToastContainer } from "./ui";
+import {
+  Button,
+  ChipInput,
+  clearToasts,
+  CopyActions,
+  Countdown,
+  DetailPane,
+  Dialog,
+  FilterInput,
+  getValueHue,
+  KV,
+  KVGroup,
+  notify,
+  Section,
+  shortId,
+  StateBadge,
+  SuggestInput,
+  ToastContainer,
+} from "./ui";
 import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 import { modal } from "../hooks";
 import { changeInput, typeText } from "../test-render";
@@ -32,8 +50,12 @@ afterEach(() => {
 
 describe("shortId (WM-96)", () => {
   test("shortens a prefixed UUID id to the prefix plus the first 8 body characters", () => {
-    expect(shortId("run_ec9c87f9-4c1d-4f4a-9d7e-2c2f3a1b0c9d")).toBe("run_ec9c87f9");
-    expect(shortId("worker_0f3b2a1c-9e8d-4b7a-8c6d-5e4f3a2b1c0d")).toBe("worker_0f3b2a1c");
+    expect(shortId("run_ec9c87f9-4c1d-4f4a-9d7e-2c2f3a1b0c9d")).toBe(
+      "run_ec9c87f9",
+    );
+    expect(shortId("worker_0f3b2a1c-9e8d-4b7a-8c6d-5e4f3a2b1c0d")).toBe(
+      "worker_0f3b2a1c",
+    );
   });
 
   test("returns ids whose body is already 8 characters or fewer unchanged", () => {
@@ -42,7 +64,9 @@ describe("shortId (WM-96)", () => {
   });
 
   test("returns ids without a prefix unchanged", () => {
-    expect(shortId("plainid-with-no-underscore")).toBe("plainid-with-no-underscore");
+    expect(shortId("plainid-with-no-underscore")).toBe(
+      "plainid-with-no-underscore",
+    );
     expect(shortId("")).toBe("");
   });
 });
@@ -59,7 +83,9 @@ describe("CopyActions (WM-302)", () => {
     );
 
     const id = r.getByRole("button", { name: "Copy run id (c)" });
-    const cli = r.getByRole("button", { name: "Copy CLI inspect command (c i)" });
+    const cli = r.getByRole("button", {
+      name: "Copy CLI inspect command (c i)",
+    });
     const link = r.getByRole("button", { name: "Copy link (c l)" });
     expect(id.getAttribute("title")).toBe("Copy run id · c");
     expect(cli.getAttribute("title")).toBe("Copy CLI inspect command · c i");
@@ -92,7 +118,9 @@ describe("CopyActions (WM-302)", () => {
     );
 
     fireEvent.click(r.getByRole("button", { name: "Copy run id (c)" }));
-    fireEvent.click(r.getByRole("button", { name: "Copy CLI inspect command (c i)" }));
+    fireEvent.click(
+      r.getByRole("button", { name: "Copy CLI inspect command (c i)" }),
+    );
     fireEvent.click(r.getByRole("button", { name: "Copy link (c l)" }));
 
     expect(writes).toEqual([
@@ -153,7 +181,9 @@ describe("ToastContainer", () => {
     act(() => {
       button.click();
     });
-    expect(r.queryByRole("button", { name: /Operation succeeded/i })).toBeNull();
+    expect(
+      r.queryByRole("button", { name: /Operation succeeded/i }),
+    ).toBeNull();
   });
 });
 
@@ -168,18 +198,24 @@ describe("Countdown", () => {
     jest.setSystemTime(now);
     const createdAt = now.toISOString();
     const ttlSeconds = 15 * 60 + 14;
-    const r = render(<Countdown createdAt={createdAt} ttlSeconds={ttlSeconds} />);
+    const r = render(
+      <Countdown createdAt={createdAt} ttlSeconds={ttlSeconds} />,
+    );
 
     const el = r.container.querySelector("span");
     if (!el) throw new Error("Countdown span is missing");
     expect(el.textContent).toBe("15:14 left");
-    expect(el.getAttribute("title")).toBe(new Date(now.getTime() + ttlSeconds * 1000).toISOString());
+    expect(el.getAttribute("title")).toBe(
+      new Date(now.getTime() + ttlSeconds * 1000).toISOString(),
+    );
   });
 
   test("counts down as time passes, without losing the 'left' qualifier", () => {
     const created = new Date("2024-01-01T00:00:00Z");
     jest.setSystemTime(new Date(created.getTime() + 60_000));
-    const r = render(<Countdown createdAt={created.toISOString()} ttlSeconds={15 * 60 + 14} />);
+    const r = render(
+      <Countdown createdAt={created.toISOString()} ttlSeconds={15 * 60 + 14} />,
+    );
 
     const el = r.container.querySelector("span");
     if (!el) throw new Error("Countdown span is missing");
@@ -190,13 +226,19 @@ describe("Countdown", () => {
     const now = new Date("2024-01-01T00:00:00Z");
     jest.setSystemTime(now);
     const ttlSeconds = 60;
-    const createdAt = new Date(now.getTime() - (ttlSeconds * 1000 + 2 * 3600 * 1000)).toISOString();
-    const r = render(<Countdown createdAt={createdAt} ttlSeconds={ttlSeconds} />);
+    const createdAt = new Date(
+      now.getTime() - (ttlSeconds * 1000 + 2 * 3600 * 1000),
+    ).toISOString();
+    const r = render(
+      <Countdown createdAt={createdAt} ttlSeconds={ttlSeconds} />,
+    );
 
     const el = r.container.querySelector("span");
     if (!el) throw new Error("Countdown span is missing");
     expect(el.textContent).toBe("expired 2h ago");
-    expect(el.getAttribute("title")).toBe(new Date(new Date(createdAt).getTime() + ttlSeconds * 1000).toISOString());
+    expect(el.getAttribute("title")).toBe(
+      new Date(new Date(createdAt).getTime() + ttlSeconds * 1000).toISOString(),
+    );
   });
 });
 
@@ -255,7 +297,11 @@ describe("DetailPane", () => {
 
   test("omits the close slot when no close action is given", () => {
     const r = render(
-      <DetailPane widthClass="w-[440px]" title="t" actions={<Button onClick={() => {}}>Copy id</Button>}>
+      <DetailPane
+        widthClass="w-[440px]"
+        title="t"
+        actions={<Button onClick={() => {}}>Copy id</Button>}
+      >
         <div>body</div>
       </DetailPane>,
     );
@@ -274,13 +320,20 @@ describe("getValueHue", () => {
 });
 
 describe("FilterInput autocomplete (OPS-506)", () => {
-  function renderFilter(props: {
-    value?: string;
-    onChange?: (v: string) => void;
-    query?: ReturnType<typeof parseFilterQuery>;
-    facets?: typeof RUN_FACETS;
-  } = {}) {
-    const { value = "", onChange = () => {}, query, facets = RUN_FACETS } = props;
+  function renderFilter(
+    props: {
+      value?: string;
+      onChange?: (v: string) => void;
+      query?: ReturnType<typeof parseFilterQuery>;
+      facets?: typeof RUN_FACETS;
+    } = {},
+  ) {
+    const {
+      value = "",
+      onChange = () => {},
+      query,
+      facets = RUN_FACETS,
+    } = props;
     const parsed = query ?? parseFilterQuery(value, facets);
     return render(
       <FilterInput
@@ -377,7 +430,6 @@ describe("FilterInput autocomplete (OPS-506)", () => {
   });
 });
 
-
 describe("KV mono discipline (WM-136)", () => {
   test("renders identifier-ish values in mono and prose values in the UI font", () => {
     const r = render(
@@ -388,7 +440,9 @@ describe("KV mono discipline (WM-136)", () => {
       </>,
     );
     expect(classes(r.getByTitle("dispatch@1"))).toContain("mono");
-    expect(classes(r.getByTitle("/Users/x/.factory/event-runtime"))).toContain("mono");
+    expect(classes(r.getByTitle("/Users/x/.factory/event-runtime"))).toContain(
+      "mono",
+    );
     // "any worker" is language, not an identifier — character alignment buys nothing.
     expect(classes(r.getByTitle("any worker"))).not.toContain("mono");
   });
@@ -416,7 +470,11 @@ describe("KV attribute icons and unset values (WM-482)", () => {
   test("renders a leading aria-hidden icon slot only when an icon is passed", () => {
     const r = render(
       <>
-        <KV k="timeout" v="120s" icon={<svg data-testid="icon" viewBox="0 0 15 15" />} />
+        <KV
+          k="timeout"
+          v="120s"
+          icon={<svg data-testid="icon" viewBox="0 0 15 15" />}
+        />
         <KV k="version" v="1" />
       </>,
     );
@@ -437,19 +495,29 @@ describe("KV attribute icons and unset values (WM-482)", () => {
         <KV k="runId" v="run_1" />
       </Section>,
     );
-    expect(r.getByTitle("adapter").querySelector("i[aria-hidden] svg")).toBeTruthy();
+    expect(
+      r.getByTitle("adapter").querySelector("i[aria-hidden] svg"),
+    ).toBeTruthy();
     const slot = r.getByTitle("runId").querySelector("i[aria-hidden]");
     expect(slot).toBeTruthy();
     expect(slot!.querySelector("svg")).toBeNull();
     cleanup();
     // Without the opt-in nothing changes for the ~100 existing KV call sites.
-    const bare = render(<Section title="Run"><KV k="adapter" v="pi" /></Section>);
-    expect(bare.getByTitle("adapter").querySelector("i[aria-hidden]")).toBeNull();
+    const bare = render(
+      <Section title="Run">
+        <KV k="adapter" v="pi" />
+      </Section>,
+    );
+    expect(
+      bare.getByTitle("adapter").querySelector("i[aria-hidden]"),
+    ).toBeNull();
   });
 
   test("a null icon reserves the slot so labels in the same group align", () => {
     const r = render(<KV k="model override" v="-" icon={null} />);
-    expect(r.getByTitle("model override").querySelector("[aria-hidden]")).toBeTruthy();
+    expect(
+      r.getByTitle("model override").querySelector("[aria-hidden]"),
+    ).toBeTruthy();
   });
 
   test("renders the unset marker fainter than a set value", () => {
@@ -487,31 +555,56 @@ describe("Section cards and collapse persistence (WM-136)", () => {
   beforeEach(() => localStorage.clear());
 
   test("wraps rows in a card by default and skips it when card is false", () => {
-    const carded = render(<Section title="Run"><KV k="agent" v="a@1" /></Section>);
+    const carded = render(
+      <Section title="Run">
+        <KV k="agent" v="a@1" />
+      </Section>,
+    );
     expect(carded.container.querySelector(".rounded-md")).toBeTruthy();
     cleanup();
-    const bare = render(<Section title="Heartbeat" card={false}><KV k="agent" v="a@1" /></Section>);
+    const bare = render(
+      <Section title="Heartbeat" card={false}>
+        <KV k="agent" v="a@1" />
+      </Section>,
+    );
     expect(bare.container.querySelector(".rounded-md")).toBeNull();
   });
 
   test("collapses on click, hides its rows, and persists the choice", () => {
-    const r = render(<Section title="Lifecycle"><KV k="agent" v="a@1" /></Section>);
+    const r = render(
+      <Section title="Lifecycle">
+        <KV k="agent" v="a@1" />
+      </Section>,
+    );
     expect(r.queryByText("agent")).toBeTruthy();
     fireEvent.click(r.getByRole("button", { expanded: true }));
     expect(r.queryByText("agent")).toBeNull();
-    expect(JSON.parse(localStorage.getItem("evrt-sections-collapsed")!)).toContain("Lifecycle");
+    expect(
+      JSON.parse(localStorage.getItem("evrt-sections-collapsed")!),
+    ).toContain("Lifecycle");
     // A remount reads the persisted choice back.
     cleanup();
-    const again = render(<Section title="Lifecycle"><KV k="agent" v="a@1" /></Section>);
+    const again = render(
+      <Section title="Lifecycle">
+        <KV k="agent" v="a@1" />
+      </Section>,
+    );
     expect(again.queryByText("agent")).toBeNull();
   });
 
   test("a toggle does not stomp a sibling section's persisted collapse", () => {
-    localStorage.setItem("evrt-sections-collapsed", JSON.stringify(["Receipt"]));
+    localStorage.setItem(
+      "evrt-sections-collapsed",
+      JSON.stringify(["Receipt"]),
+    );
     const r = render(
       <>
-        <Section title="Run"><KV k="agent" v="a@1" /></Section>
-        <Section title="Receipt"><KV k="hash" v="abc" /></Section>
+        <Section title="Run">
+          <KV k="agent" v="a@1" />
+        </Section>
+        <Section title="Receipt">
+          <KV k="hash" v="abc" />
+        </Section>
       </>,
     );
     fireEvent.click(r.getByRole("button", { expanded: true, name: /Run/ }));
@@ -521,12 +614,22 @@ describe("Section cards and collapse persistence (WM-136)", () => {
   });
 
   test("keys persistence on id so a title carrying live data stays stable", () => {
-    const r = render(<Section id="run-result" title="Result · COMPLETED · ok"><KV k="a" v="b" /></Section>);
+    const r = render(
+      <Section id="run-result" title="Result · COMPLETED · ok">
+        <KV k="a" v="b" />
+      </Section>,
+    );
     fireEvent.click(r.getByRole("button", { expanded: true }));
-    expect(JSON.parse(localStorage.getItem("evrt-sections-collapsed")!)).toEqual(["run-result"]);
+    expect(
+      JSON.parse(localStorage.getItem("evrt-sections-collapsed")!),
+    ).toEqual(["run-result"]);
     cleanup();
     // Same section, different terminal state in the title — still collapsed.
-    const again = render(<Section id="run-result" title="Result · FAILED · agent_exit_1"><KV k="a" v="b" /></Section>);
+    const again = render(
+      <Section id="run-result" title="Result · FAILED · agent_exit_1">
+        <KV k="a" v="b" />
+      </Section>,
+    );
     expect(again.queryByText("a")).toBeNull();
   });
 });
@@ -812,7 +915,9 @@ describe("ChipInput popover (WM-160)", () => {
 
   test("filters available suggestions and supports ArrowDown / ArrowUp / Enter / Escape", () => {
     const r = render(<Harness />);
-    const input = r.getByRole("combobox", { name: "Repos" }) as HTMLInputElement;
+    const input = r.getByRole("combobox", {
+      name: "Repos",
+    }) as HTMLInputElement;
     fireEvent.focus(input);
 
     const options = r.getAllByRole("option");
@@ -824,7 +929,9 @@ describe("ChipInput popover (WM-160)", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(options[1].getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(r.getByRole("button", { name: "Remove watt-mind/bj29" })).toBeTruthy();
+    expect(
+      r.getByRole("button", { name: "Remove watt-mind/bj29" }),
+    ).toBeTruthy();
     expect(r.queryByRole("listbox")).toBeNull();
 
     fireEvent.focus(input);
@@ -839,7 +946,9 @@ describe("ChipInput popover (WM-160)", () => {
 
   test("preserves free-text chip entry when no suggestion matches", () => {
     const r = render(<Harness />);
-    const input = r.getByRole("combobox", { name: "Repos" }) as HTMLInputElement;
+    const input = r.getByRole("combobox", {
+      name: "Repos",
+    }) as HTMLInputElement;
     fireEvent.focus(input);
     act(() => {
       changeInput(input, "custom-repo");
@@ -864,7 +973,10 @@ describe("Dialog (WM-270)", () => {
             </Dialog>
           )}
           {confirmationOpen && (
-            <Dialog title="Confirmation dialog" onClose={() => setConfirmationOpen(false)}>
+            <Dialog
+              title="Confirmation dialog"
+              onClose={() => setConfirmationOpen(false)}
+            >
               Confirmation content
             </Dialog>
           )}
@@ -882,4 +994,3 @@ describe("Dialog (WM-270)", () => {
     expect(modal.depth).toBe(1);
   });
 });
-

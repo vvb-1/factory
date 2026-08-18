@@ -32,7 +32,9 @@ const OPTIONS = {
  */
 export function graphIdentity<G extends LayoutGraph>(graph: G): string {
   const nodes = graph.nodes.map((n) => n.id).sort();
-  const edges = graph.edges.map((e) => `${e.id}\t${e.source}\t${e.target}`).sort();
+  const edges = graph.edges
+    .map((e) => `${e.id}\t${e.source}\t${e.target}`)
+    .sort();
   return `${nodes.join("\n")}\n--\n${edges.join("\n")}`;
 }
 
@@ -56,7 +58,10 @@ export async function layoutGraphIfIdentityChanged<G extends LayoutGraph>(
   graph: G,
   prevIdentity: string | null,
   layout: LayoutFn = layoutGraph,
-): Promise<{ identity: string; positions: Map<string, { x: number; y: number }> | null }> {
+): Promise<{
+  identity: string;
+  positions: Map<string, { x: number; y: number }> | null;
+}> {
   const identity = graphIdentity(graph);
   if (prevIdentity !== null && identity === prevIdentity) {
     return { identity, positions: null };
@@ -72,7 +77,9 @@ export async function layoutGraph<G extends LayoutGraph>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`ELK layout calculation timed out after ${timeoutMs}ms`));
+      reject(
+        new Error(`ELK layout calculation timed out after ${timeoutMs}ms`),
+      );
     }, timeoutMs);
   });
 
@@ -80,8 +87,16 @@ export async function layoutGraph<G extends LayoutGraph>(
     const layoutPromise = elk.layout({
       id: "root",
       layoutOptions,
-      children: graph.nodes.map((n) => ({ id: n.id, width: NODE_WIDTH, height: NODE_HEIGHT })),
-      edges: graph.edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+      children: graph.nodes.map((n) => ({
+        id: n.id,
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      })),
+      edges: graph.edges.map((e) => ({
+        id: e.id,
+        sources: [e.source],
+        targets: [e.target],
+      })),
     });
 
     const result = await Promise.race([layoutPromise, timeoutPromise]);

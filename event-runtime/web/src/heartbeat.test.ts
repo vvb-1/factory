@@ -35,7 +35,10 @@ describe("heartbeatOf", () => {
 
   test("stale outranks stopped: a stale row still shows overdue time", () => {
     const w = baseWorker({ state: "stopped", stale: true, lastSeen });
-    expect(heartbeatOf(w, deadline + 5000)).toEqual({ kind: "stale", overdueMs: 5000 });
+    expect(heartbeatOf(w, deadline + 5000)).toEqual({
+      kind: "stale",
+      overdueMs: 5000,
+    });
   });
 
   test("live worker halfway through the window", () => {
@@ -46,20 +49,35 @@ describe("heartbeatOf", () => {
 
   test("ceil rounds sub-second remainder up to the next whole second", () => {
     const w = baseWorker({ lastSeen });
-    expect(heartbeatOf(w, deadline - 1)).toEqual({ kind: "live", remainingMs: 1000 });
-    expect(heartbeatOf(w, deadline - 999)).toEqual({ kind: "live", remainingMs: 1000 });
+    expect(heartbeatOf(w, deadline - 1)).toEqual({
+      kind: "live",
+      remainingMs: 1000,
+    });
+    expect(heartbeatOf(w, deadline - 999)).toEqual({
+      kind: "live",
+      remainingMs: 1000,
+    });
   });
 
   test("at the 90s boundary remainingMs is zero (overdue, not stale yet)", () => {
     const w = baseWorker({ lastSeen });
     expect(heartbeatOf(w, deadline)).toEqual({ kind: "live", remainingMs: 0 });
-    expect(heartbeatOf(w, deadline + 10_000)).toEqual({ kind: "live", remainingMs: 0 });
+    expect(heartbeatOf(w, deadline + 10_000)).toEqual({
+      kind: "live",
+      remainingMs: 0,
+    });
   });
 
   test("stale overdueMs floors to at least one second", () => {
     const w = baseWorker({ stale: true, lastSeen });
-    expect(heartbeatOf(w, deadline + 1)).toEqual({ kind: "stale", overdueMs: 1000 });
-    expect(heartbeatOf(w, deadline + 2500)).toEqual({ kind: "stale", overdueMs: 2500 });
+    expect(heartbeatOf(w, deadline + 1)).toEqual({
+      kind: "stale",
+      overdueMs: 1000,
+    });
+    expect(heartbeatOf(w, deadline + 2500)).toEqual({
+      kind: "stale",
+      overdueMs: 2500,
+    });
   });
 });
 
@@ -74,17 +92,27 @@ describe("isOverdue", () => {
 
 describe("heartbeatHue", () => {
   test("stale is always error", () => {
-    expect(heartbeatHue({ kind: "stale", overdueMs: 1000 })).toBe("var(--hue-err)");
+    expect(heartbeatHue({ kind: "stale", overdueMs: 1000 })).toBe(
+      "var(--hue-err)",
+    );
   });
 
   test("live inside the warn band is warn", () => {
-    expect(heartbeatHue({ kind: "live", remainingMs: HEARTBEAT_WARN_MS })).toBe("var(--hue-warn)");
-    expect(heartbeatHue({ kind: "live", remainingMs: 1000 })).toBe("var(--hue-warn)");
-    expect(heartbeatHue({ kind: "live", remainingMs: 0 })).toBe("var(--hue-warn)");
+    expect(heartbeatHue({ kind: "live", remainingMs: HEARTBEAT_WARN_MS })).toBe(
+      "var(--hue-warn)",
+    );
+    expect(heartbeatHue({ kind: "live", remainingMs: 1000 })).toBe(
+      "var(--hue-warn)",
+    );
+    expect(heartbeatHue({ kind: "live", remainingMs: 0 })).toBe(
+      "var(--hue-warn)",
+    );
   });
 
   test("live outside the warn band has no accent", () => {
-    expect(heartbeatHue({ kind: "live", remainingMs: HEARTBEAT_WARN_MS + 1000 })).toBeUndefined();
+    expect(
+      heartbeatHue({ kind: "live", remainingMs: HEARTBEAT_WARN_MS + 1000 }),
+    ).toBeUndefined();
     expect(heartbeatHue({ kind: "none" })).toBeUndefined();
   });
 });

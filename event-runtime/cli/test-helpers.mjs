@@ -152,7 +152,8 @@ export async function runNotifierDeliveryCase({
   const { tick } = await import("../cli.mjs");
   const { loadRegistry } = await import("../lib/registry.mjs");
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-tick-notify-"));
-  const { outFile, pidFile, startedFile, releaseFile, stub } = writeGatedNotifier(dir);
+  const { outFile, pidFile, startedFile, releaseFile, stub } =
+    writeGatedNotifier(dir);
   const db = openDb(path.join(dir, "runtime.db"));
   const at = new Date().toISOString();
   db.query(
@@ -182,7 +183,9 @@ export async function runNotifierDeliveryCase({
     });
     deliveryStarted = true;
     await awaitFile(startedFile, "notifier start");
-    trackProcess(Number(readFileSync(pidFile, "utf8").trim()), { group: false });
+    trackProcess(Number(readFileSync(pidFile, "utf8").trim()), {
+      group: false,
+    });
     if (failWhilePending)
       throw new Error(
         "intentional assertion failure while notifier delivery is pending",
@@ -199,9 +202,9 @@ export async function runNotifierDeliveryCase({
       "2. Not now",
     ].join("\n");
     expect(readFileSync(outFile, "utf8").trim()).toBe(expectedMessage);
-    expect(
-      logs.some((l) => l.includes("notify BLOCKED test/evt-tick")),
-    ).toBe(true);
+    expect(logs.some((l) => l.includes("notify BLOCKED test/evt-tick"))).toBe(
+      true,
+    );
     await tick({
       db,
       registry: loadRegistry(),

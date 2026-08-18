@@ -5,20 +5,14 @@
   "input_schema": "schemas/merge-notify.input.json",
   "output_schema": "schemas/command-result.output.json",
   "output_contract": "factory.command-result/v1",
-  "command": [
-    "factory",
-    "notify",
-    "ESCALATED merge {repo}: {summary}"
-  ],
+  "command": ["factory", "notify", "ESCALATED merge {repo}: {summary}"],
   "workspace": {
     "type": "ephemeral",
     "retainOnFailure": true
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "notify:telegram"
-    ]
+    "services": ["notify:telegram"]
   },
   "limits": {
     "timeout_seconds": 60,

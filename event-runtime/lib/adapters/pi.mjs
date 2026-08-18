@@ -55,7 +55,12 @@ import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 import { FACTORY_ROOT } from "../config.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
-import { guestBinary, guestEnvironment, runSandboxed, sandboxRequested } from "./sandboxed.mjs";
+import {
+  guestBinary,
+  guestEnvironment,
+  runSandboxed,
+  sandboxRequested,
+} from "./sandboxed.mjs";
 
 // PUSH_CREDENTIAL_ENV is imported, not redeclared: the WM-128 carve-out is one
 // list shared by both LLM adapters (WM-223), so it cannot drift between them.
@@ -74,7 +79,11 @@ export const SANDBOX_PROMPT_FILE = ".prompt.md";
 export const KILL_GRACE_MS = 30_000;
 
 /** Terminate a detached CLI and every subprocess it started (WM-263). */
-export function killProcessGroup(child, signal = "SIGTERM", kill = process.kill) {
+export function killProcessGroup(
+  child,
+  signal = "SIGTERM",
+  kill = process.kill,
+) {
   const pid = child?.pid;
   if (!pid) return;
   try {
@@ -250,8 +259,18 @@ export function piExtensions(def) {
 }
 
 export const BASE_INHERITED_ENV = [
-  "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM",
-  "TMPDIR", "USER", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
 ];
 
 /**
@@ -275,9 +294,16 @@ export const BASE_INHERITED_ENV = [
  * definition — `mutating` is a JSON boolean — but this direction fails closed.
  */
 export function safeChildEnvironment(env = {}, defOrOpts = {}) {
-  const isMutating = typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
-  const inherited = isMutating ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV] : BASE_INHERITED_ENV;
-  const childEnv = Object.fromEntries(inherited.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  const isMutating =
+    typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
+  const inherited = isMutating
+    ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV]
+    : BASE_INHERITED_ENV;
+  const childEnv = Object.fromEntries(
+    inherited.flatMap((key) =>
+      process.env[key] === undefined ? [] : [[key, process.env[key]]],
+    ),
+  );
   Object.assign(childEnv, env);
   // Read-only repository workspaces contain the selected target checkout, not
   // Factory's runtime support code. Expose the running Factory checkout through
@@ -289,8 +315,14 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
   // billing (same rationale as run-agent.sh's UNSET_KEYS, all providers pi
   // itself recognizes, not just OpenAI's).
   for (const key of [
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
   ]) {
     delete childEnv[key];
   }
@@ -315,12 +347,17 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
 export const HARNESS_DENIAL_PATTERNS = [];
 
 export function isHarnessDenial(content) {
-  return typeof content === "string" && HARNESS_DENIAL_PATTERNS.some((re) => re.test(content));
+  return (
+    typeof content === "string" &&
+    HARNESS_DENIAL_PATTERNS.some((re) => re.test(content))
+  );
 }
 
 function clip(text) {
   const s = String(text ?? "");
-  return s.length > TEXT_PREVIEW_CHARS ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]` : s;
+  return s.length > TEXT_PREVIEW_CHARS
+    ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]`
+    : s;
 }
 
 /** Flatten a tool result content value (pi's shape: an array of text blocks). */
@@ -355,16 +392,29 @@ export function mapStreamEvent(msg) {
     const events = [];
     for (const block of blocks) {
       if (block?.type === "text" && block.text) {
-        events.push({ kind: "assistant_text", payload: { text: clip(block.text) } });
+        events.push({
+          kind: "assistant_text",
+          payload: { text: clip(block.text) },
+        });
       } else if (block?.type === "toolCall") {
-        events.push({ kind: "tool_use", payload: { id: block.id ?? null, name: block.name, input: block.arguments } });
+        events.push({
+          kind: "tool_use",
+          payload: {
+            id: block.id ?? null,
+            name: block.name,
+            input: block.arguments,
+          },
+        });
       }
     }
     return events;
   }
 
   if (msg.type === "tool_execution_end") {
-    const payload = { content: clip(contentText(msg.result?.content)), toolUseId: msg.toolCallId ?? null };
+    const payload = {
+      content: clip(contentText(msg.result?.content)),
+      toolUseId: msg.toolCallId ?? null,
+    };
     if (msg.isError === true) payload.isError = true;
     return [{ kind: "tool_result", payload }];
   }
@@ -378,11 +428,19 @@ export function mapStreamEvent(msg) {
  * `usage` trace event pi's protocol has no equivalent terminal message for.
  */
 export function extractUsage(msg) {
-  if (!msg || msg.type !== "message_end" || msg.message?.role !== "assistant") return null;
+  if (!msg || msg.type !== "message_end" || msg.message?.role !== "assistant")
+    return null;
   const u = msg.message?.usage;
   if (!u || typeof u !== "object") return null;
   const usage = {};
-  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens"]) {
+  for (const key of [
+    "input",
+    "output",
+    "cacheRead",
+    "cacheWrite",
+    "reasoning",
+    "totalTokens",
+  ]) {
     if (typeof u[key] === "number") usage[key] = u[key];
   }
   const costUSD = typeof u.cost?.total === "number" ? u.cost.total : null;
@@ -402,7 +460,9 @@ export function extractUsage(msg) {
 function attachOutput({ stdout, workspaceDir, spec, def, onTrace, onUsage }) {
   // Capture the CLI's structured output as a runtime artifact, same
   // contract as the claude adapter: NDJSON, one message per line.
-  const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
+  const transcript = createWriteStream(
+    path.join(workspaceDir, ".transcript.json"),
+  );
   transcript.on("error", () => {});
   if (stdout) {
     stdout.pipe(transcript);
@@ -427,7 +487,10 @@ function attachOutput({ stdout, workspaceDir, spec, def, onTrace, onUsage }) {
         return; // not JSON — ignore
       }
       try {
-        if (parsed?.type === "message_end" && typeof parsed.message?.model === "string") {
+        if (
+          parsed?.type === "message_end" &&
+          typeof parsed.message?.model === "string"
+        ) {
           observedModel = parsed.message.model;
         } else if (typeof parsed?.model === "string") {
           observedModel = parsed.model;
@@ -438,9 +501,22 @@ function attachOutput({ stdout, workspaceDir, spec, def, onTrace, onUsage }) {
             if (event.payload?.id) toolNames.set(event.payload.id, lastTool);
           }
           onTrace?.(event.kind, event.payload);
-          const content = typeof event.payload?.content === "string" ? event.payload.content : "";
-          if (event.kind === "tool_result" && event.payload?.isError && isHarnessDenial(content)) {
-            const denial = { tool: toolNames.get(event.payload?.toolUseId) ?? lastTool ?? "unknown", rule: clip(content) };
+          const content =
+            typeof event.payload?.content === "string"
+              ? event.payload.content
+              : "";
+          if (
+            event.kind === "tool_result" &&
+            event.payload?.isError &&
+            isHarnessDenial(content)
+          ) {
+            const denial = {
+              tool:
+                toolNames.get(event.payload?.toolUseId) ??
+                lastTool ??
+                "unknown",
+              rule: clip(content),
+            };
             policyDenials.push(denial);
             onTrace?.("lifecycle", { note: "policy_denial", ...denial });
           }
@@ -448,7 +524,8 @@ function attachOutput({ stdout, workspaceDir, spec, def, onTrace, onUsage }) {
         const turnUsage = extractUsage(parsed);
         if (turnUsage) {
           turnCount += 1;
-          if (turnUsage.costUSD !== null) costTotal = (costTotal ?? 0) + turnUsage.costUSD;
+          if (turnUsage.costUSD !== null)
+            costTotal = (costTotal ?? 0) + turnUsage.costUSD;
           for (const [key, value] of Object.entries(turnUsage.usage)) {
             usageTotals[key] = (usageTotals[key] ?? 0) + value;
           }
@@ -535,13 +612,26 @@ async function executeSandboxed({
   writeFileSync(path.join(workspaceDir, SANDBOX_PROMPT_FILE), prompt, "utf8");
 
   if (resume?.sessionId) {
-    onTrace?.("lifecycle", { note: "sandbox_resume_unavailable", sessionId: resume.sessionId });
+    onTrace?.("lifecycle", {
+      note: "sandbox_resume_unavailable",
+      sessionId: resume.sessionId,
+    });
   }
   const bin = guestBinary(def, "pi");
-  const argv = [bin, ...buildPiArgv({ def, model: spec?.model, resumeSessionId: null })];
+  const argv = [
+    bin,
+    ...buildPiArgv({ def, model: spec?.model, resumeSessionId: null }),
+  ];
 
   const stdout = new PassThrough();
-  const { transcript, finish } = attachOutput({ stdout, workspaceDir, spec, def, onTrace, onUsage });
+  const { transcript, finish } = attachOutput({
+    stdout,
+    workspaceDir,
+    spec,
+    def,
+    onTrace,
+    onUsage,
+  });
   const transcriptClosed = new Promise((done) => {
     transcript.on("close", done);
     transcript.on("finish", done);
@@ -569,7 +659,10 @@ async function executeSandboxed({
   // gone, so nothing else is holding the run open.
   await transcriptClosed;
 
-  return finish({ exitCode: sandboxOutcome.exitCode, timedOut: sandboxOutcome.timedOut });
+  return finish({
+    exitCode: sandboxOutcome.exitCode,
+    timedOut: sandboxOutcome.timedOut,
+  });
 }
 
 /**
@@ -594,15 +687,24 @@ export async function execute({
   // spawn below, whatever else happens.
   if (sandboxRequested(def)) {
     return executeSandboxed({
-      spec, def, workspaceDir, timeoutMs, onTrace, onUsage, resume,
-      abortSignal: abortSignal ?? signal, runSandbox,
+      spec,
+      def,
+      workspaceDir,
+      timeoutMs,
+      onTrace,
+      onUsage,
+      resume,
+      abortSignal: abortSignal ?? signal,
+      runSandbox,
     });
   }
 
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
   const childEnv = safeChildEnvironment(env, def);
 
-  const resolved = resolvePiCommand({ which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }) });
+  const resolved = resolvePiCommand({
+    which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }),
+  });
   if (!resolved) {
     // Preflight refusal (OPS-296 AC): missing CLI is a typed condition the
     // worker recognizes as `cli_not_found`, not an opaque `adapter_error`
@@ -613,7 +715,11 @@ export async function execute({
   }
   const argv = [
     ...resolved.args,
-    ...buildPiArgv({ def, model: spec?.model, resumeSessionId: resume?.sessionId }),
+    ...buildPiArgv({
+      def,
+      model: spec?.model,
+      resumeSessionId: resume?.sessionId,
+    }),
   ];
 
   return new Promise((resolve, reject) => {
@@ -628,21 +734,34 @@ export async function execute({
     child.stdin.write(prompt);
     child.stdin.end();
 
-    const { transcript, finish } = attachOutput({ stdout: child.stdout, workspaceDir, spec, def, onTrace, onUsage });
+    const { transcript, finish } = attachOutput({
+      stdout: child.stdout,
+      workspaceDir,
+      spec,
+      def,
+      onTrace,
+      onUsage,
+    });
 
     let timedOut = false;
     let killTimer = null;
     const termTimer = setTimeout(() => {
       timedOut = true;
       killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+      killTimer = setTimeout(
+        () => killProcessGroup(child, "SIGKILL"),
+        killGraceMs,
+      );
       killTimer.unref?.();
     }, timeoutMs);
 
     const onAbort = () => {
       killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+        killTimer = setTimeout(
+          () => killProcessGroup(child, "SIGKILL"),
+          killGraceMs,
+        );
         killTimer.unref?.();
       }
     };

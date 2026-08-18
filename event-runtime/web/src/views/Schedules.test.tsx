@@ -1,9 +1,19 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Schedules, scheduleFilterTokens, type ScheduleItem } from "./Schedules";
+import {
+  Schedules,
+  scheduleFilterTokens,
+  type ScheduleItem,
+} from "./Schedules";
 import { api } from "../api";
 import { useContextActions } from "../palette";
 import { changeInput } from "../test-render";
@@ -16,12 +26,16 @@ function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 const noop = () => {};
 
-function schedule(overrides: Partial<ScheduleItem> & Pick<ScheduleItem, "loop">): ScheduleItem {
+function schedule(
+  overrides: Partial<ScheduleItem> & Pick<ScheduleItem, "loop">,
+): ScheduleItem {
   return {
     repo: null,
     every: "5m",
@@ -45,9 +59,19 @@ function schedule(overrides: Partial<ScheduleItem> & Pick<ScheduleItem, "loop">)
 /** The four enabled × stopped combinations (WM-101). */
 const rows: ScheduleItem[] = [
   schedule({ loop: "loop-enabled-running", enabled: true, stopped: false }),
-  schedule({ loop: "loop-enabled-stopped", enabled: true, stopped: true, intervalsLate: 3 }),
+  schedule({
+    loop: "loop-enabled-stopped",
+    enabled: true,
+    stopped: true,
+    intervalsLate: 3,
+  }),
   schedule({ loop: "loop-disabled-idle", enabled: false, stopped: false }),
-  schedule({ loop: "loop-disabled-stopped", enabled: false, stopped: true, intervalsLate: 7 }),
+  schedule({
+    loop: "loop-disabled-stopped",
+    enabled: false,
+    stopped: true,
+    intervalsLate: 7,
+  }),
 ];
 
 const origFetch = globalThis.fetch;
@@ -57,7 +81,12 @@ const origTriggerSchedule = api.triggerSchedule;
 
 beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
     if (url.startsWith("/api/schedules")) {
       return new Response(JSON.stringify({ schedules: rows }), {
         status: 200,
@@ -66,7 +95,12 @@ beforeEach(() => {
     }
     return origFetch(input, init);
   }) as typeof fetch;
-  api.agents = async () => ({ agents: [], edges: {}, eventTypes: [], contracts: {} });
+  api.agents = async () => ({
+    agents: [],
+    edges: {},
+    eventTypes: [],
+    contracts: {},
+  });
   api.events = async () => ({ events: [] });
 });
 
@@ -114,17 +148,31 @@ function StatefulSchedules({
   initialLoop?: string | null;
 }) {
   const [loop, setLoop] = useState<string | null>(initialLoop);
-  return <Schedules {...scheduleViewProps({ connected, focusScheduleLoop: loop, onSelectSchedule: setLoop })} />;
+  return (
+    <Schedules
+      {...scheduleViewProps({
+        connected,
+        focusScheduleLoop: loop,
+        onSelectSchedule: setLoop,
+      })}
+    />
+  );
 }
 
 function PaletteProbe() {
   const actions = useContextActions();
-  return <div data-testid="palette-probe">{actions.map((a) => a.label).join(" | ")}</div>;
+  return (
+    <div data-testid="palette-probe">
+      {actions.map((a) => a.label).join(" | ")}
+    </div>
+  );
 }
 
 function pressKey(key: string) {
   act(() => {
-    document.body.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true }),
+    );
   });
 }
 
@@ -136,7 +184,9 @@ describe("Schedules enabled/state wording (WM-101)", () => {
 
     const enabledCells = getAllByText("enabled");
     expect(enabledCells.length).toBe(2); // the two enabled rows
-    expect(enabledCells[0]!.title).toContain("enabled: true in event-runtime/schedules.json");
+    expect(enabledCells[0]!.title).toContain(
+      "enabled: true in event-runtime/schedules.json",
+    );
 
     const running = getByText("running");
     expect(running.title).toContain("scheduler loop is ticking");
@@ -152,7 +202,9 @@ describe("Schedules enabled/state wording (WM-101)", () => {
     await waitFor(() => getByText("loop-enabled-stopped"));
 
     const stopped = getByText("stopped (3 late)");
-    expect(stopped.title).toContain("enabled: true but the scheduler loop is not ticking");
+    expect(stopped.title).toContain(
+      "enabled: true but the scheduler loop is not ticking",
+    );
     expect(stopped.title).toContain("3 intervals");
   });
 
@@ -165,14 +217,19 @@ describe("Schedules enabled/state wording (WM-101)", () => {
 
     const disabledCells = getAllByText("disabled");
     expect(disabledCells.length).toBe(2); // the two disabled rows
-    expect(disabledCells[0]!.title).toContain("enabled: false in event-runtime/schedules.json");
+    expect(disabledCells[0]!.title).toContain(
+      "enabled: false in event-runtime/schedules.json",
+    );
 
     const notScheduled = getAllByText("not scheduled");
-    expect(notScheduled[0]!.title).toContain("enabled: false in event-runtime/schedules.json");
+    expect(notScheduled[0]!.title).toContain(
+      "enabled: false in event-runtime/schedules.json",
+    );
   });
 
   test("disabled + stopped still renders 'not scheduled' (a disabled loop cannot be a stalled clock)", async () => {
-    const { getByText, getAllByText, queryByText, getByRole } = renderSchedules();
+    const { getByText, getAllByText, queryByText, getByRole } =
+      renderSchedules();
 
     await waitFor(() => getByRole("tab", { name: /Disabled/ }));
     fireEvent.click(getByRole("tab", { name: /Disabled/ }));
@@ -189,7 +246,9 @@ describe("Schedules enabled/state wording (WM-101)", () => {
 
     await waitFor(() => getByText("loop-enabled-running"));
 
-    expect(getByTitle(/Config flag from event-runtime\/schedules.json/).title).toContain("event-runtime/schedules.json");
+    expect(
+      getByTitle(/Config flag from event-runtime\/schedules.json/).title,
+    ).toContain("event-runtime/schedules.json");
     expect(getByText("State").title).toContain("Runtime health");
     expect(getByText(/there is no.*toggle here/s)).toBeTruthy();
   });
@@ -210,7 +269,9 @@ describe("Schedules enabled/state wording (WM-101)", () => {
       expect(tokens).not.toContain("ok");
     }
     // error wins the state token
-    expect(scheduleFilterTokens(schedule({ loop: "l", error: "bad cadence" }))).toContain("error");
+    expect(
+      scheduleFilterTokens(schedule({ loop: "l", error: "bad cadence" })),
+    ).toContain("error");
   });
 });
 
@@ -237,14 +298,30 @@ describe("Schedules tabs and default ordering (WM-549)", () => {
 
   test("orders enabled first, then next due ascending, then loop name", async () => {
     const orderedRows = [
-      schedule({ loop: "disabled-z", enabled: false, nextDue: "2030-01-01T00:00:00.000Z" }),
+      schedule({
+        loop: "disabled-z",
+        enabled: false,
+        nextDue: "2030-01-01T00:00:00.000Z",
+      }),
       schedule({ loop: "enabled-later", nextDue: "2030-01-02T00:00:00.000Z" }),
       schedule({ loop: "enabled-undated", nextDue: null }),
-      schedule({ loop: "disabled-a", enabled: false, nextDue: "2030-01-03T00:00:00.000Z" }),
+      schedule({
+        loop: "disabled-a",
+        enabled: false,
+        nextDue: "2030-01-03T00:00:00.000Z",
+      }),
       schedule({ loop: "enabled-sooner", nextDue: "2030-01-01T00:00:00.000Z" }),
     ];
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
       if (url.startsWith("/api/schedules")) {
         return new Response(JSON.stringify({ schedules: orderedRows }), {
           status: 200,
@@ -258,9 +335,9 @@ describe("Schedules tabs and default ordering (WM-549)", () => {
     const allTab = await view.findByRole("tab", { name: /All\s*5/ });
     fireEvent.click(allTab);
 
-    const renderedLoops = [...view.container.querySelectorAll("tbody tr td:first-child")].map(
-      (cell) => cell.textContent,
-    );
+    const renderedLoops = [
+      ...view.container.querySelectorAll("tbody tr td:first-child"),
+    ].map((cell) => cell.textContent);
     expect(renderedLoops).toEqual([
       "enabled-sooner",
       "enabled-later",
@@ -278,7 +355,11 @@ describe("Schedules connected gating (WM-156)", () => {
       focusScheduleLoop: "loop-enabled-running",
     });
 
-    await waitFor(() => expect(getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(1));
+    await waitFor(() =>
+      expect(
+        getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(1),
+    );
 
     for (const btn of getAllByRole("button", { name: "Run now…" })) {
       expect((btn as HTMLButtonElement).disabled).toBe(true);
@@ -287,10 +368,17 @@ describe("Schedules connected gating (WM-156)", () => {
 
   test("keyboard r does not open confirm when disconnected", async () => {
     const { getAllByRole, queryByRole, queryByText } = renderWithClient(
-      <StatefulSchedules connected={false} initialLoop="loop-enabled-running" />,
+      <StatefulSchedules
+        connected={false}
+        initialLoop="loop-enabled-running"
+      />,
     );
 
-    await waitFor(() => expect(getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(
+        getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(0),
+    );
     pressKey("r");
 
     expect(queryByRole("button", { name: "Trigger Run" }) === null).toBe(true);
@@ -300,13 +388,24 @@ describe("Schedules connected gating (WM-156)", () => {
   test("palette omits Run now when disconnected", async () => {
     const { getAllByRole, getByTestId } = renderWithClient(
       <>
-        <StatefulSchedules connected={false} initialLoop="loop-enabled-running" />
+        <StatefulSchedules
+          connected={false}
+          initialLoop="loop-enabled-running"
+        />
         <PaletteProbe />
       </>,
     );
 
-    await waitFor(() => expect(getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
-    await waitFor(() => expect(getByTestId("palette-probe").textContent).toContain("Copy loop-enabled-running"));
+    await waitFor(() =>
+      expect(
+        getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(0),
+    );
+    await waitFor(() =>
+      expect(getByTestId("palette-probe").textContent).toContain(
+        "Copy loop-enabled-running",
+      ),
+    );
 
     const labels = getByTestId("palette-probe").textContent ?? "";
     expect(labels).not.toMatch(/Run .* now/);
@@ -320,22 +419,37 @@ describe("Schedules connected gating (WM-156)", () => {
           <button type="button" onClick={() => setConnected(false)}>
             simulate-disconnect
           </button>
-          <StatefulSchedules connected={connected} initialLoop="loop-enabled-running" />
+          <StatefulSchedules
+            connected={connected}
+            initialLoop="loop-enabled-running"
+          />
         </>
       );
     }
 
-    const { getByText, getByRole, getAllByRole } = renderWithClient(<ConfirmThenDisconnect />);
+    const { getByText, getByRole, getAllByRole } = renderWithClient(
+      <ConfirmThenDisconnect />,
+    );
 
-    await waitFor(() => expect(getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(
+        getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(0),
+    );
     fireEvent.click(getAllByRole("button", { name: "Run now…" })[0]!);
     await waitFor(() => getByRole("button", { name: "Trigger Run" }));
 
-    expect((getByRole("button", { name: "Trigger Run" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (getByRole("button", { name: "Trigger Run" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
 
     fireEvent.click(getByText("simulate-disconnect"));
 
-    expect((getByRole("button", { name: "Trigger Run" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (getByRole("button", { name: "Trigger Run" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   test("Run now buttons are enabled when connected={true}", async () => {
@@ -344,7 +458,11 @@ describe("Schedules connected gating (WM-156)", () => {
       focusScheduleLoop: "loop-enabled-running",
     });
 
-    await waitFor(() => expect(getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(1));
+    await waitFor(() =>
+      expect(
+        getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(1),
+    );
 
     for (const btn of getAllByRole("button", { name: "Run now…" })) {
       expect((btn as HTMLButtonElement).disabled).toBe(false);
@@ -354,16 +472,24 @@ describe("Schedules connected gating (WM-156)", () => {
 
 describe("Schedules aria-selected (WM-156)", () => {
   test("selected row has aria-selected=true; others false; updates on click and j/k", async () => {
-    const { getByText, container } = renderWithClient(<StatefulSchedules connected={true} />);
+    const { getByText, container } = renderWithClient(
+      <StatefulSchedules connected={true} />,
+    );
 
     await waitFor(() => getByText("loop-enabled-running"));
 
     const dataRows = () => [...container.querySelectorAll("tbody tr")];
-    expect(dataRows().every((row) => row.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(
+      dataRows().every((row) => row.getAttribute("aria-selected") === "false"),
+    ).toBe(true);
 
     fireEvent.click(getByText("loop-enabled-running"));
     expect(dataRows()[0]!.getAttribute("aria-selected")).toBe("true");
-    expect(dataRows().slice(1).every((row) => row.getAttribute("aria-selected") === "false")).toBe(true);
+    expect(
+      dataRows()
+        .slice(1)
+        .every((row) => row.getAttribute("aria-selected") === "false"),
+    ).toBe(true);
 
     pressKey("j");
     expect(dataRows()[0]!.getAttribute("aria-selected")).toBe("false");
@@ -398,7 +524,9 @@ describe("Schedules copy chords and hints (WM-233)", () => {
       focusScheduleLoop: "loop-enabled-running",
     });
 
-    const loopBtn = await r.findByRole("button", { name: "Copy schedule loop (c)" });
+    const loopBtn = await r.findByRole("button", {
+      name: "Copy schedule loop (c)",
+    });
 
     // Verify icon-action tooltips preserve shortcut discoverability.
     expect(loopBtn.getAttribute("title")).toBe("Copy schedule loop · c");
@@ -447,8 +575,16 @@ describe("Schedules manual merge targeting (WM-426)", () => {
   });
 
   function serveMergeSchedule() {
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
       if (url.startsWith("/api/schedules")) {
         return new Response(JSON.stringify({ schedules: [mergeSchedule] }), {
           status: 200,
@@ -480,18 +616,34 @@ describe("Schedules manual merge targeting (WM-426)", () => {
     const view = renderWithClient(
       <StatefulSchedules connected={true} initialLoop="merge-factory" />,
     );
-    await waitFor(() => expect(view.getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(
+        view.getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(0),
+    );
     fireEvent.click(view.getAllByRole("button", { name: "Run now…" })[0]!);
 
-    const input = await view.findByRole("textbox", { name: "PR numbers (optional)" });
-    expect(view.getByText(/Leave blank to review all open PRs in factory/)).toBeTruthy();
+    const input = await view.findByRole("textbox", {
+      name: "PR numbers (optional)",
+    });
+    expect(
+      view.getByText(/Leave blank to review all open PRs in factory/),
+    ).toBeTruthy();
     expect(view.getByText("Autonomous merge automation")).toBeTruthy();
-    expect(view.getByText(/mutating downstream automation without another confirmation/)).toBeTruthy();
-    expect(input.getAttribute("aria-describedby")).toBe("schedule-pr-numbers-help");
+    expect(
+      view.getByText(
+        /mutating downstream automation without another confirmation/,
+      ),
+    ).toBeTruthy();
+    expect(input.getAttribute("aria-describedby")).toBe(
+      "schedule-pr-numbers-help",
+    );
     act(() => changeInput(input, "411, 426"));
     fireEvent.click(view.getByRole("button", { name: "Trigger Run" }));
 
-    await waitFor(() => expect(calls).toEqual([{ loop: "merge-factory", prNumbers: [411, 426] }]));
+    await waitFor(() =>
+      expect(calls).toEqual([{ loop: "merge-factory", prNumbers: [411, 426] }]),
+    );
   });
 
   test("invalid merge selection exposes an input-associated error", async () => {
@@ -499,9 +651,15 @@ describe("Schedules manual merge targeting (WM-426)", () => {
     const view = renderWithClient(
       <StatefulSchedules connected={true} initialLoop="merge-factory" />,
     );
-    await waitFor(() => expect(view.getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(
+        view.getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(0),
+    );
     fireEvent.click(view.getAllByRole("button", { name: "Run now…" })[0]!);
-    const input = await view.findByRole("textbox", { name: "PR numbers (optional)" });
+    const input = await view.findByRole("textbox", {
+      name: "PR numbers (optional)",
+    });
     act(() => changeInput(input, "426, 426"));
     fireEvent.click(view.getByRole("button", { name: "Trigger Run" }));
 
@@ -532,12 +690,17 @@ describe("Schedules manual merge targeting (WM-426)", () => {
     const view = renderWithClient(
       <StatefulSchedules connected={true} initialLoop="merge-factory" />,
     );
-    await waitFor(() => expect(view.getAllByRole("button", { name: "Run now…" }).length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(
+        view.getAllByRole("button", { name: "Run now…" }).length,
+      ).toBeGreaterThan(0),
+    );
     fireEvent.click(view.getAllByRole("button", { name: "Run now…" })[0]!);
     await view.findByRole("textbox", { name: "PR numbers (optional)" });
     fireEvent.click(view.getByRole("button", { name: "Trigger Run" }));
 
-    await waitFor(() => expect(calls).toEqual([{ loop: "merge-factory", prNumbers: undefined }]));
+    await waitFor(() =>
+      expect(calls).toEqual([{ loop: "merge-factory", prNumbers: undefined }]),
+    );
   });
 });
-

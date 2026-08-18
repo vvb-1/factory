@@ -14,7 +14,15 @@
 import type { ScheduleItem } from "./api";
 import { eventNodeId, runNodeId } from "./graph/chainModel";
 import { humanizeReason } from "./reasons";
-import type { ChainEvent, ChainRun, ChainView, InboxItem, LifecycleEvent, Proposal, RunDetail } from "./types";
+import type {
+  ChainEvent,
+  ChainRun,
+  ChainView,
+  InboxItem,
+  LifecycleEvent,
+  Proposal,
+  RunDetail,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // View mode (Graph | Timeline), persisted like the other display options.
@@ -31,7 +39,9 @@ function isChainViewMode(value: unknown): value is ChainViewMode {
 }
 
 /** Persisted mode; graph when nothing (or garbage) is stored. */
-export function loadChainViewMode(storage: StorageLike | null = defaultStorage()): ChainViewMode {
+export function loadChainViewMode(
+  storage: StorageLike | null = defaultStorage(),
+): ChainViewMode {
   try {
     const raw = storage?.getItem(CHAIN_VIEW_STORAGE_KEY);
     return isChainViewMode(raw) ? raw : "graph";
@@ -40,7 +50,10 @@ export function loadChainViewMode(storage: StorageLike | null = defaultStorage()
   }
 }
 
-export function saveChainViewMode(mode: ChainViewMode, storage: StorageLike | null = defaultStorage()): void {
+export function saveChainViewMode(
+  mode: ChainViewMode,
+  storage: StorageLike | null = defaultStorage(),
+): void {
   try {
     storage?.setItem(CHAIN_VIEW_STORAGE_KEY, mode);
   } catch {
@@ -49,7 +62,9 @@ export function saveChainViewMode(mode: ChainViewMode, storage: StorageLike | nu
 }
 
 /** `?view=timeline` on a chain deep link; null when absent or unknown. */
-export function chainViewModeFromQuery(query: URLSearchParams): ChainViewMode | null {
+export function chainViewModeFromQuery(
+  query: URLSearchParams,
+): ChainViewMode | null {
   const raw = query.get("view");
   return isChainViewMode(raw) ? raw : null;
 }
@@ -71,13 +86,16 @@ export interface HumanReason {
  * `code[:suffix]` → sentence, keeping any suffix (policy version, detail)
  * as a mono-ish tail. Unknown codes are de-snaked rather than hidden.
  */
-export function humanizeRunReason(reason: string | null | undefined): HumanReason | null {
+export function humanizeRunReason(
+  reason: string | null | undefined,
+): HumanReason | null {
   const human = humanizeReason(reason);
   if (!human.raw) return null;
   // The chain is showing the plan that this particular run consumed.
-  const text = reason?.split(":", 1)[0] === "merge_fix_pr_moved"
-    ? human.text.replace("since the plan", "after the plan")
-    : human.text;
+  const text =
+    reason?.split(":", 1)[0] === "merge_fix_pr_moved"
+      ? human.text.replace("since the plan", "after the plan")
+      : human.text;
   return { text, raw: human.raw };
 }
 
@@ -85,7 +103,15 @@ export function humanizeRunReason(reason: string | null | undefined): HumanReaso
 // Rows
 // ---------------------------------------------------------------------------
 
-export type TimelineRefKind = "event" | "run" | "proposal" | "pr" | "ticket" | "agent" | "schedule" | "inbox";
+export type TimelineRefKind =
+  | "event"
+  | "run"
+  | "proposal"
+  | "pr"
+  | "ticket"
+  | "agent"
+  | "schedule"
+  | "inbox";
 
 export interface TimelineRef {
   kind: TimelineRefKind;
@@ -138,9 +164,19 @@ export interface ChainTimelineInput {
   now: number;
 }
 
-const TERMINAL = new Set(["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"]);
+const TERMINAL = new Set([
+  "COMPLETED",
+  "REFUSED",
+  "FAILED",
+  "TIMED_OUT",
+  "CANCELLED",
+]);
 const REVISIT_STATES = new Set(["REFUSED", "FAILED", "TIMED_OUT"]);
-const REVISIT_EVENT_STATUSES = new Set(["noop", "human_needed", "dead_lettered"]);
+const REVISIT_EVENT_STATUSES = new Set([
+  "noop",
+  "human_needed",
+  "dead_lettered",
+]);
 
 function ms(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -169,7 +205,8 @@ function formatTimelineDuration(valueMs: number): string {
   const seconds = Math.round(valueMs / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m${seconds % 60 ? ` ${seconds % 60}s` : ""}`;
+  if (minutes < 60)
+    return `${minutes}m${seconds % 60 ? ` ${seconds % 60}s` : ""}`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
 }
@@ -178,7 +215,9 @@ function formatTimelineDuration(valueMs: number): string {
 export function formatUntil(atMs: number, now: number): string {
   const diff = atMs - now;
   if (Math.abs(diff) < 30_000) return "now";
-  return diff > 0 ? `in ${formatTimelineDuration(diff)}` : `overdue by ${formatTimelineDuration(-diff)}`;
+  return diff > 0
+    ? `in ${formatTimelineDuration(diff)}`
+    : `overdue by ${formatTimelineDuration(-diff)}`;
 }
 
 /** Ticket + PR references named by a run's spec input (merge-fix, dispatch, …). */
@@ -186,23 +225,44 @@ export function specInputRefs(input: unknown): TimelineRef[] {
   const refs: TimelineRef[] = [];
   if (!input || typeof input !== "object") return refs;
   const record = input as Record<string, unknown>;
-  const github = typeof record.github === "string" && /^[^/]+\/[^/]+$/.test(record.github) ? record.github : null;
+  const github =
+    typeof record.github === "string" && /^[^/]+\/[^/]+$/.test(record.github)
+      ? record.github
+      : null;
   const pr = record.pr ?? record.prNumber ?? record.pullRequestNumber;
-  const prNumber = typeof pr === "number" ? pr : typeof pr === "string" && /^\d+$/.test(pr) ? Number(pr) : null;
+  const prNumber =
+    typeof pr === "number"
+      ? pr
+      : typeof pr === "string" && /^\d+$/.test(pr)
+        ? Number(pr)
+        : null;
   const prUrl =
-    typeof record.prUrl === "string" && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(record.prUrl)
+    typeof record.prUrl === "string" &&
+    /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(record.prUrl)
       ? record.prUrl
       : prNumber != null && github
         ? `https://github.com/${github}/pull/${prNumber}`
         : null;
   if (prNumber != null || prUrl) {
     const number = prNumber ?? Number(prUrl!.match(/\/pull\/(\d+)/)?.[1]);
-    refs.push({ kind: "pr", label: `PR #${number}`, id: prUrl ?? String(number), href: prUrl ?? undefined });
+    refs.push({
+      kind: "pr",
+      label: `PR #${number}`,
+      id: prUrl ?? String(number),
+      href: prUrl ?? undefined,
+    });
   }
   for (const key of ["ticket", "ticketId", "issue", "issueId"]) {
     const value = record[key];
-    if (typeof value === "string" && /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(value.trim().toUpperCase())) {
-      refs.push({ kind: "ticket", label: value.trim().toUpperCase(), id: value.trim().toUpperCase() });
+    if (
+      typeof value === "string" &&
+      /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(value.trim().toUpperCase())
+    ) {
+      refs.push({
+        kind: "ticket",
+        label: value.trim().toUpperCase(),
+        id: value.trim().toUpperCase(),
+      });
       break;
     }
   }
@@ -219,7 +279,10 @@ function dedupeRefs(refs: TimelineRef[]): TimelineRef[] {
   });
 }
 
-function approvalNote(lifecycle: LifecycleEvent[], proposal: Proposal | undefined): string | null {
+function approvalNote(
+  lifecycle: LifecycleEvent[],
+  proposal: Proposal | undefined,
+): string | null {
   const approved = lifecycle.find((entry) => entry.to_state === "APPROVED");
   if (approved) {
     const reason = approved.reason ?? "";
@@ -230,8 +293,10 @@ function approvalNote(lifecycle: LifecycleEvent[], proposal: Proposal | undefine
     }
     return `approved by ${approved.actor}`;
   }
-  if (proposal?.status === "approved") return `approved by ${proposal.decided_by ?? "operator"}`;
-  if (proposal?.status === "rejected") return `rejected by ${proposal.decided_by ?? "operator"}`;
+  if (proposal?.status === "approved")
+    return `approved by ${proposal.decided_by ?? "operator"}`;
+  if (proposal?.status === "rejected")
+    return `rejected by ${proposal.decided_by ?? "operator"}`;
   if (proposal?.status === "open") return "awaiting approval";
   return null;
 }
@@ -268,7 +333,8 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
   }
   const runInput = (runId: string | null | undefined): unknown =>
     runId ? runDetails[runId]?.run.spec.input : undefined;
-  const runRefs = (runId: string | null | undefined): TimelineRef[] => specInputRefs(runInput(runId));
+  const runRefs = (runId: string | null | undefined): TimelineRef[] =>
+    specInputRefs(runInput(runId));
 
   const decidedRuns = new Set<string>();
   let partial = false;
@@ -278,7 +344,12 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
     const nodeId = eventNodeId(event.source, event.eventId);
     const admittedMs = ms(event.admittedAt) ?? ms(event.occurredAt) ?? 0;
     const refs = dedupeRefs([
-      { kind: "event", label: event.type, id: event.eventId, source: event.source },
+      {
+        kind: "event",
+        label: event.type,
+        id: event.eventId,
+        source: event.source,
+      },
       ...runRefs(event.runId),
     ]);
     const suffix = refs
@@ -308,17 +379,40 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
       proposalsByEvent.get(`${event.source}:${event.eventId}`);
     const decision = proposal?.decision ?? event.proposalDecision ?? null;
     const status = event.status;
-    const run = event.runId ? runsById.get(event.runId) : proposal?.runId ? runsById.get(proposal.runId) : undefined;
+    const run = event.runId
+      ? runsById.get(event.runId)
+      : proposal?.runId
+        ? runsById.get(proposal.runId)
+        : undefined;
     const decisionAt = proposal?.created_at ?? run?.created_at ?? null;
     if (decision || REVISIT_EVENT_STATUSES.has(status)) {
       const kindLabel = decision === "run" ? "planned" : (decision ?? status);
       const detail = run ? runDetails[run.runId] : undefined;
       const note = run ? approvalNote(detail?.lifecycle ?? [], proposal) : null;
-      const reason = decision === "run" ? null : humanizeRunReason(proposal?.reason ?? null);
+      const reason =
+        decision === "run" ? null : humanizeRunReason(proposal?.reason ?? null);
       const rowRefs = dedupeRefs([
-        ...(proposal ? [{ kind: "proposal" as const, label: proposal.id.slice(0, 13), id: proposal.id }] : []),
-        ...(run ? [{ kind: "run" as const, label: shortRunId(run.runId), id: run.runId }] : []),
-        ...(run?.agent ? [{ kind: "agent" as const, label: run.agent, id: run.agent }] : []),
+        ...(proposal
+          ? [
+              {
+                kind: "proposal" as const,
+                label: proposal.id.slice(0, 13),
+                id: proposal.id,
+              },
+            ]
+          : []),
+        ...(run
+          ? [
+              {
+                kind: "run" as const,
+                label: shortRunId(run.runId),
+                id: run.runId,
+              },
+            ]
+          : []),
+        ...(run?.agent
+          ? [{ kind: "agent" as const, label: run.agent, id: run.agent }]
+          : []),
       ]);
       const what = run
         ? `${run.agent ? `${run.agent} → ` : ""}${shortRunId(run.runId)}${note ? ` (${note})` : ""}`
@@ -351,16 +445,30 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
     const detail = runDetails[run.runId];
     // Every lifecycle row links its run; only the terminal row repeats the
     // PR / ticket it decided about — the actor column already names the agent.
-    const runRef: TimelineRef = { kind: "run", label: shortRunId(run.runId), id: run.runId };
+    const runRef: TimelineRef = {
+      kind: "run",
+      label: shortRunId(run.runId),
+      id: run.runId,
+    };
     const stepRefs = [runRef];
     const outcomeRefs = dedupeRefs([runRef, ...runRefs(run.runId)]);
     const actorLabel = run.agent ?? shortRunId(run.runId);
     if (!detail) {
       partial = true;
-      drafts.push(...fallbackRunRows(run, nodeId, stepRefs, decidedRuns.has(run.runId), actorLabel));
+      drafts.push(
+        ...fallbackRunRows(
+          run,
+          nodeId,
+          stepRefs,
+          decidedRuns.has(run.runId),
+          actorLabel,
+        ),
+      );
       continue;
     }
-    const lifecycle = [...detail.lifecycle].sort((a, b) => a.at.localeCompare(b.at) || a.seq - b.seq);
+    const lifecycle = [...detail.lifecycle].sort(
+      (a, b) => a.at.localeCompare(b.at) || a.seq - b.seq,
+    );
     const input = detail.run.spec.input;
     let lastEmitted: LifecycleEvent | null = null;
     lifecycle.forEach((entry, index) => {
@@ -368,19 +476,45 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
       const state = entry.to_state;
       if (state === "PROPOSED") {
         if (decidedRuns.has(run.runId)) return;
-        push(entry, "planned", "decision", "planner", `${actorLabel} → ${shortRunId(run.runId)}`, null);
+        push(
+          entry,
+          "planned",
+          "decision",
+          "planner",
+          `${actorLabel} → ${shortRunId(run.runId)}`,
+          null,
+        );
         return;
       }
       if (state === "APPROVED") return; // folded into the planned row's note
-      if (state === "QUEUED" && (entry.from_state === "APPROVED" || entry.from_state === null)) return;
-      if (state === "RUNNING" && lastEmitted?.to_state === "LEASED" && (ms(entry.at) ?? 0) - (ms(lastEmitted.at) ?? 0) < 1000) return;
+      if (
+        state === "QUEUED" &&
+        (entry.from_state === "APPROVED" || entry.from_state === null)
+      )
+        return;
+      if (
+        state === "RUNNING" &&
+        lastEmitted?.to_state === "LEASED" &&
+        (ms(entry.at) ?? 0) - (ms(lastEmitted.at) ?? 0) < 1000
+      )
+        return;
       if (state === "VERIFYING" && next && TERMINAL.has(next.to_state)) return;
       const reason = humanizeRunReason(entry.reason);
-      const detailText = TERMINAL.has(state) ? reasonDetail(entry.reason, input) : null;
-      const shown = reason && detailText ? { ...reason, text: `${reason.text} (${detailText})` } : reason;
-      const actor = state === "QUEUED" || TERMINAL.has(state) ? actorLabel : entry.actor;
+      const detailText = TERMINAL.has(state)
+        ? reasonDetail(entry.reason, input)
+        : null;
+      const shown =
+        reason && detailText
+          ? { ...reason, text: `${reason.text} (${detailText})` }
+          : reason;
+      const actor =
+        state === "QUEUED" || TERMINAL.has(state) ? actorLabel : entry.actor;
       const what = TERMINAL.has(state)
-        ? entry.actor && entry.actor !== actorLabel && !entry.actor.startsWith("worker_") ? `by ${entry.actor}` : ""
+        ? entry.actor &&
+          entry.actor !== actorLabel &&
+          !entry.actor.startsWith("worker_")
+          ? `by ${entry.actor}`
+          : ""
         : state === "LEASED" && entry.attempt != null && entry.attempt > 1
           ? `attempt ${entry.attempt}`
           : "";
@@ -416,11 +550,15 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
     }
   }
 
-  drafts.sort((a, b) => a.atMs - b.atMs || a.rank - b.rank || a.row.id.localeCompare(b.row.id));
+  drafts.sort(
+    (a, b) =>
+      a.atMs - b.atMs || a.rank - b.rank || a.row.id.localeCompare(b.row.id),
+  );
 
   const rows: ChainTimelineRow[] = drafts.map((draft, index) => ({
     ...draft.row,
-    deltaMs: index === 0 ? null : Math.max(0, draft.atMs - drafts[index - 1].atMs),
+    deltaMs:
+      index === 0 ? null : Math.max(0, draft.atMs - drafts[index - 1].atMs),
   }));
 
   const nextRow = nextStepRow(chain, schedules, inbox, now);
@@ -428,13 +566,20 @@ export function buildChainTimeline(input: ChainTimelineInput): ChainTimeline {
 
   const nodeOrder: string[] = [];
   for (const row of rows) {
-    if (row.nodeId && !nodeOrder.includes(row.nodeId)) nodeOrder.push(row.nodeId);
+    if (row.nodeId && !nodeOrder.includes(row.nodeId))
+      nodeOrder.push(row.nodeId);
   }
   return { rows, nodeOrder, partial };
 }
 
 /** Rows from the chain summary alone, while `GET /runs/:id` is still loading. */
-function fallbackRunRows(run: ChainRun, nodeId: string, refs: TimelineRef[], decided: boolean, actorLabel: string): Draft[] {
+function fallbackRunRows(
+  run: ChainRun,
+  nodeId: string,
+  refs: TimelineRef[],
+  decided: boolean,
+  actorLabel: string,
+): Draft[] {
   const out: Draft[] = [];
   const base = {
     kind: "lifecycle" as const,
@@ -446,31 +591,68 @@ function fallbackRunRows(run: ChainRun, nodeId: string, refs: TimelineRef[], dec
     out.push({
       atMs: ms(run.created_at) ?? 0,
       rank: 2,
-      row: { ...base, id: `${nodeId}:planned`, at: run.created_at, badge: "planned", hues: "decision", actor: "planner", what: `${actorLabel} → ${shortRunId(run.runId)}`, reason: null },
+      row: {
+        ...base,
+        id: `${nodeId}:planned`,
+        at: run.created_at,
+        badge: "planned",
+        hues: "decision",
+        actor: "planner",
+        what: `${actorLabel} → ${shortRunId(run.runId)}`,
+        reason: null,
+      },
     });
   }
   if (run.startedAt) {
     out.push({
       atMs: ms(run.startedAt) ?? 0,
       rank: 2.5,
-      row: { ...base, id: `${nodeId}:started`, at: run.startedAt, badge: TERMINAL.has(run.state) || run.state === "RUNNING" || run.state === "VERIFYING" ? "RUNNING" : run.state, hues: "run", actor: "worker", what: "", reason: null },
+      row: {
+        ...base,
+        id: `${nodeId}:started`,
+        at: run.startedAt,
+        badge:
+          TERMINAL.has(run.state) ||
+          run.state === "RUNNING" ||
+          run.state === "VERIFYING"
+            ? "RUNNING"
+            : run.state,
+        hues: "run",
+        actor: "worker",
+        what: "",
+        reason: null,
+      },
     });
   }
   if (run.finishedAt && TERMINAL.has(run.state)) {
     out.push({
       atMs: ms(run.finishedAt) ?? 0,
       rank: 3,
-      row: { ...base, id: `${nodeId}:finished`, at: run.finishedAt, badge: run.state, hues: "run", actor: actorLabel, what: "", reason: humanizeRunReason(run.reasonCode) },
+      row: {
+        ...base,
+        id: `${nodeId}:finished`,
+        at: run.finishedAt,
+        badge: run.state,
+        hues: "run",
+        actor: actorLabel,
+        what: "",
+        reason: humanizeRunReason(run.reasonCode),
+      },
     });
   }
   return out;
 }
 
 /** The chain's origin: the earliest event with no causation parent. */
-export function chainOriginEvent(chain: Pick<ChainView, "events">): ChainEvent | null {
+export function chainOriginEvent(
+  chain: Pick<ChainView, "events">,
+): ChainEvent | null {
   const roots = chain.events.filter((e) => !e.causationId);
   const pool = roots.length ? roots : chain.events;
-  return [...pool].sort((a, b) => a.admittedAt.localeCompare(b.admittedAt))[0] ?? null;
+  return (
+    [...pool].sort((a, b) => a.admittedAt.localeCompare(b.admittedAt))[0] ??
+    null
+  );
 }
 
 export interface ScheduledRetryOrigin {
@@ -499,18 +681,28 @@ export function nextScheduledRetry<T extends ScheduledRetrySchedule>(
       !s.stopped &&
       s.nextDue != null &&
       s.eventType === origin.type &&
-      (s.repo == null || origin.repos.length === 0 || origin.repos.includes(s.repo)),
+      (s.repo == null ||
+        origin.repos.length === 0 ||
+        origin.repos.includes(s.repo)),
   );
   candidates.sort((a, b) => (a.nextDue ?? "￿").localeCompare(b.nextDue ?? "￿"));
   return candidates[0] ?? null;
 }
 
 /** Shared timeline/journey wording for a scheduled retry. */
-export function scheduledRetryLabel(retry: ScheduledRetrySchedule, now = Date.now()): string {
+export function scheduledRetryLabel(
+  retry: ScheduledRetrySchedule,
+  now = Date.now(),
+): string {
   const dueMs = ms(retry.nextDue);
-  const clock = dueMs == null
-    ? retry.nextDue ?? "unknown time"
-    : new Date(dueMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const clock =
+    dueMs == null
+      ? (retry.nextDue ?? "unknown time")
+      : new Date(dueMs).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
   return `next: ${retry.loop} · re-examines at ${clock}${dueMs == null ? "" : ` (${formatUntil(dueMs, now)})`}`;
 }
 
@@ -526,7 +718,9 @@ export function chainNeedsRevisit(chain: ChainView): boolean {
 function inboxItemFor(chain: ChainView, inbox: InboxItem[]): InboxItem | null {
   const runIds = new Set(chain.runs.map((r) => r.runId));
   const eventIds = new Set(chain.events.map((e) => e.eventId));
-  const proposalIds = new Set(chain.events.map((e) => e.proposalId).filter(Boolean) as string[]);
+  const proposalIds = new Set(
+    chain.events.map((e) => e.proposalId).filter(Boolean) as string[],
+  );
   return (
     inbox.find(
       (item) =>
@@ -537,11 +731,24 @@ function inboxItemFor(chain: ChainView, inbox: InboxItem[]): InboxItem | null {
   );
 }
 
-function nextStepRow(chain: ChainView, schedules: ScheduleItem[], inbox: InboxItem[], now: number): ChainTimelineRow | null {
+function nextStepRow(
+  chain: ChainView,
+  schedules: ScheduleItem[],
+  inbox: InboxItem[],
+  now: number,
+): ChainTimelineRow | null {
   if (!chainNeedsRevisit(chain)) return null;
   const origin = chainOriginEvent(chain);
   const schedule = nextScheduledRetry(origin, schedules);
-  const base = { id: "next", kind: "next" as const, nodeId: null, deltaMs: null, hues: "muted" as const, reason: null, muted: true };
+  const base = {
+    id: "next",
+    kind: "next" as const,
+    nodeId: null,
+    deltaMs: null,
+    hues: "muted" as const,
+    reason: null,
+    muted: true,
+  };
   if (schedule && schedule.nextDue) {
     return {
       ...base,

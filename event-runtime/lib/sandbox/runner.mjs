@@ -40,13 +40,25 @@ function readRequest() {
 
 async function main() {
   const request = readRequest();
-  const { policy, secrets = {}, command, cwd, env = {}, timeoutMs, shell = false } = request;
+  const {
+    policy,
+    secrets = {},
+    command,
+    cwd,
+    env = {},
+    timeoutMs,
+    shell = false,
+  } = request;
 
   let sdk;
   try {
     sdk = await import("@earendil-works/gondolin");
   } catch (err) {
-    emit({ type: "error", code: "sandbox_unavailable", message: `@earendil-works/gondolin is not installed: ${err.message}` });
+    emit({
+      type: "error",
+      code: "sandbox_unavailable",
+      message: `@earendil-works/gondolin is not installed: ${err.message}`,
+    });
     process.exit(2);
   }
   const { VM, RealFSProvider, ReadonlyProvider, createHttpHooks } = sdk;
@@ -57,14 +69,19 @@ async function main() {
   const { httpHooks, env: placeholderEnv } = createHttpHooks({
     allowedHosts: policy.allowedHosts,
     secrets: Object.fromEntries(
-      Object.entries(secrets).map(([name, { hosts, value }]) => [name, { hosts, value }]),
+      Object.entries(secrets).map(([name, { hosts, value }]) => [
+        name,
+        { hosts, value },
+      ]),
     ),
   });
 
   const mounts = {};
   for (const mount of policy.mounts) {
     const provider = new RealFSProvider(mount.hostPath);
-    mounts[mount.guestPath] = mount.readonly ? new ReadonlyProvider(provider) : provider;
+    mounts[mount.guestPath] = mount.readonly
+      ? new ReadonlyProvider(provider)
+      : provider;
   }
 
   const bootStart = Date.now();
@@ -87,7 +104,8 @@ async function main() {
   emit({ type: "ready", bootMs: Date.now() - bootStart });
 
   const abort = new AbortController();
-  const timer = timeoutMs > 0 ? setTimeout(() => abort.abort(), timeoutMs) : null;
+  const timer =
+    timeoutMs > 0 ? setTimeout(() => abort.abort(), timeoutMs) : null;
 
   try {
     // The parent sends an argv array unless it explicitly asked for a shell.
@@ -96,7 +114,11 @@ async function main() {
     // an input value can never become a command. The string form (`/bin/sh
     // -lc`) exists only for the hand-driven `sandbox exec --shell` path.
     if (shell ? typeof command !== "string" : !Array.isArray(command)) {
-      throw new Error(shell ? "shell mode requires a command string" : "non-shell mode requires an argv array");
+      throw new Error(
+        shell
+          ? "shell mode requires a command string"
+          : "non-shell mode requires an argv array",
+      );
     }
     const proc = vm.exec(command, {
       cwd,
@@ -105,15 +127,31 @@ async function main() {
       stderr: "pipe",
       buffer: false,
     });
-    proc.stdout?.on("data", (chunk) => emit({ type: "stdout", data: chunk.toString() }));
-    proc.stderr?.on("data", (chunk) => emit({ type: "stderr", data: chunk.toString() }));
+    proc.stdout?.on("data", (chunk) =>
+      emit({ type: "stdout", data: chunk.toString() }),
+    );
+    proc.stderr?.on("data", (chunk) =>
+      emit({ type: "stderr", data: chunk.toString() }),
+    );
     const result = await proc;
-    emit({ type: "exit", exitCode: result.exitCode, signal: result.signal ?? null });
+    emit({
+      type: "exit",
+      exitCode: result.exitCode,
+      signal: result.signal ?? null,
+    });
   } catch (err) {
     if (abort.signal.aborted) {
-      emit({ type: "error", code: "sandbox_timeout", message: `guest command exceeded ${timeoutMs}ms` });
+      emit({
+        type: "error",
+        code: "sandbox_timeout",
+        message: `guest command exceeded ${timeoutMs}ms`,
+      });
     } else {
-      emit({ type: "error", code: "sandbox_exec_failed", message: err.message });
+      emit({
+        type: "error",
+        code: "sandbox_exec_failed",
+        message: err.message,
+      });
     }
   } finally {
     if (timer) clearTimeout(timer);
@@ -128,6 +166,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  emit({ type: "error", code: "sandbox_runner_crashed", message: err?.message ?? String(err) });
+  emit({
+    type: "error",
+    code: "sandbox_runner_crashed",
+    message: err?.message ?? String(err),
+  });
   process.exit(2);
 });

@@ -10,7 +10,12 @@
  * simply drops its section (optional fields are optional, §2.2).
  */
 import { dur } from "../heartbeat";
-import type { ArtifactFormat, ArtifactTone, ArtifactView, ArtifactViewSection } from "../types";
+import type {
+  ArtifactFormat,
+  ArtifactTone,
+  ArtifactView,
+  ArtifactViewSection,
+} from "../types";
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
@@ -96,11 +101,17 @@ export const TONE_HUES: Record<ArtifactTone, string> = {
  * map names no such value. Values are matched by their string form so a
  * boolean `true` finds the `"true"` key merge-scan's view uses.
  */
-export function toneFor(value: unknown, toneMap: unknown): ArtifactTone | undefined {
-  if (!isObject(toneMap) || value === undefined || value === null) return undefined;
+export function toneFor(
+  value: unknown,
+  toneMap: unknown,
+): ArtifactTone | undefined {
+  if (!isObject(toneMap) || value === undefined || value === null)
+    return undefined;
   const key = typeof value === "string" ? value : String(value);
   const tone = toneMap[key];
-  return typeof tone === "string" && tone in TONE_HUES ? (tone as ArtifactTone) : undefined;
+  return typeof tone === "string" && tone in TONE_HUES
+    ? (tone as ArtifactTone)
+    : undefined;
 }
 
 /** A section's tone map for one column/key — table/keyvalue/list nest one map per key. */
@@ -119,9 +130,12 @@ function columnToneMap(section: ArtifactViewSection, key: string): unknown {
  * when the agent reports one (merge-scan does) — no repo, no link, chip only.
  */
 export const LINEAR_ISSUE_URL = "https://linear.app/watt-mind/issue/";
-export const issueHref = (id: string): string => `${LINEAR_ISSUE_URL}${encodeURIComponent(id)}`;
-export const prHref = (n: string | number, github: string | null | undefined): string | null =>
-  github ? `https://github.com/${github}/pull/${n}` : null;
+export const issueHref = (id: string): string =>
+  `${LINEAR_ISSUE_URL}${encodeURIComponent(id)}`;
+export const prHref = (
+  n: string | number,
+  github: string | null | undefined,
+): string | null => (github ? `https://github.com/${github}/pull/${n}` : null);
 
 export interface FormatContext {
   /** `owner/repo`, from the artifact's own `/github` when present. */
@@ -136,7 +150,13 @@ export interface FormatContext {
 export type Formatted =
   | { kind: "empty" }
   | { kind: "text"; text: string; mono: boolean; title?: string }
-  | { kind: "chip"; chip: "issue" | "pr" | "run"; id: string; text: string; href: string | null }
+  | {
+      kind: "chip";
+      chip: "issue" | "pr" | "run";
+      id: string;
+      text: string;
+      href: string | null;
+    }
   | { kind: "state"; state: string }
   | { kind: "link"; href: string; text: string }
   | { kind: "json"; value: unknown };
@@ -154,19 +174,42 @@ const isScalar = (v: unknown): boolean =>
  * absent format falls through to the plain rendering, so a view can only
  * *add* meaning to a value, never hide one.
  */
-export function formatValue(value: unknown, format?: ArtifactFormat, ctx: FormatContext = {}): Formatted {
-  if (value === undefined || value === null || value === "") return { kind: "empty" };
+export function formatValue(
+  value: unknown,
+  format?: ArtifactFormat,
+  ctx: FormatContext = {},
+): Formatted {
+  if (value === undefined || value === null || value === "")
+    return { kind: "empty" };
   if (!isScalar(value)) return { kind: "json", value };
   const text = asText(value);
   switch (format) {
     case "issue":
-      return { kind: "chip", chip: "issue", id: text, text, href: issueHref(text) };
+      return {
+        kind: "chip",
+        chip: "issue",
+        id: text,
+        text,
+        href: issueHref(text),
+      };
     case "pr": {
       const n = text.replace(/^#/, "");
-      return { kind: "chip", chip: "pr", id: n, text: `#${n}`, href: prHref(n, ctx.github) };
+      return {
+        kind: "chip",
+        chip: "pr",
+        id: n,
+        text: `#${n}`,
+        href: prHref(n, ctx.github),
+      };
     }
     case "run":
-      return { kind: "chip", chip: "run", id: text, text: shortRunId(text), href: null };
+      return {
+        kind: "chip",
+        chip: "run",
+        id: text,
+        text: shortRunId(text),
+        href: null,
+      };
     case "state":
       return { kind: "state", state: text };
     case "url":
@@ -178,17 +221,32 @@ export function formatValue(value: unknown, format?: ArtifactFormat, ctx: Format
     case "duration":
       // Seconds — the runtime's own duration fields are `*Seconds`; `dur` takes ms.
       return typeof value === "number"
-        ? { kind: "text", text: dur(value * 1000), mono: true, title: `${value}s` }
+        ? {
+            kind: "text",
+            text: dur(value * 1000),
+            mono: true,
+            title: `${value}s`,
+          }
         : { kind: "text", text, mono: looksLikeIdentifier(text) };
     case "datetime": {
       const ms = typeof value === "number" ? value : Date.parse(text);
       return Number.isNaN(ms)
         ? { kind: "text", text, mono: false }
-        : { kind: "text", text: new Date(ms).toLocaleString(), mono: false, title: new Date(ms).toISOString() };
+        : {
+            kind: "text",
+            text: new Date(ms).toLocaleString(),
+            mono: false,
+            title: new Date(ms).toISOString(),
+          };
     }
     case "bytes":
       return typeof value === "number"
-        ? { kind: "text", text: formatBytes(value), mono: true, title: `${value} B` }
+        ? {
+            kind: "text",
+            text: formatBytes(value),
+            mono: true,
+            title: `${value} B`,
+          }
         : { kind: "text", text, mono: true };
     case "count":
       return typeof value === "number"
@@ -255,18 +313,28 @@ export type SectionModel =
     }
   | { as: "keyvalue"; label: string | undefined; entries: Cell[] }
   | { as: "list"; label: string | undefined; items: Cell[] }
-  | { as: "badge"; label: string | undefined; value: string; tone?: ArtifactTone }
+  | {
+      as: "badge";
+      label: string | undefined;
+      value: string;
+      tone?: ArtifactTone;
+    }
   | { as: "code"; label: string | undefined; text: string; language?: string }
   | { as: "prose"; label: string | undefined; text: string };
 
-const groupLabel = (v: unknown): string => (v === undefined || v === null || v === "" ? "—" : asText(v));
+const groupLabel = (v: unknown): string =>
+  v === undefined || v === null || v === "" ? "—" : asText(v);
 
 /**
  * Group table rows by one item property, first-seen order, so the artifact's
  * own ordering (which the agent chose) survives. Rows without the property
  * gather under `—` at the end.
  */
-export function groupRows(rows: TableRow[], groupBy: string, toneMap?: unknown): RowGroup[] {
+export function groupRows(
+  rows: TableRow[],
+  groupBy: string,
+  toneMap?: unknown,
+): RowGroup[] {
   const groups = new Map<string, RowGroup>();
   let missing: RowGroup | null = null;
   for (const row of rows) {
@@ -279,7 +347,12 @@ export function groupRows(rows: TableRow[], groupBy: string, toneMap?: unknown):
     const key = asText(value);
     let group = groups.get(key);
     if (!group) {
-      group = { key, label: groupLabel(value), tone: toneFor(value, toneMap), rows: [] };
+      group = {
+        key,
+        label: groupLabel(value),
+        tone: toneFor(value, toneMap),
+        rows: [],
+      };
       groups.set(key, group);
     }
     group.rows.push(row);
@@ -289,7 +362,12 @@ export function groupRows(rows: TableRow[], groupBy: string, toneMap?: unknown):
   return out;
 }
 
-function cellFor(section: ArtifactViewSection, item: unknown, key: string, ctx: FormatContext): Cell {
+function cellFor(
+  section: ArtifactViewSection,
+  item: unknown,
+  key: string,
+  ctx: FormatContext,
+): Cell {
   const raw = resolveRelative(item, key);
   return {
     key,
@@ -298,7 +376,11 @@ function cellFor(section: ArtifactViewSection, item: unknown, key: string, ctx: 
   };
 }
 
-function tableSection(section: ArtifactViewSection, node: unknown, ctx: FormatContext): SectionModel | null {
+function tableSection(
+  section: ArtifactViewSection,
+  node: unknown,
+  ctx: FormatContext,
+): SectionModel | null {
   if (!Array.isArray(node)) return null;
   const columns = section.columns ?? [];
   const expandKeys = section.expand ?? [];
@@ -310,7 +392,9 @@ function tableSection(section: ArtifactViewSection, node: unknown, ctx: FormatCo
       .filter((cell) => cell.value.kind !== "empty"),
     raw: item,
   }));
-  const groups = section.groupBy ? groupRows(rows, section.groupBy, columnToneMap(section, section.groupBy)) : null;
+  const groups = section.groupBy
+    ? groupRows(rows, section.groupBy, columnToneMap(section, section.groupBy))
+    : null;
   return {
     as: "table",
     label: section.label,
@@ -321,7 +405,11 @@ function tableSection(section: ArtifactViewSection, node: unknown, ctx: FormatCo
   };
 }
 
-function keyvalueSection(section: ArtifactViewSection, node: unknown, ctx: FormatContext): SectionModel | null {
+function keyvalueSection(
+  section: ArtifactViewSection,
+  node: unknown,
+  ctx: FormatContext,
+): SectionModel | null {
   if (!isObject(node)) {
     // A scalar keyvalue: one row whose label is the section's — a heading
     // over a single row would just say the same word twice.
@@ -331,7 +419,13 @@ function keyvalueSection(section: ArtifactViewSection, node: unknown, ctx: Forma
     return {
       as: "keyvalue",
       label: undefined,
-      entries: [{ key: section.label ?? lastToken(section.path), value, tone: toneFor(node, section.tone?.[""]) }],
+      entries: [
+        {
+          key: section.label ?? lastToken(section.path),
+          value,
+          tone: toneFor(node, section.tone?.[""]),
+        },
+      ],
     };
   }
   const keys = section.keys ?? Object.keys(node);
@@ -342,10 +436,16 @@ function keyvalueSection(section: ArtifactViewSection, node: unknown, ctx: Forma
   return { as: "keyvalue", label: section.label, entries };
 }
 
-function listSection(section: ArtifactViewSection, node: unknown, ctx: FormatContext): SectionModel | null {
+function listSection(
+  section: ArtifactViewSection,
+  node: unknown,
+  ctx: FormatContext,
+): SectionModel | null {
   if (!Array.isArray(node)) return null;
   const items: Cell[] = node.map((item, index) => {
-    const raw = section.itemLabel ? resolveRelative(item, section.itemLabel) : item;
+    const raw = section.itemLabel
+      ? resolveRelative(item, section.itemLabel)
+      : item;
     return {
       key: String(index),
       value: formatValue(raw, section.formats?.[section.itemLabel ?? ""], ctx),
@@ -367,7 +467,10 @@ const lastToken = (pointer: string): string => {
  * non-array) — the JSON stays one Raw toggle away, so dropping is honest,
  * inventing a rendering is not.
  */
-export function sectionsFor(view: ArtifactView, artifact: unknown): SectionModel[] {
+export function sectionsFor(
+  view: ArtifactView,
+  artifact: unknown,
+): SectionModel[] {
   const ctx: FormatContext = { github: githubOf(artifact) };
   const out: SectionModel[] = [];
   for (const section of view.sections ?? []) {
@@ -386,15 +489,33 @@ export function sectionsFor(view: ArtifactView, artifact: unknown): SectionModel
         break;
       case "badge":
         if (isScalar(node)) {
-          model = { as: "badge", label: section.label, value: asText(node), tone: toneFor(node, section.tone) };
+          model = {
+            as: "badge",
+            label: section.label,
+            value: asText(node),
+            tone: toneFor(node, section.tone),
+          };
         }
         break;
       case "code":
-        if (typeof node === "string") model = { as: "code", label: section.label, text: node, language: section.language };
-        else if (!isScalar(node)) model = { as: "code", label: section.label, text: JSON.stringify(node, null, 2), language: "json" };
+        if (typeof node === "string")
+          model = {
+            as: "code",
+            label: section.label,
+            text: node,
+            language: section.language,
+          };
+        else if (!isScalar(node))
+          model = {
+            as: "code",
+            label: section.label,
+            text: JSON.stringify(node, null, 2),
+            language: "json",
+          };
         break;
       case "prose":
-        if (isScalar(node)) model = { as: "prose", label: section.label, text: asText(node) };
+        if (isScalar(node))
+          model = { as: "prose", label: section.label, text: asText(node) };
         break;
     }
     if (model) out.push(model);
@@ -415,16 +536,33 @@ export interface ViewHeader {
   status: { label: string; value: string; tone?: ArtifactTone } | null;
 }
 
-export function headerFor(view: ArtifactView, artifact: unknown, schema?: unknown): ViewHeader {
-  const schemaTitle = isObject(schema) && typeof schema.title === "string" ? schema.title : null;
-  const summary = view.summary !== undefined ? resolvePointer(artifact, view.summary) : undefined;
-  const statusValue = view.status ? resolvePointer(artifact, view.status.path) : undefined;
+export function headerFor(
+  view: ArtifactView,
+  artifact: unknown,
+  schema?: unknown,
+): ViewHeader {
+  const schemaTitle =
+    isObject(schema) && typeof schema.title === "string" ? schema.title : null;
+  const summary =
+    view.summary !== undefined
+      ? resolvePointer(artifact, view.summary)
+      : undefined;
+  const statusValue = view.status
+    ? resolvePointer(artifact, view.status.path)
+    : undefined;
   return {
     title: view.title ?? schemaTitle,
     summary: typeof summary === "string" && summary.trim() ? summary : null,
     status:
-      view.status && isScalar(statusValue) && statusValue !== null && statusValue !== ""
-        ? { label: lastToken(view.status.path), value: asText(statusValue), tone: toneFor(statusValue, view.status.tone) }
+      view.status &&
+      isScalar(statusValue) &&
+      statusValue !== null &&
+      statusValue !== ""
+        ? {
+            label: lastToken(view.status.path),
+            value: asText(statusValue),
+            tone: toneFor(statusValue, view.status.tone),
+          }
         : null,
   };
 }
@@ -434,8 +572,15 @@ export function headerFor(view: ArtifactView, artifact: unknown, schema?: unknow
  * Artifacts inspector uses before swapping its text preview for the view
  * (a transcript that happens to parse as JSON must not wear a merge-plan).
  */
-export function viewApplies(view: ArtifactView | null | undefined, artifact: unknown): view is ArtifactView {
+export function viewApplies(
+  view: ArtifactView | null | undefined,
+  artifact: unknown,
+): view is ArtifactView {
   if (!view || !isObject(artifact)) return false;
   const h = headerFor(view, artifact);
-  return h.summary !== null || h.status !== null || sectionsFor(view, artifact).length > 0;
+  return (
+    h.summary !== null ||
+    h.status !== null ||
+    sectionsFor(view, artifact).length > 0
+  );
 }

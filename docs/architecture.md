@@ -41,7 +41,7 @@ Subagents share a process, a context window and a budget. One crash takes every 
 
 When a ticket finishes, its slot refills immediately. `Promise.all` on a batch was the first implementation and it was wrong: one 40-minute ticket idles two agents for 40 minutes, and batching is the dominant throughput loss in practice.
 
-The queue is re-read on **every** refill, so a ticket that became agent-ready *during* the run — triage promoting one, or a finishing agent filing follow-up work — is picked up without waiting for the next supervisor tick.
+The queue is re-read on **every** refill, so a ticket that became agent-ready _during_ the run — triage promoting one, or a finishing agent filing follow-up work — is picked up without waiting for the next supervisor tick.
 
 ### 2.3 `Owned Paths` is the concurrency key
 
@@ -75,11 +75,11 @@ Measured on bj29 with the template 99 commits behind: ~3 minutes per worktree, ~
 
 So `tick.mjs` decides, because the arithmetic is mechanical — warming costs one compile, skipping costs N:
 
-| | |
-| :--- | :--- |
-| 2+ tickets, ≥15 commits behind | refresh once, then build |
-| 1 ticket | skip — a wash, and the ticket would rather start now |
-| fresh | skip |
+|                                |                                                      |
+| :----------------------------- | :--------------------------------------------------- |
+| 2+ tickets, ≥15 commits behind | refresh once, then build                             |
+| 1 ticket                       | skip — a wash, and the ticket would rather start now |
+| fresh                          | skip                                                 |
 
 Warming happens **before any `worktree-up`**, so nothing clones a template being rewritten underneath it. (`worktree-up.sh` would detect the mismatch and rebuild from empty, so that race is a slowness bug rather than corruption — but slowness is what we are removing.)
 
@@ -87,12 +87,12 @@ Warming happens **before any `worktree-up`**, so nothing clones a template being
 
 Not everyone, which is why there is no global "pull often" rule.
 
-| Consumer | Source | Stale risk |
-| :--- | :--- | :--- |
-| **Ticket worktrees** | `worktree-up.sh` fetches and branches from `origin/<base>` | **None** — every ticket starts from current remote |
-| **Warm cache** | `worktree-warm.sh` resets to `origin/<base>` | Handled by the staleness gate (§2.6) |
-| **Merge stage** | operates on PR branches via `gh` | Per-PR; rebases against the base itself |
-| **Triage** | reads the **main checkout working tree** | **Real** — stale files mean file pointers to code that moved |
+| Consumer             | Source                                                     | Stale risk                                                   |
+| :------------------- | :--------------------------------------------------------- | :----------------------------------------------------------- |
+| **Ticket worktrees** | `worktree-up.sh` fetches and branches from `origin/<base>` | **None** — every ticket starts from current remote           |
+| **Warm cache**       | `worktree-warm.sh` resets to `origin/<base>`               | Handled by the staleness gate (§2.6)                         |
+| **Merge stage**      | operates on PR branches via `gh`                           | Per-PR; rebases against the base itself                      |
+| **Triage**           | reads the **main checkout working tree**                   | **Real** — stale files mean file pointers to code that moved |
 
 So dispatch was never affected by a main checkout 66 commits behind; only triage was.
 
@@ -106,12 +106,12 @@ A harness timeout produces a **clean error**; a factory timeout **guarantees the
 
 agy's print mode defaults to 5 minutes. A real triage run exceeded it at 231s — 68 tool calls in, mid-sentence — and reported `status: ERROR, "timeout waiting for response"`. The work was actually done; only the closing summary was lost.
 
-The obvious fix (raise it) makes the *stuck* case worse: a wedged run then holds its concurrency slot for the new, longer timeout. So:
+The obvious fix (raise it) makes the _stuck_ case worse: a wedged run then holds its concurrency slot for the new, longer timeout. So:
 
-| Layer | Value | Purpose |
-| :--- | :--- | :--- |
-| Harness (`--print-timeout`) | `max_run_minutes - 2` | errors cleanly, with a usable transcript |
-| Factory (`timeout -k 30s`) | `limits.max_run_minutes` (45) | backstop — TERM, then KILL 30s later |
+| Layer                       | Value                         | Purpose                                  |
+| :-------------------------- | :---------------------------- | :--------------------------------------- |
+| Harness (`--print-timeout`) | `max_run_minutes - 2`         | errors cleanly, with a usable transcript |
+| Factory (`timeout -k 30s`)  | `limits.max_run_minutes` (45) | backstop — TERM, then KILL 30s later     |
 
 Enforced in both `run-agent.sh` and `tick.mjs`, so a per-ticket process cannot hold a slot indefinitely. If `timeout(1)` is missing the runner says so rather than pretending there is a cap.
 
@@ -139,13 +139,13 @@ The real constraint is the **usage window**, which nothing here can observe. Per
 
 ### 2.10 Models: opus only where it changes the outcome
 
-| Stage | Model | Why |
-| :--- | :--- | :--- |
-| triage | sonnet | structured extraction guided by a detailed skill |
-| ticket (implementation) | sonnet | was opus, until 54 ticket runs in one night cost ~$223 of ~$381 notional — a fifth of a weekly allowance for the step that is cheap to implement and expensive to review. `tick.mjs` reads the model from `factory-ticket.md`'s frontmatter, so this is one line to reverse |
-| merge | **opus** | review catches what tests don't; last gate before `develop` auto-deploys |
-| audit | sonnet | mechanical checklist |
-| factory-ux-critic | sonnet on Claude; parent model elsewhere | exercises the app and reports |
+| Stage                   | Model                                    | Why                                                                                                                                                                                                                                                                         |
+| :---------------------- | :--------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| triage                  | sonnet                                   | structured extraction guided by a detailed skill                                                                                                                                                                                                                            |
+| ticket (implementation) | sonnet                                   | was opus, until 54 ticket runs in one night cost ~$223 of ~$381 notional — a fifth of a weekly allowance for the step that is cheap to implement and expensive to review. `tick.mjs` reads the model from `factory-ticket.md`'s frontmatter, so this is one line to reverse |
+| merge                   | **opus**                                 | review catches what tests don't; last gate before `develop` auto-deploys                                                                                                                                                                                                    |
+| audit                   | sonnet                                   | mechanical checklist                                                                                                                                                                                                                                                        |
+| factory-ux-critic       | sonnet on Claude; parent model elsewhere | exercises the app and reports                                                                                                                                                                                                                                               |
 
 Triage is the live judgement call: a bad spec burns a full dispatch run, which argues for opus; `evals/` is the cheaper place to catch spec quality dropping. Currently sonnet — revisit if specs degrade.
 
@@ -161,13 +161,13 @@ The plugin is a convenience layer, not the safety floor. It reaches Claude Code 
 
 ## 3. Failure modes this design accepts
 
-| Failure | Why it is tolerated | Mitigation |
-| :--- | :--- | :--- |
-| Crashed agent holds a ticket | Reaper is not on a timer (§2.7) | `tick.mjs` un-claims its own failed runs (back to Todo, with a comment); the reaper covers crashes tick can't see — run it by hand |
-| Agents indistinguishable from the human in Linear | Shared API key | OPS-40 — the dispatcher is the natural place to inject per-agent keys |
-| Orphaned worktrees | Merge stage sometimes skipped | `janitor.mjs`, hourly gate |
-| Stale spec against moved code | Runner fast-forwards only a clean tree — the main checkout routinely holds uncommitted human work | Tells the agent in its prompt that the checkout is unreliable evidence and to read from `origin/<base>`; rebasing under someone is worse |
-| Triage can still write to the repo | `Bash` must stay available for exploration | Edit/Write/NotebookEdit disabled; dispatch works in worktrees instead |
+| Failure                                           | Why it is tolerated                                                                               | Mitigation                                                                                                                               |
+| :------------------------------------------------ | :------------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| Crashed agent holds a ticket                      | Reaper is not on a timer (§2.7)                                                                   | `tick.mjs` un-claims its own failed runs (back to Todo, with a comment); the reaper covers crashes tick can't see — run it by hand       |
+| Agents indistinguishable from the human in Linear | Shared API key                                                                                    | OPS-40 — the dispatcher is the natural place to inject per-agent keys                                                                    |
+| Orphaned worktrees                                | Merge stage sometimes skipped                                                                     | `janitor.mjs`, hourly gate                                                                                                               |
+| Stale spec against moved code                     | Runner fast-forwards only a clean tree — the main checkout routinely holds uncommitted human work | Tells the agent in its prompt that the checkout is unreliable evidence and to read from `origin/<base>`; rebasing under someone is worse |
+| Triage can still write to the repo                | `Bash` must stay available for exploration                                                        | Edit/Write/NotebookEdit disabled; dispatch works in worktrees instead                                                                    |
 
 ---
 

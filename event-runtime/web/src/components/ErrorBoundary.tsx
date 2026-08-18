@@ -50,7 +50,10 @@ export function claimChunkReload(
         return false;
       }
     }
-    storage.setItem(CHUNK_RELOAD_STORAGE_KEY, JSON.stringify({ route, at: now }));
+    storage.setItem(
+      CHUNK_RELOAD_STORAGE_KEY,
+      JSON.stringify({ route, at: now }),
+    );
     return true;
   } catch {
     // Without a durable guard, an automatic reload could loop forever. Leave
@@ -83,7 +86,9 @@ export class ErrorBoundary extends Component<Props, State> {
     const storage = this.props.storage ?? window.sessionStorage;
     const route = this.props.route ?? currentRoute();
     if (claimChunkReload(error, storage, route, this.props.now?.())) {
-      this.setState({ reloading: true }, () => (this.props.reload ?? (() => window.location.reload()))());
+      this.setState({ reloading: true }, () =>
+        (this.props.reload ?? (() => window.location.reload()))(),
+      );
     }
   }
 
@@ -92,7 +97,9 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
 
     const chunkFailure = isChunkLoadError(error);
-    const title = chunkFailure ? "New version deployed" : "The control plane could not render";
+    const title = chunkFailure
+      ? "New version deployed"
+      : "The control plane could not render";
     const detail = reloading
       ? "Refreshing this tab once to load the new version…"
       : chunkFailure
@@ -101,14 +108,19 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return (
       <main className="flex min-h-screen items-center justify-center bg-(--surface-0) p-6 text-(--text)">
-        <section role="alert" className="max-w-lg border-l-2 border-(--hue-warn) pl-4">
+        <section
+          role="alert"
+          className="max-w-lg border-l-2 border-(--hue-warn) pl-4"
+        >
           <h1 className="display text-lg font-semibold">{title}</h1>
           <p className="mt-2 text-sm text-(--text-dim)">{detail}</p>
           {!reloading && (
             <button
               type="button"
               className="mt-4 rounded-md border border-(--border-strong) px-3 py-1.5 text-sm font-medium hover:bg-(--surface-2)"
-              onClick={() => (this.props.reload ?? (() => window.location.reload()))()}
+              onClick={() =>
+                (this.props.reload ?? (() => window.location.reload()))()
+              }
             >
               Reload
             </button>

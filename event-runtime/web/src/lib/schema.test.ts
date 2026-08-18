@@ -15,7 +15,9 @@ describe("validate (web port of lib/schema.mjs)", () => {
         tags: { type: "array", items: { type: "string" } },
       },
     };
-    expect(validate(schema, { name: "bj29", count: 2, tags: ["a"] }).valid).toBe(true);
+    expect(
+      validate(schema, { name: "bj29", count: 2, tags: ["a"] }).valid,
+    ).toBe(true);
   });
 
   test("rejects unknown properties when additionalProperties is false", () => {
@@ -40,11 +42,17 @@ describe("validate (web port of lib/schema.mjs)", () => {
   });
 
   test("const, enum, pattern, bounds", () => {
-    expect(validate({ const: "factory.event/v1" }, "factory.event/v1").valid).toBe(true);
+    expect(
+      validate({ const: "factory.event/v1" }, "factory.event/v1").valid,
+    ).toBe(true);
     expect(validate({ enum: ["a", "b"] }, "c").valid).toBe(false);
-    expect(validate({ type: "string", pattern: "^run_" }, "prop_1").valid).toBe(false);
+    expect(validate({ type: "string", pattern: "^run_" }, "prop_1").valid).toBe(
+      false,
+    );
     expect(validate({ type: "array", minItems: 1 }, []).valid).toBe(false);
-    expect(validate({ type: "number", minimum: 0, maximum: 100 }, 150).valid).toBe(false);
+    expect(
+      validate({ type: "number", minimum: 0, maximum: 100 }, 150).valid,
+    ).toBe(false);
   });
 
   test("empty schema accepts anything", () => {
@@ -63,7 +71,11 @@ describe("validate (web port of lib/schema.mjs)", () => {
       properties: {
         repos: {
           type: "array",
-          items: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+          items: {
+            type: "object",
+            required: ["name"],
+            properties: { name: { type: "string" } },
+          },
         },
       },
     };
@@ -81,7 +93,10 @@ describe("validate (web port of lib/schema.mjs)", () => {
   });
 
   test("pattern validation error does not expose raw regex", () => {
-    const { valid, errors } = validate({ type: "string", pattern: "^[0-9a-f]{40}$" }, "invalid");
+    const { valid, errors } = validate(
+      { type: "string", pattern: "^[0-9a-f]{40}$" },
+      "invalid",
+    );
     expect(valid).toBe(false);
     expect(errors[0]).toBe("$: does not match pattern");
     expect(errors[0]).not.toContain("^[0-9a-f]{40}$");

@@ -48,14 +48,22 @@ export function saveArtifactRaw(raw: boolean): void {
 }
 
 /** Two-state segmented control, `aria-pressed` on the active half. */
-export function RawToggle({ raw, onChange }: { raw: boolean; onChange: (raw: boolean) => void }) {
+export function RawToggle({
+  raw,
+  onChange,
+}: {
+  raw: boolean;
+  onChange: (raw: boolean) => void;
+}) {
   const opt = (value: boolean, label: string) => (
     <button
       type="button"
       aria-pressed={raw === value}
       onClick={() => onChange(value)}
       className={`cursor-pointer rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
-        raw === value ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:text-(--text-dim)"
+        raw === value
+          ? "bg-(--surface-3) text-(--text)"
+          : "text-(--text-faint) hover:text-(--text-dim)"
       }`}
     >
       {label}
@@ -86,7 +94,10 @@ function TonePill({ text, tone }: { text: string; tone: ArtifactTone }) {
   return (
     <span
       className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium"
-      style={{ color: hue, background: `color-mix(in oklch, ${hue} 12%, transparent)` }}
+      style={{
+        color: hue,
+        background: `color-mix(in oklch, ${hue} 12%, transparent)`,
+      }}
     >
       {text}
     </span>
@@ -119,7 +130,13 @@ function Value({
       return <span className="text-(--text-faint)">—</span>;
     case "chip": {
       const title =
-        f.chip === "issue" ? `Open ${f.id} in Linear` : f.chip === "pr" ? (f.href ? `Open pull request ${f.text}` : `Pull request ${f.text}`) : f.id;
+        f.chip === "issue"
+          ? `Open ${f.id} in Linear`
+          : f.chip === "pr"
+            ? f.href
+              ? `Open pull request ${f.text}`
+              : `Pull request ${f.text}`
+            : f.id;
       if (f.chip === "run") {
         return (
           <JumpLink
@@ -150,17 +167,28 @@ function Value({
       return <StateBadge state={f.state} />;
     case "link":
       return (
-        <a href={f.href} target="_blank" rel="noreferrer" className="break-all text-(--accent) hover:underline">
+        <a
+          href={f.href}
+          target="_blank"
+          rel="noreferrer"
+          className="break-all text-(--accent) hover:underline"
+        >
           {f.text}
         </a>
       );
     case "json":
       if (block) {
-        if (Array.isArray(f.value) && f.value.every((v) => v === null || typeof v !== "object")) {
+        if (
+          Array.isArray(f.value) &&
+          f.value.every((v) => v === null || typeof v !== "object")
+        ) {
           return (
             <ul className="m-0 list-none p-0">
               {f.value.map((v, i) => (
-                <li key={i} className="mono break-all py-px text-[11.5px] text-(--text-dim)">
+                <li
+                  key={i}
+                  className="mono break-all py-px text-[11.5px] text-(--text-dim)"
+                >
                   {String(v)}
                 </li>
               ))}
@@ -170,12 +198,16 @@ function Value({
         return <JsonBlock value={f.value} />;
       }
       return (
-        <span className="mono text-(--text-faint)" title={JSON.stringify(f.value)}>
+        <span
+          className="mono text-(--text-faint)"
+          title={JSON.stringify(f.value)}
+        >
           {compactJson(f.value)}
         </span>
       );
     case "text":
-      if (tone && tone !== "muted") return <TonePill text={f.text} tone={tone} />;
+      if (tone && tone !== "muted")
+        return <TonePill text={f.text} tone={tone} />;
       return (
         <span
           className={`${f.mono ? "mono" : ""} ${block ? "break-words whitespace-pre-wrap" : ""} ${
@@ -194,23 +226,42 @@ function Value({
 // Sections
 // ---------------------------------------------------------------------------
 
-function SectionHeading({ label, count }: { label: string | undefined; count?: number }) {
+function SectionHeading({
+  label,
+  count,
+}: {
+  label: string | undefined;
+  count?: number;
+}) {
   if (!label) return null;
   return (
     <div className="mb-1 flex items-baseline gap-2 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
       <span>{label}</span>
-      {count !== undefined && <span className="tabular-nums normal-case">{count}</span>}
+      {count !== undefined && (
+        <span className="tabular-nums normal-case">{count}</span>
+      )}
     </div>
   );
 }
 
 const CELL = "border-b border-(--border) px-3 py-1.5 align-top";
 
-function ExpandedRow({ row, colSpan, onJumpRun }: { row: TableRow; colSpan: number; onJumpRun?: (id: string) => void }) {
+function ExpandedRow({
+  row,
+  colSpan,
+  onJumpRun,
+}: {
+  row: TableRow;
+  colSpan: number;
+  onJumpRun?: (id: string) => void;
+}) {
   return (
     <tr>
       {/* theme.css pins `table td` to nowrap for list tables; expanded detail is prose. */}
-      <td colSpan={colSpan} className="border-b border-(--border) bg-(--surface-1) px-3 py-2 whitespace-normal">
+      <td
+        colSpan={colSpan}
+        className="border-b border-(--border) bg-(--surface-1) px-3 py-2 whitespace-normal"
+      >
         <div className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 text-[11.5px]">
           {row.expand.map((cell) => (
             <Fragment key={cell.key}>
@@ -218,7 +269,12 @@ function ExpandedRow({ row, colSpan, onJumpRun }: { row: TableRow; colSpan: numb
                 {cell.key}
               </span>
               <div className="min-w-0 text-(--text-dim)">
-                <Value f={cell.value} tone={cell.tone} block onJumpRun={onJumpRun} />
+                <Value
+                  f={cell.value}
+                  tone={cell.tone}
+                  block
+                  onJumpRun={onJumpRun}
+                />
               </div>
             </Fragment>
           ))}
@@ -252,7 +308,9 @@ function Rows({
         return (
           <Fragment key={row.index}>
             <tr
-              className={expandable ? "cursor-pointer hover:bg-(--surface-1)" : undefined}
+              className={
+                expandable ? "cursor-pointer hover:bg-(--surface-1)" : undefined
+              }
               onClick={expandable ? () => onToggle(row.index) : undefined}
             >
               {hasExpand && (
@@ -278,11 +336,17 @@ function Rows({
                   key={cell.key}
                   className={`${CELL} ${wideColumn(cell) ? "min-w-[10rem] whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap"}`}
                 >
-                  <Value f={cell.value} tone={cell.tone} onJumpRun={onJumpRun} />
+                  <Value
+                    f={cell.value}
+                    tone={cell.tone}
+                    onJumpRun={onJumpRun}
+                  />
                 </td>
               ))}
             </tr>
-            {expandable && isOpen && <ExpandedRow row={row} colSpan={colSpan} onJumpRun={onJumpRun} />}
+            {expandable && isOpen && (
+              <ExpandedRow row={row} colSpan={colSpan} onJumpRun={onJumpRun} />
+            )}
           </Fragment>
         );
       })}
@@ -291,7 +355,8 @@ function Rows({
 }
 
 /** Prose cells (a `reason`) wrap; identifiers, chips and badges stay on one line. */
-const wideColumn = (cell: Cell): boolean => cell.value.kind === "text" && !cell.value.mono && !cell.tone;
+const wideColumn = (cell: Cell): boolean =>
+  cell.value.kind === "text" && !cell.value.mono && !cell.tone;
 
 function GroupRow({
   group,
@@ -318,20 +383,39 @@ function GroupRow({
           <span
             aria-hidden
             className="size-2 rounded-full"
-            style={{ background: hue, boxShadow: `0 0 0 3px color-mix(in oklch, ${hue} 18%, transparent)` }}
+            style={{
+              background: hue,
+              boxShadow: `0 0 0 3px color-mix(in oklch, ${hue} 18%, transparent)`,
+            }}
           />
-          <span className="text-[11.5px] font-medium text-(--text)">{group.label}</span>
-          <span className="tabular-nums text-[11px] text-(--text-faint)">{group.rows.length}</span>
-          {collapsed && <span className="ml-auto pr-1 text-[10px] text-(--text-faint)">collapsed</span>}
+          <span className="text-[11.5px] font-medium text-(--text)">
+            {group.label}
+          </span>
+          <span className="tabular-nums text-[11px] text-(--text-faint)">
+            {group.rows.length}
+          </span>
+          {collapsed && (
+            <span className="ml-auto pr-1 text-[10px] text-(--text-faint)">
+              collapsed
+            </span>
+          )}
         </button>
       </td>
     </tr>
   );
 }
 
-function TableSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "table" }>; onJumpRun?: (id: string) => void }) {
+function TableSection({
+  s,
+  onJumpRun,
+}: {
+  s: Extract<SectionModel, { as: "table" }>;
+  onJumpRun?: (id: string) => void;
+}) {
   const [open, setOpen] = useState<Set<number>>(() => new Set());
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
   const toggleRow = (index: number) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -364,37 +448,37 @@ function TableSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "table"
               </tr>
             </thead>
             <tbody>
-              {s.groups
-                ? s.groups.map((g) => (
-                    <Fragment key={g.key}>
-                      <GroupRow
-                        group={g}
-                        colSpan={colSpan}
-                        collapsed={collapsedGroups.has(g.key)}
-                        onToggle={() => toggleGroup(g.key)}
-                      />
-                      {!collapsedGroups.has(g.key) && (
-                        <Rows
-                          rows={g.rows}
-                          columns={s.columns}
-                          hasExpand={s.hasExpand}
-                          open={open}
-                          onToggle={toggleRow}
-                          onJumpRun={onJumpRun}
-                        />
-                      )}
-                    </Fragment>
-                  ))
-                : (
-                    <Rows
-                      rows={s.rows}
-                      columns={s.columns}
-                      hasExpand={s.hasExpand}
-                      open={open}
-                      onToggle={toggleRow}
-                      onJumpRun={onJumpRun}
+              {s.groups ? (
+                s.groups.map((g) => (
+                  <Fragment key={g.key}>
+                    <GroupRow
+                      group={g}
+                      colSpan={colSpan}
+                      collapsed={collapsedGroups.has(g.key)}
+                      onToggle={() => toggleGroup(g.key)}
                     />
-                  )}
+                    {!collapsedGroups.has(g.key) && (
+                      <Rows
+                        rows={g.rows}
+                        columns={s.columns}
+                        hasExpand={s.hasExpand}
+                        open={open}
+                        onToggle={toggleRow}
+                        onJumpRun={onJumpRun}
+                      />
+                    )}
+                  </Fragment>
+                ))
+              ) : (
+                <Rows
+                  rows={s.rows}
+                  columns={s.columns}
+                  hasExpand={s.hasExpand}
+                  open={open}
+                  onToggle={toggleRow}
+                  onJumpRun={onJumpRun}
+                />
+              )}
             </tbody>
           </table>
         </div>
@@ -403,18 +487,32 @@ function TableSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "table"
   );
 }
 
-function KeyValueSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "keyvalue" }>; onJumpRun?: (id: string) => void }) {
+function KeyValueSection({
+  s,
+  onJumpRun,
+}: {
+  s: Extract<SectionModel, { as: "keyvalue" }>;
+  onJumpRun?: (id: string) => void;
+}) {
   return (
     <section aria-label={s.label ?? "details"} className="mb-4 last:mb-0">
       <SectionHeading label={s.label} />
       <div className="text-[12px]">
         {s.entries.map((cell) => (
-          <div key={cell.key} className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] items-baseline gap-3 py-[3px]">
+          <div
+            key={cell.key}
+            className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] items-baseline gap-3 py-[3px]"
+          >
             <div className="truncate text-(--text-faint)" title={cell.key}>
               {cell.key}
             </div>
             <div className="min-w-0 text-(--text-dim)">
-              <Value f={cell.value} tone={cell.tone} block onJumpRun={onJumpRun} />
+              <Value
+                f={cell.value}
+                tone={cell.tone}
+                block
+                onJumpRun={onJumpRun}
+              />
             </div>
           </div>
         ))}
@@ -423,7 +521,13 @@ function KeyValueSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "key
   );
 }
 
-function ListSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "list" }>; onJumpRun?: (id: string) => void }) {
+function ListSection({
+  s,
+  onJumpRun,
+}: {
+  s: Extract<SectionModel, { as: "list" }>;
+  onJumpRun?: (id: string) => void;
+}) {
   return (
     <section aria-label={s.label ?? "list"} className="mb-4 last:mb-0">
       <SectionHeading label={s.label} count={s.items.length} />
@@ -432,9 +536,19 @@ function ListSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "list" }
       ) : (
         <ul className="m-0 list-none p-0 text-[12px]">
           {s.items.map((cell) => (
-            <li key={cell.key} className="flex items-baseline gap-2 py-[3px] text-(--text-dim)">
-              <span aria-hidden className="text-(--text-faint)">·</span>
-              <Value f={cell.value} tone={cell.tone} block onJumpRun={onJumpRun} />
+            <li
+              key={cell.key}
+              className="flex items-baseline gap-2 py-[3px] text-(--text-dim)"
+            >
+              <span aria-hidden className="text-(--text-faint)">
+                ·
+              </span>
+              <Value
+                f={cell.value}
+                tone={cell.tone}
+                block
+                onJumpRun={onJumpRun}
+              />
             </li>
           ))}
         </ul>
@@ -443,7 +557,13 @@ function ListSection({ s, onJumpRun }: { s: Extract<SectionModel, { as: "list" }
   );
 }
 
-function SectionBlock({ s, onJumpRun }: { s: SectionModel; onJumpRun?: (id: string) => void }) {
+function SectionBlock({
+  s,
+  onJumpRun,
+}: {
+  s: SectionModel;
+  onJumpRun?: (id: string) => void;
+}) {
   switch (s.as) {
     case "table":
       return <TableSection s={s} onJumpRun={onJumpRun} />;
@@ -474,7 +594,9 @@ function SectionBlock({ s, onJumpRun }: { s: SectionModel; onJumpRun?: (id: stri
       return (
         <section aria-label={s.label ?? "prose"} className="mb-4 last:mb-0">
           <SectionHeading label={s.label} />
-          <p className="m-0 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-(--text-dim)">{s.text}</p>
+          <p className="m-0 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-(--text-dim)">
+            {s.text}
+          </p>
         </section>
       );
   }
@@ -499,16 +621,27 @@ export function ArtifactView({
   /** Right-aligned header slot — the host's Raw toggle. */
   actions?: ReactNode;
 }) {
-  const header = useMemo(() => headerFor(view, artifact, schema), [view, artifact, schema]);
+  const header = useMemo(
+    () => headerFor(view, artifact, schema),
+    [view, artifact, schema],
+  );
   const sections = useMemo(() => sectionsFor(view, artifact), [view, artifact]);
-  const statusHues = header.status?.tone ? { [header.status.value]: TONE_HUES[header.status.tone] } : {};
+  const statusHues = header.status?.tone
+    ? { [header.status.value]: TONE_HUES[header.status.tone] }
+    : {};
   return (
     <div data-artifact-view className="text-[12px]">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        {header.title && <span className="font-medium text-(--text)">{header.title}</span>}
+        {header.title && (
+          <span className="font-medium text-(--text)">{header.title}</span>
+        )}
         {header.status && (
           <span title={`${header.status.label}: ${header.status.value}`}>
-            <StateBadge state={header.status.value} hues={statusHues} dot={false} />
+            <StateBadge
+              state={header.status.value}
+              hues={statusHues}
+              dot={false}
+            />
           </span>
         )}
         {actions && <span className="ml-auto">{actions}</span>}
@@ -519,7 +652,11 @@ export function ArtifactView({
         </p>
       )}
       {sections.map((s, i) => (
-        <SectionBlock key={`${s.as}:${s.label ?? i}`} s={s} onJumpRun={onJumpRun} />
+        <SectionBlock
+          key={`${s.as}:${s.label ?? i}`}
+          s={s}
+          onJumpRun={onJumpRun}
+        />
       ))}
     </div>
   );

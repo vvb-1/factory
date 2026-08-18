@@ -120,7 +120,8 @@ export function guestBinary(def, adapter) {
 export function guestEnvironment(extra = {}, hostEnv = process.env) {
   const env = { HOME: GUEST_HOME, PATH: GUEST_PATH, TERM: "dumb" };
   for (const key of GUEST_LOCALE_ENV) {
-    if (typeof hostEnv[key] === "string" && hostEnv[key] !== "") env[key] = hostEnv[key];
+    if (typeof hostEnv[key] === "string" && hostEnv[key] !== "")
+      env[key] = hostEnv[key];
   }
   return { ...env, ...extra };
 }
@@ -137,13 +138,20 @@ export function guestEnvironment(extra = {}, hostEnv = process.env) {
  */
 export function withStdinFile(argv, stdinFile) {
   if (typeof stdinFile !== "string" || !/^[A-Za-z0-9._-]+$/.test(stdinFile)) {
-    throw new Error(`sandbox stdin file must be a bare workspace filename, got ${JSON.stringify(stdinFile)}`);
+    throw new Error(
+      `sandbox stdin file must be a bare workspace filename, got ${JSON.stringify(stdinFile)}`,
+    );
   }
   return [GUEST_SHELL, "-c", `exec "$0" "$@" < ./${stdinFile}`, ...argv];
 }
 
 function assertGuestArgv(def, argv) {
-  if (!Array.isArray(argv) || argv.length === 0 || typeof argv[0] !== "string" || !argv[0].startsWith("/")) {
+  if (
+    !Array.isArray(argv) ||
+    argv.length === 0 ||
+    typeof argv[0] !== "string" ||
+    !argv[0].startsWith("/")
+  ) {
     // Array-form exec does not search $PATH inside the guest, and a host path
     // like /opt/homebrew/bin/bun does not exist there. Failing here with the
     // real reason beats a bare "no such file" from inside a VM.
@@ -199,7 +207,9 @@ export async function runSandboxed({
     consoleTail = (consoleTail + text).slice(-CONSOLE_TRACE_CHARS);
   };
   const started = Date.now();
-  note(`[sandbox] adapter=${adapter} definition=${def?.ref ?? "?"} provider=${def?.sandbox?.provider ?? "?"} argv=${JSON.stringify(command)}`);
+  note(
+    `[sandbox] adapter=${adapter} definition=${def?.ref ?? "?"} provider=${def?.sandbox?.provider ?? "?"} argv=${JSON.stringify(command)}`,
+  );
 
   let outcome;
   let failure = null;
@@ -223,7 +233,11 @@ export async function runSandboxed({
     failure = err;
   }
 
-  if (failure && abortSignal?.aborted && failure.code === "sandbox_runner_crashed") {
+  if (
+    failure &&
+    abortSignal?.aborted &&
+    failure.code === "sandbox_runner_crashed"
+  ) {
     // The runner was torn down mid-run because WE asked for it. A host child
     // in the same position closes with a null exit code; report the same so
     // the worker's cancel path cannot tell the two apart.
@@ -233,7 +247,9 @@ export async function runSandboxed({
 
   const elapsed = Date.now() - started;
   if (failure) {
-    note(`[sandbox] failed after ${elapsed}ms: ${failure.code ?? failure.name}: ${failure.message}`);
+    note(
+      `[sandbox] failed after ${elapsed}ms: ${failure.code ?? failure.name}: ${failure.message}`,
+    );
   } else {
     note(
       `[sandbox] boot=${outcome.bootMs ?? "?"}ms exit=${outcome.exitCode ?? "null"} timedOut=${outcome.timedOut} elapsed=${elapsed}ms${abortSignal?.aborted ? " cancelled=true" : ""}`,
@@ -256,7 +272,9 @@ export async function runSandboxed({
       bootMs: outcome?.bootMs ?? null,
       exitCode: outcome?.exitCode ?? null,
       timedOut: outcome?.timedOut ?? false,
-      ...(failure ? { error: `${failure.code ?? failure.name}: ${failure.message}` } : {}),
+      ...(failure
+        ? { error: `${failure.code ?? failure.name}: ${failure.message}` }
+        : {}),
       text: consoleTail,
     });
   } catch {
@@ -264,5 +282,9 @@ export async function runSandboxed({
   }
 
   if (failure) throw failure;
-  return { exitCode: outcome.exitCode ?? null, timedOut: outcome.timedOut === true, bootMs: outcome.bootMs ?? null };
+  return {
+    exitCode: outcome.exitCode ?? null,
+    timedOut: outcome.timedOut === true,
+    bootMs: outcome.bootMs ?? null,
+  };
 }

@@ -59,13 +59,13 @@ stamp at a checkout other than the one the worker was started from.
 
 **Which change needs which reload:**
 
-| You changed | What reloads it | How fast |
-| :--- | :--- | :--- |
-| `event-runtime/lib/**`, `event-runtime/cli.mjs` | serve: `bun --watch` (in-flight planner work is dropped). worker: exit 75 at the next **idle** poll, then supervisor re-exec | serve immediately; worker after the current run |
-| `event-runtime/web/**` | vite HMR — the open tab updates, no restart | immediate |
-| `agents/*.md`, `schemas/**` | **neither** — definitions are read per plan/claim, but the pinned content hash is not. Run `bun event-runtime/cli.mjs update-pins` | on the next plan/claim after re-pinning |
-| `config/repos.yaml`, `config/schedule.yaml` | serve re-reads on restart — `--watch` covers it only if the edit also touches `event-runtime/` | restart serve |
-| `bin/live-stack.sh` itself | nothing — `factory down && factory up --dev` | manual |
+| You changed                                     | What reloads it                                                                                                                    | How fast                                        |
+| :---------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
+| `event-runtime/lib/**`, `event-runtime/cli.mjs` | serve: `bun --watch` (in-flight planner work is dropped). worker: exit 75 at the next **idle** poll, then supervisor re-exec       | serve immediately; worker after the current run |
+| `event-runtime/web/**`                          | vite HMR — the open tab updates, no restart                                                                                        | immediate                                       |
+| `agents/*.md`, `schemas/**`                     | **neither** — definitions are read per plan/claim, but the pinned content hash is not. Run `bun event-runtime/cli.mjs update-pins` | on the next plan/claim after re-pinning         |
+| `config/repos.yaml`, `config/schedule.yaml`     | serve re-reads on restart — `--watch` covers it only if the edit also touches `event-runtime/`                                     | restart serve                                   |
+| `bin/live-stack.sh` itself                      | nothing — `factory down && factory up --dev`                                                                                       | manual                                          |
 
 Two things `--dev` does not do: it does not restart the worker for an edit
 under `event-runtime/web/**` (vite owns that), and it does not touch a run
@@ -186,7 +186,7 @@ limit.
 
 **Cross-run references (OPS-373).** An artifact need not come from the same
 chain. `factory.run-postmortem.requested {runId}` → `run-postmortem@1` reads
-`./transcript.json`, the *earlier* run's captured transcript: the planner
+`./transcript.json`, the _earlier_ run's captured transcript: the planner
 resolves that run's stored artifact into `input.runPin` at plan time, so the
 operator approves a run pinned to specific bytes rather than "whatever that
 run's transcript is by the time this executes". A run that never stored a
@@ -231,7 +231,7 @@ and per run a detached worktree at the SHA the planner pinned into
 `input.repoPin`. No install, no ports — reading code needs neither. Repo
 facts come from the factory's own `config/repos.yaml`
 (`FACTORY_REPOS_ROOT` to point elsewhere); the operator's live checkout is
-never touched. Full worktrees for *coding* tasks are deliberately not built —
+never touched. Full worktrees for _coding_ tasks are deliberately not built —
 see [workers doc §5a](../docs/event-runtime-workers.md).
 
 First consumer: `factory.triage.requested` → `triage-scan@1` reads the pinned
@@ -257,11 +257,11 @@ bin/worktree-down.sh OPS-123     # stop daemons, remove the worktree (branch sta
 
 Port allocation (so instances never collide):
 
-| Instance | API | Web |
-| :--- | :--- | :--- |
-| interactive default (`serve`) | 7381 | 7382 |
-| `--here` demo | 7391 | 7392 |
-| ticket worktree | dynamic (7400–7798 band) | API + 1 |
+| Instance                      | API                      | Web     |
+| :---------------------------- | :----------------------- | :------ |
+| interactive default (`serve`) | 7381                     | 7382    |
+| `--here` demo                 | 7391                     | 7392    |
+| ticket worktree               | dynamic (7400–7798 band) | API + 1 |
 
 Ticket worktrees hash the ticket ID into a preferred even port in the 7400–7798
 band, scanning forward for the first free slot and persisting the assigned ports
@@ -327,33 +327,33 @@ spec (§12).
 
 ## Layout
 
-| Path | What |
-| :--- | :--- |
-| `lib/config.mjs` | paths, port, secrets, policy version |
-| `lib/canonical.mjs` `lib/schema.mjs` | canonical JSON + hashes; fail-closed schema validation |
-| `lib/db.mjs` | SQLite substrate (§10): events, proposals, runs, attempts, journal, results, outbox |
-| `lib/lifecycle.mjs` | closed FSM (§8); every transition journaled |
-| `lib/registry.mjs` | agent definitions pinned by content hash (§6) |
-| `lib/intake.mjs` | HMAC verification + idempotent admission (§5.1, §14) |
-| `lib/planner.mjs` | deterministic plan(event) → NOOP \| HUMAN_NEEDED \| RunSpec (§4, §5.4) |
-| `lib/proposals.mjs` | watched approval, TTL, re-plan on expiry (§12) |
-| `lib/workspace.mjs` | ephemeral workspaces, path confinement (§7) |
-| `lib/worker.mjs` | worker loop: claim under `BEGIN IMMEDIATE`, lease, execute, verify, publish with fencing (§8) |
-| `lib/verify.mjs` | result verification + compact receipts (§9) |
-| `lib/adapters/` | adapter registry (§6): `claude` (LLM), `pi` (LLM), `agy` (LLM), `command` (closed argv template), `actions` (approved action list → closed registry), `fake` (tests/demo) |
-| `lib/artifacts.mjs` | content-addressed store: collect, stream via `GET /artifacts/:sha256`, materialize declared inputs, retention (OPS-372) |
-| `lib/schedules.mjs` `schedules.json` | clock ticks: slots, catch-up, singleton, earned auto-approval (OPS-381) |
-| `lib/workers.mjs` | worker registry, heartbeats, placement predicate (OPS-233) |
-| `lib/repos.mjs` `lib/repository.mjs` | repos.yaml reader; mirror + pinned read-only checkout (OPS-228) |
-| `lib/adapters/actions.mjs` | closed action-list executor: approved action IDs → fixed SSH commands, probe evidence (OPS-208) |
-| `lib/chain.mjs` `edges.json` | discovered chains: typed recommendation → internal event → watched proposal (OPS-223) |
-| `lib/adapters/command.mjs` | closed-template command executor — the only admissible mutating agent form (§14) |
-| `lib/trace.mjs` | live agent trace: `factory.trace/v1` records from the claude stream (OPS-295) |
-| `lib/outbox.mjs` | transactional outbox: publish receipts after the run's transaction commits (§10) |
-| `lib/api.mjs` `cli.mjs` `lib/client.mjs` | loopback control API, CLI client, and the shared HTTP client (§12–§13) |
-| `web/` | web control plane: Vite/React app + `serve.mjs` static/proxy server |
-| `demo/` | seeded one-of-everything fixture + e2e verify (OPS-217, see above) |
-| `agents/` `schemas/` `event-types.json` | registered agents, contracts, event→agent mappings |
+| Path                                     | What                                                                                                                                                                      |
+| :--------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lib/config.mjs`                         | paths, port, secrets, policy version                                                                                                                                      |
+| `lib/canonical.mjs` `lib/schema.mjs`     | canonical JSON + hashes; fail-closed schema validation                                                                                                                    |
+| `lib/db.mjs`                             | SQLite substrate (§10): events, proposals, runs, attempts, journal, results, outbox                                                                                       |
+| `lib/lifecycle.mjs`                      | closed FSM (§8); every transition journaled                                                                                                                               |
+| `lib/registry.mjs`                       | agent definitions pinned by content hash (§6)                                                                                                                             |
+| `lib/intake.mjs`                         | HMAC verification + idempotent admission (§5.1, §14)                                                                                                                      |
+| `lib/planner.mjs`                        | deterministic plan(event) → NOOP \| HUMAN_NEEDED \| RunSpec (§4, §5.4)                                                                                                    |
+| `lib/proposals.mjs`                      | watched approval, TTL, re-plan on expiry (§12)                                                                                                                            |
+| `lib/workspace.mjs`                      | ephemeral workspaces, path confinement (§7)                                                                                                                               |
+| `lib/worker.mjs`                         | worker loop: claim under `BEGIN IMMEDIATE`, lease, execute, verify, publish with fencing (§8)                                                                             |
+| `lib/verify.mjs`                         | result verification + compact receipts (§9)                                                                                                                               |
+| `lib/adapters/`                          | adapter registry (§6): `claude` (LLM), `pi` (LLM), `agy` (LLM), `command` (closed argv template), `actions` (approved action list → closed registry), `fake` (tests/demo) |
+| `lib/artifacts.mjs`                      | content-addressed store: collect, stream via `GET /artifacts/:sha256`, materialize declared inputs, retention (OPS-372)                                                   |
+| `lib/schedules.mjs` `schedules.json`     | clock ticks: slots, catch-up, singleton, earned auto-approval (OPS-381)                                                                                                   |
+| `lib/workers.mjs`                        | worker registry, heartbeats, placement predicate (OPS-233)                                                                                                                |
+| `lib/repos.mjs` `lib/repository.mjs`     | repos.yaml reader; mirror + pinned read-only checkout (OPS-228)                                                                                                           |
+| `lib/adapters/actions.mjs`               | closed action-list executor: approved action IDs → fixed SSH commands, probe evidence (OPS-208)                                                                           |
+| `lib/chain.mjs` `edges.json`             | discovered chains: typed recommendation → internal event → watched proposal (OPS-223)                                                                                     |
+| `lib/adapters/command.mjs`               | closed-template command executor — the only admissible mutating agent form (§14)                                                                                          |
+| `lib/trace.mjs`                          | live agent trace: `factory.trace/v1` records from the claude stream (OPS-295)                                                                                             |
+| `lib/outbox.mjs`                         | transactional outbox: publish receipts after the run's transaction commits (§10)                                                                                          |
+| `lib/api.mjs` `cli.mjs` `lib/client.mjs` | loopback control API, CLI client, and the shared HTTP client (§12–§13)                                                                                                    |
+| `web/`                                   | web control plane: Vite/React app + `serve.mjs` static/proxy server                                                                                                       |
+| `demo/`                                  | seeded one-of-everything fixture + e2e verify (OPS-217, see above)                                                                                                        |
+| `agents/` `schemas/` `event-types.json`  | registered agents, contracts, event→agent mappings                                                                                                                        |
 
 ## Capabilities are audited, not enforced (§14)
 

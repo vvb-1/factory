@@ -3,8 +3,22 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import { humanizeReason } from "../reasons";
 import type { AdmittedEvent, Proposal, RunListItem } from "../types";
-import { DECISION_HUES, DisclosureChevron, EVENT_STATUS_HUES, JumpLink, Section, StateBadge, ago, shortId } from "./ui";
-import { ReasonText, eventTicket, hashHref, ticketIdOf } from "./RunDetailBlocks";
+import {
+  DECISION_HUES,
+  DisclosureChevron,
+  EVENT_STATUS_HUES,
+  JumpLink,
+  Section,
+  StateBadge,
+  ago,
+  shortId,
+} from "./ui";
+import {
+  ReasonText,
+  eventTicket,
+  hashHref,
+  ticketIdOf,
+} from "./RunDetailBlocks";
 
 /**
  * The per-ticket "why isn't this running?" answer (WM-594). Split out of
@@ -41,12 +55,20 @@ const OUTCOME_HUES: Record<string, string> = {
  */
 export function buildTicketDecisions(
   ticket: string,
-  data: { events: readonly AdmittedEvent[]; proposals: readonly Proposal[]; runs: readonly RunListItem[] },
+  data: {
+    events: readonly AdmittedEvent[];
+    proposals: readonly Proposal[];
+    runs: readonly RunListItem[];
+  },
 ): TicketDecision[] {
   const T = ticket.toUpperCase();
-  const eventKey = (source: string | null | undefined, id: string | null | undefined) => `${source}:${id}`;
+  const eventKey = (
+    source: string | null | undefined,
+    id: string | null | undefined,
+  ) => `${source}:${id}`;
   const events = new Map<string, AdmittedEvent>();
-  for (const e of data.events) if (eventTicket(e) === T) events.set(eventKey(e.source, e.eventId), e);
+  for (const e of data.events)
+    if (eventTicket(e) === T) events.set(eventKey(e.source, e.eventId), e);
 
   const proposals = data.proposals.filter((p) => {
     if (events.has(eventKey(p.eventSource, p.eventId))) return true;
@@ -55,7 +77,9 @@ export function buildTicketDecisions(
   });
   // A proposal whose spec names the ticket links its event even when the event
   // itself does not (a chain event carrying only the proposal's payload).
-  const eventById = new Map(data.events.map((e) => [eventKey(e.source, e.eventId), e]));
+  const eventById = new Map(
+    data.events.map((e) => [eventKey(e.source, e.eventId), e]),
+  );
   for (const p of proposals) {
     const k = eventKey(p.eventSource, p.eventId);
     const e = eventById.get(k);
@@ -65,14 +89,20 @@ export function buildTicketDecisions(
   // Only runs this ticket's planner opened: a noop proposal's runId can be
   // the *blocking* run of another ticket (`ticket_dispatch_already_live`).
   const runIds = new Set(
-    proposals.filter((p) => p.decision === "run").map((p) => p.runId).filter((id): id is string => !!id),
+    proposals
+      .filter((p) => p.decision === "run")
+      .map((p) => p.runId)
+      .filter((id): id is string => !!id),
   );
   const runs = data.runs.filter(
-    (r) => runIds.has(r.runId) || events.has(eventKey(r.eventSource, r.eventId)),
+    (r) =>
+      runIds.has(r.runId) || events.has(eventKey(r.eventSource, r.eventId)),
   );
 
   const decisions: TicketDecision[] = [];
-  const decidedEvents = new Set(proposals.map((p) => eventKey(p.eventSource, p.eventId)));
+  const decidedEvents = new Set(
+    proposals.map((p) => eventKey(p.eventSource, p.eventId)),
+  );
   for (const p of proposals) {
     const e = eventById.get(eventKey(p.eventSource, p.eventId));
     decisions.push({
@@ -106,7 +136,10 @@ export function buildTicketDecisions(
       outcome: "refused",
       status: null,
       reason: r.reasonCode,
-      event: r.eventSource && r.eventId ? { source: r.eventSource, eventId: r.eventId, type: "" } : null,
+      event:
+        r.eventSource && r.eventId
+          ? { source: r.eventSource, eventId: r.eventId, type: "" }
+          : null,
       proposalId: null,
       runId: r.runId,
     });
@@ -117,7 +150,10 @@ export function buildTicketDecisions(
 /** `noop · Owned paths overlap · 3m ago` — the one line an operator reads first. */
 export function decisionHeadline(d: TicketDecision, now: number): string {
   const reason = humanizeReason(d.reason).text;
-  const status = d.outcome === "planned" && d.status && d.status !== "approved" ? ` (${d.status})` : "";
+  const status =
+    d.outcome === "planned" && d.status && d.status !== "approved"
+      ? ` (${d.status})`
+      : "";
   return `${d.outcome}${status}${reason ? ` · ${reason}` : ""} · ${ago(d.at, now)}`;
 }
 
@@ -145,13 +181,21 @@ export function TicketDecisions({
   onJumpTicket?: (ticketId: string) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const eventsQ = useQuery({ queryKey: ["events", "all"], queryFn: () => api.events(), staleTime: 5_000 });
+  const eventsQ = useQuery({
+    queryKey: ["events", "all"],
+    queryFn: () => api.events(),
+    staleTime: 5_000,
+  });
   const proposalsQ = useQuery({
     queryKey: ["proposals", "history"],
     queryFn: () => api.proposalHistory("all"),
     staleTime: 5_000,
   });
-  const runsQ = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), staleTime: 5_000 });
+  const runsQ = useQuery({
+    queryKey: ["runs", "ALL"],
+    queryFn: () => api.runs(),
+    staleTime: 5_000,
+  });
   const decisions = useMemo(
     () =>
       buildTicketDecisions(ticket, {
@@ -164,14 +208,20 @@ export function TicketDecisions({
   const loading = eventsQ.isPending || proposalsQ.isPending || runsQ.isPending;
   const latest = decisions.at(-1) ?? null;
   const jumpEvent = (source: string, eventId: string) =>
-    onJumpEvent ? onJumpEvent(source, eventId) : (window.location.hash = hashHref("events", source, eventId));
+    onJumpEvent
+      ? onJumpEvent(source, eventId)
+      : (window.location.hash = hashHref("events", source, eventId));
 
   return (
     <Section title="Decisions" id="decisions">
       {loading && !latest ? (
-        <div className="py-1 text-[11px] text-(--text-faint)">Loading planner decisions…</div>
+        <div className="py-1 text-[11px] text-(--text-faint)">
+          Loading planner decisions…
+        </div>
       ) : !latest ? (
-        <div className="py-1 text-[11px] text-(--text-faint)">No planner decisions recorded for this ticket.</div>
+        <div className="py-1 text-[11px] text-(--text-faint)">
+          No planner decisions recorded for this ticket.
+        </div>
       ) : (
         <>
           {/* The headline is the whole answer for most tickets; the list under
@@ -195,16 +245,38 @@ export function TicketDecisions({
               <DisclosureChevron open={open} />
               <span className="text-[11px] text-(--text-faint)">last:</span>
             </button>
-            <StateBadge state={latest.outcome} hues={OUTCOME_HUES} dot={false} />
+            <StateBadge
+              state={latest.outcome}
+              hues={OUTCOME_HUES}
+              dot={false}
+            />
             <span className="min-w-0 flex-1 truncate text-[12px] text-(--text-dim)">
-              {latest.outcome === "planned" && latest.status && latest.status !== "approved" && (
-                <span className="text-(--text-faint)">({latest.status}) </span>
+              {latest.outcome === "planned" &&
+                latest.status &&
+                latest.status !== "approved" && (
+                  <span className="text-(--text-faint)">
+                    ({latest.status}){" "}
+                  </span>
+                )}
+              <ReasonText
+                code={latest.reason}
+                onJumpRun={onJumpRun}
+                onJumpProposal={onJumpProposal}
+                onJumpTicket={onJumpTicket}
+              />
+              {!latest.reason && latest.outcome === "planned" && (
+                <span className="text-(--text-faint)">run proposed</span>
               )}
-              <ReasonText code={latest.reason} onJumpRun={onJumpRun} onJumpProposal={onJumpProposal} onJumpTicket={onJumpTicket} />
-              {!latest.reason && latest.outcome === "planned" && <span className="text-(--text-faint)">run proposed</span>}
-              {!latest.reason && latest.outcome === "admitted" && <span className="text-(--text-faint)">awaiting the planner</span>}
+              {!latest.reason && latest.outcome === "admitted" && (
+                <span className="text-(--text-faint)">
+                  awaiting the planner
+                </span>
+              )}
             </span>
-            <span className="shrink-0 text-[11px] tabular-nums text-(--text-faint)" title={latest.at}>
+            <span
+              className="shrink-0 text-[11px] tabular-nums text-(--text-faint)"
+              title={latest.at}
+            >
               {ago(latest.at, now)}
             </span>
             <span className="shrink-0 text-[11px] tabular-nums text-(--text-faint)">
@@ -212,24 +284,51 @@ export function TicketDecisions({
             </span>
           </div>
           {open && (
-            <ol className="m-0 mt-1 list-none border-t border-(--border) p-0 pt-1" aria-label={`Planner decisions for ${ticket}`}>
+            <ol
+              className="m-0 mt-1 list-none border-t border-(--border) p-0 pt-1"
+              aria-label={`Planner decisions for ${ticket}`}
+            >
               {decisions.map((d, i) => (
                 <li
                   key={`${d.proposalId ?? ""}:${d.runId ?? ""}:${d.event?.eventId ?? ""}:${i}`}
                   className="py-1 text-[11.5px]"
                 >
                   <div className="flex items-baseline gap-2">
-                    <span className="mono w-[52px] shrink-0 text-[11px] tabular-nums text-(--text-faint)" title={d.at}>
+                    <span
+                      className="mono w-[52px] shrink-0 text-[11px] tabular-nums text-(--text-faint)"
+                      title={d.at}
+                    >
                       {ago(d.at, now)}
                     </span>
-                    <StateBadge state={d.outcome} hues={OUTCOME_HUES} dot={false} />
+                    <StateBadge
+                      state={d.outcome}
+                      hues={OUTCOME_HUES}
+                      dot={false}
+                    />
                     <span className="min-w-0 flex-1 break-words text-(--text-dim)">
-                      {d.outcome === "planned" && d.status && d.status !== "approved" && (
-                        <span className="text-(--text-faint)">({d.status}) </span>
+                      {d.outcome === "planned" &&
+                        d.status &&
+                        d.status !== "approved" && (
+                          <span className="text-(--text-faint)">
+                            ({d.status}){" "}
+                          </span>
+                        )}
+                      <ReasonText
+                        code={d.reason}
+                        onJumpRun={onJumpRun}
+                        onJumpProposal={onJumpProposal}
+                        onJumpTicket={onJumpTicket}
+                      />
+                      {!d.reason && d.outcome === "planned" && (
+                        <span className="text-(--text-faint)">
+                          run proposed
+                        </span>
                       )}
-                      <ReasonText code={d.reason} onJumpRun={onJumpRun} onJumpProposal={onJumpProposal} onJumpTicket={onJumpTicket} />
-                      {!d.reason && d.outcome === "planned" && <span className="text-(--text-faint)">run proposed</span>}
-                      {!d.reason && d.outcome === "admitted" && <span className="text-(--text-faint)">awaiting the planner</span>}
+                      {!d.reason && d.outcome === "admitted" && (
+                        <span className="text-(--text-faint)">
+                          awaiting the planner
+                        </span>
+                      )}
                     </span>
                   </div>
                   {/* The joins on their own line: event ids can be long
@@ -240,7 +339,9 @@ export function TicketDecisions({
                       <span className="flex shrink-0 items-baseline gap-1">
                         <span>event</span>
                         <JumpLink
-                          onClick={() => jumpEvent(d.event!.source, d.event!.eventId)}
+                          onClick={() =>
+                            jumpEvent(d.event!.source, d.event!.eventId)
+                          }
                           title={`${d.event.source} · ${d.event.eventId}${d.event.type ? ` · ${d.event.type}` : ""}`}
                           className="inline-block max-w-[11rem] truncate align-bottom"
                         >
@@ -296,4 +397,3 @@ export function TicketDecisions({
     </Section>
   );
 }
-

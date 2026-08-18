@@ -95,7 +95,9 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       worktreeWarm: "bin/worktree-warm.sh",
       verify: "npm run typecheck",
       ownedPathsPolicy: {
-        direct: [{ source: "shared/**", requires: ["dist/**", "plugins/core/**"] }],
+        direct: [
+          { source: "shared/**", requires: ["dist/**", "plugins/core/**"] },
+        ],
         pinManifests: ["event-runtime/agents/*.json"],
       },
     });
@@ -123,7 +125,9 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
 
   test("report_only reads false unless it is exactly true — a guard is never 'maybe'", () => {
     const repos = loadRepos({
-      root: factoryRoot(`repos:\n  - name: a\n    path: /tmp/a\n  - name: b\n    path: /tmp/b\n    report_only: false\n`),
+      root: factoryRoot(
+        `repos:\n  - name: a\n    path: /tmp/a\n  - name: b\n    path: /tmp/b\n    report_only: false\n`,
+      ),
     });
     expect(repos.get("a").reportOnly).toBe(false);
     expect(repos.get("b").reportOnly).toBe(false);
@@ -195,7 +199,8 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
   });
 
   test("owned_paths_policy is parsed and validated, defaulting to empty when absent", () => {
-    const repos = loadRepos({ root: factoryRoot(`repos:
+    const repos = loadRepos({
+      root: factoryRoot(`repos:
   - name: bare
     path: /tmp/a
     owned_paths_policy:
@@ -203,9 +208,16 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       pin_manifests: []
   - name: absent-policy
     path: /tmp/b
-`) });
-    expect(repos.get("bare").ownedPathsPolicy).toEqual({ direct: [], pinManifests: [] });
-    expect(repos.get("absent-policy").ownedPathsPolicy).toEqual({ direct: [], pinManifests: [] });
+`),
+    });
+    expect(repos.get("bare").ownedPathsPolicy).toEqual({
+      direct: [],
+      pinManifests: [],
+    });
+    expect(repos.get("absent-policy").ownedPathsPolicy).toEqual({
+      direct: [],
+      pinManifests: [],
+    });
   });
 
   test("owned_paths_policy must be valid schema", () => {
@@ -249,26 +261,53 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       workflow: "CI",
       requiredChecks: ["Shadow runner fleet available", "Verify"],
     });
-    expect(() => selectMergeCheckGate(repos.get("bare"), [])).toThrow(RepoError);
-    expect(() => selectMergeCheckGate(repo, ["Verify", "Verify"])).toThrow(RepoError);
+    expect(() => selectMergeCheckGate(repos.get("bare"), [])).toThrow(
+      RepoError,
+    );
+    expect(() => selectMergeCheckGate(repo, ["Verify", "Verify"])).toThrow(
+      RepoError,
+    );
   });
 
   test("exact-SHA check proof rejects empty, missing, pending, red, stale, and ambiguous evidence (WM-419)", () => {
     const sha = "a".repeat(40);
-    const green = (name) => ({ name, headSha: sha, status: "completed", conclusion: "success", workflow: "CI" });
+    const green = (name) => ({
+      name,
+      headSha: sha,
+      status: "completed",
+      conclusion: "success",
+      workflow: "CI",
+    });
     const expected = ["Shadow runner fleet available", "Verify"];
-    expect(proveMergeChecks({ expectedChecks: expected, actualChecks: expected.map(green), expectedSha: sha, workflow: "CI" })).toBe(true);
+    expect(
+      proveMergeChecks({
+        expectedChecks: expected,
+        actualChecks: expected.map(green),
+        expectedSha: sha,
+        workflow: "CI",
+      }),
+    ).toBe(true);
     const invalid = [
       [],
       [green(expected[0])],
-      [green(expected[0]), { ...green(expected[1]), status: "in_progress", conclusion: null }],
+      [
+        green(expected[0]),
+        { ...green(expected[1]), status: "in_progress", conclusion: null },
+      ],
       [green(expected[0]), { ...green(expected[1]), conclusion: "failure" }],
       [green(expected[0]), { ...green(expected[1]), headSha: "b".repeat(40) }],
       [green(expected[0]), green(expected[1]), green(expected[1])],
       [green(expected[0]), { ...green(expected[1]), workflow: "Other" }],
     ];
     for (const actualChecks of invalid) {
-      expect(() => proveMergeChecks({ expectedChecks: expected, actualChecks, expectedSha: sha, workflow: "CI" })).toThrow(RepoError);
+      expect(() =>
+        proveMergeChecks({
+          expectedChecks: expected,
+          actualChecks,
+          expectedSha: sha,
+          workflow: "CI",
+        }),
+      ).toThrow(RepoError);
     }
   });
   test("malformed YAML throws RepoError with file path and parse error message (OPS-346)", () => {
@@ -286,8 +325,16 @@ describe("reposView is what the control API serves", () => {
   });
 
   test("worktree scripts are reported as capability, not as paths to run", () => {
-    expect(rows[0]).toMatchObject({ hasWorktreeUp: true, hasWorktreeDown: true, hasWorktreeWarm: true });
-    expect(rows[1]).toMatchObject({ hasWorktreeUp: false, hasWorktreeDown: false, hasWorktreeWarm: false });
+    expect(rows[0]).toMatchObject({
+      hasWorktreeUp: true,
+      hasWorktreeDown: true,
+      hasWorktreeWarm: true,
+    });
+    expect(rows[1]).toMatchObject({
+      hasWorktreeUp: false,
+      hasWorktreeDown: false,
+      hasWorktreeWarm: false,
+    });
     // The script path itself is meaningless to a reader and only the janitor
     // executes it, so it stays server-side.
     expect(rows[0]).not.toHaveProperty("worktreeDown");
@@ -296,8 +343,22 @@ describe("reposView is what the control API serves", () => {
   test("the projection is an allow-list, so policy keys cannot leak by being added", () => {
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([
-        "base", "deployBranch", "github", "hasWorktreeDown", "hasWorktreeUp", "hasWorktreeWarm",
-        "maxInFlight", "mergeCi", "name", "path", "project", "reportOnly", "smokeDeadlineSeconds", "team", "verify", "worktreeRoot",
+        "base",
+        "deployBranch",
+        "github",
+        "hasWorktreeDown",
+        "hasWorktreeUp",
+        "hasWorktreeWarm",
+        "maxInFlight",
+        "mergeCi",
+        "name",
+        "path",
+        "project",
+        "reportOnly",
+        "smokeDeadlineSeconds",
+        "team",
+        "verify",
+        "worktreeRoot",
       ]);
     }
     const serialized = JSON.stringify(rows);
@@ -307,6 +368,9 @@ describe("reposView is what the control API serves", () => {
   });
 
   test("the dispatch/report-only distinction survives the wire", () => {
-    expect(rows.map((r) => [r.name, r.reportOnly])).toEqual([["full", false], ["bare", true]]);
+    expect(rows.map((r) => [r.name, r.reportOnly])).toEqual([
+      ["full", false],
+      ["bare", true],
+    ]);
   });
 });

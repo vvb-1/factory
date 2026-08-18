@@ -9,7 +9,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { api } from "../api";
-import { buildTemplates, groupTemplates, triggerId, type TriggerTemplate } from "../templates";
+import {
+  buildTemplates,
+  groupTemplates,
+  triggerId,
+  type TriggerTemplate,
+} from "../templates";
 import { validate } from "../lib/schema";
 import {
   PLANNER_FIELDS,
@@ -62,7 +67,9 @@ export interface RecentAdmittedEvent {
 
 function getSessionStorage(): Storage | null {
   try {
-    return typeof window !== "undefined" && window.sessionStorage ? window.sessionStorage : null;
+    return typeof window !== "undefined" && window.sessionStorage
+      ? window.sessionStorage
+      : null;
   } catch {
     return null;
   }
@@ -70,7 +77,9 @@ function getSessionStorage(): Storage | null {
 
 function getLocalStorage(): Storage | null {
   try {
-    return typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
+    return typeof window !== "undefined" && window.localStorage
+      ? window.localStorage
+      : null;
   } catch {
     return null;
   }
@@ -89,7 +98,9 @@ export function loadDraft(): InjectDraft | null {
         tab: parsed.tab === "form" ? "form" : "json",
         text: typeof parsed.text === "string" ? parsed.text : "",
         formBase: isPlainObject(parsed.formBase) ? parsed.formBase : {},
-        formPayload: isPlainObject(parsed.formPayload) ? parsed.formPayload : {},
+        formPayload: isPlainObject(parsed.formPayload)
+          ? parsed.formPayload
+          : {},
         subJson: isPlainObject(parsed.subJson) ? parsed.subJson : {},
       };
     }
@@ -133,7 +144,10 @@ export function loadRecentEvents(): RecentAdmittedEvent[] {
   }
 }
 
-export function saveRecentEvent(envelope: Record<string, unknown>, eventId: string): RecentAdmittedEvent[] {
+export function saveRecentEvent(
+  envelope: Record<string, unknown>,
+  eventId: string,
+): RecentAdmittedEvent[] {
   try {
     const storage = getLocalStorage();
     const prev = loadRecentEvents();
@@ -141,14 +155,17 @@ export function saveRecentEvent(envelope: Record<string, unknown>, eventId: stri
     const newEntry: RecentAdmittedEvent = {
       eventId,
       type,
-      occurredAt: typeof envelope.occurredAt === "string" ? envelope.occurredAt : undefined,
+      occurredAt:
+        typeof envelope.occurredAt === "string"
+          ? envelope.occurredAt
+          : undefined,
       admittedAt: Date.now(),
       envelope: { ...envelope, eventId },
     };
-    const next = [
-      newEntry,
-      ...prev.filter((p) => p.eventId !== eventId),
-    ].slice(0, MAX_RECENT_EVENTS);
+    const next = [newEntry, ...prev.filter((p) => p.eventId !== eventId)].slice(
+      0,
+      MAX_RECENT_EVENTS,
+    );
     if (storage) {
       storage.setItem(INJECT_RECENT_STORAGE_KEY, JSON.stringify(next));
     }
@@ -195,11 +212,18 @@ export function saveLastTemplate(eventType: string | null) {
 function summarizePayload(env: Record<string, unknown> | undefined): string {
   if (!env || !isPlainObject(env.payload)) return "no payload";
   const payload = env.payload as Record<string, unknown>;
-  const entries = Object.entries(payload).filter(([, v]) => v !== undefined && v !== "");
+  const entries = Object.entries(payload).filter(
+    ([, v]) => v !== undefined && v !== "",
+  );
   if (entries.length === 0) return "empty payload";
   if (typeof payload.repo === "string") return `repo: ${payload.repo}`;
   if (typeof payload.host === "string") return `host: ${payload.host}`;
-  return entries.map(([k]) => k).slice(0, 3).join(", ") + (entries.length > 3 ? "…" : "");
+  return (
+    entries
+      .map(([k]) => k)
+      .slice(0, 3)
+      .join(", ") + (entries.length > 3 ? "…" : "")
+  );
 }
 
 /** Blank slate for an unregistered/hand-written envelope (the escape hatch). */
@@ -222,7 +246,10 @@ const pretty = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
 
-function omitKey(obj: Record<string, unknown>, key: string): Record<string, unknown> {
+function omitKey(
+  obj: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
   const next = { ...obj };
   delete next[key];
   return next;
@@ -249,14 +276,26 @@ export function jsonEnvelopeStatus(raw: string): JsonEnvelopeStatus {
   try {
     value = JSON.parse(raw);
   } catch {
-    return { syntaxValid: false, envelopeValid: false, label: "Invalid JSON syntax" };
+    return {
+      syntaxValid: false,
+      envelopeValid: false,
+      label: "Invalid JSON syntax",
+    };
   }
   if (!isPlainObject(value)) {
-    return { syntaxValid: true, envelopeValid: false, label: "JSON ok · envelope must be an object" };
+    return {
+      syntaxValid: true,
+      envelopeValid: false,
+      label: "JSON ok · envelope must be an object",
+    };
   }
   for (const field of ["type", "source", "subject"] as const) {
     if (typeof value[field] !== "string" || value[field].trim() === "") {
-      return { syntaxValid: true, envelopeValid: false, label: `JSON ok · ${field} missing` };
+      return {
+        syntaxValid: true,
+        envelopeValid: false,
+        label: `JSON ok · ${field} missing`,
+      };
     }
   }
   return { syntaxValid: true, envelopeValid: true, label: "Valid JSON" };
@@ -272,7 +311,10 @@ const inputCls =
 
 type EditorTab = "form" | "json";
 
-export function humanizeSchemaErrors(errs: string[], fields?: FieldSpec[] | null): string[] {
+export function humanizeSchemaErrors(
+  errs: string[],
+  fields?: FieldSpec[] | null,
+): string[] {
   const byName = new Map((fields ?? []).map((f) => [f.name, f]));
   return errs.map((err) => {
     if (!/does not match pattern/.test(err)) return err;
@@ -282,7 +324,8 @@ export function humanizeSchemaErrors(errs: string[], fields?: FieldSpec[] | null
       const subpath = fielded[2] ?? "";
       const message = fielded[3];
       const spec = byName.get(name);
-      const example = !subpath && spec ? placeholderFor(name, spec.schema) : null;
+      const example =
+        !subpath && spec ? placeholderFor(name, spec.schema) : null;
       const hint = example ? ` (e.g. ${example})` : "";
       const humanizedMsg = message.replace(
         /does not match pattern[\s\S]*$/,
@@ -290,10 +333,12 @@ export function humanizeSchemaErrors(errs: string[], fields?: FieldSpec[] | null
       );
       return `$.${name}${subpath}: ${humanizedMsg}`;
     }
-    return err.replace(/does not match pattern[\s\S]*$/, "does not match expected format");
+    return err.replace(
+      /does not match pattern[\s\S]*$/,
+      "does not match expected format",
+    );
   });
 }
-
 
 /**
  * Inject dialog (webui spec §4.4, templates per OPS-214, confirm per OPS-230,
@@ -332,11 +377,19 @@ export function InjectDialog({
   const repoItems = reposQ.data?.repos ?? [];
 
   const openedAt = useMemo(() => Date.now(), []);
-  const initialDraft = useMemo(() => (initialEnvelope ? null : loadDraft()), [initialEnvelope]);
-  const [recentEvents, setRecentEvents] = useState<RecentAdmittedEvent[]>(() => loadRecentEvents());
+  const initialDraft = useMemo(
+    () => (initialEnvelope ? null : loadDraft()),
+    [initialEnvelope],
+  );
+  const [recentEvents, setRecentEvents] = useState<RecentAdmittedEvent[]>(() =>
+    loadRecentEvents(),
+  );
   const submittedRef = useRef(false);
 
-  const templates = useMemo(() => buildTemplates(registryView, openedAt), [registryView, openedAt]);
+  const templates = useMemo(
+    () => buildTemplates(registryView, openedAt),
+    [registryView, openedAt],
+  );
 
   const [search, setSearch] = useState("");
   const lastTemplateRef = useRef(false);
@@ -370,10 +423,12 @@ export function InjectDialog({
     if (initialDraft?.formBase) return initialDraft.formBase;
     return {};
   });
-  const [formPayload, setFormPayload] = useState<Record<string, unknown>>(() => {
-    if (initialDraft?.formPayload) return initialDraft.formPayload;
-    return {};
-  });
+  const [formPayload, setFormPayload] = useState<Record<string, unknown>>(
+    () => {
+      if (initialDraft?.formPayload) return initialDraft.formPayload;
+      return {};
+    },
+  );
   const [subJson, setSubJson] = useState<Record<string, string>>(() => {
     if (initialDraft?.subJson) return initialDraft.subJson;
     return {};
@@ -404,7 +459,8 @@ export function InjectDialog({
       if (r.eventId?.toLowerCase().includes(q)) return true;
       if (r.envelope && isPlainObject(r.envelope.payload)) {
         try {
-          if (JSON.stringify(r.envelope.payload).toLowerCase().includes(q)) return true;
+          if (JSON.stringify(r.envelope.payload).toLowerCase().includes(q))
+            return true;
         } catch {}
       }
       return false;
@@ -421,7 +477,10 @@ export function InjectDialog({
         (t.summary?.toLowerCase().includes(q) ?? false),
     );
   }, [templates, search]);
-  const groupedTemplates = useMemo(() => groupTemplates(filteredTemplates), [filteredTemplates]);
+  const groupedTemplates = useMemo(
+    () => groupTemplates(filteredTemplates),
+    [filteredTemplates],
+  );
 
   const inject = useMutation({
     mutationFn: (envelope: Record<string, unknown>) => api.replay(envelope),
@@ -429,10 +488,13 @@ export function InjectDialog({
       queryClient.invalidateQueries();
       setConfirming(false);
       notify(
-        data.duplicate ? `Duplicate event ${data.eventId}` : `Admitted event ${data.eventId}`,
+        data.duplicate
+          ? `Duplicate event ${data.eventId}`
+          : `Admitted event ${data.eventId}`,
         data.duplicate ? "info" : "ok",
       );
-      const source = typeof envelope.source === "string" ? envelope.source : "web-trigger";
+      const source =
+        typeof envelope.source === "string" ? envelope.source : "web-trigger";
       if (!data.duplicate) {
         const updated = saveRecentEvent(envelope, data.eventId);
         setRecentEvents(updated);
@@ -452,14 +514,18 @@ export function InjectDialog({
     return isPlainObject(s) ? s : null;
   }
 
-  function initFormFromEnvelope(env: Record<string, unknown>, fields: FieldSpec[] | null) {
+  function initFormFromEnvelope(
+    env: Record<string, unknown>,
+    fields: FieldSpec[] | null,
+  ) {
     const { payload, ...base } = env;
     const pay = isPlainObject(payload) ? { ...payload } : {};
     setFormBase(base);
     setFormPayload(pay);
     const sub: Record<string, string> = {};
     for (const f of fields ?? []) {
-      if (f.kind === "json") sub[f.name] = f.name in pay ? JSON.stringify(pay[f.name], null, 2) : "";
+      if (f.kind === "json")
+        sub[f.name] = f.name in pay ? JSON.stringify(pay[f.name], null, 2) : "";
     }
     setSubJson(sub);
     setTouched({});
@@ -520,7 +586,8 @@ export function InjectDialog({
       return;
     }
     if (next === "__given__" && initialEnvelope) {
-      const type = typeof initialEnvelope.type === "string" ? initialEnvelope.type : "";
+      const type =
+        typeof initialEnvelope.type === "string" ? initialEnvelope.type : "";
       setSelected("__given__");
       setText(pretty(initialEnvelope));
       initFormFromEnvelope(initialEnvelope, schemaFields(schemaFor(type)));
@@ -532,7 +599,9 @@ export function InjectDialog({
     }
     if (next.startsWith("__recent_")) {
       const eventId = next.slice("__recent_".length, -2);
-      const item = recentEvents.find((x) => x.eventId === eventId) ?? filteredRecent.find((x) => x.eventId === eventId);
+      const item =
+        recentEvents.find((x) => x.eventId === eventId) ??
+        filteredRecent.find((x) => x.eventId === eventId);
       if (item) {
         chooseRecent(item);
         return;
@@ -556,7 +625,9 @@ export function InjectDialog({
     return [
       ...(initialEnvelope ? ["__given__"] : []),
       ...filteredRecent.map((r) => `__recent_${r.eventId}__`),
-      ...groupedTemplates.flatMap((group) => group.templates.map((t) => t.eventType)),
+      ...groupedTemplates.flatMap((group) =>
+        group.templates.map((t) => t.eventType),
+      ),
       null,
     ];
   }
@@ -575,16 +646,23 @@ export function InjectDialog({
   function onTemplateKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
     if (!keys.includes(e.key)) return;
-    if (!(e.target instanceof HTMLElement) || e.target.getAttribute("role") !== "radio") return;
+    if (
+      !(e.target instanceof HTMLElement) ||
+      e.target.getAttribute("role") !== "radio"
+    )
+      return;
     e.preventDefault();
-    const radios = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]'));
+    const radios = Array.from(
+      e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]'),
+    );
     const idx = radios.indexOf(e.target);
     if (e.key === "ArrowUp" && idx === 0) {
       searchRef.current?.focus();
       return;
     }
     const ids = templateIds();
-    const selectedIdx = checkedId === null ? ids.length - 1 : Math.max(ids.indexOf(checkedId), 0);
+    const selectedIdx =
+      checkedId === null ? ids.length - 1 : Math.max(ids.indexOf(checkedId), 0);
     const delta = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
     const nextIdx = (selectedIdx + delta + ids.length) % ids.length;
     applySelection(ids[nextIdx]);
@@ -599,7 +677,10 @@ export function InjectDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- schemaFor reads registryView
     [formBase, registryView],
   );
-  const formFields = useMemo(() => schemaFields(formSchema) ?? [], [formSchema]);
+  const formFields = useMemo(
+    () => schemaFields(formSchema) ?? [],
+    [formSchema],
+  );
   const requiredFields = formFields.filter((f) => f.required);
   const optionalFields = formFields.filter((f) => !f.required);
 
@@ -609,14 +690,20 @@ export function InjectDialog({
   );
 
   const formValidation = useMemo(
-    () => (formSchema ? validate(formSchema, formPayload) : { valid: true, errors: [] as string[] }),
+    () =>
+      formSchema
+        ? validate(formSchema, formPayload)
+        : { valid: true, errors: [] as string[] },
     [formSchema, formPayload],
   );
   const fieldErrors = useMemo(
     () => errorsByField(formValidation.errors, formFields),
     [formValidation, formFields],
   );
-  const knownNames = useMemo(() => new Set(formFields.map((f) => f.name)), [formFields]);
+  const knownNames = useMemo(
+    () => new Set(formFields.map((f) => f.name)),
+    [formFields],
+  );
   const formLevelErrors = useMemo(() => {
     const out: string[] = [];
     for (const [k, msgs] of fieldErrors) {
@@ -637,7 +724,9 @@ export function InjectDialog({
   const invalidSubs = formFields
     .filter((f) => f.kind === "json")
     .map((f) => f.name)
-    .filter((name) => (subJson[name] ?? "").trim() !== "" && !parses(subJson[name]));
+    .filter(
+      (name) => (subJson[name] ?? "").trim() !== "" && !parses(subJson[name]),
+    );
 
   function setField(name: string, v: unknown) {
     setFormPayload((p) => ({ ...p, [name]: v }));
@@ -663,11 +752,15 @@ export function InjectDialog({
    * `disabled` marks identity-level impossibility (no schema to render);
    * a `reason` with disabled=false is a fixable state (bad JSON, odd payload).
    */
-  const formAvailability = useMemo((): { disabled: boolean; reason: string | null } => {
+  const formAvailability = useMemo((): {
+    disabled: boolean;
+    reason: string | null;
+  } => {
     if (checkedId === "__given__") {
       return {
         disabled: true,
-        reason: "Trigger again re-sends the captured envelope as-is — no schema to render.",
+        reason:
+          "Trigger again re-sends the captured envelope as-is — no schema to render.",
       };
     }
     let env: unknown;
@@ -682,7 +775,8 @@ export function InjectDialog({
     if (!isPlainObject(env)) {
       return {
         disabled: false,
-        reason: "the envelope must be a JSON object — fix it or reselect a template to revert",
+        reason:
+          "the envelope must be a JSON object — fix it or reselect a template to revert",
       };
     }
     const type = typeof env.type === "string" ? env.type : "";
@@ -696,7 +790,8 @@ export function InjectDialog({
     if (env.payload !== undefined && !isPlainObject(env.payload)) {
       return {
         disabled: false,
-        reason: "payload is not a JSON object, which the form cannot represent — fix it or reselect a template to revert",
+        reason:
+          "payload is not a JSON object, which the form cannot represent — fix it or reselect a template to revert",
       };
     }
     return { disabled: false, reason: null };
@@ -722,7 +817,10 @@ export function InjectDialog({
       return;
     }
     const env = JSON.parse(text) as Record<string, unknown>;
-    initFormFromEnvelope(env, schemaFields(schemaFor(typeof env.type === "string" ? env.type : "")));
+    initFormFromEnvelope(
+      env,
+      schemaFields(schemaFor(typeof env.type === "string" ? env.type : "")),
+    );
     setTab("form");
     setTabNotice(null);
   }
@@ -748,7 +846,9 @@ export function InjectDialog({
     if (errs.length === 0 || schemaAck) return false;
     const fields = schemaFields(schemaFor(type));
     const humanized = humanizeSchemaErrors(errs, fields);
-    const summary = humanized.slice(0, 3).join("; ") + (humanized.length > 3 ? ` (+${humanized.length - 3} more)` : "");
+    const summary =
+      humanized.slice(0, 3).join("; ") +
+      (humanized.length > 3 ? ` (+${humanized.length - 3} more)` : "");
     setClientError(
       `payload does not validate against the "${type}" input schema: ${summary}. Intake will admit it, but planning will park it human_needed. Inject anyway to proceed.`,
     );
@@ -765,9 +865,13 @@ export function InjectDialog({
       setConfirming(false);
       return;
     }
-    const missing = REQUIRED.filter((k) => typeof formEnvelope[k] !== "string" || !formEnvelope[k]);
+    const missing = REQUIRED.filter(
+      (k) => typeof formEnvelope[k] !== "string" || !formEnvelope[k],
+    );
     if (missing.length) {
-      setClientError(`missing required string field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
+      setClientError(
+        `missing required string field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`,
+      );
       setConfirming(false);
       return;
     }
@@ -790,13 +894,18 @@ export function InjectDialog({
       setConfirming(false);
       return;
     }
-    const missing = REQUIRED.filter((k) => typeof envelope[k] !== "string" || !envelope[k]);
+    const missing = REQUIRED.filter(
+      (k) => typeof envelope[k] !== "string" || !envelope[k],
+    );
     if (missing.length) {
-      setClientError(`missing required string field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`);
+      setClientError(
+        `missing required string field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`,
+      );
       setConfirming(false);
       return;
     }
-    const registered = registryView?.eventTypes.some((r) => r.type === envelope.type) ?? true;
+    const registered =
+      registryView?.eventTypes.some((r) => r.type === envelope.type) ?? true;
     if (!registered && !unregisteredAck) {
       setClientError(
         `"${envelope.type}" is not a registered event type — it will be admitted, but planning will park it as human_needed. Confirm inject to proceed.`,
@@ -835,7 +944,11 @@ export function InjectDialog({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "f" || e.key === "F")) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        (e.key === "f" || e.key === "F")
+      ) {
         if (tabRef.current !== "json") return;
         e.preventDefault();
         formatJsonRef.current();
@@ -875,14 +988,19 @@ export function InjectDialog({
   function renderField(f: FieldSpec) {
     const fid = `${fieldIdBase}-${f.name}`;
     const value = formPayload[f.name];
-    const errs =
-      fieldErrorVisible(f.name, touched, submitAttempted) ? (fieldErrors.get(f.name) ?? []) : [];
+    const errs = fieldErrorVisible(f.name, touched, submitAttempted)
+      ? (fieldErrors.get(f.name) ?? [])
+      : [];
     const suggestions = repoSuggestions(f.name, f.schema, f.kind, repoItems);
 
     let control: React.ReactNode;
     switch (f.kind) {
       case "const":
-        control = <Pill title="Fixed by the schema">{JSON.stringify(f.schema.const)}</Pill>;
+        control = (
+          <Pill title="Fixed by the schema">
+            {JSON.stringify(f.schema.const)}
+          </Pill>
+        );
         break;
       case "enum": {
         const options = (f.schema.enum as unknown[]) ?? [];
@@ -893,7 +1011,8 @@ export function InjectDialog({
             onChange={(e) => {
               const raw = e.target.value;
               if (raw === "" && !f.required) clearField(f.name);
-              else setField(f.name, options.find((o) => String(o) === raw) ?? raw);
+              else
+                setField(f.name, options.find((o) => String(o) === raw) ?? raw);
             }}
             className={inputCls}
           >
@@ -924,11 +1043,31 @@ export function InjectDialog({
             id={fid}
             type="number"
             step="any"
-            min={typeof f.schema.minimum === "number" ? f.schema.minimum : undefined}
-            max={typeof f.schema.maximum === "number" ? f.schema.maximum : undefined}
-            aria-valuemin={typeof f.schema.minimum === "number" ? f.schema.minimum : undefined}
-            aria-valuemax={typeof f.schema.maximum === "number" ? f.schema.maximum : undefined}
-            value={typeof value === "number" || typeof value === "string" ? String(value) : ""}
+            min={
+              typeof f.schema.minimum === "number"
+                ? f.schema.minimum
+                : undefined
+            }
+            max={
+              typeof f.schema.maximum === "number"
+                ? f.schema.maximum
+                : undefined
+            }
+            aria-valuemin={
+              typeof f.schema.minimum === "number"
+                ? f.schema.minimum
+                : undefined
+            }
+            aria-valuemax={
+              typeof f.schema.maximum === "number"
+                ? f.schema.maximum
+                : undefined
+            }
+            value={
+              typeof value === "number" || typeof value === "string"
+                ? String(value)
+                : ""
+            }
             onChange={(e) => {
               const raw = e.target.value;
               if (raw === "") clearField(f.name);
@@ -956,7 +1095,8 @@ export function InjectDialog({
         break;
       case "json": {
         const raw = subJson[f.name] ?? "";
-        const state = raw.trim() === "" ? "empty" : parses(raw) ? "valid" : "invalid";
+        const state =
+          raw.trim() === "" ? "empty" : parses(raw) ? "valid" : "invalid";
         control = (
           <>
             <textarea
@@ -973,12 +1113,18 @@ export function InjectDialog({
                 className="size-1.5 rounded-full"
                 style={{
                   background:
-                    state === "invalid" ? "var(--hue-err)" : state === "valid" ? "var(--hue-ok)" : "var(--hue-idle)",
+                    state === "invalid"
+                      ? "var(--hue-err)"
+                      : state === "valid"
+                        ? "var(--hue-ok)"
+                        : "var(--hue-idle)",
                 }}
               />
               <span
                 className="text-(--text-faint)"
-                style={state === "invalid" ? { color: "var(--hue-err)" } : undefined}
+                style={
+                  state === "invalid" ? { color: "var(--hue-err)" } : undefined
+                }
               >
                 {state === "invalid"
                   ? "Invalid JSON — fix before injecting"
@@ -997,7 +1143,13 @@ export function InjectDialog({
         control = (
           <SuggestInput
             id={fid}
-            value={typeof value === "string" ? value : value === undefined ? "" : String(value)}
+            value={
+              typeof value === "string"
+                ? value
+                : value === undefined
+                  ? ""
+                  : String(value)
+            }
             onChange={(v) => {
               if (v === "" && !f.required) clearField(f.name);
               else setField(f.name, v);
@@ -1012,7 +1164,9 @@ export function InjectDialog({
       <div
         key={f.name}
         className="mb-2.5 last:mb-0"
-        onBlur={() => setTouched((t) => (t[f.name] ? t : { ...t, [f.name]: true }))}
+        onBlur={() =>
+          setTouched((t) => (t[f.name] ? t : { ...t, [f.name]: true }))
+        }
       >
         <div className="mb-0.5 flex items-center gap-2">
           <label
@@ -1021,7 +1175,9 @@ export function InjectDialog({
           >
             {f.name}
           </label>
-          {f.required && <span className="text-[10px] text-(--text-faint)">required</span>}
+          {f.required && (
+            <span className="text-[10px] text-(--text-faint)">required</span>
+          )}
           <span className="flex-1" />
           {f.kind === "string" && isAtField(f.name) && (
             <button
@@ -1044,10 +1200,18 @@ export function InjectDialog({
             </button>
           )}
         </div>
-        {f.description && <div className="mb-1 text-[10px] text-(--text-faint)">{f.description}</div>}
+        {f.description && (
+          <div className="mb-1 text-[10px] text-(--text-faint)">
+            {f.description}
+          </div>
+        )}
         {control}
         {errs.map((e, i) => (
-          <div key={i} className="mt-0.5 text-[11px]" style={{ color: "var(--hue-err)" }}>
+          <div
+            key={i}
+            className="mt-0.5 text-[11px]"
+            style={{ color: "var(--hue-err)" }}
+          >
             {e}
           </div>
         ))}
@@ -1059,7 +1223,9 @@ export function InjectDialog({
   const seeded = Boolean(initialEnvelope);
   return (
     <Dialog
-      title={seeded ? "Trigger again — inject with a fresh event id" : "Inject event"}
+      title={
+        seeded ? "Trigger again — inject with a fresh event id" : "Inject event"
+      }
       onClose={onClose}
       extraWide
     >
@@ -1082,7 +1248,8 @@ export function InjectDialog({
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key !== "ArrowDown") return;
-                const first = listRef.current?.querySelector<HTMLElement>('[role="radio"]');
+                const first =
+                  listRef.current?.querySelector<HTMLElement>('[role="radio"]');
                 if (!first) return;
                 e.preventDefault();
                 first.focus();
@@ -1092,7 +1259,9 @@ export function InjectDialog({
           </div>
 
           {registry.isPending && !registryView && (
-            <div className="py-2 text-[12px] text-(--text-faint)">Loading templates…</div>
+            <div className="py-2 text-[12px] text-(--text-faint)">
+              Loading templates…
+            </div>
           )}
           {registry.isError && !registryView && (
             <div className="py-2 text-[12px] text-(--text-faint)">
@@ -1119,7 +1288,9 @@ export function InjectDialog({
                 }`}
               >
                 <div className="font-medium text-[12px]">this envelope</div>
-                <div className="text-[11px] text-(--text-faint) truncate">original triggering payload</div>
+                <div className="text-[11px] text-(--text-faint) truncate">
+                  original triggering payload
+                </div>
               </button>
             )}
 
@@ -1144,10 +1315,14 @@ export function InjectDialog({
                             : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
                         }`}
                       >
-                        <div className="mono font-medium text-[12px] truncate">{r.type || "untyped event"}</div>
+                        <div className="mono font-medium text-[12px] truncate">
+                          {r.type || "untyped event"}
+                        </div>
                         <div className="mt-0.5 flex items-center justify-between text-[11px] text-(--text-faint)">
                           <span className="truncate">recent</span>
-                          <span className="ml-1 shrink-0 opacity-75">{summary}</span>
+                          <span className="ml-1 shrink-0 opacity-75">
+                            {summary}
+                          </span>
                         </div>
                       </button>
                     );
@@ -1184,10 +1359,17 @@ export function InjectDialog({
                                   : "border-(--border) text-(--text-dim) hover:bg-(--surface-2)"
                               }`}
                             >
-                              <div className="mono truncate text-[12px] font-medium">{t.eventType}</div>
+                              <div className="mono truncate text-[12px] font-medium">
+                                {t.eventType}
+                              </div>
                               <div className="mt-0.5 flex min-w-0 items-center justify-between text-[11px] text-(--text-faint)">
-                                <span className="min-w-0 truncate">{t.agent}</span>
-                                <span title={summary} className="ml-1 min-w-0 max-w-[55%] truncate opacity-75">
+                                <span className="min-w-0 truncate">
+                                  {t.agent}
+                                </span>
+                                <span
+                                  title={summary}
+                                  className="ml-1 min-w-0 max-w-[55%] truncate opacity-75"
+                                >
                                   {summary}
                                 </span>
                               </div>
@@ -1201,11 +1383,13 @@ export function InjectDialog({
               </div>
             )}
 
-            {filteredTemplates.length === 0 && filteredRecent.length === 0 && search && (
-              <div className="py-3 text-center text-[12px] text-(--text-faint)">
-                No templates or recent payloads matching &quot;{search}&quot;
-              </div>
-            )}
+            {filteredTemplates.length === 0 &&
+              filteredRecent.length === 0 &&
+              search && (
+                <div className="py-3 text-center text-[12px] text-(--text-faint)">
+                  No templates or recent payloads matching &quot;{search}&quot;
+                </div>
+              )}
 
             <button
               type="button"
@@ -1218,7 +1402,9 @@ export function InjectDialog({
               }`}
             >
               <div className="font-medium text-[12px]">blank envelope</div>
-              <div className="text-[11px] text-(--text-faint)">empty starter envelope</div>
+              <div className="text-[11px] text-(--text-faint)">
+                empty starter envelope
+              </div>
             </button>
           </div>
         </div>
@@ -1255,9 +1441,10 @@ export function InjectDialog({
                   />
                   <span
                     style={{
-                      color: jsonStatus.envelopeValid || !jsonStatus.syntaxValid
-                        ? "var(--text-faint)"
-                        : "var(--text-muted, var(--text-faint))",
+                      color:
+                        jsonStatus.envelopeValid || !jsonStatus.syntaxValid
+                          ? "var(--text-faint)"
+                          : "var(--text-muted, var(--text-faint))",
                     }}
                   >
                     {jsonStatus.label}
@@ -1269,14 +1456,23 @@ export function InjectDialog({
                   className="text-[11px] text-(--text-dim) hover:text-(--accent)"
                   title="Format JSON (⌘⇧F)"
                 >
-                  Format JSON <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">⌘⇧F</span>
+                  Format JSON{" "}
+                  <span
+                    className="mono ml-1 text-(--text-faint)"
+                    aria-hidden="true"
+                  >
+                    ⌘⇧F
+                  </span>
                 </button>
               </div>
             )}
           </div>
 
           {tabNotice && (
-            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[12px]" style={warnStyle}>
+            <div
+              className="mb-2 rounded-md px-2.5 py-1.5 text-[12px]"
+              style={warnStyle}
+            >
               {tabNotice}
             </div>
           )}
@@ -1285,15 +1481,17 @@ export function InjectDialog({
           <div hidden={tab !== "form"}>
             {formFields.length === 0 ? (
               <div className="rounded-md border border-(--border) bg-(--surface-0) p-3 text-[12px] text-(--text-faint)">
-                {String(formBase.type ?? "this event type")} takes no payload fields — inject as-is, or switch to
-                the JSON tab.
+                {String(formBase.type ?? "this event type")} takes no payload
+                fields — inject as-is, or switch to the JSON tab.
               </div>
             ) : (
               <div className="max-h-[340px] overflow-y-auto rounded-md border border-(--border) bg-(--surface-0) p-3">
                 {requiredFields.map(renderField)}
                 {optionalFields.length > 0 && (
                   <div className="mt-2 border-t border-(--border) pt-2">
-                    <Disclosure label={`Optional fields (${optionalFields.length})`}>
+                    <Disclosure
+                      label={`Optional fields (${optionalFields.length})`}
+                    >
                       {optionalFields.map(renderField)}
                     </Disclosure>
                   </div>
@@ -1302,13 +1500,21 @@ export function InjectDialog({
             )}
 
             {unknown.length > 0 && (
-              <div className="mt-2 rounded-md px-2.5 py-1.5 text-[11px]" style={warnStyle}>
-                Unknown payload key{unknown.length > 1 ? "s" : ""} kept: {unknown.join(", ")} — the schema does
-                not declare {unknown.length > 1 ? "them" : "it"}; edit or remove in the JSON tab.
+              <div
+                className="mt-2 rounded-md px-2.5 py-1.5 text-[11px]"
+                style={warnStyle}
+              >
+                Unknown payload key{unknown.length > 1 ? "s" : ""} kept:{" "}
+                {unknown.join(", ")} — the schema does not declare{" "}
+                {unknown.length > 1 ? "them" : "it"}; edit or remove in the JSON
+                tab.
               </div>
             )}
             {formLevelErrors.length > 0 && (
-              <div className="mt-2 rounded-md px-2.5 py-1.5 text-[11px]" style={warnStyle}>
+              <div
+                className="mt-2 rounded-md px-2.5 py-1.5 text-[11px]"
+                style={warnStyle}
+              >
                 {formLevelErrors.map((e, i) => (
                   <div key={i}>{e}</div>
                 ))}
@@ -1336,17 +1542,23 @@ export function InjectDialog({
               className="mono w-full resize-y rounded-md border border-(--border) bg-(--surface-0) p-3 text-[12px] leading-relaxed text-(--text) outline-none focus:border-(--border-strong)"
             />
             {jsonSchemaErrors.length > 0 && (
-              <div className="mt-2 rounded-md px-2.5 py-1.5 text-[11px]" style={warnStyle}>
+              <div
+                className="mt-2 rounded-md px-2.5 py-1.5 text-[11px]"
+                style={warnStyle}
+              >
                 <div className="mb-0.5 font-medium">
-                  payload does not validate against the registered input schema (
-                  {jsonSchemaErrors.length} issue{jsonSchemaErrors.length > 1 ? "s" : ""}):
+                  payload does not validate against the registered input schema
+                  ({jsonSchemaErrors.length} issue
+                  {jsonSchemaErrors.length > 1 ? "s" : ""}):
                 </div>
                 {jsonSchemaErrors.slice(0, 6).map((e, i) => (
                   <div key={i} className="mono">
                     {e}
                   </div>
                 ))}
-                {jsonSchemaErrors.length > 6 && <div>… and {jsonSchemaErrors.length - 6} more</div>}
+                {jsonSchemaErrors.length > 6 && (
+                  <div>… and {jsonSchemaErrors.length - 6} more</div>
+                )}
               </div>
             )}
           </div>
@@ -1369,8 +1581,9 @@ export function InjectDialog({
 
           {confirming && !outcome && (
             <div className="mt-2 text-[12px] text-(--text-dim)">
-              Confirm sends this envelope through intake. A known event id is reported as a duplicate and
-              does nothing — that is Replay&apos;s demo, not a new event. Use Trigger again for a fresh id.
+              Confirm sends this envelope through intake. A known event id is
+              reported as a duplicate and does nothing — that is Replay&apos;s
+              demo, not a new event. Use Trigger again for a fresh id.
             </div>
           )}
 
@@ -1389,8 +1602,18 @@ export function InjectDialog({
                 </Button>
               </>
             ) : (
-              <Button variant="primary" onClick={submit} disabled={inject.isPending}>
-                Inject… <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">⌘↵</span>
+              <Button
+                variant="primary"
+                onClick={submit}
+                disabled={inject.isPending}
+              >
+                Inject…{" "}
+                <span
+                  className="mono ml-1 text-(--text-faint)"
+                  aria-hidden="true"
+                >
+                  ⌘↵
+                </span>
               </Button>
             )}
           </div>

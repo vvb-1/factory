@@ -16,8 +16,8 @@ and audit trail as a webhook.
 
 §3's MVP rules currently forbid the runtime to "enable launchd, cron, or
 another unattended timer", and architecture.md §2.7 keeps every job in
-`config/schedule.yaml` disabled on purpose: *the factory runs in the
-foreground, watched, and when it is not running nothing is running.* That
+`config/schedule.yaml` disabled on purpose: _the factory runs in the
+foreground, watched, and when it is not running nothing is running._ That
 policy exists because the reaper has already demonstrated it can act on 31
 tickets from one bad predicate.
 
@@ -53,7 +53,7 @@ primary runtime scheduler:
 - **A separate scheduler process** — more moving parts for something that is
   one timer and one `admitEvent` call, and a third process to supervise.
 
-The worker is *not* involved: it claims runs, and a scheduled run is an
+The worker is _not_ involved: it claims runs, and a scheduled run is an
 ordinary run. `serve` restarting mid-interval must not lose or duplicate a
 tick, which §3 makes cheap — see slots.
 
@@ -84,11 +84,11 @@ approved tick and a replayed one converge on the same run.
 A laptop asleep from 22:00 to 04:00 misses six hourly slots. There is no
 universally right answer, so each loop declares one:
 
-| `catchUp` | Behaviour | Use for |
-| :--- | :--- | :--- |
+| `catchUp`        | Behaviour                                                       | Use for                                                                                    |
+| :--------------- | :-------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
 | `none` (default) | Fire only the current slot; missed ones are recorded as skipped | Idempotent maintenance — running the reaper once now is equivalent to running it six times |
-| `last` | Fire the most recent missed slot, then resume | Loops where one late run still has value |
-| `all` | Fire every missed slot in order | Anything that accumulates per-interval work; rare, and expensive by construction |
+| `last`           | Fire the most recent missed slot, then resume                   | Loops where one late run still has value                                                   |
+| `all`            | Fire every missed slot in order                                 | Anything that accumulates per-interval work; rare, and expensive by construction           |
 
 The count of skipped slots travels on the tick that did fire
 (`payload.skippedSlots`), and `serve` logs it — so a six-hour gap reads as one
@@ -113,8 +113,8 @@ learns to click approve without reading.
 So each loop declares its policy, and it is **earned**:
 
 ```yaml
-approval: watched        # every tick proposes; the operator approves  (default)
-approval: auto           # the scheduler approves; recorded as such
+approval: watched # every tick proposes; the operator approves  (default)
+approval: auto # the scheduler approves; recorded as such
 ```
 
 Two rules make `auto` safe to have at all:
@@ -149,7 +149,7 @@ adapter, OPS-223), not LLM agents:
 
 This matters for §3's capacity rule: every claude-adapter run draws on the
 same unobservable subscription usage window as interactive sessions, so a
-scheduled *LLM* loop can starve the operator's own work on a timer. A
+scheduled _LLM_ loop can starve the operator's own work on a timer. A
 deterministic loop cannot. **Deterministic-command loops ship first**;
 scheduling an LLM agent is a separate decision with the usage-window question
 answered, not a config edit.
@@ -244,11 +244,11 @@ that is **not** `report_only` (today: `bj29`, `wm-home`, `legalease`,
 `cashsaas` — the dispatch doc's §5 rule keeps report-only repos out), three
 per-repo entries in `schedules.json`:
 
-| Loop | Cadence | Fires | Chain it heads |
-| :--- | :--- | :--- | :--- |
-| `work-<repo>` | `30m` | `factory.work.requested {repo}` | work-scan → dispatch (WM-110/108) |
+| Loop           | Cadence                                 | Fires                            | Chain it heads                                                       |
+| :------------- | :-------------------------------------- | :------------------------------- | :------------------------------------------------------------------- |
+| `work-<repo>`  | `30m`                                   | `factory.work.requested {repo}`  | work-scan → dispatch (WM-110/108)                                    |
 | `merge-<repo>` | `30m` fallback (`merge-factory`: `15m`) | `factory.merge.requested {repo}` | full-set sweep → merge-scan → merge-apply / escalate (WM-109/WM-576) |
-| `ship-<repo>` | `7d` | `factory.ship.requested {repo}` | ship-scan → human-only ship-apply (WM-111) |
+| `ship-<repo>`  | `7d`                                    | `factory.ship.requested {repo}`  | ship-scan → human-only ship-apply (WM-111)                           |
 
 Every entry ships `enabled: false`, `approval: "watched"`, `singleton: true`,
 `catchUp: "none"`. Switching a loop on is a deliberate, per-loop operator act
@@ -291,7 +291,7 @@ Notes, stated rather than absorbed:
 The other half of closing the loop: GitHub deliveries, translated at the
 intake boundary into ordinary `factory.event/v1` envelopes. The design
 decision, made against the code: intake's structure allowed a clean seam
-(option *a* of WM-112), so verification and translation live in
+(option _a_ of WM-112), so verification and translation live in
 `lib/intake.mjs` (`verifyGitHubWebhook`, `translateGitHubEvent`) and only the
 route — `POST /github` — sits in `lib/api.mjs`, because intake has no HTTP
 layer. The factory-envelope path on `POST /events` is byte-for-byte
@@ -316,11 +316,11 @@ unchanged.
 
 **Translations** — minimal and typed; anything else refuses:
 
-| Delivery | Condition | Envelope |
-| :--- | :--- | :--- |
-| `pull_request` | action `opened`/`synchronize`/`ready_for_review`, base ref = the configured repo's `base`, repo not `report_only` | `factory.merge.requested`, subject + payload `{repo}` (short name) |
-| `workflow_run` | action `completed`, conclusion `success`, event `pull_request`, exactly one PR targeting the configured base, repo not `report_only` | `factory.merge.requested`, payload `{repo, prNumbers: [N]}`, idempotent as `merge-pr:<repo>:<pr>:<headSha>` |
-| `workflow_run` | action `completed`, conclusion `failure`, repo configured (`report_only` included) | `github.workflow-run.failed`, subject `ci`, payload `{repo: owner/name slug, runId}` — the existing shape ci-log-capture consumes |
+| Delivery       | Condition                                                                                                                            | Envelope                                                                                                                          |
+| :------------- | :----------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------- |
+| `pull_request` | action `opened`/`synchronize`/`ready_for_review`, base ref = the configured repo's `base`, repo not `report_only`                    | `factory.merge.requested`, subject + payload `{repo}` (short name)                                                                |
+| `workflow_run` | action `completed`, conclusion `success`, event `pull_request`, exactly one PR targeting the configured base, repo not `report_only` | `factory.merge.requested`, payload `{repo, prNumbers: [N]}`, idempotent as `merge-pr:<repo>:<pr>:<headSha>`                       |
+| `workflow_run` | action `completed`, conclusion `failure`, repo configured (`report_only` included)                                                   | `github.workflow-run.failed`, subject `ci`, payload `{repo: owner/name slug, runId}` — the existing shape ci-log-capture consumes |
 
 **Refusal cases**, following intake's typed-refusal conventions:
 
@@ -374,11 +374,11 @@ port 7522 — a demo, never a test dependency), or any watched environment:
    a scan, while the 15-minute full-set sweep catches missed events.
 5. **merge proposal**: merge-scan reviews only the selected PR cold and its MERGE
    verdict chains a head-SHA-pinned `merge-apply` plan into a watched
-   proposal. Approving *that* is the merge.
+   proposal. Approving _that_ is the merge.
 
 Ship is the same shape on a weekly clock, with one permanent difference: the
 `ship-apply` approval is structurally human-only (WM-111) — that watched
-approval *is* the master-merge decision, and no schedule, chain, or earned
+approval _is_ the master-merge decision, and no schedule, chain, or earned
 policy can ever make it `auto`.
 
 ## Merge-loop exception (WM-398)
@@ -397,14 +397,14 @@ remain disabled/watched, and deploy/main/master decisions remain human-only.
 mutating orchestrator script. Each command admits the corresponding typed
 event through `lib/emit-event.mjs`:
 
-| Scheduled stage | Admitted event |
-| :--- | :--- |
-| triage | `factory.triage.requested {repo}` |
-| dispatch | `factory.work.requested {repo}` |
-| merge | `factory.merge.requested {repo}` |
-| unblock | `factory.unblock.requested {repo}` |
+| Scheduled stage           | Admitted event                                                                                     |
+| :------------------------ | :------------------------------------------------------------------------------------------------- |
+| triage                    | `factory.triage.requested {repo}`                                                                  |
+| dispatch                  | `factory.work.requested {repo}`                                                                    |
+| merge                     | `factory.merge.requested {repo}`                                                                   |
+| unblock                   | `factory.unblock.requested {repo}`                                                                 |
 | deterministic maintenance | its registered request type (`label-guard`, `warm`, `reconcile`, `unblock-digest`, `janitor-scan`) |
-| reaper | `clock.tick.reaper` with an explicit loop/slot payload |
+| reaper                    | `clock.tick.reaper` with an explicit loop/slot payload                                             |
 
 The command fails non-zero if the runtime is unreachable or refuses the event.
 Once admitted, planning, approval, adapter execution, output verification, and
@@ -419,12 +419,12 @@ has no equivalent typed event and is tracked separately by WM-684.
 The Factory control repo now has the same explicit four-stage floor as client
 repos. Cadences start conservative, and only the lowest-risk stage is on:
 
-| Loop | Cadence | Enabled | Gate | Runtime effect |
-| :--- | :--- | :--- | :--- | :--- |
-| `factory-triage` | `24h` | **yes** | `queue.mjs --repo factory --gate triage` | watched `factory.triage.requested` proposal when supply is low and Triage can help |
-| `factory-dispatch` | `5m` | no | `queue.mjs --repo factory --gate dispatch` | `factory.work.requested`; work-scan chooses bounded candidates |
-| `factory-merge` | `10m` | no | `queue.mjs --repo factory --gate merge` | `factory.merge.requested`; mutating follow-ups retain their own gates |
-| `factory-reaper` | `60m` | no | none; strict stale-claim predicate inside reaper | watched `clock.tick.reaper` proposal |
+| Loop               | Cadence | Enabled | Gate                                             | Runtime effect                                                                     |
+| :----------------- | :------ | :------ | :----------------------------------------------- | :--------------------------------------------------------------------------------- |
+| `factory-triage`   | `24h`   | **yes** | `queue.mjs --repo factory --gate triage`         | watched `factory.triage.requested` proposal when supply is low and Triage can help |
+| `factory-dispatch` | `5m`    | no      | `queue.mjs --repo factory --gate dispatch`       | `factory.work.requested`; work-scan chooses bounded candidates                     |
+| `factory-merge`    | `10m`   | no      | `queue.mjs --repo factory --gate merge`          | `factory.merge.requested`; mutating follow-ups retain their own gates              |
+| `factory-reaper`   | `60m`   | no      | none; strict stale-claim predicate inside reaper | watched `clock.tick.reaper` proposal                                               |
 
 This is **chain-first, not cron-first**. `work-scan@1` emits
 `factory.triage.requested` on `LOW_SUPPLY`, and promoted triage work returns to

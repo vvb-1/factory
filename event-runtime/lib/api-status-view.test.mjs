@@ -205,7 +205,8 @@ describe("StatusView and Worker client types pinned to API response (OPS-284)", 
 
       // Top-level StatusView keys match (inbox declared on the web type since WM-286).
       const statusViewBlock = extractInterfaceBlock(typesSrc, "StatusView");
-      const expectedStatusKeys = extractDirectProperties(statusViewBlock).sort();
+      const expectedStatusKeys =
+        extractDirectProperties(statusViewBlock).sort();
       expect(Object.keys(status).sort()).toEqual(expectedStatusKeys);
       expect(status.inbox).toEqual({ open: 0, acked: 0, byKind: {} });
 

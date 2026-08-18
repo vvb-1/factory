@@ -27,21 +27,26 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 const APPLY = process.argv.includes("--apply");
-const SHARED_PROFILE = path.join(homedir(), ".cache/chrome-devtools-mcp/chrome-profile");
+const SHARED_PROFILE = path.join(
+  homedir(),
+  ".cache/chrome-devtools-mcp/chrome-profile",
+);
 
 /** Does this ps line look like an agent-launched Chrome profile? */
-const AGENT_PROFILE = /--user-data-dir=[^ ]*(chrome-devtools-mcp|puppeteer_dev_(chrome|firefox)_profile)/;
+const AGENT_PROFILE =
+  /--user-data-dir=[^ ]*(chrome-devtools-mcp|puppeteer_dev_(chrome|firefox)_profile)/;
 
 /**
  * Pure classifier over `ps -axo pid=,ppid=,command=` rows so the kill logic is
  * testable without killing anything. Returns { orphans, live }.
  */
 export function classify(rows) {
-  const orphans = [], live = [];
+  const orphans = [],
+    live = [];
   for (const r of rows) {
-    if (!AGENT_PROFILE.test(r.command)) continue;     // fence 1: agent profile only
-    if (/--type=/.test(r.command)) continue;          // fence 2: main process only
-    (r.ppid === 1 ? orphans : live).push(r);          // fence 3: dead parent = orphan
+    if (!AGENT_PROFILE.test(r.command)) continue; // fence 1: agent profile only
+    if (/--type=/.test(r.command)) continue; // fence 2: main process only
+    (r.ppid === 1 ? orphans : live).push(r); // fence 3: dead parent = orphan
   }
   return { orphans, live };
 }
@@ -54,26 +59,46 @@ export function parsePs(text) {
 }
 
 if (import.meta.main) {
-  const rows = parsePs(execSync("ps -axo pid=,ppid=,command=", { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
+  const rows = parsePs(
+    execSync("ps -axo pid=,ppid=,command=", {
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    }),
+  );
   const { orphans, live } = classify(rows);
 
-  if (live.length) console.log(`${live.length} agent Chrome(s) with a living MCP server — left alone`);
+  if (live.length)
+    console.log(
+      `${live.length} agent Chrome(s) with a living MCP server — left alone`,
+    );
 
   if (!orphans.length) {
     console.log("no orphaned agent Chromes");
   } else {
     for (const o of orphans) {
-      const profile = (o.command.match(/--user-data-dir=([^ ]+)/) ?? [])[1] ?? "?";
-      console.log(`  ${APPLY ? "killing" : "would kill"} pid ${o.pid}  ${profile}`);
+      const profile =
+        (o.command.match(/--user-data-dir=([^ ]+)/) ?? [])[1] ?? "?";
+      console.log(
+        `  ${APPLY ? "killing" : "would kill"} pid ${o.pid}  ${profile}`,
+      );
       if (!APPLY) continue;
-      try { process.kill(o.pid, "SIGTERM"); } catch { /* intentionally ignored */ }
+      try {
+        process.kill(o.pid, "SIGTERM");
+      } catch {
+        /* intentionally ignored */
+      }
     }
     if (APPLY) {
       // TERM first so Chrome flushes its profile; KILL whatever ignores it.
       await Bun.sleep(5000);
       for (const o of orphans) {
-        try { process.kill(o.pid, 0); process.kill(o.pid, "SIGKILL"); console.log(`  SIGKILL pid ${o.pid} (survived TERM)`); }
-        catch { /* already gone — the normal case */ }
+        try {
+          process.kill(o.pid, 0);
+          process.kill(o.pid, "SIGKILL");
+          console.log(`  SIGKILL pid ${o.pid} (survived TERM)`);
+        } catch {
+          /* already gone — the normal case */
+        }
       }
     }
   }
@@ -89,9 +114,12 @@ if (import.meta.main) {
         lstatSync(p); // throws when absent — symlinks to dead sockets need lstat
         console.log(`  ${APPLY ? "removing" : "would remove"} stale ${f}`);
         if (APPLY) unlinkSync(p);
-      } catch { /* not present */ }
+      } catch {
+        /* not present */
+      }
     }
   }
 
-  if (!APPLY && orphans.length) console.log("\ndry run — re-run with --apply to kill them");
+  if (!APPLY && orphans.length)
+    console.log("\ndry run — re-run with --apply to kill them");
 }

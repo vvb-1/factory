@@ -44,11 +44,15 @@ describe("useTabKeys", () => {
       scrolled.length = 0;
 
       act(() => {
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "]", bubbles: true }));
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "]", bubbles: true }),
+        );
       });
 
       expect(scrolled.length).toBeGreaterThan(0);
-      expect(scrolled.every((el) => !el.closest(`[${CONTEXT_TABS_ATTR}]`))).toBe(true);
+      expect(
+        scrolled.every((el) => !el.closest(`[${CONTEXT_TABS_ATTR}]`)),
+      ).toBe(true);
       const viewTab = r.getByRole("tab", { name: "running" });
       expect(viewTab.getAttribute("aria-selected")).toBe("true");
       expect(scrolled).toContain(viewTab);

@@ -129,44 +129,61 @@ describe("RunFull deadline extension (WM-566)", () => {
     globalThis.fetch = (async (_input, init) => {
       const body = JSON.parse(String(init?.body ?? "{}"));
       calls.push(body.seconds);
-      return new Response(JSON.stringify({
-        extended: true,
-        runId,
-        seconds: body.seconds,
-        deadlineAt: new Date(Date.parse(deadlineAt) + body.seconds * 1000).toISOString(),
-        leaseExpiresAt: new Date(Date.parse(deadlineAt) + (body.seconds + 120) * 1000).toISOString(),
-        override: false,
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          extended: true,
+          runId,
+          seconds: body.seconds,
+          deadlineAt: new Date(
+            Date.parse(deadlineAt) + body.seconds * 1000,
+          ).toISOString(),
+          leaseExpiresAt: new Date(
+            Date.parse(deadlineAt) + (body.seconds + 120) * 1000,
+          ).toISOString(),
+          override: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     }) as typeof fetch;
     try {
       await withApi(
-      {
-        run: async () => detail,
-        runs: async () => ({
-          runs: [createRunListItemFixture({ runId, state: "RUNNING", deadlineAt })],
-        }),
-      },
-      async () => {
-        const { getByRole, getByText, getByLabelText } = renderRunFull(runId);
-        await waitFor(() => getByText(/Remaining/));
-        expect(getByText(/Remaining/).textContent).toContain("30m");
+        {
+          run: async () => detail,
+          runs: async () => ({
+            runs: [
+              createRunListItemFixture({ runId, state: "RUNNING", deadlineAt }),
+            ],
+          }),
+        },
+        async () => {
+          const { getByRole, getByText, getByLabelText } = renderRunFull(runId);
+          await waitFor(() => getByText(/Remaining/));
+          expect(getByText(/Remaining/).textContent).toContain("30m");
 
-        fireEvent.click(getByRole("button", { name: "+15m" }));
-        await waitFor(() => expect(calls).toEqual([900]));
-        expect(getByText(/Run extended by 15 minutes/)).toBeTruthy();
+          fireEvent.click(getByRole("button", { name: "+15m" }));
+          await waitFor(() => expect(calls).toEqual([900]));
+          expect(getByText(/Run extended by 15 minutes/)).toBeTruthy();
 
-        fireEvent.click(getByRole("button", { name: "Custom…" }));
-        const input = getByLabelText("Extension minutes");
-        changeInput(input as HTMLInputElement, "0");
-        expect(input.getAttribute("aria-invalid")).toBe("true");
-        expect(getByText("Enter a whole number from 1 to 60.")).toBeTruthy();
-        expect(within(getByRole("dialog")).getByRole("button", { name: "Extend run" }).hasAttribute("disabled")).toBe(true);
-        changeInput(input as HTMLInputElement, "20");
-        expect(input.getAttribute("aria-invalid")).toBe("false");
-        fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Extend run" }));
-        await waitFor(() => expect(calls).toEqual([900, 1200]));
-      },
-    );
+          fireEvent.click(getByRole("button", { name: "Custom…" }));
+          const input = getByLabelText("Extension minutes");
+          changeInput(input as HTMLInputElement, "0");
+          expect(input.getAttribute("aria-invalid")).toBe("true");
+          expect(getByText("Enter a whole number from 1 to 60.")).toBeTruthy();
+          expect(
+            within(getByRole("dialog"))
+              .getByRole("button", { name: "Extend run" })
+              .hasAttribute("disabled"),
+          ).toBe(true);
+          changeInput(input as HTMLInputElement, "20");
+          expect(input.getAttribute("aria-invalid")).toBe("false");
+          fireEvent.click(
+            within(getByRole("dialog")).getByRole("button", {
+              name: "Extend run",
+            }),
+          );
+          await waitFor(() => expect(calls).toEqual([900, 1200]));
+        },
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -179,17 +196,27 @@ describe("RunFull deadline extension (WM-566)", () => {
     });
     detail.deadlineAt = new Date(Date.now() + 60_000).toISOString();
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      error: "deadline_already_expired",
-      extended: false,
-      refusal: { code: "deadline_already_expired", retryable: false },
-    }), { status: 409, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error: "deadline_already_expired",
+          extended: false,
+          refusal: { code: "deadline_already_expired", retryable: false },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      )) as unknown as typeof fetch;
     try {
       await withApi(
         {
           run: async () => detail,
           runs: async () => ({
-            runs: [createRunListItemFixture({ runId, state: "RUNNING", deadlineAt: detail.deadlineAt })],
+            runs: [
+              createRunListItemFixture({
+                runId,
+                state: "RUNNING",
+                deadlineAt: detail.deadlineAt,
+              }),
+            ],
           }),
         },
         async () => {
@@ -215,15 +242,27 @@ describe("RunFull deadline extension (WM-566)", () => {
       {
         run: async () => detail,
         runs: async () => ({
-          runs: [createRunListItemFixture({ runId, state: "RUNNING", deadlineAt: detail.deadlineAt })],
+          runs: [
+            createRunListItemFixture({
+              runId,
+              state: "RUNNING",
+              deadlineAt: detail.deadlineAt,
+            }),
+          ],
         }),
       },
       async () => {
         const { getByRole } = renderRunFull(runId, false);
-        const custom = await waitFor(() => getByRole("button", { name: "Custom…" }));
+        const custom = await waitFor(() =>
+          getByRole("button", { name: "Custom…" }),
+        );
         expect(custom.hasAttribute("disabled")).toBe(false);
         fireEvent.click(custom);
-        expect(within(getByRole("dialog")).getByRole("button", { name: "Extend run" }).hasAttribute("disabled")).toBe(true);
+        expect(
+          within(getByRole("dialog"))
+            .getByRole("button", { name: "Extend run" })
+            .hasAttribute("disabled"),
+        ).toBe(true);
       },
     );
   });
@@ -285,14 +324,22 @@ describe("RunFull header copy verbs and hints (WM-218)", () => {
       },
       async () => {
         const { getByRole } = renderRunFull(runId);
-        const openInTab = await waitFor(() => getByRole("button", { name: /Open in tab/ }));
-        expect(openInTab.querySelector('[aria-hidden="true"]')?.textContent).toBe("p");
+        const openInTab = await waitFor(() =>
+          getByRole("button", { name: /Open in tab/ }),
+        );
+        expect(
+          openInTab.querySelector('[aria-hidden="true"]')?.textContent,
+        ).toBe("p");
 
         fireEvent.keyDown(document.body, { key: "p" });
-        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([runId]);
+        expect(
+          JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]"),
+        ).toEqual([runId]);
 
         fireEvent.keyDown(document.body, { key: "p" });
-        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([]);
+        expect(
+          JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]"),
+        ).toEqual([]);
       },
     );
   });
@@ -316,15 +363,21 @@ describe("RunFull header copy verbs and hints (WM-218)", () => {
         expect(getByRole("button", { name: /← Runs/ }).textContent).toContain(
           "Esc",
         );
-        expect(getByRole("button", { name: "Copy run id (c)" }).getAttribute("title")).toBe(
-          "Copy run id · c",
-        );
-        expect(getByRole("button", { name: "Copy CLI inspect command (c i)" }).getAttribute("title")).toBe(
-          "Copy CLI inspect command · c i",
-        );
-        expect(getByRole("button", { name: "Copy link (c l)" }).getAttribute("title")).toBe(
-          "Copy link · c l",
-        );
+        expect(
+          getByRole("button", { name: "Copy run id (c)" }).getAttribute(
+            "title",
+          ),
+        ).toBe("Copy run id · c");
+        expect(
+          getByRole("button", {
+            name: "Copy CLI inspect command (c i)",
+          }).getAttribute("title"),
+        ).toBe("Copy CLI inspect command · c i");
+        expect(
+          getByRole("button", { name: "Copy link (c l)" }).getAttribute(
+            "title",
+          ),
+        ).toBe("Copy link · c l");
       },
     );
   });
@@ -493,7 +546,10 @@ describe("RunFull causal follow-up events and chained runs (WM-420)", () => {
         run: async () => detail,
         runs: async () => ({
           runs: [
-            createRunListItemFixture({ runId: parentRunId, state: "COMPLETED" }),
+            createRunListItemFixture({
+              runId: parentRunId,
+              state: "COMPLETED",
+            }),
             childRun,
           ],
         }),

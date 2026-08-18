@@ -1,5 +1,13 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -20,7 +28,10 @@ import {
   WRITE_TOOLS,
 } from "./claude.mjs";
 import { SandboxUnsupportedError } from "./sandboxed.mjs";
-import { processOwnerWatchdogSource, trackProcessGroupForPid } from "../test-helpers-process.mjs";
+import {
+  processOwnerWatchdogSource,
+  trackProcessGroupForPid,
+} from "../test-helpers-process.mjs";
 
 describe("sandbox decision (WM-313): deferred, so refused — never ignored", () => {
   const sandboxedDef = (promptPath) => ({
@@ -38,13 +49,19 @@ describe("sandbox decision (WM-313): deferred, so refused — never ignored", ()
   });
 
   test("a sandboxed definition is refused with a typed error naming the adapter, before any spawn or workspace write", async () => {
-    const workspaceDir = realpathSync(mkdtempSync(path.join(tmpdir(), "evrt-claude-sandbox-")));
+    const workspaceDir = realpathSync(
+      mkdtempSync(path.join(tmpdir(), "evrt-claude-sandbox-")),
+    );
     const promptPath = path.join(workspaceDir, "prompt.md");
     writeFileSync(promptPath, "hello", "utf8");
     let caught;
     try {
       await execute({
-        spec: { agent: "sandboxed-claude@1", input: {}, workspace: { type: "repository", checkoutDir: "repo" } },
+        spec: {
+          agent: "sandboxed-claude@1",
+          input: {},
+          workspace: { type: "repository", checkoutDir: "repo" },
+        },
         def: sandboxedDef(promptPath),
         workspaceDir,
         timeoutMs: 1000,
@@ -56,10 +73,14 @@ describe("sandbox decision (WM-313): deferred, so refused — never ignored", ()
     expect(caught).toBeInstanceOf(SandboxUnsupportedError);
     expect(caught.code).toBe("sandbox_unsupported");
     expect(caught.adapter).toBe("claude");
-    expect(caught.message).toContain('adapter "claude" cannot honour a sandbox policy');
+    expect(caught.message).toContain(
+      'adapter "claude" cannot honour a sandbox policy',
+    );
     expect(caught.message).toContain(SANDBOX_DEFERRAL_REASON);
     // Nothing host-side happened: no settings policy, no transcript.
-    expect(existsSync(path.join(workspaceDir, ".claude-policy.json"))).toBe(false);
+    expect(existsSync(path.join(workspaceDir, ".claude-policy.json"))).toBe(
+      false,
+    );
     expect(existsSync(path.join(workspaceDir, ".transcript.json"))).toBe(false);
     rmSync(workspaceDir, { recursive: true, force: true });
   });
@@ -67,20 +88,50 @@ describe("sandbox decision (WM-313): deferred, so refused — never ignored", ()
 
 describe("isHarnessDenial (WM-127)", () => {
   test("matches the harness's own refusal shapes", () => {
-    expect(isHarnessDenial("Claude requested permissions to use Bash, but you haven't granted it yet.")).toBe(true);
-    expect(isHarnessDenial("Claude requested permissions to use mcp__linear__create_issue, but you haven't granted it yet.")).toBe(true);
-    expect(isHarnessDenial("Permission to use Bash has been denied.")).toBe(true);
-    expect(isHarnessDenial("Sandbox denied write to /tmp/run-a1/repo/x")).toBe(true);
+    expect(
+      isHarnessDenial(
+        "Claude requested permissions to use Bash, but you haven't granted it yet.",
+      ),
+    ).toBe(true);
+    expect(
+      isHarnessDenial(
+        "Claude requested permissions to use mcp__linear__create_issue, but you haven't granted it yet.",
+      ),
+    ).toBe(true);
+    expect(isHarnessDenial("Permission to use Bash has been denied.")).toBe(
+      true,
+    );
+    expect(isHarnessDenial("Sandbox denied write to /tmp/run-a1/repo/x")).toBe(
+      true,
+    );
   });
 
   test("does not match permission-flavored stderr from commands the harness allowed", () => {
     // The run_38deabb4 misclassification: git push over SSH without agent access.
-    expect(isHarnessDenial("git@ssh.github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.")).toBe(false);
+    expect(
+      isHarnessDenial(
+        "git@ssh.github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.",
+      ),
+    ).toBe(false);
     expect(isHarnessDenial("bash: /etc/hosts: Permission denied")).toBe(false);
-    expect(isHarnessDenial("sudo: a terminal is required to read the password; permission denied")).toBe(false);
-    expect(isHarnessDenial("EACCES: permission denied, open '/var/log/system.log'")).toBe(false);
-    expect(isHarnessDenial("remote: Write access to repository not granted.\nfatal: unable to access: The requested URL returned error: 403")).toBe(false);
-    expect(isHarnessDenial("curl: (22) The requested URL returned error: 403 Forbidden — request blocked by firewall permissions")).toBe(false);
+    expect(
+      isHarnessDenial(
+        "sudo: a terminal is required to read the password; permission denied",
+      ),
+    ).toBe(false);
+    expect(
+      isHarnessDenial("EACCES: permission denied, open '/var/log/system.log'"),
+    ).toBe(false);
+    expect(
+      isHarnessDenial(
+        "remote: Write access to repository not granted.\nfatal: unable to access: The requested URL returned error: 403",
+      ),
+    ).toBe(false);
+    expect(
+      isHarnessDenial(
+        "curl: (22) The requested URL returned error: 403 Forbidden — request blocked by firewall permissions",
+      ),
+    ).toBe(false);
     expect(isHarnessDenial(null)).toBe(false);
   });
 });
@@ -89,11 +140,17 @@ describe("mapStreamEvent", () => {
   test("assistant text block → assistant_text", () => {
     const events = mapStreamEvent({
       type: "assistant",
-      message: { role: "assistant", content: [{ type: "text", text: "Looking at the input now." }] },
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Looking at the input now." }],
+      },
       session_id: "s-1",
     });
     expect(events).toEqual([
-      { kind: "assistant_text", payload: { text: "Looking at the input now." } },
+      {
+        kind: "assistant_text",
+        payload: { text: "Looking at the input now." },
+      },
     ]);
   });
 
@@ -103,36 +160,66 @@ describe("mapStreamEvent", () => {
       message: {
         content: [
           { type: "text", text: "Running the query." },
-          { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "ls" } },
+          {
+            type: "tool_use",
+            id: "toolu_1",
+            name: "Bash",
+            input: { command: "ls" },
+          },
         ],
       },
     });
     expect(events).toEqual([
       { kind: "assistant_text", payload: { text: "Running the query." } },
-      { kind: "tool_use", payload: { id: "toolu_1", name: "Bash", input: { command: "ls" } } },
+      {
+        kind: "tool_use",
+        payload: { id: "toolu_1", name: "Bash", input: { command: "ls" } },
+      },
     ]);
   });
 
   test("user tool_result → tool_result, string and block-array content, isError", () => {
     const plain = mapStreamEvent({
       type: "user",
-      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file.txt" }] },
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_1", content: "file.txt" },
+        ],
+      },
     });
-    expect(plain).toEqual([{ kind: "tool_result", payload: { content: "file.txt", toolUseId: "toolu_1" } }]);
+    expect(plain).toEqual([
+      {
+        kind: "tool_result",
+        payload: { content: "file.txt", toolUseId: "toolu_1" },
+      },
+    ]);
 
     const blocks = mapStreamEvent({
       type: "user",
       message: {
-        content: [{
-          type: "tool_result",
-          tool_use_id: "toolu_2",
-          content: [{ type: "text", text: "line 1" }, { type: "text", text: "line 2" }],
-          is_error: true,
-        }],
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_2",
+            content: [
+              { type: "text", text: "line 1" },
+              { type: "text", text: "line 2" },
+            ],
+            is_error: true,
+          },
+        ],
       },
     });
     expect(blocks).toEqual([
-      { kind: "tool_result", payload: { content: "line 1\nline 2", toolUseId: "toolu_2", isError: true } },
+      {
+        kind: "tool_result",
+        payload: {
+          content: "line 1\nline 2",
+          toolUseId: "toolu_2",
+          isError: true,
+        },
+      },
     ]);
   });
 
@@ -155,28 +242,36 @@ describe("mapStreamEvent", () => {
       },
       result: "done",
     });
-    expect(events).toEqual([{
-      kind: "usage",
-      payload: {
-        durationMs: 4321,
-        numTurns: 3,
-        costUSD: 0.0421,
-        usage: {
-          input_tokens: 12,
-          output_tokens: 345,
-          cache_creation_input_tokens: 6789,
-          cache_read_input_tokens: 1011,
+    expect(events).toEqual([
+      {
+        kind: "usage",
+        payload: {
+          durationMs: 4321,
+          numTurns: 3,
+          costUSD: 0.0421,
+          usage: {
+            input_tokens: 12,
+            output_tokens: 345,
+            cache_creation_input_tokens: 6789,
+            cache_read_input_tokens: 1011,
+          },
         },
       },
-    }]);
+    ]);
   });
 
   test("unrecognized messages are ignored silently", () => {
-    expect(mapStreamEvent({ type: "system", subtype: "init", tools: [] })).toEqual([]);
-    expect(mapStreamEvent({ type: "system", subtype: "hook_started" })).toEqual([]);
+    expect(
+      mapStreamEvent({ type: "system", subtype: "init", tools: [] }),
+    ).toEqual([]);
+    expect(mapStreamEvent({ type: "system", subtype: "hook_started" })).toEqual(
+      [],
+    );
     expect(mapStreamEvent({ type: "stream_event", event: {} })).toEqual([]);
     expect(mapStreamEvent({ type: "assistant" })).toEqual([]); // no message body
-    expect(mapStreamEvent({ type: "user", message: { content: "just a string" } })).toEqual([]);
+    expect(
+      mapStreamEvent({ type: "user", message: { content: "just a string" } }),
+    ).toEqual([]);
     expect(mapStreamEvent(null)).toEqual([]);
     expect(mapStreamEvent("not an object")).toEqual([]);
   });
@@ -207,7 +302,14 @@ describe("deriveAllowedTools (OPS-407)", () => {
   });
 
   test("permits shell inspection and workspace-local output for non-mutating agents", () => {
-    expect(deriveAllowedTools({ mutating: false })).toEqual(["Read", "Grep", "Glob", "Bash", "Write", "Edit"]);
+    expect(deriveAllowedTools({ mutating: false })).toEqual([
+      "Read",
+      "Grep",
+      "Glob",
+      "Bash",
+      "Write",
+      "Edit",
+    ]);
   });
 
   test("allows requested tools when mutating is true", () => {
@@ -296,7 +398,9 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
       workspaceDir: "/private/tmp/run-a1",
     });
     expect(settings.permissions.allow).toEqual(READ_ONLY_TOOLS);
-    expect(settings.permissions.deny).toEqual(["Edit(//private/tmp/run-a1/repo/**)"]);
+    expect(settings.permissions.deny).toEqual([
+      "Edit(//private/tmp/run-a1/repo/**)",
+    ]);
     expect(settings.sandbox).toEqual({
       enabled: true,
       autoAllowBashIfSandboxed: true,
@@ -306,7 +410,10 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
   });
 
   test("mutating runs include --dangerously-skip-permissions and omit --settings (WM-137)", () => {
-    const mutatingDef = { mutating: true, capabilities: { tools: ["Bash", "Read", "Write"] } };
+    const mutatingDef = {
+      mutating: true,
+      capabilities: { tools: ["Bash", "Read", "Write"] },
+    };
     const argv = buildClaudeArgv({ prompt: "Fix issue", def: mutatingDef });
 
     expect(argv).toContain("--dangerously-skip-permissions");
@@ -317,7 +424,11 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
 
   test("read-only runs omit --dangerously-skip-permissions and include --settings (WM-137)", () => {
     const readOnlyDef = { mutating: false };
-    const argv = buildClaudeArgv({ prompt: "Inspect repo", def: readOnlyDef, settingsPath: "/tmp/policy.json" });
+    const argv = buildClaudeArgv({
+      prompt: "Inspect repo",
+      def: readOnlyDef,
+      settingsPath: "/tmp/policy.json",
+    });
 
     expect(argv).not.toContain("--dangerously-skip-permissions");
     expect(argv).toContain("--settings");
@@ -335,7 +446,11 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
   test("constructs argv with --allowedTools, --mcp-config, and --strict-mcp-config", () => {
     const def = { mutating: false };
     const prompt = "Do a status check.";
-    const argv = buildClaudeArgv({ prompt, def, mcpConfig: "/path/to/mcp.json" });
+    const argv = buildClaudeArgv({
+      prompt,
+      def,
+      mcpConfig: "/path/to/mcp.json",
+    });
 
     expect(argv).toContain("-p");
     expect(argv).toContain(prompt);
@@ -350,18 +465,37 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
   });
 
   test("limits.budget_usd → --max-budget-usd; absent or invalid → no flag (WM-108)", () => {
-    const withBudget = buildClaudeArgv({ prompt: "p", def: { mutating: false, limits: { budget_usd: 15 } } });
+    const withBudget = buildClaudeArgv({
+      prompt: "p",
+      def: { mutating: false, limits: { budget_usd: 15 } },
+    });
     const i = withBudget.indexOf("--max-budget-usd");
     expect(i).toBeGreaterThan(-1);
     expect(withBudget[i + 1]).toBe("15");
 
-    expect(buildClaudeArgv({ prompt: "p", def: { mutating: false } })).not.toContain("--max-budget-usd");
-    expect(buildClaudeArgv({ prompt: "p", def: { mutating: false, limits: { budget_usd: 0 } } })).not.toContain("--max-budget-usd");
-    expect(buildClaudeArgv({ prompt: "p", def: { mutating: false, limits: { budget_usd: "15" } } })).not.toContain("--max-budget-usd");
+    expect(
+      buildClaudeArgv({ prompt: "p", def: { mutating: false } }),
+    ).not.toContain("--max-budget-usd");
+    expect(
+      buildClaudeArgv({
+        prompt: "p",
+        def: { mutating: false, limits: { budget_usd: 0 } },
+      }),
+    ).not.toContain("--max-budget-usd");
+    expect(
+      buildClaudeArgv({
+        prompt: "p",
+        def: { mutating: false, limits: { budget_usd: "15" } },
+      }),
+    ).not.toContain("--max-budget-usd");
   });
 
   test("planner-pinned model → --model verbatim; default sentinel, null, or absent → no flag (WM-135)", () => {
-    const withModel = buildClaudeArgv({ prompt: "p", def: { mutating: false }, model: "sonnet" });
+    const withModel = buildClaudeArgv({
+      prompt: "p",
+      def: { mutating: false },
+      model: "sonnet",
+    });
     const i = withModel.indexOf("--model");
     expect(i).toBeGreaterThan(-1);
     expect(withModel[i + 1]).toBe("sonnet");
@@ -369,14 +503,26 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
     // The "default" sentinel means "ride the CLI default" — no flag at all,
     // byte-identical argv to a spec that pinned nothing.
     const unpinned = buildClaudeArgv({ prompt: "p", def: { mutating: false } });
-    expect(buildClaudeArgv({ prompt: "p", def: { mutating: false }, model: "default" })).toEqual(unpinned);
-    expect(buildClaudeArgv({ prompt: "p", def: { mutating: false }, model: null })).toEqual(unpinned);
-    expect(buildClaudeArgv({ prompt: "p", def: { mutating: false }, model: "" })).toEqual(unpinned);
+    expect(
+      buildClaudeArgv({
+        prompt: "p",
+        def: { mutating: false },
+        model: "default",
+      }),
+    ).toEqual(unpinned);
+    expect(
+      buildClaudeArgv({ prompt: "p", def: { mutating: false }, model: null }),
+    ).toEqual(unpinned);
+    expect(
+      buildClaudeArgv({ prompt: "p", def: { mutating: false }, model: "" }),
+    ).toEqual(unpinned);
   });
 });
 
 describe("execute conformance (OPS-427, docs/event-runtime.md §6)", () => {
-  const tmpBase = realpathSync(mkdtempSync(path.join(tmpdir(), "evrt-claude-test-")));
+  const tmpBase = realpathSync(
+    mkdtempSync(path.join(tmpdir(), "evrt-claude-test-")),
+  );
   const stubBinDir = path.join(tmpBase, "bin");
   mkdirSync(stubBinDir, { recursive: true });
 
@@ -615,7 +761,11 @@ if (behavior === "emit_denial_then_recovery") {
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
 
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
 
     // 1. Workspace confinement: cwd is workspaceDir
     expect(existsSync(recordFile)).toBe(true);
@@ -631,7 +781,9 @@ if (behavior === "emit_denial_then_recovery") {
     // 3. Prompt & argv verification
     const promptIdx = record.argv.indexOf("-p");
     expect(promptIdx).toBeGreaterThan(-1);
-    expect(record.argv[promptIdx + 1]).toBe(`You are a test agent.${PROMPT_SUFFIX}`);
+    expect(record.argv[promptIdx + 1]).toBe(
+      `You are a test agent.${PROMPT_SUFFIX}`,
+    );
     expect(record.argv).toContain("--output-format");
     expect(record.argv).toContain("stream-json");
     expect(record.argv).toContain("--verbose");
@@ -676,37 +828,41 @@ if (behavior === "emit_denial_then_recovery") {
     expect(outcome.timedOut).toBe(false);
   });
 
-  testProcessGroup("timeout kills a real long-lived grandchild (WM-263)", async () => {
-    const workspaceDir = ws();
-    const pidFile = path.join(workspaceDir, "grandchild.pid");
-    const ac = new AbortController();
-    const runPromise = execute({
-      spec: defaultSpec,
-      def: defaultDef,
-      workspaceDir,
-      timeoutMs: 6_000,
-      killGraceMs: 5000,
-      abortSignal: ac.signal,
-      env: {
-        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
-        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
-      },
-    });
-    let grandchildPid;
+  testProcessGroup(
+    "timeout kills a real long-lived grandchild (WM-263)",
+    async () => {
+      const workspaceDir = ws();
+      const pidFile = path.join(workspaceDir, "grandchild.pid");
+      const ac = new AbortController();
+      const runPromise = execute({
+        spec: defaultSpec,
+        def: defaultDef,
+        workspaceDir,
+        timeoutMs: 6_000,
+        killGraceMs: 5000,
+        abortSignal: ac.signal,
+        env: {
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+          FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+          FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
+        },
+      });
+      let grandchildPid;
 
-    try {
-      grandchildPid = await waitForGrandchildPid(pidFile);
-      expect(processExists(grandchildPid)).toBe(true);
-      const outcome = await runPromise;
-      expect(outcome.timedOut).toBe(true);
-      await expectProcessExit(grandchildPid);
-    } finally {
-      ac.abort();
-      await runPromise;
-      killIfRunning(grandchildPid);
-    }
-  }, { timeout: 12_000 });
+      try {
+        grandchildPid = await waitForGrandchildPid(pidFile);
+        expect(processExists(grandchildPid)).toBe(true);
+        const outcome = await runPromise;
+        expect(outcome.timedOut).toBe(true);
+        await expectProcessExit(grandchildPid);
+      } finally {
+        ac.abort();
+        await runPromise;
+        killIfRunning(grandchildPid);
+      }
+    },
+    { timeout: 12_000 },
+  );
 
   test("timeout escalates to SIGKILL when child ignores SIGTERM", async () => {
     const workspaceDir = ws();
@@ -724,38 +880,41 @@ if (behavior === "emit_denial_then_recovery") {
     expect(outcome.timedOut).toBe(true);
   });
 
-  testProcessGroup("abort kills a real long-lived grandchild (WM-263)", async () => {
-    const workspaceDir = ws();
-    const pidFile = path.join(workspaceDir, "grandchild.pid");
-    const ac = new AbortController();
-    const runPromise = execute({
-      spec: defaultSpec,
-      def: defaultDef,
-      workspaceDir,
-      timeoutMs: 10_000,
-      killGraceMs: 500,
-      abortSignal: ac.signal,
-      env: {
-        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
-        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
-      },
-    });
-    let grandchildPid;
+  testProcessGroup(
+    "abort kills a real long-lived grandchild (WM-263)",
+    async () => {
+      const workspaceDir = ws();
+      const pidFile = path.join(workspaceDir, "grandchild.pid");
+      const ac = new AbortController();
+      const runPromise = execute({
+        spec: defaultSpec,
+        def: defaultDef,
+        workspaceDir,
+        timeoutMs: 10_000,
+        killGraceMs: 500,
+        abortSignal: ac.signal,
+        env: {
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+          FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+          FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
+        },
+      });
+      let grandchildPid;
 
-    try {
-      grandchildPid = await waitForGrandchildPid(pidFile);
-      expect(processExists(grandchildPid)).toBe(true);
-      ac.abort();
-      const outcome = await runPromise;
-      expect(outcome.timedOut).toBe(false);
-      await expectProcessExit(grandchildPid);
-    } finally {
-      ac.abort();
-      await runPromise;
-      killIfRunning(grandchildPid);
-    }
-  });
+      try {
+        grandchildPid = await waitForGrandchildPid(pidFile);
+        expect(processExists(grandchildPid)).toBe(true);
+        ac.abort();
+        const outcome = await runPromise;
+        expect(outcome.timedOut).toBe(false);
+        await expectProcessExit(grandchildPid);
+      } finally {
+        ac.abort();
+        await runPromise;
+        killIfRunning(grandchildPid);
+      }
+    },
+  );
 
   test("pre-aborted abortSignal terminates child immediately", async () => {
     const workspaceDir = ws();
@@ -790,8 +949,16 @@ if (behavior === "emit_denial_then_recovery") {
       },
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
-    expect(traceEvents.some((e) => e.kind === "tool_use" && e.payload.name === "Bash")).toBe(true);
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "tool_use" && e.payload.name === "Bash",
+      ),
+    ).toBe(true);
   });
 
   test("records a policy denial without terminating the child from the trace observer", async () => {
@@ -813,9 +980,21 @@ if (behavior === "emit_denial_then_recovery") {
     expect(outcome).toEqual({
       exitCode: 1,
       timedOut: false,
-      policyDenials: [{ tool: "Bash", rule: "Claude requested permissions to use Bash, but you haven't granted it yet." }],
+      policyDenials: [
+        {
+          tool: "Bash",
+          rule: "Claude requested permissions to use Bash, but you haven't granted it yet.",
+        },
+      ],
     });
-    expect(traceEvents.some((e) => e.kind === "lifecycle" && e.payload.note === "policy_denial" && e.payload.tool === "Bash")).toBe(true);
+    expect(
+      traceEvents.some(
+        (e) =>
+          e.kind === "lifecycle" &&
+          e.payload.note === "policy_denial" &&
+          e.payload.tool === "Bash",
+      ),
+    ).toBe(true);
   });
 
   test("SSH publickey stderr in an error tool_result is not a policy denial (WM-127)", async () => {
@@ -833,8 +1012,16 @@ if (behavior === "emit_denial_then_recovery") {
     });
     // The harness allowed and executed the push; the command failed on its
     // own. The run must fail as an ordinary agent exit, never policy_denied.
-    expect(outcome).toEqual({ exitCode: 1, timedOut: false, policyDenials: [] });
-    expect(traceEvents.some((e) => e.kind === "lifecycle" && e.payload.note === "policy_denial")).toBe(false);
+    expect(outcome).toEqual({
+      exitCode: 1,
+      timedOut: false,
+      policyDenials: [],
+    });
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "lifecycle" && e.payload.note === "policy_denial",
+      ),
+    ).toBe(false);
   });
 
   test("SSH publickey stderr followed by a recovered push and clean exit completes (WM-127, run_38deabb4)", async () => {
@@ -850,8 +1037,16 @@ if (behavior === "emit_denial_then_recovery") {
       },
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
-    expect(traceEvents.some((e) => e.kind === "lifecycle" && e.payload.note === "policy_denial")).toBe(false);
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "lifecycle" && e.payload.note === "policy_denial",
+      ),
+    ).toBe(false);
   });
 
   test("a genuine denial the model recovers from does not fail a clean exit; trace keeps the evidence (WM-127)", async () => {
@@ -869,8 +1064,19 @@ if (behavior === "emit_denial_then_recovery") {
     });
     // Evidence, not verdict: the observation stays in the lifecycle trace,
     // but a run that ends exit 0 with a valid result is not failed for it.
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
-    expect(traceEvents.some((e) => e.kind === "lifecycle" && e.payload.note === "policy_denial" && e.payload.tool === "WebFetch")).toBe(true);
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
+    expect(
+      traceEvents.some(
+        (e) =>
+          e.kind === "lifecycle" &&
+          e.payload.note === "policy_denial" &&
+          e.payload.tool === "WebFetch",
+      ),
+    ).toBe(true);
   });
 
   test("returns a policy denial even when no trace sink is attached", async () => {
@@ -884,7 +1090,12 @@ if (behavior === "emit_denial_then_recovery") {
         FACTORY_TEST_BEHAVIOR: "emit_policy_denial",
       },
     });
-    expect(outcome.policyDenials).toEqual([{ tool: "Bash", rule: "Claude requested permissions to use Bash, but you haven't granted it yet." }]);
+    expect(outcome.policyDenials).toEqual([
+      {
+        tool: "Bash",
+        rule: "Claude requested permissions to use Bash, but you haven't granted it yet.",
+      },
+    ]);
   });
 
   test("mutating dispatch execution passes --dangerously-skip-permissions and preserves push credentials (WM-137, WM-128)", async () => {
@@ -912,14 +1123,20 @@ if (behavior === "emit_denial_then_recovery") {
       },
     });
 
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
     const record = JSON.parse(readFileSync(recordFile, "utf8"));
     expect(record.argv).toContain("--dangerously-skip-permissions");
     expect(record.argv).not.toContain("--settings");
     expect(record.env.SSH_AUTH_SOCK).toBe("/tmp/dispatch-ssh.sock");
     expect(record.env.GITHUB_TOKEN).toBe("ghp_dispatch_secret");
     expect(record.env.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(existsSync(path.join(workspaceDir, ".claude-policy.json"))).toBe(false);
+    expect(existsSync(path.join(workspaceDir, ".claude-policy.json"))).toBe(
+      false,
+    );
   });
 
   test("read-only dispatch execution enforces settings policy and strips push credentials (WM-137, WM-128)", async () => {
@@ -947,14 +1164,20 @@ if (behavior === "emit_denial_then_recovery") {
       },
     });
 
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
     const record = JSON.parse(readFileSync(recordFile, "utf8"));
     expect(record.argv).not.toContain("--dangerously-skip-permissions");
     expect(record.argv).toContain("--settings");
     expect(record.env.SSH_AUTH_SOCK).toBeUndefined();
     expect(record.env.GITHUB_TOKEN).toBeUndefined();
     expect(record.env.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(existsSync(path.join(workspaceDir, ".claude-policy.json"))).toBe(true);
+    expect(existsSync(path.join(workspaceDir, ".claude-policy.json"))).toBe(
+      true,
+    );
   });
 
   test("spawn error (e.g. claude not on PATH) rejects promise", async () => {

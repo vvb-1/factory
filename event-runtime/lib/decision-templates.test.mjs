@@ -4,10 +4,18 @@ import { templateFor } from "./decision-templates.mjs";
 
 describe("default decision templates (WM-390)", () => {
   const cases = [
-    ["ESCALATED", "escalation", { issue: "WM-1", repo: "factory", runId: "run_1" }],
+    [
+      "ESCALATED",
+      "escalation",
+      { issue: "WM-1", repo: "factory", runId: "run_1" },
+    ],
     ["BLOCKED", "parked", { eventSource: "linear", eventId: "evt_1" }],
     ["decision_needed", "triage-question", { issue: "WM-2", repo: "factory" }],
-    ["ESCALATED", "merge-escalation", { issue: "WM-3", repo: "factory", pr: "42" }],
+    [
+      "ESCALATED",
+      "merge-escalation",
+      { issue: "WM-3", repo: "factory", pr: "42" },
+    ],
     ["decision_needed", "proposal", { proposalId: "prop_1" }],
   ];
 

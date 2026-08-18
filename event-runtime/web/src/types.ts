@@ -358,7 +358,8 @@ export type ArtifactFormat =
   | "state"
   | "bytes"
   | "count";
-export type ArtifactSectionKind = "table" | "keyvalue" | "list" | "badge" | "code" | "prose";
+export type ArtifactSectionKind =
+  "table" | "keyvalue" | "list" | "badge" | "code" | "prose";
 export interface ArtifactViewSection {
   /** RFC 6901 pointer into the artifact; `""` is the whole document. */
   path: string;
@@ -544,13 +545,23 @@ export interface StatusView {
   /** Human inbox counts (WM-285); absent on a pre-inbox control API. */
   inbox?: { open: number; acked: number; byKind?: Record<string, number> };
   /** Artifact store rollup; `orphans` counts files no result references. Cached ~10s server-side (`at` = when computed). */
-  artifacts: { files: number; bytes: number; orphans: number; orphanBytes: number; at?: string };
+  artifacts: {
+    files: number;
+    bytes: number;
+    orphans: number;
+    orphanBytes: number;
+    at?: string;
+  };
   anomalies: {
     configuration?: string[];
     expiredOpenProposals: string[];
     staleLeases: number;
     unpublishedOutbox: number;
-    deadLettered: { source: string; eventId: string; lastError: string | null }[];
+    deadLettered: {
+      source: string;
+      eventId: string;
+      lastError: string | null;
+    }[];
     stalledWorkers: StalledWorker[];
     stoppedSchedules?: StoppedSchedule[];
     /** Placement-constrained queued runs that no active, non-stale worker can claim. */
@@ -615,7 +626,6 @@ export interface JanitorResult {
   skippedApplyReason?: string;
 }
 
-
 /** The kinds the inbox ledger accepts (lib/inbox.mjs INBOX_KINDS). */
 export type InboxKind =
   | "BLOCKED"
@@ -643,7 +653,11 @@ export interface InboxRefs {
 
 /** Telegram projection record written by deliverInboxItem; absent = not attempted. */
 export interface InboxDelivery {
-  telegram?: { sent_at: string; exit_code: number | null; error: string | null };
+  telegram?: {
+    sent_at: string;
+    exit_code: number | null;
+    error: string | null;
+  };
 }
 
 /** One row of the human inbox ledger (GET /inbox). */

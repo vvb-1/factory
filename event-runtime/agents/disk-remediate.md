@@ -5,11 +5,11 @@ deterministic actions adapter (`lib/adapters/actions.mjs`). No model runs.
 
 Registered actions (the closed registry — nothing else can execute):
 
-| action id | remote command |
-| :--- | :--- |
-| `docker-builder-prune` | `sudo docker builder prune -af` |
-| `docker-system-prune` | `sudo docker system prune -af` |
-| `journal-vacuum-3d` | `sudo journalctl --vacuum-time=3d` |
+| action id              | remote command                     |
+| :--------------------- | :--------------------------------- |
+| `docker-builder-prune` | `sudo docker builder prune -af`    |
+| `docker-system-prune`  | `sudo docker system prune -af`     |
+| `journal-vacuum-3d`    | `sudo journalctl --vacuum-time=3d` |
 
 Host allowlist: `lab` (`root@100.110.36.96`), `web` (`hdkiller@100.93.81.56`).
 

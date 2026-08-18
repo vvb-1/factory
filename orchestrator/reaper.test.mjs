@@ -90,7 +90,10 @@ describe("reaper run log discovery", () => {
   test("latestReaperRunMs picks the newest reaper log and ignores other files", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "reaper-"));
     writeFileSync(path.join(dir, "reaper-20260804-120000.log"), "old");
-    writeFileSync(path.join(dir, "bj29-factory-merge-20260804-120000.jsonl"), "not a reaper log");
+    writeFileSync(
+      path.join(dir, "bj29-factory-merge-20260804-120000.jsonl"),
+      "not a reaper log",
+    );
     const t0 = latestReaperRunMs(dir);
     expect(t0).not.toBeNull();
     writeFileSync(path.join(dir, "reaper-20260804-130000.log"), "new");
@@ -121,9 +124,14 @@ describe("issue fetch filter (OPS-63)", () => {
   test("default filter no longer excludes agent-labelled tickets lacking the heartbeat label", () => {
     // The regression itself: the old filter was the label clause ALONE, so a
     // ticket isAgentClaim() accepts via `agent:*` was never returned.
-    const agentOnly = { labels: { nodes: [{ name: "agent:claude-code" }] }, state: { name: "In Progress" } };
+    const agentOnly = {
+      labels: { nodes: [{ name: "agent:claude-code" }] },
+      state: { name: "In Progress" },
+    };
     expect(isAgentClaim(agentOnly)).toBe(true);
-    expect(buildIssueFilter()).not.toBe(`labels: { name: { eq: "${HEARTBEAT_LABEL}" } }`);
+    expect(buildIssueFilter()).not.toBe(
+      `labels: { name: { eq: "${HEARTBEAT_LABEL}" } }`,
+    );
   });
 
   test("--any-assignee still queries by state alone, so it can surface human work", () => {
@@ -134,7 +142,9 @@ describe("issue fetch filter (OPS-63)", () => {
 
   test("team scoping is ANDed onto both variants", () => {
     expect(buildIssueFilter("CLNT")).toContain(`team: { key: { eq: "CLNT" } }`);
-    expect(buildIssueFilter("CW", true)).toContain(`team: { key: { eq: "CW" } }`);
+    expect(buildIssueFilter("CW", true)).toContain(
+      `team: { key: { eq: "CW" } }`,
+    );
     expect(buildIssueFilter(null)).not.toContain("team:");
   });
 });
@@ -210,7 +220,14 @@ describe("reclaim label computation (WM-14)", () => {
         ],
       },
     };
-    const res = await reclaim(issue, "state-todo", 45, false, false, "lbl-ready");
+    const res = await reclaim(
+      issue,
+      "state-todo",
+      45,
+      false,
+      false,
+      "lbl-ready",
+    );
     expect(res).toBeDefined();
     expect(res.stateId).toBe("state-todo");
     expect(res.labelIds).toContain("lbl-ready");
@@ -223,8 +240,14 @@ describe("dispatch unclaim & repeated failure detection (WM-14 & WM-12)", () => 
   test("countPriorDispatchFailures counts consecutive dispatch failure comments", () => {
     const comments = [
       { body: "Claimed ticket", createdAt: "2026-08-01T10:00:00Z" },
-      { body: "Dispatch run failed, claim released back to Todo.\n\n**Why:** fail 1", createdAt: "2026-08-01T10:05:00Z" },
-      { body: "Dispatch run failed, claim released back to Todo.\n\n**Why:** fail 2", createdAt: "2026-08-01T10:10:00Z" },
+      {
+        body: "Dispatch run failed, claim released back to Todo.\n\n**Why:** fail 1",
+        createdAt: "2026-08-01T10:05:00Z",
+      },
+      {
+        body: "Dispatch run failed, claim released back to Todo.\n\n**Why:** fail 2",
+        createdAt: "2026-08-01T10:10:00Z",
+      },
     ];
     expect(countPriorDispatchFailures(comments)).toBe(2);
     expect(isRepeatedDispatchFailure(comments, 3)).toBe(true); // 2 prior + 1 current = 3 >= 3
@@ -232,10 +255,22 @@ describe("dispatch unclaim & repeated failure detection (WM-14 & WM-12)", () => 
 
   test("countPriorDispatchFailures resets streak on intervening non-failure comment", () => {
     const comments = [
-      { body: "Dispatch run failed, claim released back to Todo.", createdAt: "2026-08-01T09:00:00Z" },
-      { body: "Dispatch run failed, claim released back to Todo.", createdAt: "2026-08-01T09:10:00Z" },
-      { body: "Human checked and fixed repo config", createdAt: "2026-08-01T09:20:00Z" },
-      { body: "Dispatch run failed, claim released back to Todo.", createdAt: "2026-08-01T09:30:00Z" },
+      {
+        body: "Dispatch run failed, claim released back to Todo.",
+        createdAt: "2026-08-01T09:00:00Z",
+      },
+      {
+        body: "Dispatch run failed, claim released back to Todo.",
+        createdAt: "2026-08-01T09:10:00Z",
+      },
+      {
+        body: "Human checked and fixed repo config",
+        createdAt: "2026-08-01T09:20:00Z",
+      },
+      {
+        body: "Dispatch run failed, claim released back to Todo.",
+        createdAt: "2026-08-01T09:30:00Z",
+      },
     ];
     expect(countPriorDispatchFailures(comments)).toBe(1);
     expect(isRepeatedDispatchFailure(comments, 3)).toBe(false); // 1 prior + 1 current = 2 < 3
@@ -258,7 +293,10 @@ describe("dispatch unclaim & repeated failure detection (WM-14 & WM-12)", () => 
       },
       comments: {
         nodes: [
-          { body: "Dispatch run failed, claim released back to Todo.", createdAt: "2026-08-01T10:00:00Z" },
+          {
+            body: "Dispatch run failed, claim released back to Todo.",
+            createdAt: "2026-08-01T10:00:00Z",
+          },
         ],
       },
     };
@@ -299,8 +337,14 @@ describe("dispatch unclaim & repeated failure detection (WM-14 & WM-12)", () => 
       },
       comments: {
         nodes: [
-          { body: "Dispatch run failed, claim released back to Todo.", createdAt: "2026-08-01T10:00:00Z" },
-          { body: "Dispatch run failed, claim released back to Todo.", createdAt: "2026-08-01T10:05:00Z" },
+          {
+            body: "Dispatch run failed, claim released back to Todo.",
+            createdAt: "2026-08-01T10:00:00Z",
+          },
+          {
+            body: "Dispatch run failed, claim released back to Todo.",
+            createdAt: "2026-08-01T10:05:00Z",
+          },
         ],
       },
     };
@@ -321,7 +365,9 @@ describe("dispatch unclaim & repeated failure detection (WM-14 & WM-12)", () => 
     expect(action.labelIds).not.toContain("lbl-ready");
     expect(action.labelIds).not.toContain("lbl-prog");
     expect(action.labelIds).not.toContain("lbl-agent");
-    expect(action.commentBody).toContain("Dispatch run failed repeatedly (3 consecutive dispatch failures), moved to Blocked");
+    expect(action.commentBody).toContain(
+      "Dispatch run failed repeatedly (3 consecutive dispatch failures), moved to Blocked",
+    );
     expect(action.commentBody).toContain("ai:blocked");
   });
 });
@@ -336,7 +382,9 @@ describe("WIP preservation (WM-12)", () => {
   test("preserveWip returns clean when worktree is clean", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "wip-clean-"));
     spawnSync("git", ["init"], { cwd: dir });
-    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+    spawnSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: dir,
+    });
     spawnSync("git", ["config", "user.name", "Test User"], { cwd: dir });
     writeFileSync(path.join(dir, "file.txt"), "committed content\n");
     spawnSync("git", ["add", "file.txt"], { cwd: dir });
@@ -351,7 +399,9 @@ describe("WIP preservation (WM-12)", () => {
   test("preserveWip commits uncommitted modifications and untracked files safely", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "wip-dirty-"));
     spawnSync("git", ["init"], { cwd: dir });
-    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+    spawnSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: dir,
+    });
     spawnSync("git", ["config", "user.name", "Test User"], { cwd: dir });
     writeFileSync(path.join(dir, "file.txt"), "initial\n");
     spawnSync("git", ["add", "file.txt"], { cwd: dir });
@@ -368,10 +418,16 @@ describe("WIP preservation (WM-12)", () => {
     expect(res.hash).toBeDefined();
 
     // Verify git log and clean status
-    const log = spawnSync("git", ["log", "-1", "--pretty=%B"], { cwd: dir, encoding: "utf8" });
+    const log = spawnSync("git", ["log", "-1", "--pretty=%B"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
     expect(log.stdout.trim()).toBe("wip: CLNT-518 uncommitted progress");
 
-    const status = spawnSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" });
+    const status = spawnSync("git", ["status", "--porcelain"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
     expect(status.stdout.trim()).toBe("");
 
     rmSync(dir, { recursive: true, force: true });

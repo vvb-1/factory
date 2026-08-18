@@ -12,7 +12,11 @@ export function matchNodes(nodes: GraphNode[], query: string): string[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
   return nodes
-    .filter((n) => n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
+    .filter(
+      (n) =>
+        n.label.toLowerCase().includes(needle) ||
+        n.id.toLowerCase().includes(needle),
+    )
     .map((n) => n.id);
 }
 
@@ -54,7 +58,9 @@ export function missingFocusNode(
  * on screen at once.
  */
 export function largestComponentIds(graph: CapabilityGraph): string[] {
-  const adjacency = new Map<string, string[]>(graph.nodes.map((n) => [n.id, []]));
+  const adjacency = new Map<string, string[]>(
+    graph.nodes.map((n) => [n.id, []]),
+  );
   for (const edge of graph.edges) {
     adjacency.get(edge.source)?.push(edge.target);
     adjacency.get(edge.target)?.push(edge.source);
@@ -80,7 +86,10 @@ export function largestComponentIds(graph: CapabilityGraph): string[] {
       }
     }
     const edges = edgeEndpoints / 2;
-    if (ids.length > best.ids.length || (ids.length === best.ids.length && edges > best.edges)) {
+    if (
+      ids.length > best.ids.length ||
+      (ids.length === best.ids.length && edges > best.edges)
+    ) {
       best = { ids, edges };
     }
   }

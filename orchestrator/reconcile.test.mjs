@@ -22,7 +22,14 @@ describe("parseArgs", () => {
   });
 
   test("parses provided arguments", () => {
-    const opts = parseArgs(["--apply", "--gate", "--quiet-minutes", "40", "--repo", "bj29,legalease"]);
+    const opts = parseArgs([
+      "--apply",
+      "--gate",
+      "--quiet-minutes",
+      "40",
+      "--repo",
+      "bj29,legalease",
+    ]);
     expect(opts.apply).toBe(true);
     expect(opts.gate).toBe(true);
     expect(opts.quietMin).toBe(40);
@@ -47,7 +54,9 @@ describe("prNumbers", () => {
 
   test("returns empty array when no attachments match", () => {
     expect(prNumbers({}, "watt-mind/factory")).toEqual([]);
-    expect(prNumbers({ attachments: { nodes: [] } }, "watt-mind/factory")).toEqual([]);
+    expect(
+      prNumbers({ attachments: { nodes: [] } }, "watt-mind/factory"),
+    ).toEqual([]);
   });
 });
 
@@ -55,11 +64,13 @@ describe("prState", () => {
   test("returns parsed JSON state, isDraft, and labels on exit 0", () => {
     const mockRun = () => ({
       exitCode: 0,
-      stdout: Buffer.from(JSON.stringify({
-        state: "OPEN",
-        isDraft: false,
-        labels: [{ name: "escalated" }],
-      })),
+      stdout: Buffer.from(
+        JSON.stringify({
+          state: "OPEN",
+          isDraft: false,
+          labels: [{ name: "escalated" }],
+        }),
+      ),
     });
     const state = prState("watt-mind/factory", 110, mockRun);
     expect(state).toEqual({
@@ -70,8 +81,15 @@ describe("prState", () => {
   });
 
   test("returns null on non-zero exit or invalid json", () => {
-    expect(prState("watt-mind/factory", 110, () => ({ exitCode: 1, stdout: "" }))).toBeNull();
-    expect(prState("watt-mind/factory", 110, () => ({ exitCode: 0, stdout: "invalid" }))).toBeNull();
+    expect(
+      prState("watt-mind/factory", 110, () => ({ exitCode: 1, stdout: "" })),
+    ).toBeNull();
+    expect(
+      prState("watt-mind/factory", 110, () => ({
+        exitCode: 0,
+        stdout: "invalid",
+      })),
+    ).toBeNull();
   });
 });
 
@@ -119,10 +137,10 @@ describe("evaluateTicketDrift (WM-11, WM-16)", () => {
       identifier: "CLNT-522",
       state: { name: "Done", type: "completed" },
     };
-    const prStates = [
-      { number: 203, state: "MERGED", labels: [] },
-    ];
-    expect(evaluateTicketDrift(issue, "watt-mind/legalease", prStates)).toBeNull();
+    const prStates = [{ number: 203, state: "MERGED", labels: [] }];
+    expect(
+      evaluateTicketDrift(issue, "watt-mind/legalease", prStates),
+    ).toBeNull();
   });
 
   test.each(["In Review", "In Progress"])(
@@ -151,7 +169,9 @@ describe("evaluateTicketDrift (WM-11, WM-16)", () => {
       };
       const prStates = [{ number: 100, state: "MERGED" }];
 
-      expect(evaluateTicketDrift(issue, "watt-mind/legalease", prStates)).toBeNull();
+      expect(
+        evaluateTicketDrift(issue, "watt-mind/legalease", prStates),
+      ).toBeNull();
     },
   );
 
@@ -163,10 +183,10 @@ describe("evaluateTicketDrift (WM-11, WM-16)", () => {
       updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       comments: { nodes: [] },
     };
-    const prStates = [
-      { number: 150, state: "OPEN", labels: [] },
-    ];
-    const res = evaluateTicketDrift(issue, "watt-mind/legalease", prStates, { quietMin: 25 });
+    const prStates = [{ number: 150, state: "OPEN", labels: [] }];
+    const res = evaluateTicketDrift(issue, "watt-mind/legalease", prStates, {
+      quietMin: 25,
+    });
     expect(res).not.toBeNull();
     expect(res.type).toBe("in-progress-with-open-pr");
     expect(res.open).toEqual([150]);
@@ -181,10 +201,10 @@ describe("evaluateTicketDrift (WM-11, WM-16)", () => {
       updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
       comments: { nodes: [] },
     };
-    const prStates = [
-      { number: 150, state: "OPEN", labels: [] },
-    ];
-    const res = evaluateTicketDrift(issue, "watt-mind/legalease", prStates, { quietMin: 25 });
+    const prStates = [{ number: 150, state: "OPEN", labels: [] }];
+    const res = evaluateTicketDrift(issue, "watt-mind/legalease", prStates, {
+      quietMin: 25,
+    });
     expect(res).not.toBeNull();
     expect(res.type).toBe("still-active");
   });
@@ -216,7 +236,9 @@ describe("reconcileRepo (WM-11)", () => {
       title: "Something failed",
       state: { id: "s-done", name: "Done", type: "completed" },
       labels: { nodes: [{ id: "l-bug", name: "type:bug" }] },
-      attachments: { nodes: [{ url: "https://github.com/watt-mind/legalease/pull/203" }] },
+      attachments: {
+        nodes: [{ url: "https://github.com/watt-mind/legalease/pull/203" }],
+      },
     };
 
     const mutations = [];
@@ -231,13 +253,17 @@ describe("reconcileRepo (WM-11)", () => {
       labels: [{ name: "escalated" }],
     });
 
-    const res = await reconcileRepo(repo, { apply: true, gate: false }, {
-      gql: mockGql,
-      prState: mockPrState,
-      issues: [issue],
-      states,
-      labels,
-    });
+    const res = await reconcileRepo(
+      repo,
+      { apply: true, gate: false },
+      {
+        gql: mockGql,
+        prState: mockPrState,
+        issues: [issue],
+        states,
+        labels,
+      },
+    );
 
     expect(res.drift).toBe(1);
     expect(res.actions).toHaveLength(1);
@@ -266,7 +292,9 @@ describe("reconcileRepo (WM-11)", () => {
       title: "Something failed",
       state: { id: "s-done", name: "Done", type: "completed" },
       labels: { nodes: [] },
-      attachments: { nodes: [{ url: "https://github.com/watt-mind/legalease/pull/203" }] },
+      attachments: {
+        nodes: [{ url: "https://github.com/watt-mind/legalease/pull/203" }],
+      },
     };
 
     const mutations = [];
@@ -275,13 +303,17 @@ describe("reconcileRepo (WM-11)", () => {
       return { success: true };
     };
 
-    const res = await reconcileRepo(repo, { apply: false, gate: true }, {
-      gql: mockGql,
-      prState: () => ({ state: "OPEN", labels: [] }),
-      issues: [issue],
-      states,
-      labels,
-    });
+    const res = await reconcileRepo(
+      repo,
+      { apply: false, gate: true },
+      {
+        gql: mockGql,
+        prState: () => ({ state: "OPEN", labels: [] }),
+        issues: [issue],
+        states,
+        labels,
+      },
+    );
 
     expect(res.drift).toBe(1);
     expect(mutations).toHaveLength(0);

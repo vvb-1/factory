@@ -7,7 +7,13 @@ import { canonicalJson, hashJson } from "./canonical.mjs";
 import { openDb } from "./db.mjs";
 import { createRun, transition } from "./lifecycle.mjs";
 import { loadRegistry } from "./registry.mjs";
-import { TRACE_EVENTS_CAP, TRACE_KINDS, TRACE_PAYLOAD_MAX_BYTES, traceOf, traceRecorder } from "./trace.mjs";
+import {
+  TRACE_EVENTS_CAP,
+  TRACE_KINDS,
+  TRACE_PAYLOAD_MAX_BYTES,
+  traceOf,
+  traceRecorder,
+} from "./trace.mjs";
 import { runOnce } from "./worker.mjs";
 
 const registry = loadRegistry();
@@ -22,15 +28,24 @@ function traceRows(db, runId) {
 describe("traceRecorder", () => {
   test("records every allowed kind with attribution and timestamp", () => {
     const db = openDb(":memory:");
-    const record = traceRecorder(db, { runId: "run_a", attempt: 1, now: () => T0 });
+    const record = traceRecorder(db, {
+      runId: "run_a",
+      attempt: 1,
+      now: () => T0,
+    });
     for (const kind of TRACE_KINDS) record(kind, { kind });
 
     const rows = traceRows(db, "run_a");
     expect(rows.map((r) => r.kind)).toEqual(TRACE_KINDS);
     expect(rows.every((r) => r.attempt === 1)).toBe(true);
     expect(rows[0].ts).toBe(new Date(T0).toISOString());
-    expect(JSON.parse(rows[0].payload_json)).toEqual({ kind: "assistant_text" });
-    expect(record.stats()).toEqual({ recorded: TRACE_KINDS.length, dropped: 0 });
+    expect(JSON.parse(rows[0].payload_json)).toEqual({
+      kind: "assistant_text",
+    });
+    expect(record.stats()).toEqual({
+      recorded: TRACE_KINDS.length,
+      dropped: 0,
+    });
   });
 
   test("unknown kinds are dropped and counted, never thrown", () => {
@@ -62,7 +77,9 @@ describe("traceRecorder", () => {
 
     const rows = traceRows(db, "run_d");
     expect(rows).toHaveLength(1);
-    expect(Buffer.byteLength(rows[0].payload_json, "utf8")).toBeLessThanOrEqual(TRACE_PAYLOAD_MAX_BYTES);
+    expect(Buffer.byteLength(rows[0].payload_json, "utf8")).toBeLessThanOrEqual(
+      TRACE_PAYLOAD_MAX_BYTES,
+    );
     const payload = JSON.parse(rows[0].payload_json);
     expect(payload.truncated).toBe(true);
     expect(payload.originalBytes).toBeGreaterThan(TRACE_PAYLOAD_MAX_BYTES);
@@ -72,13 +89,20 @@ describe("traceRecorder", () => {
 
   test("cap: TRACE_EVENTS_CAP rows plus exactly one truncation marker", () => {
     const db = openDb(":memory:");
-    const record = traceRecorder(db, { runId: "run_e", attempt: 1, now: () => T0 });
-    for (let i = 0; i < TRACE_EVENTS_CAP + 50; i += 1) record("assistant_text", { i });
+    const record = traceRecorder(db, {
+      runId: "run_e",
+      attempt: 1,
+      now: () => T0,
+    });
+    for (let i = 0; i < TRACE_EVENTS_CAP + 50; i += 1)
+      record("assistant_text", { i });
 
     const rows = traceRows(db, "run_e");
     expect(rows).toHaveLength(TRACE_EVENTS_CAP + 1);
     const markers = rows.filter(
-      (r) => r.kind === "lifecycle" && JSON.parse(r.payload_json).note === "trace_truncated",
+      (r) =>
+        r.kind === "lifecycle" &&
+        JSON.parse(r.payload_json).note === "trace_truncated",
     );
     expect(markers).toHaveLength(1);
     expect(rows.at(-1).kind).toBe("lifecycle"); // the marker is the final row
@@ -89,13 +113,25 @@ describe("traceRecorder", () => {
 
 describe("traceOf", () => {
   function seeded(db) {
-    const r1 = traceRecorder(db, { runId: "run_page", attempt: 1, now: () => T0 });
+    const r1 = traceRecorder(db, {
+      runId: "run_page",
+      attempt: 1,
+      now: () => T0,
+    });
     r1("assistant_text", { text: "one" });
     r1("tool_use", { name: "Bash", input: {} });
     // Interleave another run to prove head and entries are per-run.
-    const other = traceRecorder(db, { runId: "run_other", attempt: 1, now: () => T0 });
+    const other = traceRecorder(db, {
+      runId: "run_other",
+      attempt: 1,
+      now: () => T0,
+    });
     other("assistant_text", { text: "noise" });
-    const r2 = traceRecorder(db, { runId: "run_page", attempt: 2, now: () => T0 });
+    const r2 = traceRecorder(db, {
+      runId: "run_page",
+      attempt: 2,
+      now: () => T0,
+    });
     r2("tool_result", { content: "done" });
     r2("usage", { durationMs: 5 });
   }
@@ -106,7 +142,10 @@ describe("traceOf", () => {
 
     const first = traceOf(db, "run_page", { limit: 2 });
     expect(first.entries).toHaveLength(2);
-    expect(first.entries.map((e) => e.kind)).toEqual(["assistant_text", "tool_use"]);
+    expect(first.entries.map((e) => e.kind)).toEqual([
+      "assistant_text",
+      "tool_use",
+    ]);
     expect(first.entries[0].payload).toEqual({ text: "one" });
 
     const rest = traceOf(db, "run_page", { since: first.entries.at(-1).seq });
@@ -130,7 +169,11 @@ describe("traceOf", () => {
     const db = openDb(":memory:");
     expect(traceOf(db, "run_none")).toEqual({ head: 0, entries: [] });
 
-    const record = traceRecorder(db, { runId: "run_big", attempt: 1, now: () => T0 });
+    const record = traceRecorder(db, {
+      runId: "run_big",
+      attempt: 1,
+      now: () => T0,
+    });
     for (let i = 0; i < 600; i += 1) record("assistant_text", { i });
     expect(traceOf(db, "run_big", { limit: 9999 }).entries).toHaveLength(500);
   });
@@ -143,7 +186,9 @@ describe("traceOf", () => {
 
 let seq = 0;
 function makeSpec(overrides = {}) {
-  const runId = overrides.runId ?? `run_trace_${++seq}_${Math.random().toString(36).slice(2)}`;
+  const runId =
+    overrides.runId ??
+    `run_trace_${++seq}_${Math.random().toString(36).slice(2)}`;
   const input = overrides.input ?? { repos: ["ok"] };
   return {
     schemaVersion: "factory.run-spec/v1",
@@ -166,9 +211,14 @@ function makeSpec(overrides = {}) {
 
 function queueRun(db, spec, now = T0) {
   createRun(db, {
-    runId: spec.runId, idempotencyKey: spec.idempotencyKey,
-    spec, specJson: canonicalJson(spec), specHash: hashJson(spec),
-    actor: "test", policyVersion: "test", now,
+    runId: spec.runId,
+    idempotencyKey: spec.idempotencyKey,
+    spec,
+    specJson: canonicalJson(spec),
+    specHash: hashJson(spec),
+    actor: "test",
+    policyVersion: "test",
+    now,
   });
   transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now });
   transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now });
@@ -194,7 +244,12 @@ describe("worker trace plumbing", () => {
     expect(summary.terminalState).toBe("COMPLETED");
 
     const rows = traceRows(db, spec.runId);
-    expect(rows.map((r) => r.kind)).toEqual(["assistant_text", "tool_use", "tool_result", "usage"]);
+    expect(rows.map((r) => r.kind)).toEqual([
+      "assistant_text",
+      "tool_use",
+      "tool_result",
+      "usage",
+    ]);
     expect(rows.every((r) => r.attempt === 1)).toBe(true);
     expect(JSON.parse(rows[1].payload_json).name).toBe("Bash");
 

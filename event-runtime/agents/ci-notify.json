@@ -5,20 +5,14 @@
   "input_schema": "schemas/ci-notify.input.json",
   "output_schema": "schemas/command-result.output.json",
   "output_contract": "factory.command-result/v1",
-  "command": [
-    "factory",
-    "notify",
-    "CI RED {repo} run {runId}: {summary}"
-  ],
+  "command": ["factory", "notify", "CI RED {repo} run {runId}: {summary}"],
   "workspace": {
     "type": "ephemeral",
     "retainOnFailure": true
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "notify:telegram"
-    ]
+    "services": ["notify:telegram"]
   },
   "limits": {
     "timeout_seconds": 60,

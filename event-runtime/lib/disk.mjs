@@ -18,7 +18,10 @@ export const DEFAULT_WARN_USAGE_RATIO = 0.85;
 export const DEFAULT_REFUSE_USAGE_RATIO = 0.95;
 
 export class DiskSpaceError extends Error {
-  constructor(message, { path, availableBytes, requiredBytes, totalBytes, usageRatio } = {}) {
+  constructor(
+    message,
+    { path, availableBytes, requiredBytes, totalBytes, usageRatio } = {},
+  ) {
     super(message);
     this.name = "DiskSpaceError";
     this.path = path;

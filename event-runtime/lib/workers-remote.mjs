@@ -16,7 +16,9 @@ export class NodeConfigError extends Error {
 }
 
 export function nodesConfigPath(root = FACTORY_ROOT) {
-  return process.env.FACTORY_NODES_CONFIG || path.join(root, "config", "nodes.yaml");
+  return (
+    process.env.FACTORY_NODES_CONFIG || path.join(root, "config", "nodes.yaml")
+  );
 }
 
 /** Expand leading ~ in paths */
@@ -42,7 +44,10 @@ export function expandHome(p, home = process.env.HOME) {
  *   adapters: string[]
  * }>}
  */
-export function loadNodesConfig({ configPath = null, root = FACTORY_ROOT } = {}) {
+export function loadNodesConfig({
+  configPath = null,
+  root = FACTORY_ROOT,
+} = {}) {
   const filePath = configPath || nodesConfigPath(root);
   if (!existsSync(filePath)) {
     return new Map();
@@ -52,7 +57,9 @@ export function loadNodesConfig({ configPath = null, root = FACTORY_ROOT } = {})
   try {
     parsed = Bun.YAML.parse(readFileSync(filePath, "utf8"));
   } catch (err) {
-    throw new NodeConfigError(`malformed nodes config at ${filePath}: ${err.message}`);
+    throw new NodeConfigError(
+      `malformed nodes config at ${filePath}: ${err.message}`,
+    );
   }
 
   const nodes = new Map();
@@ -62,23 +69,35 @@ export function loadNodesConfig({ configPath = null, root = FACTORY_ROOT } = {})
 
   for (const [name, entry] of Object.entries(parsed.nodes)) {
     if (!entry || typeof entry !== "object") {
-      throw new NodeConfigError(`invalid node entry for "${name}" in ${filePath}`);
+      throw new NodeConfigError(
+        `invalid node entry for "${name}" in ${filePath}`,
+      );
     }
     if (!entry.host || typeof entry.host !== "string") {
-      throw new NodeConfigError(`node "${name}" is missing required "host" property`);
+      throw new NodeConfigError(
+        `node "${name}" is missing required "host" property`,
+      );
     }
 
     const port = Number(entry.port ?? 22);
     if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new NodeConfigError(`node "${name}" has invalid port: ${entry.port}`);
+      throw new NodeConfigError(
+        `node "${name}" has invalid port: ${entry.port}`,
+      );
     }
 
     const factoryRoot = entry.factory_root || "~/Develop/factory";
     const branch = entry.branch || "develop";
     const user = entry.user || null;
-    const env = entry.env && typeof entry.env === "object" ? { ...entry.env } : {};
-    const labels = entry.labels && typeof entry.labels === "object" ? { ...entry.labels } : {};
-    const adapters = Array.isArray(entry.adapters) ? entry.adapters.map(String) : [];
+    const env =
+      entry.env && typeof entry.env === "object" ? { ...entry.env } : {};
+    const labels =
+      entry.labels && typeof entry.labels === "object"
+        ? { ...entry.labels }
+        : {};
+    const adapters = Array.isArray(entry.adapters)
+      ? entry.adapters.map(String)
+      : [];
 
     nodes.set(name, {
       name,
@@ -99,7 +118,11 @@ export function loadNodesConfig({ configPath = null, root = FACTORY_ROOT } = {})
 /**
  * Build safe ssh argv array for child process execution.
  */
-export function buildSshArgv(node, remoteCommand, { batchMode = true, connectTimeout = 5 } = {}) {
+export function buildSshArgv(
+  node,
+  remoteCommand,
+  { batchMode = true, connectTimeout = 5 } = {},
+) {
   const args = [];
   if (node.port && node.port !== 22) {
     args.push("-p", String(node.port));
@@ -126,24 +149,26 @@ export function buildSshArgv(node, remoteCommand, { batchMode = true, connectTim
 /**
  * Execute an SSH command against a remote node.
  */
-export function executeSsh(node, remoteCommand, {
-  batchMode = true,
-  connectTimeout = 5,
-  spawnFn = null,
-} = {}) {
+export function executeSsh(
+  node,
+  remoteCommand,
+  { batchMode = true, connectTimeout = 5, spawnFn = null } = {},
+) {
   const args = buildSshArgv(node, remoteCommand, { batchMode, connectTimeout });
-  const runner = spawnFn || ((cmd) => {
-    const proc = Bun.spawnSync({
-      cmd: ["ssh", ...cmd],
-      stdout: "pipe",
-      stderr: "pipe",
+  const runner =
+    spawnFn ||
+    ((cmd) => {
+      const proc = Bun.spawnSync({
+        cmd: ["ssh", ...cmd],
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      return {
+        exitCode: proc.exitCode,
+        stdout: proc.stdout.toString(),
+        stderr: proc.stderr.toString(),
+      };
     });
-    return {
-      exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
-    };
-  });
 
   const res = runner(args);
   return {
@@ -157,11 +182,10 @@ export function executeSsh(node, remoteCommand, {
 /**
  * Probe remote node connectivity, git commit, runtime version, and running worker processes.
  */
-export function probeRemoteNode(node, {
-  localTrunkSha = null,
-  connectTimeout = 2,
-  spawnFn = null,
-} = {}) {
+export function probeRemoteNode(
+  node,
+  { localTrunkSha = null, connectTimeout = 2, spawnFn = null } = {},
+) {
   const remotePath = node.factoryRoot;
   // Probe script: checks git sha, branch, arch, os, bun version, and running worker pid
   const probeScript = [
@@ -210,10 +234,15 @@ export function probeRemoteNode(node, {
     };
   }
 
-  const [headSha, branch, dirtyCount, arch, osName, bunVer, pidsRaw] = match[1].trim().split("|");
+  const [headSha, branch, dirtyCount, arch, osName, bunVer, pidsRaw] = match[1]
+    .trim()
+    .split("|");
   const pids = pidsRaw ? pidsRaw.split(",").map(Number).filter(Boolean) : [];
   const parsedDirtyCount = Number(dirtyCount);
-  const normalizedDirtyCount = Number.isInteger(parsedDirtyCount) && parsedDirtyCount >= 0 ? parsedDirtyCount : 0;
+  const normalizedDirtyCount =
+    Number.isInteger(parsedDirtyCount) && parsedDirtyCount >= 0
+      ? parsedDirtyCount
+      : 0;
   const isMissingDir = headSha === "missing_dir";
   const isDirty = normalizedDirtyCount > 0;
 
@@ -257,10 +286,7 @@ export function probeRemoteNode(node, {
 /**
  * Deploy or update repository code and dependencies on a remote worker node.
  */
-export function deployRemoteWorker(node, {
-  ref = null,
-  spawnFn = null,
-} = {}) {
+export function deployRemoteWorker(node, { ref = null, spawnFn = null } = {}) {
   const targetBranch = ref || node.branch || "develop";
   const remotePath = node.factoryRoot;
 
@@ -296,9 +322,7 @@ export function deployRemoteWorker(node, {
 /**
  * Start a worker daemon process on the remote node.
  */
-export function startRemoteWorker(node, {
-  spawnFn = null,
-} = {}) {
+export function startRemoteWorker(node, { spawnFn = null } = {}) {
   const remotePath = node.factoryRoot;
   const envVars = Object.entries(node.env || {})
     .map(([k, v]) => `export ${k}="${v}";`)
@@ -332,17 +356,19 @@ export function startRemoteWorker(node, {
     name: node.name,
     ok,
     pid,
-    error: ok ? null : (res.stderr || res.stdout || "failed to start remote worker").trim(),
+    error: ok
+      ? null
+      : (res.stderr || res.stdout || "failed to start remote worker").trim(),
   };
 }
 
 /**
  * Stop running worker daemon processes on the remote node with graceful drain timeout.
  */
-export function stopRemoteWorker(node, {
-  drainTimeout = 15,
-  spawnFn = null,
-} = {}) {
+export function stopRemoteWorker(
+  node,
+  { drainTimeout = 15, spawnFn = null } = {},
+) {
   const remotePath = node.factoryRoot;
 
   const stopScript = [
@@ -376,18 +402,19 @@ export function stopRemoteWorker(node, {
   return {
     name: node.name,
     ok,
-    error: ok ? null : (res.stderr || res.stdout || "failed to stop remote worker").trim(),
+    error: ok
+      ? null
+      : (res.stderr || res.stdout || "failed to stop remote worker").trim(),
   };
 }
 
 /**
  * Perform rolling update of remote worker: stop -> deploy/pull -> start.
  */
-export function updateRemoteWorker(node, {
-  ref = null,
-  drainTimeout = 15,
-  spawnFn = null,
-} = {}) {
+export function updateRemoteWorker(
+  node,
+  { ref = null, drainTimeout = 15, spawnFn = null } = {},
+) {
   const stopRes = stopRemoteWorker(node, { drainTimeout, spawnFn });
   if (!stopRes.ok) {
     return {

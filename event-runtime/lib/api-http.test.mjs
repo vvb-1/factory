@@ -66,8 +66,15 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
             let json = null;
             try {
               json = JSON.parse(text);
-            } catch { /* intentionally ignored */ }
-            resolve({ status: res.statusCode, headers: res.headers, json, text });
+            } catch {
+              /* intentionally ignored */
+            }
+            resolve({
+              status: res.statusCode,
+              headers: res.headers,
+              json,
+              text,
+            });
           });
         },
       );

@@ -21,15 +21,24 @@ export function oklchToLinearRgb(c: OklchColor): [number, number, number] {
 
   const l_ = c.l + 0.3963377774 * a + 0.2158037573 * b;
   const m_ = c.l - 0.1055613458 * a - 0.0638541728 * b;
-  const s_ = c.l - 0.0894841775 * a - 1.2914855480 * b;
+  const s_ = c.l - 0.0894841775 * a - 1.291485548 * b;
 
   const l = l_ * l_ * l_;
   const m = m_ * m_ * m_;
   const s = s_ * s_ * s_;
 
-  const rLin = Math.min(Math.max(0, +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), 1);
-  const gLin = Math.min(Math.max(0, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), 1);
-  const bLin = Math.min(Math.max(0, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 1);
+  const rLin = Math.min(
+    Math.max(0, +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    1,
+  );
+  const gLin = Math.min(
+    Math.max(0, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    1,
+  );
+  const bLin = Math.min(
+    Math.max(0, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+    1,
+  );
 
   return [rLin, gLin, bLin];
 }
@@ -47,7 +56,11 @@ export function contrastRatio(c1: OklchColor, c2: OklchColor): number {
   return (l1 + 0.05) / (l2 + 0.05);
 }
 
-export function mixOklch(c1: OklchColor, c2: OklchColor, p1: number): OklchColor {
+export function mixOklch(
+  c1: OklchColor,
+  c2: OklchColor,
+  p1: number,
+): OklchColor {
   const p2 = 1 - p1;
   const h1Rad = (c1.h * Math.PI) / 180;
   const a1 = c1.c * Math.cos(h1Rad);
@@ -85,13 +98,17 @@ interface ParsedTheme {
   borderStrong: OklchColor;
 }
 
-function resolveThemesFromCss(): Record<"dark" | "light" | "contrast", ParsedTheme> {
+function resolveThemesFromCss(): Record<
+  "dark" | "light" | "contrast",
+  ParsedTheme
+> {
   const cssPath = path.resolve(__dirname, "theme.css");
   const css = fs.readFileSync(cssPath, "utf-8");
 
   function extractBlock(selector: string): string {
     const startIdx = css.indexOf(selector);
-    if (startIdx === -1) throw new Error(`Selector ${selector} not found in theme.css`);
+    if (startIdx === -1)
+      throw new Error(`Selector ${selector} not found in theme.css`);
     const openBrace = css.indexOf("{", startIdx);
     const closeBrace = css.indexOf("}", openBrace);
     return css.slice(openBrace + 1, closeBrace);
@@ -124,15 +141,27 @@ function resolveThemesFromCss(): Record<"dark" | "light" | "contrast", ParsedThe
 
   function parseMixPct(val: string, primaryVar: string): number {
     const match = val.match(new RegExp(`var\\(--${primaryVar}\\)\\s*(\\d+)%`));
-    if (!match) throw new Error(`Cannot parse mix percentage for var(--${primaryVar}) in "${val}"`);
+    if (!match)
+      throw new Error(
+        `Cannot parse mix percentage for var(--${primaryVar}) in "${val}"`,
+      );
     return parseInt(match[1], 10) / 100;
   }
 
   const textPct = parseMixPct(extractVar(sharedBlock, "text")!, "contrast");
-  const textDimPct = parseMixPct(extractVar(sharedBlock, "text-dim")!, "contrast");
-  const textFaintPct = parseMixPct(extractVar(sharedBlock, "text-faint")!, "contrast");
+  const textDimPct = parseMixPct(
+    extractVar(sharedBlock, "text-dim")!,
+    "contrast",
+  );
+  const textFaintPct = parseMixPct(
+    extractVar(sharedBlock, "text-faint")!,
+    "contrast",
+  );
   const borderPct = parseMixPct(extractVar(sharedBlock, "border")!, "base");
-  const borderStrongPct = parseMixPct(extractVar(sharedBlock, "border-strong")!, "base");
+  const borderStrongPct = parseMixPct(
+    extractVar(sharedBlock, "border-strong")!,
+    "base",
+  );
   const surfacePcts = {
     surface1: parseMixPct(extractVar(sharedBlock, "surface-1")!, "base"),
     surface2: parseMixPct(extractVar(sharedBlock, "surface-2")!, "base"),
@@ -159,11 +188,17 @@ function resolveThemesFromCss(): Record<"dark" | "light" | "contrast", ParsedThe
       onAccent = parseOklch(onAccentStr);
     }
 
-    const surface = (name: "surface-0" | "surface-1" | "surface-2" | "surface-3"): OklchColor => {
+    const surface = (
+      name: "surface-0" | "surface-1" | "surface-2" | "surface-3",
+    ): OklchColor => {
       const explicit = extractVar(block, name);
       if (explicit) return parseOklch(explicit);
       if (name === "surface-0") return base;
-      return mixOklch(base, contrast, surfacePcts[name.replace("-", "") as keyof typeof surfacePcts]);
+      return mixOklch(
+        base,
+        contrast,
+        surfacePcts[name.replace("-", "") as keyof typeof surfacePcts],
+      );
     };
 
     return {
@@ -226,9 +261,15 @@ describe("Theme contrast & accessibility (OPS-447, OPS-338)", () => {
   }
 
   test("contrast theme primary button has >= contrast than dark or light", () => {
-    const contrastBtnCr = contrastRatio(themes.contrast.onAccent, themes.contrast.accent);
+    const contrastBtnCr = contrastRatio(
+      themes.contrast.onAccent,
+      themes.contrast.accent,
+    );
     const darkBtnCr = contrastRatio(themes.dark.onAccent, themes.dark.accent);
-    const lightBtnCr = contrastRatio(themes.light.onAccent, themes.light.accent);
+    const lightBtnCr = contrastRatio(
+      themes.light.onAccent,
+      themes.light.accent,
+    );
 
     expect(contrastBtnCr).toBeGreaterThanOrEqual(darkBtnCr);
     expect(contrastBtnCr).toBeGreaterThanOrEqual(lightBtnCr);
@@ -255,14 +296,22 @@ describe("Theme contrast & accessibility (OPS-447, OPS-338)", () => {
 
     expect(contrastRatio(light.hueWarn, liveWash)).toBeGreaterThanOrEqual(3);
     expect(contrastRatio(light.text, inFlightWash)).toBeGreaterThanOrEqual(3);
-    expect(contrastRatio(light.hueAccent, sidebarAccentWash)).toBeGreaterThanOrEqual(3);
-    expect(contrastRatio(light.hueWarn, sidebarWarnWash)).toBeGreaterThanOrEqual(3);
+    expect(
+      contrastRatio(light.hueAccent, sidebarAccentWash),
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      contrastRatio(light.hueWarn, sidebarWarnWash),
+    ).toBeGreaterThanOrEqual(3);
     expect(contrastRatio(light.textDim, zebra)).toBeGreaterThanOrEqual(3);
   });
 
   test("row treatments use semantic zebra surfaces and accent-hued 2px selection (WM-558)", () => {
     const css = fs.readFileSync(path.resolve(__dirname, "theme.css"), "utf-8");
-    expect(css).toMatch(/tbody\s*>\s*tr:nth-child\(even\)[^{]*\{[^}]*var\(--surface-2\)/s);
-    expect(css).toMatch(/\.row-selected\s*\{[^}]*var\(--hue-accent\)\s+1[2-6]%,\s*transparent[^}]*inset\s+2px\s+0\s+0\s+var\(--hue-accent\)/s);
+    expect(css).toMatch(
+      /tbody\s*>\s*tr:nth-child\(even\)[^{]*\{[^}]*var\(--surface-2\)/s,
+    );
+    expect(css).toMatch(
+      /\.row-selected\s*\{[^}]*var\(--hue-accent\)\s+1[2-6]%,\s*transparent[^}]*inset\s+2px\s+0\s+0\s+var\(--hue-accent\)/s,
+    );
   });
 });

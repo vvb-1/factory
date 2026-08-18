@@ -14,7 +14,13 @@
         "required": ["action"],
         "additionalProperties": false,
         "properties": {
-          "action": { "enum": ["docker-builder-prune", "docker-system-prune", "journal-vacuum-3d"] },
+          "action": {
+            "enum": [
+              "docker-builder-prune",
+              "docker-system-prune",
+              "journal-vacuum-3d"
+            ]
+          },
           "expectedReclaimBytes": { "type": "integer", "minimum": 0 }
         }
       }

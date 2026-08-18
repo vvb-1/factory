@@ -52,7 +52,8 @@ function optionalString(value, name) {
 
 function normalizeRefs(refs) {
   if (refs === undefined || refs === null) return {};
-  if (typeof refs !== "object" || Array.isArray(refs)) throw new Error("refs must be an object");
+  if (typeof refs !== "object" || Array.isArray(refs))
+    throw new Error("refs must be an object");
   const normalized = {};
   for (const [key, value] of Object.entries(refs)) {
     if (!REF_KEYS.has(key)) throw new Error(`unknown inbox ref ${key}`);
@@ -66,7 +67,9 @@ function parseObject(value) {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
   } catch {
     return {};
   }
@@ -122,8 +125,9 @@ export function getInboxItem(db, id) {
 }
 
 function supersedeInboxDecision(db, row, { body, refs, decision }) {
-  const updated = db.query(
-    `UPDATE inbox_items
+  const updated = db
+    .query(
+      `UPDATE inbox_items
      SET decision_json = ?, response_json = NULL, decided_at = NULL,
          decided_by = NULL, body = ?,
          refs_json = CASE WHEN ? IS NULL THEN refs_json ELSE json_set(
@@ -139,28 +143,34 @@ function supersedeInboxDecision(db, row, { body, refs, decision }) {
            ), 0) + 1
          )
      WHERE id = ? AND resolved_at IS NULL`,
-  ).run(
-    decision === null ? null : JSON.stringify(decision),
-    body,
-    refs.runId ?? null,
-    refs.runId ?? null,
-    row.id,
-  );
+    )
+    .run(
+      decision === null ? null : JSON.stringify(decision),
+      body,
+      refs.runId ?? null,
+      refs.runId ?? null,
+      row.id,
+    );
   if (updated.changes !== 1) return null;
   return getInboxItem(db, row.id);
 }
 
-export function createInboxItem(db, input, {
-  id = `inbox_${randomUUID()}`,
-  now = Date.now(),
-} = {}) {
+export function createInboxItem(
+  db,
+  input,
+  { id = `inbox_${randomUUID()}`, now = Date.now() } = {},
+) {
   const kind = requiredString(input?.kind, "kind");
   if (!KIND_SET.has(kind)) throw new Error(`unknown inbox kind: ${kind}`);
   const title = requiredString(input?.title, "title");
   const body = optionalString(input?.body, "body");
   const severity = optionalString(input?.severity, "severity") ?? "normal";
   const source = optionalString(input?.source, "source") ?? "cli";
-  if (source !== "cli" && source !== "serve:notify" && !/^agent:.+/.test(source)) {
+  if (
+    source !== "cli" &&
+    source !== "serve:notify" &&
+    !/^agent:.+/.test(source)
+  ) {
     throw new Error(`unknown inbox source: ${source}`);
   }
   const refs = normalizeRefs(input?.refs);
@@ -180,11 +190,13 @@ export function createInboxItem(db, input, {
   const createdAt = new Date(now).toISOString();
 
   if (dedupeKey) {
-    const existing = db.query(
-      `SELECT * FROM inbox_items
+    const existing = db
+      .query(
+        `SELECT * FROM inbox_items
        WHERE dedupe_key = ? AND resolved_at IS NULL
        LIMIT 1`,
-    ).get(dedupeKey);
+      )
+      .get(dedupeKey);
     if (existing) {
       const superseded = supersedeInboxDecision(db, existing, {
         body,
@@ -222,11 +234,13 @@ export function createInboxItem(db, input, {
       // lookup above. In that case the collision has the same semantics as an
       // item that was already present; unrelated insert failures still escape.
       const winner = dedupeKey
-        ? db.query(
-          `SELECT * FROM inbox_items
+        ? db
+            .query(
+              `SELECT * FROM inbox_items
            WHERE dedupe_key = ? AND resolved_at IS NULL
            LIMIT 1`,
-        ).get(dedupeKey)
+            )
+            .get(dedupeKey)
         : null;
       if (!winner) break;
       const superseded = supersedeInboxDecision(db, winner, {
@@ -245,21 +259,21 @@ export function createInboxItem(db, input, {
 function decisionRow(db, id) {
   const row = db.query("SELECT * FROM inbox_items WHERE id = ?").get(id);
   if (!row) {
-    throw new InboxDecisionError(
-      "not_found",
-      `unknown inbox item ${id}`,
-      404,
-    );
+    throw new InboxDecisionError("not_found", `unknown inbox item ${id}`, 404);
   }
   return row;
 }
 
 function normalizeEffect(effect, item, response) {
-  const kind = item.decision.options.find(
-    (option) => option.id === response.optionId,
-  )?.effect ?? "unknown";
+  const kind =
+    item.decision.options.find((option) => option.id === response.optionId)
+      ?.effect ?? "unknown";
   if (!effect || typeof effect !== "object" || Array.isArray(effect)) {
-    return { kind, outcome: "failed", error: "decision effect returned no outcome" };
+    return {
+      kind,
+      outcome: "failed",
+      error: "decision effect returned no outcome",
+    };
   }
   return { ...effect, kind };
 }
@@ -292,7 +306,11 @@ function decideInboxItemInTransaction(
     );
   }
   if (!response || typeof response !== "object" || Array.isArray(response)) {
-    throw new InboxDecisionError("invalid_response", "response must be an object", 400);
+    throw new InboxDecisionError(
+      "invalid_response",
+      "response must be an object",
+      400,
+    );
   }
   const expectedHash = decisionRequestHash(decision);
   if (
@@ -325,11 +343,13 @@ function decideInboxItemInTransaction(
 
   // Persist the answer before invoking the seam. A throwing effect must not
   // lose what the operator entered; retry uses this exact stored response.
-  const recorded = db.query(
-    `UPDATE inbox_items
+  const recorded = db
+    .query(
+      `UPDATE inbox_items
      SET response_json = ?, decided_at = ?, decided_by = ?
      WHERE id = ? AND response_json IS NULL AND decided_at IS NULL`,
-  ).run(JSON.stringify(storedResponse), decidedAt, decidedBy, id);
+    )
+    .run(JSON.stringify(storedResponse), decidedAt, decidedBy, id);
   if (recorded.changes !== 1) {
     throw new InboxDecisionError(
       "already_decided",
@@ -341,7 +361,11 @@ function decideInboxItemInTransaction(
   const item = getInboxItem(db, id);
   let effect;
   try {
-    effect = normalizeEffect(applyEffect(db, item, storedResponse), item, storedResponse);
+    effect = normalizeEffect(
+      applyEffect(db, item, storedResponse),
+      item,
+      storedResponse,
+    );
   } catch (err) {
     effect = normalizeEffect(
       { outcome: "failed", error: err?.message ?? String(err) },
@@ -368,7 +392,7 @@ export function decideInboxItem(db, id, response, options = {}) {
   // Serialize request claim, effect application, and finalization against
   // concurrent answers and dedupe supersession on other connections.
   return txImmediate(db, () =>
-    decideInboxItemInTransaction(db, id, response, options)
+    decideInboxItemInTransaction(db, id, response, options),
   );
 }
 
@@ -441,15 +465,15 @@ export function retryInboxDecision(db, id, options = {}) {
   // Capture the exact failed outcome before waiting for the write lock. A
   // concurrent retry increments retryAttempt, so a waiter cannot replay the
   // same effect after that first retry commits; a later deliberate retry can.
-  const expectedResponseJson = db.query(
-    "SELECT response_json FROM inbox_items WHERE id = ?",
-  ).get(id)?.response_json ?? null;
+  const expectedResponseJson =
+    db.query("SELECT response_json FROM inbox_items WHERE id = ?").get(id)
+      ?.response_json ?? null;
   // The same lock prevents two operators from retrying one effect at once.
   return txImmediate(db, () =>
     retryInboxDecisionInTransaction(db, id, {
       ...options,
       expectedResponseJson,
-    })
+    }),
   );
 }
 
@@ -462,24 +486,30 @@ export function listInboxItems(db, { status = "open" } = {}) {
     all: "1 = 1",
   }[status];
   return db
-    .query(`SELECT * FROM inbox_items WHERE ${where} ORDER BY created_at DESC, rowid DESC`)
+    .query(
+      `SELECT * FROM inbox_items WHERE ${where} ORDER BY created_at DESC, rowid DESC`,
+    )
     .all()
     .map(itemView);
 }
 
 export function ackInboxItem(db, id, { now = Date.now() } = {}) {
-  const row = db.query("SELECT resolved_at FROM inbox_items WHERE id = ?").get(id);
+  const row = db
+    .query("SELECT resolved_at FROM inbox_items WHERE id = ?")
+    .get(id);
   if (!row) throw new Error(`unknown inbox item ${id}`);
   if (row.resolved_at) throw new Error(`inbox item ${id} is already resolved`);
-  db.query("UPDATE inbox_items SET acked_at = COALESCE(acked_at, ?) WHERE id = ?")
-    .run(new Date(now).toISOString(), id);
+  db.query(
+    "UPDATE inbox_items SET acked_at = COALESCE(acked_at, ?) WHERE id = ?",
+  ).run(new Date(now).toISOString(), id);
   return getInboxItem(db, id);
 }
 
-export function resolveInboxItem(db, id, {
-  now = Date.now(),
-  resolvedBy = "operator",
-} = {}) {
+export function resolveInboxItem(
+  db,
+  id,
+  { now = Date.now(), resolvedBy = "operator" } = {},
+) {
   requiredString(resolvedBy, "resolvedBy");
   if (
     resolvedBy !== "operator" &&
@@ -488,9 +518,11 @@ export function resolveInboxItem(db, id, {
   ) {
     throw new Error(`invalid inbox resolver: ${resolvedBy}`);
   }
-  const row = db.query(
-    "SELECT id, decision_json, response_json FROM inbox_items WHERE id = ?",
-  ).get(id);
+  const row = db
+    .query(
+      "SELECT id, decision_json, response_json FROM inbox_items WHERE id = ?",
+    )
+    .get(id);
   if (!row) throw new Error(`unknown inbox item ${id}`);
   const resolvedAt = new Date(now).toISOString();
   if (row.decision_json && !row.response_json) {
@@ -527,20 +559,28 @@ export function resolveInboxItem(db, id, {
 }
 
 export function inboxCounts(db) {
-  const totals = db.query(
-    `SELECT
+  const totals = db
+    .query(
+      `SELECT
        SUM(CASE WHEN resolved_at IS NULL AND acked_at IS NULL THEN 1 ELSE 0 END) AS open,
        SUM(CASE WHEN resolved_at IS NULL AND acked_at IS NOT NULL THEN 1 ELSE 0 END) AS acked
      FROM inbox_items`,
-  ).get();
+    )
+    .get();
   const byKind = {};
-  for (const row of db.query(
-    `SELECT kind, COUNT(*) AS n FROM inbox_items
+  for (const row of db
+    .query(
+      `SELECT kind, COUNT(*) AS n FROM inbox_items
      WHERE resolved_at IS NULL GROUP BY kind ORDER BY kind`,
-  ).all()) {
+    )
+    .all()) {
     byKind[row.kind] = row.n;
   }
-  return { open: Number(totals.open ?? 0), acked: Number(totals.acked ?? 0), byKind };
+  return {
+    open: Number(totals.open ?? 0),
+    acked: Number(totals.acked ?? 0),
+    byKind,
+  };
 }
 
 function telegramMessage(item, webUrl) {
@@ -558,15 +598,20 @@ function telegramMessage(item, webUrl) {
 }
 
 /** Attempt the Telegram projection and persist its outcome on the existing row. */
-export async function deliverInboxItem(db, id, {
-  command,
-  send,
-  webUrl = process.env.FACTORY_WEB_URL,
-  now = Date.now(),
-} = {}) {
+export async function deliverInboxItem(
+  db,
+  id,
+  {
+    command,
+    send,
+    webUrl = process.env.FACTORY_WEB_URL,
+    now = Date.now(),
+  } = {},
+) {
   const item = getInboxItem(db, id);
   if (!item) throw new Error(`unknown inbox item ${id}`);
-  if (typeof send !== "function") throw new Error("inbox delivery transport is required");
+  if (typeof send !== "function")
+    throw new Error("inbox delivery transport is required");
   let outcome;
   try {
     outcome = await send(command, telegramMessage(item, webUrl));
@@ -581,8 +626,10 @@ export async function deliverInboxItem(db, id, {
       error: outcome.error ?? null,
     },
   };
-  db.query("UPDATE inbox_items SET delivery_json = ? WHERE id = ?")
-    .run(JSON.stringify(delivery), id);
+  db.query("UPDATE inbox_items SET delivery_json = ? WHERE id = ?").run(
+    JSON.stringify(delivery),
+    id,
+  );
   return {
     ok: outcome.ok === true,
     exitCode: outcome.exitCode ?? null,
@@ -594,12 +641,14 @@ export async function deliverInboxItem(db, id, {
 /** Resolve runtime-owned asks when their authoritative referent stops waiting. */
 export function reconcileInbox(db, { now = Date.now() } = {}) {
   const resolved = [];
-  const rows = db.query(
-    `SELECT id, kind, refs_json, decision_json, response_json FROM inbox_items
+  const rows = db
+    .query(
+      `SELECT id, kind, refs_json, decision_json, response_json FROM inbox_items
      WHERE resolved_at IS NULL
        AND kind IN ('decision_needed', 'proposal_expired', 'human_needed', 'BLOCKED')
      ORDER BY created_at, rowid`,
-  ).all();
+    )
+    .all();
   for (const row of rows) {
     // Pending decisions are not skipped: once the referent stops waiting the
     // ask is moot and resolveInboxItem records it as superseded (auto:*).
@@ -607,12 +656,17 @@ export function reconcileInbox(db, { now = Date.now() } = {}) {
     let resolvedBy = null;
     if (row.kind === "decision_needed" || row.kind === "proposal_expired") {
       if (!refs.proposalId) continue;
-      const proposal = db.query("SELECT status FROM proposals WHERE id = ?").get(refs.proposalId);
-      if (proposal && proposal.status !== "open") resolvedBy = "auto:proposal_decided";
+      const proposal = db
+        .query("SELECT status FROM proposals WHERE id = ?")
+        .get(refs.proposalId);
+      if (proposal && proposal.status !== "open")
+        resolvedBy = "auto:proposal_decided";
     } else if (refs.eventSource && refs.eventId) {
-      const event = db.query("SELECT status FROM events WHERE source = ? AND event_id = ?")
+      const event = db
+        .query("SELECT status FROM events WHERE source = ? AND event_id = ?")
         .get(refs.eventSource, refs.eventId);
-      if (event && event.status !== "human_needed") resolvedBy = "auto:event_requeued";
+      if (event && event.status !== "human_needed")
+        resolvedBy = "auto:event_requeued";
     }
     if (!resolvedBy) continue;
     resolveInboxItem(db, row.id, { now, resolvedBy });

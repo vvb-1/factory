@@ -1,5 +1,12 @@
 import { test, expect } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -62,7 +69,11 @@ test("factory notify delegates argv to the notifier from any cwd", () => {
 });
 
 test("factory notify preserves stdin mode and the notifier exit code", () => {
-  const result = runNotify({ args: ["-"], stdin: "CI RED LAB-176: test failure\n", exitCode: "7" });
+  const result = runNotify({
+    args: ["-"],
+    stdin: "CI RED LAB-176: test failure\n",
+    exitCode: "7",
+  });
   try {
     expect(result.status).toBe(7);
     expect(result.args).toBe("-\n");
@@ -77,7 +88,9 @@ test("factory notify posts a structured inbox item when serve is reachable", asy
   const requestFile = path.join(dir, "request.json");
   const serverScript = path.join(dir, "server.py");
   const port = 31000 + (process.pid % 10000);
-  writeFileSync(serverScript, `
+  writeFileSync(
+    serverScript,
+    `
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 class Handler(BaseHTTPRequestHandler):
@@ -95,8 +108,13 @@ class Handler(BaseHTTPRequestHandler):
 server = HTTPServer(("127.0.0.1", ${port}), Handler)
 print("ready", flush=True)
 server.handle_request()
-`);
-  const server = Bun.spawn({ cmd: ["python3", serverScript], stdout: "pipe", stderr: "pipe" });
+`,
+  );
+  const server = Bun.spawn({
+    cmd: ["python3", serverScript],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const reader = server.stdout.getReader();
   await reader.read();
 
@@ -162,7 +180,9 @@ test("factory reject delegates to event-runtime/cli.mjs", () => {
     stderr: "pipe",
   });
   expect(result.exitCode).toBe(1);
-  expect(result.stderr.toString()).toContain('usage: reject <proposal-id> "<reason>"');
+  expect(result.stderr.toString()).toContain(
+    'usage: reject <proposal-id> "<reason>"',
+  );
 });
 
 test("factory inject delegates to event-runtime/cli.mjs", () => {

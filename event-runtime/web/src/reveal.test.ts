@@ -96,7 +96,9 @@ describe("formatRevealNotification", () => {
         tabChanged: true,
         filterCleared: true,
       }),
-    ).toBe("Showing all states and cleared filter — event evt_04 is human_needed");
+    ).toBe(
+      "Showing all states and cleared filter — event evt_04 is human_needed",
+    );
   });
 });
 
@@ -108,9 +110,21 @@ describe("decideRevealFilters", () => {
   };
 
   test("when target row is already visible, keeps all filters and clears nothing", () => {
-    const snapshot: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const current: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
+    const snapshot: EventFilters = {
+      filter: "error",
+      typeFilter: "deploy",
+      sourceFilter: null,
+    };
+    const current: EventFilters = {
+      filter: "error",
+      typeFilter: "deploy",
+      sourceFilter: null,
+    };
+    const empty: EventFilters = {
+      filter: "",
+      typeFilter: null,
+      sourceFilter: null,
+    };
 
     const result = decideRevealFilters(snapshot, current, empty, true);
     expect(result.cleared).toBe(false);
@@ -119,38 +133,86 @@ describe("decideRevealFilters", () => {
   });
 
   test("when target row is hidden and filters are unchanged from snapshot, clears all non-empty fields", () => {
-    const snapshot: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const current: EventFilters = { filter: "error", typeFilter: "deploy", sourceFilter: null };
-    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
+    const snapshot: EventFilters = {
+      filter: "error",
+      typeFilter: "deploy",
+      sourceFilter: null,
+    };
+    const current: EventFilters = {
+      filter: "error",
+      typeFilter: "deploy",
+      sourceFilter: null,
+    };
+    const empty: EventFilters = {
+      filter: "",
+      typeFilter: null,
+      sourceFilter: null,
+    };
 
     const result = decideRevealFilters(snapshot, current, empty, false);
     expect(result.cleared).toBe(true);
     expect(result.clearedFields).toEqual(["filter", "typeFilter"]);
-    expect(result.next).toEqual({ filter: "", typeFilter: null, sourceFilter: null });
+    expect(result.next).toEqual({
+      filter: "",
+      typeFilter: null,
+      sourceFilter: null,
+    });
   });
 
   test("Events: preserving a newly typed text filter while clearing stale type/source filters", () => {
-    const snapshot: EventFilters = { filter: "", typeFilter: "deploy", sourceFilter: "github" };
+    const snapshot: EventFilters = {
+      filter: "",
+      typeFilter: "deploy",
+      sourceFilter: "github",
+    };
     // Operator typed "new search" after latch armed, but left typeFilter/sourceFilter untouched
-    const current: EventFilters = { filter: "new search", typeFilter: "deploy", sourceFilter: "github" };
-    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
+    const current: EventFilters = {
+      filter: "new search",
+      typeFilter: "deploy",
+      sourceFilter: "github",
+    };
+    const empty: EventFilters = {
+      filter: "",
+      typeFilter: null,
+      sourceFilter: null,
+    };
 
     const result = decideRevealFilters(snapshot, current, empty, false);
     expect(result.cleared).toBe(true);
     expect(result.clearedFields).toEqual(["typeFilter", "sourceFilter"]);
-    expect(result.next).toEqual({ filter: "new search", typeFilter: null, sourceFilter: null });
+    expect(result.next).toEqual({
+      filter: "new search",
+      typeFilter: null,
+      sourceFilter: null,
+    });
   });
 
   test("Events: preserving modified type chip while clearing stale text filter", () => {
-    const snapshot: EventFilters = { filter: "old filter", typeFilter: null, sourceFilter: null };
+    const snapshot: EventFilters = {
+      filter: "old filter",
+      typeFilter: null,
+      sourceFilter: null,
+    };
     // Operator selected "webhook" type chip after latch armed
-    const current: EventFilters = { filter: "old filter", typeFilter: "webhook", sourceFilter: null };
-    const empty: EventFilters = { filter: "", typeFilter: null, sourceFilter: null };
+    const current: EventFilters = {
+      filter: "old filter",
+      typeFilter: "webhook",
+      sourceFilter: null,
+    };
+    const empty: EventFilters = {
+      filter: "",
+      typeFilter: null,
+      sourceFilter: null,
+    };
 
     const result = decideRevealFilters(snapshot, current, empty, false);
     expect(result.cleared).toBe(true);
     expect(result.clearedFields).toEqual(["filter"]);
-    expect(result.next).toEqual({ filter: "", typeFilter: "webhook", sourceFilter: null });
+    expect(result.next).toEqual({
+      filter: "",
+      typeFilter: "webhook",
+      sourceFilter: null,
+    });
   });
 
   test("Proposals: preserving newly typed filter while clearing stale expiredOnly", () => {

@@ -9,10 +9,10 @@ directory.
 
 ## Host access (allowlist — nothing else)
 
-| host | ssh target |
-| :--- | :--- |
-| lab | `root@100.110.36.96` |
-| web | `hdkiller@100.93.81.56` |
+| host | ssh target              |
+| :--- | :---------------------- |
+| lab  | `root@100.110.36.96`    |
+| web  | `hdkiller@100.93.81.56` |
 
 ## Method — read-only commands only
 
@@ -34,7 +34,13 @@ Measured usage below 85% → the alert is stale; recommend NOOP:
   "schemaVersion": "factory.agent-result/v1",
   "terminalState": "completed",
   "reasonCode": "ok",
-  "artifact": { "recommendation": "NOOP", "mount": "/", "usedPct": 62, "plan": [], "analysis": "disk healthy at diagnose time — stale alert" },
+  "artifact": {
+    "recommendation": "NOOP",
+    "mount": "/",
+    "usedPct": 62,
+    "plan": [],
+    "analysis": "disk healthy at diagnose time — stale alert"
+  },
   "evidence": { "commands": ["..."], "outputs": { "df": "..." } }
 }
 ```
@@ -48,10 +54,15 @@ reclaim first, `expectedReclaimBytes` from the evidence you gathered):
     "recommendation": "REMEDIATE",
     "mount": "/",
     "usedPct": 93,
-    "plan": [{ "action": "docker-builder-prune", "expectedReclaimBytes": 12000000000 }],
+    "plan": [
+      { "action": "docker-builder-prune", "expectedReclaimBytes": 12000000000 }
+    ],
     "analysis": "one sentence: what is eating the disk"
   },
-  "evidence": { "commands": ["every ssh command you ran"], "outputs": { "df": "...", "dockerDf": "..." } }
+  "evidence": {
+    "commands": ["every ssh command you ran"],
+    "outputs": { "df": "...", "dockerDf": "..." }
+  }
 }
 ```
 

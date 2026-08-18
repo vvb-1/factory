@@ -23,9 +23,11 @@ function BrokenRoute({ error = chunkFailure() }: { error?: Error }): null {
 describe("chunk-load recovery", () => {
   test("recognizes browser and bundler chunk-load failures", () => {
     expect(isChunkLoadError(chunkFailure())).toBe(true);
-    expect(isChunkLoadError(Object.assign(new Error("chunk missing"), { name: "ChunkLoadError" }))).toBe(
-      true,
-    );
+    expect(
+      isChunkLoadError(
+        Object.assign(new Error("chunk missing"), { name: "ChunkLoadError" }),
+      ),
+    ).toBe(true);
     expect(isChunkLoadError(new Error("ordinary render failure"))).toBe(false);
   });
 
@@ -55,21 +57,35 @@ describe("chunk-load recovery", () => {
     };
 
     const first = render(
-      <ErrorBoundary storage={storage} route="/#/proposals" now={() => 1_000} reload={reload}>
+      <ErrorBoundary
+        storage={storage}
+        route="/#/proposals"
+        now={() => 1_000}
+        reload={reload}
+      >
         <BrokenRoute />
       </ErrorBoundary>,
     );
     await waitFor(() => expect(reloads).toBe(1));
-    expect(first.getByRole("alert").textContent).toContain("Refreshing this tab once");
+    expect(first.getByRole("alert").textContent).toContain(
+      "Refreshing this tab once",
+    );
     first.unmount();
 
     const second = render(
-      <ErrorBoundary storage={storage} route="/#/proposals" now={() => 1_001} reload={reload}>
+      <ErrorBoundary
+        storage={storage}
+        route="/#/proposals"
+        now={() => 1_001}
+        reload={reload}
+      >
         <BrokenRoute />
       </ErrorBoundary>,
     );
     await waitFor(() => {
-      expect(second.getByRole("heading", { name: "New version deployed" })).toBeTruthy();
+      expect(
+        second.getByRole("heading", { name: "New version deployed" }),
+      ).toBeTruthy();
     });
     expect(second.getByRole("alert").textContent).toContain(
       "This tab could not load the updated files. Reload to try again.",
