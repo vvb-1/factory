@@ -38,8 +38,58 @@ export const VIEWPORT_MARGIN = 12;
 /** Gap between the trigger and the panel. */
 export const TRIGGER_GAP = 8;
 
-const FOCUSABLE =
-  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = "a[href],button,input,select,textarea,[tabindex]";
+
+/**
+ * Return the controls the browser can actually reach with Tab, in tab order.
+ * querySelectorAll alone also returns controls hidden by an ancestor, controls
+ * under `inert`, and descendants of closed details elements. It also keeps DOM
+ * order even though positive tabindex values are visited first.
+ */
+function getTabbableElements(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE))
+    .filter((candidate) => {
+      if (candidate.tabIndex < 0 || candidate.matches(":disabled")) {
+        return false;
+      }
+
+      for (
+        let current: HTMLElement | null = candidate;
+        current && root.contains(current);
+        current = current.parentElement
+      ) {
+        if (current.hidden || current.hasAttribute("inert")) return false;
+        const style = window.getComputedStyle(current);
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          style.visibility === "collapse" ||
+          style.contentVisibility === "hidden"
+        ) {
+          return false;
+        }
+
+        if (current instanceof HTMLDetailsElement && !current.open) {
+          const summary = Array.from(current.children).find(
+            (child): child is HTMLElement =>
+              child instanceof HTMLElement && child.tagName === "SUMMARY",
+          );
+          if (!summary?.contains(candidate)) return false;
+        }
+      }
+      return true;
+    })
+    .map((element, domOrder) => ({ element, domOrder }))
+    .sort((a, b) => {
+      const aTabIndex = a.element.tabIndex;
+      const bTabIndex = b.element.tabIndex;
+      if (aTabIndex === bTabIndex) return a.domOrder - b.domOrder;
+      if (aTabIndex === 0) return 1;
+      if (bTabIndex === 0) return -1;
+      return aTabIndex - bTabIndex;
+    })
+    .map(({ element }) => element);
+}
 
 interface OpenHoverCard {
   owner: object;
@@ -337,7 +387,7 @@ export function HoverCard({
     focusPanelRef.current = false;
     const root = panelRef.current;
     if (!root) return;
-    const first = root.querySelector<HTMLElement>(FOCUSABLE);
+    const first = getTabbableElements(root)[0];
     (first ?? root).focus();
   }, [open]);
 
@@ -386,7 +436,7 @@ export function HoverCard({
       if (e.key !== "Tab") return;
       const root = panelRef.current;
       if (!root) return;
-      const stops = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+      const stops = getTabbableElements(root);
       const active = document.activeElement;
       // A card with nothing focusable holds focus on the panel itself, so
       // either direction is an edge. Otherwise only the far end is: forward

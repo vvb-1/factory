@@ -48,6 +48,7 @@ function Fixture(props: {
   interactiveTrigger?: boolean;
   /** Two in-card controls, so the first and last tab stops are distinct. */
   secondAction?: boolean;
+  hiddenSecondAction?: boolean;
 }) {
   return (
     <HoverCard
@@ -70,7 +71,11 @@ function Fixture(props: {
           <button type="button" onClick={close}>
             Open in Agents
           </button>
-          {props.secondAction ? <button type="button">Copy id</button> : null}
+          {props.secondAction ? (
+            <button type="button" hidden={props.hiddenSecondAction}>
+              Copy id
+            </button>
+          ) : null}
         </>
       )}
     </HoverCard>
@@ -505,6 +510,77 @@ describe("HoverCard", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(r.queryByRole("dialog")).toBeTruthy();
+  });
+
+  test("a hidden last control is not treated as the Tab edge", async () => {
+    const r = render(<Fixture secondAction hiddenSecondAction />);
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.focus(trigger);
+    await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+    const visibleLast = r.getByRole("button", { name: /Open in Agents/ });
+    visibleLast.focus();
+    fireEvent.keyDown(visibleLast, { key: "Tab" });
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  test("an inert last control is not treated as the Tab edge", async () => {
+    const r = render(
+      <HoverCard
+        label="Agent triage-scan"
+        openDelayMs={0}
+        closeDelayMs={0}
+        trigger="triage-scan"
+      >
+        <button type="button">Visible action</button>
+        <span inert>
+          <button type="button">Inert action</button>
+        </span>
+      </HoverCard>,
+    );
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.focus(trigger);
+    await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+    const visibleLast = r.getByRole("button", { name: "Visible action" });
+    visibleLast.focus();
+    fireEvent.keyDown(visibleLast, { key: "Tab" });
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  test("ArrowDown skips hidden controls and follows positive tabindex order", async () => {
+    const r = render(
+      <HoverCard
+        label="Agent triage-scan"
+        openDelayMs={0}
+        closeDelayMs={0}
+        trigger="triage-scan"
+      >
+        <button type="button" hidden tabIndex={1}>
+          Hidden first
+        </button>
+        <button type="button" tabIndex={2}>
+          DOM first
+        </button>
+        <button type="button" tabIndex={1}>
+          Tab first
+        </button>
+      </HoverCard>,
+    );
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        r.getByRole("button", { name: "Tab first" }),
+      ),
+    );
   });
 
   test("Shift+Tab from the first in-card control returns focus to the trigger", async () => {
