@@ -3,6 +3,7 @@ import {
   trackTmpDir,
 } from "../test-support/tmp.mjs?file=event-runtime-lib-api-runs-test-mjs";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { ticketIndexView } from "./api-runs.mjs";
 import {
   GH_SECRET,
   PV,
@@ -529,6 +530,330 @@ describe("ticket journey join (WM-595)", () => {
       expect((await unknown.json()).activity).toBe(false);
       const invalid = await fetch(s.url("/runs?ticket=not-a-ticket"));
       expect(invalid.status).toBe(422);
+    } finally {
+      s.close();
+    }
+  });
+});
+
+describe("recent-ticket index (WM-821)", () => {
+  const spec = (input, agent = "dispatch@1") =>
+    JSON.stringify({
+      schemaVersion: "factory.run-spec/v1",
+      runId: "ignored",
+      agent,
+      input,
+      inputHash: "sha256:input",
+      workspace: { type: "none" },
+      adapter: "fake",
+      promptVersion: "test",
+      policyVersion: PV,
+      outputContract: "test/v1",
+      capabilities: [],
+      timeoutSeconds: 60,
+      maxAttempts: 1,
+      idempotencyKey: "ignored",
+    });
+
+  test("GET /tickets returns aggregated ticket summaries across events, proposals, runs, results", async () => {
+    let nowMs = Date.parse("2026-08-18T12:00:00.000Z");
+    const s = await makeServer({ now: () => nowMs });
+    try {
+      // 1. Ticket WM-101: dispatch event + run + result (PR_OPEN) + merge run (MERGED)
+      await s.client.replay(
+        envelope({
+          eventId: "ev-wm-101",
+          subject: "WM-101",
+          occurredAt: "2026-08-15T09:00:00.000Z",
+          payload: {
+            repo: "factory",
+            ticket: "WM-101",
+            ticketTitle: "Feature A",
+            ticketState: "In Review",
+          },
+        }),
+      );
+      s.db
+        .query(
+          `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(
+          "run_101_dispatch",
+          "key-101-d",
+          spec({ repo: "factory", ticket: "WM-101" }),
+          "sha256:101d",
+          "COMPLETED",
+          "2026-08-15T09:05:00.000Z",
+          "2026-08-15T09:15:00.000Z",
+        );
+      s.db
+        .query(
+          `INSERT INTO results
+           (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
+           VALUES (?, 1, ?, ?, '{}', '{}', ?)`,
+        )
+        .run(
+          "run_101_dispatch",
+          JSON.stringify({
+            terminalState: "completed",
+            artifact: {
+              outcome: "PR_OPEN",
+              ticket: "WM-101",
+              prUrl: "https://github.com/watt-mind/factory/pull/101",
+            },
+          }),
+          "sha256:res-101-d",
+          "2026-08-15T09:15:00.000Z",
+        );
+      s.db
+        .query(
+          `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(
+          "run_101_merge",
+          "key-101-m",
+          spec({ repo: "factory", pr: 101 }, "merge-apply@1"),
+          "sha256:101m",
+          "COMPLETED",
+          "2026-08-15T10:00:00.000Z",
+          "2026-08-15T10:05:00.000Z",
+        );
+      s.db
+        .query(
+          `INSERT INTO results
+           (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
+           VALUES (?, 1, ?, ?, '{}', '{}', ?)`,
+        )
+        .run(
+          "run_101_merge",
+          JSON.stringify({
+            terminalState: "completed",
+            artifact: { pr: 101, outcome: "MERGED" },
+          }),
+          "sha256:res-101-m",
+          "2026-08-15T10:05:00.000Z",
+        );
+
+      // 2. Ticket WM-102: Active RUNNING run
+      s.db
+        .query(
+          `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(
+          "run_102",
+          "key-102",
+          spec({ repo: "factory", ticket: "WM-102", ticketTitle: "Feature B" }),
+          "sha256:102",
+          "RUNNING",
+          "2026-08-17T11:00:00.000Z",
+          "2026-08-17T11:05:00.000Z",
+        );
+
+      // 3. Ticket WM-103: Failed run
+      s.db
+        .query(
+          `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .run(
+          "run_103",
+          "key-103",
+          spec({ repo: "factory", ticket: "WM-103", ticketTitle: "Feature C" }),
+          "sha256:103",
+          "FAILED",
+          "2026-08-16T08:00:00.000Z",
+          "2026-08-16T08:10:00.000Z",
+        );
+
+      // 4. Ticket WM-104: Open proposal with human_needed decision
+      s.db
+        .query(
+          `INSERT INTO proposals (id, event_source, event_id, decision, spec_json, spec_hash, status, reason, created_at, ttl_seconds)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "prop_104",
+          "linear",
+          "ev_104",
+          "human_needed",
+          JSON.stringify({
+            input: {
+              repo: "factory",
+              ticket: "WM-104",
+              ticketTitle: "Needs help",
+            },
+          }),
+          "sha256:104",
+          "open",
+          "ambiguous plan",
+          "2026-08-14T14:00:00.000Z",
+          86400,
+        );
+
+      // 5. Ticket BJ-201: BJ29 repo ticket
+      await s.client.replay(
+        envelope({
+          eventId: "ev-bj-201",
+          subject: "BJ-201",
+          occurredAt: "2026-08-18T08:00:00.000Z",
+          payload: {
+            repo: "bj29",
+            ticket: "BJ-201",
+            ticketTitle: "Fix BJ bug",
+          },
+        }),
+      );
+
+      // Fetch all tickets
+      const resAll = await fetch(s.url("/tickets"));
+      expect(resAll.status).toBe(200);
+      const dataAll = await resAll.json();
+      expect(Array.isArray(dataAll.tickets)).toBe(true);
+      expect(dataAll.tickets.length).toBe(5);
+
+      // Verify sorting DESC by lastActivityAt
+      const ticketIds = dataAll.tickets.map((t) => t.id);
+      expect(ticketIds).toEqual([
+        "BJ-201",
+        "WM-102",
+        "WM-103",
+        "WM-101",
+        "WM-104",
+      ]);
+
+      // Verify WM-101 details (merged -> Done)
+      const t101 = dataAll.tickets.find((t) => t.id === "WM-101");
+      expect(t101).toMatchObject({
+        id: "WM-101",
+        repo: "factory",
+        title: "Feature A",
+        state: "Done",
+        merged: true,
+        lastActivityKind: "merge",
+        attempts: 2,
+        activeRun: null,
+        pr: {
+          number: 101,
+          url: "https://github.com/watt-mind/factory/pull/101",
+        },
+      });
+
+      // Verify WM-102 details (active RUNNING run)
+      const t102 = dataAll.tickets.find((t) => t.id === "WM-102");
+      expect(t102).toMatchObject({
+        id: "WM-102",
+        repo: "factory",
+        title: "Feature B",
+        state: "Running",
+        merged: false,
+        activeRun: {
+          runId: "run_102",
+          state: "RUNNING",
+          agent: "dispatch@1",
+        },
+        attempts: 1,
+      });
+
+      // Verify WM-103 details (FAILED)
+      const t103 = dataAll.tickets.find((t) => t.id === "WM-103");
+      expect(t103).toMatchObject({
+        id: "WM-103",
+        repo: "factory",
+        title: "Feature C",
+        state: "Failed",
+        merged: false,
+        activeRun: null,
+      });
+
+      // Verify WM-104 details (Blocked on human_needed proposal)
+      const t104 = dataAll.tickets.find((t) => t.id === "WM-104");
+      expect(t104).toMatchObject({
+        id: "WM-104",
+        repo: "factory",
+        title: "Needs help",
+        state: "Blocked",
+        lastDecision: "human_needed",
+        lastActivityKind: "proposal",
+      });
+
+      // Verify BJ-201 repo scoping
+      const resBj = await fetch(s.url("/tickets?repo=bj29"));
+      expect(resBj.status).toBe(200);
+      const dataBj = await resBj.json();
+      expect(dataBj.tickets.map((t) => t.id)).toEqual(["BJ-201"]);
+
+      const resFactory = await fetch(s.url("/tickets?repo=factory"));
+      expect(resFactory.status).toBe(200);
+      const dataFactory = await resFactory.json();
+      expect(dataFactory.tickets.map((t) => t.id)).toEqual([
+        "WM-102",
+        "WM-103",
+        "WM-101",
+        "WM-104",
+      ]);
+
+      // Verify since filter (e.g. since=2d from 2026-08-18T12:00:00Z -> since 2026-08-16T12:00:00Z)
+      const resSince2d = await fetch(s.url("/tickets?since=2d"));
+      expect(resSince2d.status).toBe(200);
+      const dataSince2d = await resSince2d.json();
+      expect(dataSince2d.tickets.map((t) => t.id)).toEqual([
+        "BJ-201",
+        "WM-102",
+      ]);
+
+      // Verify limit parameter
+      const resLimit = await fetch(s.url("/tickets?limit=2"));
+      expect(resLimit.status).toBe(200);
+      const dataLimit = await resLimit.json();
+      expect(dataLimit.tickets.length).toBe(2);
+      expect(dataLimit.tickets.map((t) => t.id)).toEqual(["BJ-201", "WM-102"]);
+
+      // Verify invalid duration returns 422
+      const resInvalidSince = await fetch(s.url("/tickets?since=invalid-foo"));
+      expect(resInvalidSince.status).toBe(422);
+      const errBody = await resInvalidSince.json();
+      expect(errBody.error).toBe("invalid_since");
+
+      // Verify invalid limit returns 422
+      const resInvalidLimit = await fetch(s.url("/tickets?limit=abc"));
+      expect(resInvalidLimit.status).toBe(422);
+      expect((await resInvalidLimit.json()).error).toBe("invalid_limit");
+
+      const resNegativeLimit = await fetch(s.url("/tickets?limit=-5"));
+      expect(resNegativeLimit.status).toBe(422);
+      expect((await resNegativeLimit.json()).error).toBe("invalid_limit");
+
+      // Verify alternative valid duration units (1w, 24h, 30m, 60s, ISO string)
+      const resWeek = await fetch(s.url("/tickets?since=1w"));
+      expect(resWeek.status).toBe(200);
+      expect((await resWeek.json()).tickets.length).toBe(5);
+
+      const resHours = await fetch(s.url("/tickets?since=24h"));
+      expect(resHours.status).toBe(200);
+      expect((await resHours.json()).tickets.map((t) => t.id)).toEqual([
+        "BJ-201",
+      ]);
+
+      const resIso = await fetch(
+        s.url("/tickets?since=2026-08-17T00:00:00.000Z"),
+      );
+      expect(resIso.status).toBe(200);
+      expect((await resIso.json()).tickets.map((t) => t.id)).toEqual([
+        "BJ-201",
+        "WM-102",
+      ]);
+
+      // Verify caching: repeated call uses cache, advancing time past TTL re-evaluates
+      const resCached = await fetch(s.url("/tickets?since=14d"));
+      expect(resCached.status).toBe(200);
+      expect((await resCached.json()).tickets.length).toBe(5);
+
+      // Verify ticketIndexView exported function directly
+      const direct = ticketIndexView(s.db, { since: "14d", nowMs });
+      expect(direct.length).toBe(5);
     } finally {
       s.close();
     }

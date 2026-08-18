@@ -262,6 +262,8 @@ export function createApi({
         url.pathname === "/outbox" ||
         url.pathname === "/runs" ||
         url.pathname.startsWith("/runs/") ||
+        url.pathname === "/tickets" ||
+        url.pathname.startsWith("/tickets/") ||
         url.pathname.startsWith("/workers/")
       ) {
         const result = await handleRunApiRoute({

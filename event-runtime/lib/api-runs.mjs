@@ -410,6 +410,487 @@ class ListQueryError extends Error {
   }
 }
 
+export function parseSinceDuration(since, nowMs = Date.now()) {
+  if (since == null || since === "") {
+    return nowMs - 14 * 24 * 60 * 60 * 1000;
+  }
+  if (typeof since === "number") {
+    if (!Number.isFinite(since) || since <= 0) {
+      throw new ListQueryError("invalid_since", { since });
+    }
+    if (since > 1e11) return since;
+    return nowMs - since;
+  }
+  if (typeof since !== "string") {
+    throw new ListQueryError("invalid_since", { since });
+  }
+  const trimmed = since.trim();
+  const match = trimmed.match(
+    /^(\d+)\s*(d|day|days|h|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds|w|week|weeks)$/i,
+  );
+  if (match) {
+    const count = Number(match[1]);
+    if (!Number.isFinite(count) || count <= 0) {
+      throw new ListQueryError("invalid_since", { since });
+    }
+    const unit = match[2].toLowerCase();
+    let ms = 0;
+    if (unit.startsWith("w")) ms = count * 7 * 24 * 60 * 60 * 1000;
+    else if (unit.startsWith("d")) ms = count * 24 * 60 * 60 * 1000;
+    else if (unit.startsWith("h")) ms = count * 60 * 60 * 1000;
+    else if (unit.startsWith("m")) ms = count * 60 * 1000;
+    else if (unit.startsWith("s")) ms = count * 1000;
+    return nowMs - ms;
+  }
+  const parsedDate = Date.parse(trimmed);
+  if (Number.isFinite(parsedDate) && !/^\d+$/.test(trimmed)) {
+    return parsedDate;
+  }
+  throw new ListQueryError("invalid_since", { since });
+}
+
+function collectTicketIds(value, targetSet = new Set()) {
+  if (!value) return targetSet;
+  if (typeof value === "string") {
+    const matches = value.match(/\b([A-Z][A-Z0-9]{1,9}-\d+)\b/g);
+    if (matches) {
+      for (const m of matches) targetSet.add(m.toUpperCase());
+    }
+    return targetSet;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectTicketIds(entry, targetSet);
+    return targetSet;
+  }
+  if (typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      if (
+        /^(ticket|ticketId|issue|issueId|linearId)$/i.test(key) &&
+        typeof entry === "string" &&
+        TICKET_ID.test(entry.trim().toUpperCase())
+      ) {
+        targetSet.add(entry.trim().toUpperCase());
+      }
+      collectTicketIds(entry, targetSet);
+    }
+  }
+  return targetSet;
+}
+
+const TICKET_INDEX_CACHE_TTL_MS = 5000;
+const ticketIndexCache = new Map();
+
+export function clearTicketIndexCache() {
+  ticketIndexCache.clear();
+}
+
+/**
+ * Aggregates unique tickets touched by events, proposals, runs, and results
+ * within a given time window (default 14 days) (WM-821).
+ */
+export function ticketIndexView(db, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const sinceMs = parseSinceDuration(options.since, nowMs);
+  const sinceIso = new Date(sinceMs).toISOString();
+  const limit = options.limit
+    ? Math.min(Math.max(1, Number(options.limit) || 50), 200)
+    : 50;
+  const repoFilter =
+    typeof options.repo === "string" && options.repo.trim() !== ""
+      ? options.repo.trim().toLowerCase()
+      : null;
+
+  const cacheKey = `${db.filename ?? "mem"}:${sinceMs}:${limit}:${repoFilter ?? ""}`;
+  if (options.noCache !== true) {
+    const cached = ticketIndexCache.get(cacheKey);
+    if (cached && nowMs - cached.timestamp < TICKET_INDEX_CACHE_TTL_MS) {
+      return cached.data;
+    }
+  }
+
+  const eventRows = db
+    .query(`SELECT * FROM events ORDER BY admitted_at, rowid`)
+    .all();
+  const proposalRows = db
+    .query(`SELECT * FROM proposals ORDER BY created_at, rowid`)
+    .all();
+  const runRows = db
+    .query(`SELECT * FROM runs ORDER BY created_at, rowid`)
+    .all();
+  const resultRows = db.query(`SELECT * FROM results ORDER BY rowid`).all();
+  const lifecycleRows = db
+    .query(`SELECT * FROM lifecycle_events ORDER BY rowid`)
+    .all();
+
+  const resultByRun = new Map();
+  for (const row of resultRows) {
+    const result = parseObject(row.result_json);
+    if (!resultByRun.has(row.run_id)) resultByRun.set(row.run_id, []);
+    resultByRun.get(row.run_id).push(result);
+  }
+
+  // Collect candidate ticket IDs across all entities
+  const allTicketIds = new Set();
+  for (const row of eventRows) {
+    if (
+      row.subject &&
+      TICKET_ID.test(String(row.subject).trim().toUpperCase())
+    ) {
+      allTicketIds.add(String(row.subject).trim().toUpperCase());
+    }
+    const env = parseObject(row.envelope_json);
+    collectTicketIds(env, allTicketIds);
+  }
+  for (const row of proposalRows) {
+    const spec = parseObject(row.spec_json);
+    collectTicketIds(spec.input, allTicketIds);
+    collectTicketIds(row.reason, allTicketIds);
+  }
+  for (const row of runRows) {
+    const spec = parseObject(row.spec_json);
+    collectTicketIds(spec.input, allTicketIds);
+    for (const res of resultByRun.get(row.run_id) ?? []) {
+      collectTicketIds(res, allTicketIds);
+    }
+  }
+  for (const row of lifecycleRows) {
+    collectTicketIds(row.reason, allTicketIds);
+  }
+
+  const summaries = [];
+
+  for (const ticket of allTicketIds) {
+    const events = new Set();
+    const proposals = new Set();
+    const runs = new Set();
+
+    for (const row of eventRows) {
+      const envelope = parseObject(row.envelope_json);
+      if (
+        String(row.subject ?? "").toUpperCase() === ticket ||
+        objectNamesTicket(envelope, ticket)
+      ) {
+        events.add(`${row.source}\0${row.event_id}`);
+      }
+    }
+    for (const row of proposalRows) {
+      const spec = parseObject(row.spec_json);
+      if (objectNamesTicket(spec.input, ticket)) proposals.add(row.id);
+    }
+    for (const row of runRows) {
+      const spec = parseObject(row.spec_json);
+      const results = resultByRun.get(row.run_id) ?? [];
+      if (
+        objectNamesTicket(spec.input, ticket) ||
+        results.some((result) => objectNamesTicket(result, ticket))
+      ) {
+        runs.add(row.run_id);
+      }
+    }
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const row of proposalRows) {
+        const eventKey = `${row.event_source}\0${row.event_id}`;
+        if (
+          proposals.has(row.id) ||
+          events.has(eventKey) ||
+          (row.run_id && runs.has(row.run_id))
+        ) {
+          if (!proposals.has(row.id)) {
+            proposals.add(row.id);
+            changed = true;
+          }
+          if (!events.has(eventKey)) {
+            events.add(eventKey);
+            changed = true;
+          }
+          if (row.run_id && !runs.has(row.run_id)) {
+            runs.add(row.run_id);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    const prRefs = { numbers: new Set(), urls: new Set() };
+    for (const runId of runs) {
+      for (const result of resultByRun.get(runId) ?? []) {
+        collectPrRefs(result, prRefs);
+      }
+    }
+    if (prRefs.numbers.size || prRefs.urls.size) {
+      for (const row of runRows) {
+        const spec = parseObject(row.spec_json);
+        const results = resultByRun.get(row.run_id) ?? [];
+        if (
+          hasPrRef(spec.input, prRefs) ||
+          results.some((result) => hasPrRef(result, prRefs))
+        ) {
+          runs.add(row.run_id);
+        }
+      }
+      for (const row of eventRows) {
+        if (hasPrRef(parseObject(row.envelope_json), prRefs)) {
+          events.add(`${row.source}\0${row.event_id}`);
+        }
+      }
+    }
+
+    const matchedEventRows = eventRows.filter((row) =>
+      events.has(`${row.source}\0${row.event_id}`),
+    );
+    const matchedProposalRows = proposalRows.filter((row) =>
+      proposals.has(row.id),
+    );
+    const matchedRunRows = runRows.filter((row) => runs.has(row.run_id));
+
+    const metadata = [
+      ...matchedEventRows.map((e) => parseObject(e.envelope_json)?.payload),
+      ...matchedProposalRows.map((p) => parseObject(p.spec_json)?.input),
+      ...matchedRunRows.map((r) => parseObject(r.spec_json)?.input),
+      ...matchedRunRows.flatMap((r) =>
+        (resultByRun.get(r.run_id) ?? []).map((res) => res?.artifact),
+      ),
+    ];
+
+    // Repo
+    const repo =
+      namedString(metadata, ["repo"]) ??
+      metadata.flatMap((m) => repoNamesFromInput(m))[0] ??
+      null;
+
+    if (repoFilter && (!repo || repo.toLowerCase() !== repoFilter)) {
+      continue;
+    }
+
+    // Title
+    const title = namedString(metadata, [
+      "ticketTitle",
+      "linearTitle",
+      "issueTitle",
+      "title",
+    ]);
+
+    // PR
+    let pr = null;
+    let foundPrUrl = null;
+    let foundPrNumber = null;
+    let foundCi = undefined;
+    for (const meta of metadata) {
+      if (!meta || typeof meta !== "object") continue;
+      if (!foundPrUrl) {
+        if (typeof meta.prUrl === "string") foundPrUrl = meta.prUrl;
+        else if (typeof meta.url === "string" && meta.url.includes("/pull/"))
+          foundPrUrl = meta.url;
+      }
+      if (foundPrNumber == null) {
+        if (typeof meta.pr === "number") foundPrNumber = meta.pr;
+        else if (typeof meta.prNumber === "number")
+          foundPrNumber = meta.prNumber;
+      }
+      if (foundCi === undefined && meta.ci) {
+        foundCi = meta.ci;
+      }
+    }
+    if (!foundPrNumber && foundPrUrl) {
+      const match = foundPrUrl.match(/\/pull\/(\d+)/);
+      if (match) foundPrNumber = Number(match[1]);
+    }
+    if (!foundPrUrl && foundPrNumber) {
+      const orgRepo = repo
+        ? repo.includes("/")
+          ? repo
+          : `watt-mind/${repo}`
+        : "watt-mind/factory";
+      foundPrUrl = `https://github.com/${orgRepo}/pull/${foundPrNumber}`;
+    }
+    if (foundPrNumber || foundPrUrl) {
+      pr = {
+        number: foundPrNumber ?? 0,
+        url: foundPrUrl ?? "",
+        ...(foundCi ? { ci: foundCi } : {}),
+      };
+    }
+
+    // Merged
+    const merged = matchedRunRows.some((run) => {
+      const results = resultByRun.get(run.run_id) ?? [];
+      const spec = parseObject(run.spec_json);
+      return (
+        results.some(
+          (res) =>
+            res?.artifact?.outcome === "MERGED" ||
+            res?.artifact?.merged === true ||
+            /merged/i.test(JSON.stringify(res?.artifact ?? {})),
+        ) ||
+        (spec.agent?.startsWith("merge-") && run.state === "COMPLETED")
+      );
+    });
+
+    // Active run
+    const activeRunRow = matchedRunRows
+      .slice()
+      .reverse()
+      .find((r) =>
+        ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(r.state),
+      );
+    const activeRun = activeRunRow
+      ? {
+          runId: activeRunRow.run_id,
+          state: activeRunRow.state,
+          agent: parseObject(activeRunRow.spec_json).agent ?? null,
+        }
+      : null;
+
+    // Last decision
+    const sortedProposals = matchedProposalRows.slice().sort((a, b) => {
+      const atA = a.decided_at ?? a.created_at;
+      const atB = b.decided_at ?? b.created_at;
+      return atA.localeCompare(atB);
+    });
+    const lastProposal = sortedProposals.at(-1);
+    const lastDecision = lastProposal?.decision ?? null;
+
+    // Attempts
+    const attempts = matchedRunRows.reduce(
+      (acc, r) => acc + (r.attempts || 1),
+      0,
+    );
+
+    // Activities
+    const activities = [];
+    for (const e of matchedEventRows) {
+      activities.push({
+        at: e.occurred_at || e.admitted_at,
+        kind: "event",
+      });
+    }
+    for (const p of matchedProposalRows) {
+      activities.push({
+        at: p.decided_at || p.created_at,
+        kind: "proposal",
+      });
+    }
+    for (const r of matchedRunRows) {
+      const results = resultByRun.get(r.run_id) ?? [];
+      const spec = parseObject(r.spec_json);
+      for (const res of results) {
+        const isMerge =
+          res?.artifact?.outcome === "MERGED" ||
+          spec.agent?.startsWith("merge-");
+        const isPr =
+          res?.artifact?.outcome === "PR_OPEN" || Boolean(res?.artifact?.prUrl);
+        activities.push({
+          at: res.accepted_at || r.updated_at || r.created_at,
+          kind: isMerge ? "merge" : isPr ? "pr" : "run",
+        });
+      }
+      if (results.length === 0) {
+        activities.push({
+          at: r.updated_at || r.created_at,
+          kind: spec.agent?.startsWith("merge-") ? "merge" : "run",
+        });
+      }
+    }
+
+    if (activities.length === 0) continue;
+
+    activities.sort((a, b) => a.at.localeCompare(b.at));
+    const latestActivity = activities.at(-1);
+    const lastActivityAt = latestActivity.at;
+    const lastActivityKind = latestActivity.kind;
+
+    if (lastActivityAt < sinceIso) {
+      continue;
+    }
+
+    // State calculation
+    const recordedState = namedString(metadata, [
+      "ticketState",
+      "linearState",
+      "issueState",
+    ]);
+
+    let state;
+    if (merged) {
+      state = "Done";
+    } else if (activeRun) {
+      state =
+        activeRun.state === "RUNNING" ||
+        activeRun.state === "VERIFYING" ||
+        activeRun.state === "LEASED" ||
+        activeRun.state === "QUEUED"
+          ? "Running"
+          : "In Progress";
+    } else {
+      const latestRun = matchedRunRows
+        .slice()
+        .sort((a, b) => a.updated_at.localeCompare(b.updated_at))
+        .at(-1);
+      if (
+        latestRun &&
+        (latestRun.state === "FAILED" || latestRun.state === "CANCELLED")
+      ) {
+        state = "Failed";
+      } else if (
+        pr ||
+        matchedRunRows.some((r) =>
+          (resultByRun.get(r.run_id) ?? []).some(
+            (res) => res?.artifact?.outcome === "PR_OPEN",
+          ),
+        )
+      ) {
+        state = "In Review";
+      } else if (
+        matchedProposalRows.some(
+          (p) => p.decision === "human_needed" && p.status === "open",
+        ) ||
+        matchedEventRows.some((e) => e.status === "dead_lettered")
+      ) {
+        state = "Blocked";
+      } else if (recordedState) {
+        state = recordedState;
+      } else if (matchedProposalRows.some((p) => p.decision === "noop")) {
+        state = "Todo";
+      } else if (matchedRunRows.length > 0) {
+        state = "In Review";
+      } else {
+        state = "Todo";
+      }
+    }
+
+    summaries.push({
+      id: ticket,
+      repo,
+      title,
+      state,
+      lastActivityAt,
+      lastActivityKind,
+      attempts,
+      activeRun,
+      lastDecision,
+      pr,
+      merged,
+    });
+  }
+
+  summaries.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+  const result = summaries.slice(0, limit);
+  if (options.noCache !== true) {
+    ticketIndexCache.set(cacheKey, { timestamp: nowMs, data: result });
+    if (ticketIndexCache.size > 100) {
+      for (const [k, v] of ticketIndexCache.entries()) {
+        if (nowMs - v.timestamp >= TICKET_INDEX_CACHE_TTL_MS * 2) {
+          ticketIndexCache.delete(k);
+        }
+      }
+    }
+  }
+  return result;
+}
+
 function listFilters(url, { proposal = false, nowMs = Date.now() } = {}) {
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
@@ -822,6 +1303,30 @@ export async function handleRunApiRoute({
         ? 404
         : 409;
       return send(status, { error: err.message });
+    }
+  }
+
+  if (route === "GET /tickets") {
+    const since = url.searchParams.get("since") ?? undefined;
+    const limitParam = url.searchParams.get("limit");
+    const repo = url.searchParams.get("repo") ?? undefined;
+    let limit = 50;
+    if (limitParam !== null && limitParam !== undefined && limitParam !== "") {
+      const parsedLimit = Number(limitParam);
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        return send(422, {
+          error: "invalid_limit",
+          message: "limit must be a positive integer",
+        });
+      }
+      limit = Math.min(parsedLimit, 200);
+    }
+    try {
+      const tickets = ticketIndexView(db, { since, limit, repo, nowMs });
+      return send(200, { tickets });
+    } catch (err) {
+      if (err instanceof ListQueryError) return send(422, err.body);
+      throw err;
     }
   }
 
