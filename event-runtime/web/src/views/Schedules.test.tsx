@@ -529,9 +529,9 @@ describe("Schedules copy chords and hints (WM-233)", () => {
     });
 
     // Verify icon-action tooltips preserve shortcut discoverability.
-    expect(loopBtn.getAttribute("title")).toBe("Copy schedule loop · c");
+    expect(loopBtn.parentElement?.querySelector('[role="tooltip"]')?.textContent).toBe("Copy schedule loop · c");
     const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
-    expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
+    expect(linkBtn.parentElement?.querySelector('[role="tooltip"]')?.textContent).toBe("Copy link · c l");
 
     // 1. Press 'c' -> copies loop
     fireEvent.keyDown(document.body, { key: "c" });

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Button as PrimitiveButton } from "./ui";
 
 export const CHUNK_RELOAD_STORAGE_KEY = "factory.chunkReload";
 const CHUNK_RELOAD_WINDOW_MS = 5 * 60 * 1000;
@@ -115,7 +116,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <h1 className="display text-lg font-semibold">{title}</h1>
           <p className="mt-2 text-sm text-(--text-dim)">{detail}</p>
           {!reloading && (
-            <button
+            <PrimitiveButton bare
               type="button"
               className="mt-4 rounded-md border border-(--border-strong) px-3 py-1.5 text-sm font-medium hover:bg-(--surface-2)"
               onClick={() =>
@@ -123,7 +124,7 @@ export class ErrorBoundary extends Component<Props, State> {
               }
             >
               Reload
-            </button>
+            </PrimitiveButton>
           )}
         </section>
       </main>

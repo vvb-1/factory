@@ -29,6 +29,7 @@ import {
   notify,
   shortId,
 } from "../components/ui";
+import { Button as PrimitiveButton } from "../components/ui";
 
 const FEED_CAP = 50;
 
@@ -60,7 +61,7 @@ export function SectionTitle({
 
   if (collapsible) {
     return (
-      <button
+      <PrimitiveButton bare
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
@@ -74,7 +75,7 @@ export function SectionTitle({
         </span>
         {label}
         {metaNode}
-      </button>
+      </PrimitiveButton>
     );
   }
 
@@ -175,7 +176,7 @@ export function StatLegendItem({
       : "";
 
   return (
-    <button
+    <PrimitiveButton bare
       type="button"
       onClick={onClick}
       aria-label={`${fullLabel}: ${value}`}
@@ -200,7 +201,7 @@ export function StatLegendItem({
       {factoryWide && (
         <span className="text-[10px] text-(--text-faint)">(all)</span>
       )}
-    </button>
+    </PrimitiveButton>
   );
 }
 
@@ -683,7 +684,7 @@ function RecentOutcomesStrip({
                     : "var(--text-faint)";
             const label = `${o.runId} · ${o.to} · ${formatRelative(o.at, now)}`;
             return (
-              <button
+              <PrimitiveButton bare
                 key={o.seq}
                 type="button"
                 onClick={() => onJumpRun(o.runId)}
@@ -696,7 +697,7 @@ function RecentOutcomesStrip({
                   className="h-4 w-2 rounded-xs opacity-80 transition-all group-hover:scale-125 group-hover:opacity-100 group-hover:ring-1 group-hover:ring-(--text)"
                   style={{ backgroundColor: hue }}
                 />
-              </button>
+              </PrimitiveButton>
             );
           })}
         </div>
@@ -1286,7 +1287,7 @@ export function Overview({
                       <div className="min-w-0">
                         {deadLetters ? (
                           <>
-                            <button
+                            <PrimitiveButton bare
                               type="button"
                               onClick={() =>
                                 deadLetters.events.length > 1
@@ -1322,12 +1323,12 @@ export function Overview({
                               <span className="sm:truncate">
                                 {deadLetters.errorMessage}
                               </span>
-                            </button>
+                            </PrimitiveButton>
                             {expanded && (
                               <ul className="mt-2 space-y-1 border-l border-(--border) pl-3">
                                 {deadLetters.events.map((event) => (
                                   <li key={`${event.source}:${event.eventId}`}>
-                                    <button
+                                    <PrimitiveButton bare
                                       type="button"
                                       onClick={() =>
                                         onJumpEvents({
@@ -1339,7 +1340,7 @@ export function Overview({
                                       title={event.eventId}
                                     >
                                       {shortId(event.eventId)}
-                                    </button>
+                                    </PrimitiveButton>
                                   </li>
                                 ))}
                               </ul>
@@ -1347,15 +1348,15 @@ export function Overview({
                           </>
                         ) : a.proposalId ? (
                           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 break-words text-[12px] text-(--hue-warn)">
-                            <button
+                            <PrimitiveButton bare
                               type="button"
                               onClick={primaryLink?.go}
                               className="cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
                             >
                               expired open
-                            </button>
+                            </PrimitiveButton>
                             <span className="text-(--text-faint)">·</span>
-                            <button
+                            <PrimitiveButton bare
                               type="button"
                               className="mono cursor-pointer text-[11px] text-(--text-dim) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
                               title={`${a.proposalId} — click to copy`}
@@ -1364,7 +1365,7 @@ export function Overview({
                               }
                             >
                               {shortId(a.proposalId)}
-                            </button>
+                            </PrimitiveButton>
                             <span className="text-(--text-faint)">·</span>
                             <span>agent: {a.proposal?.agent ?? EMPTY}</span>
                             <span className="text-(--text-faint)">·</span>
@@ -1403,14 +1404,14 @@ export function Overview({
                             )}
                           </div>
                         ) : primaryLink ? (
-                          <button
+                          <PrimitiveButton bare
                             type="button"
                             onClick={primaryLink.go}
                             className="min-w-0 cursor-pointer break-words text-left text-[12px] text-(--hue-warn) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent) sm:truncate"
                             title={a.text}
                           >
                             {a.text}
-                          </button>
+                          </PrimitiveButton>
                         ) : (
                           <span
                             className="min-w-0 break-words text-[12px] text-(--hue-warn) sm:truncate"
@@ -1422,16 +1423,16 @@ export function Overview({
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-1">
-                      <button
+                      <PrimitiveButton bare
                         type="button"
                         onClick={() => copyText(a.text, "anomaly")}
                         className="cursor-pointer rounded px-1.5 py-1 text-[11px] text-(--text-faint) hover:text-(--text) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
                       >
                         copy
-                      </button>
+                      </PrimitiveButton>
                       <span className="flex flex-wrap items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/anomaly:opacity-100 sm:group-focus-within/anomaly:opacity-100">
                         {a.dismissProposalId && (
-                          <button
+                          <PrimitiveButton bare
                             type="button"
                             className={quietActionClass}
                             disabled={!connected || reject.isPending}
@@ -1442,11 +1443,11 @@ export function Overview({
                             }}
                           >
                             Reject…
-                          </button>
+                          </PrimitiveButton>
                         )}
                         {deadLetters && deadLetters.events.length > 1 ? (
                           <>
-                            <button
+                            <PrimitiveButton bare
                               type="button"
                               className={quietActionClass}
                               disabled={!connected || bulkDeadLetter.isPending}
@@ -1458,8 +1459,8 @@ export function Overview({
                               }
                             >
                               Archive all
-                            </button>
-                            <button
+                            </PrimitiveButton>
+                            <PrimitiveButton bare
                               type="button"
                               className={quietActionClass}
                               disabled={!connected || bulkDeadLetter.isPending}
@@ -1471,12 +1472,12 @@ export function Overview({
                               }
                             >
                               Requeue all
-                            </button>
+                            </PrimitiveButton>
                           </>
                         ) : (
                           <>
                             {a.archive && (
-                              <button
+                              <PrimitiveButton bare
                                 type="button"
                                 className={quietActionClass}
                                 disabled={
@@ -1490,22 +1491,22 @@ export function Overview({
                                 }
                               >
                                 Archive
-                              </button>
+                              </PrimitiveButton>
                             )}
                             {a.requeue && (
-                              <button
+                              <PrimitiveButton bare
                                 type="button"
                                 className={quietActionClass}
                                 disabled={!connected || requeue.isPending}
                                 onClick={() => requeue.mutate(a.requeue!)}
                               >
                                 Requeue
-                              </button>
+                              </PrimitiveButton>
                             )}
                           </>
                         )}
                         {a.releaseWorker && (
-                          <button
+                          <PrimitiveButton bare
                             type="button"
                             className={quietActionClass}
                             disabled={!connected || resolveAnomaly.isPending}
@@ -1517,17 +1518,17 @@ export function Overview({
                             }
                           >
                             Release lease
-                          </button>
+                          </PrimitiveButton>
                         )}
                         {a.links.slice(1).map((link) => (
-                          <button
+                          <PrimitiveButton bare
                             type="button"
                             key={link.label}
                             className={quietActionClass}
                             onClick={link.go}
                           >
                             {link.label.replace(/^View /, "")}
-                          </button>
+                          </PrimitiveButton>
                         ))}
                       </span>
                     </div>
@@ -1672,7 +1673,7 @@ export function Overview({
                         : "nothing waiting"}
                   </span>
                 </div>
-                <button
+                <PrimitiveButton bare
                   type="button"
                   onClick={() => onNavigate("inbox")}
                   aria-label={`Waiting on you: ${s.inbox.open} open inbox item${s.inbox.open === 1 ? "" : "s"} — open the inbox`}
@@ -1712,7 +1713,7 @@ export function Overview({
                   <span className="mono text-[11px] text-(--text-faint)">
                     g n →
                   </span>
-                </button>
+                </PrimitiveButton>
               </div>
             )}
           </StageCard>
@@ -1806,7 +1807,7 @@ export function Overview({
                 <span className="font-semibold text-(--text)">
                   Worker Fleet Capacity{factoryWide ? " · factory-wide" : ""}
                 </span>
-                <button
+                <PrimitiveButton bare
                   type="button"
                   onClick={() => onNavigate("workers")}
                   aria-label={`worker capacity${factoryWide ? " · factory-wide" : ""}: ${capacity!.running} running of ${capacity!.capacity}, ${capacity!.queued} queued`}
@@ -1819,7 +1820,7 @@ export function Overview({
                   {capacity!.draining > 0
                     ? ` · ${capacity!.draining} draining`
                     : ""}
-                </button>
+                </PrimitiveButton>
               </div>
               {capacity!.queued > 0 && capacity!.limitingFactor && (
                 <div className="mb-2 text-[11px] text-(--hue-warn)">

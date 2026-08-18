@@ -4,6 +4,8 @@ import { INFLIGHT, toggleInflight } from "../context";
 import { hashProject, withProject } from "../hash";
 import { CONTEXT_TABS_ATTR } from "../hooks";
 import type { RepoItem } from "../types";
+import { IconButton } from "./ui";
+import { Button as PrimitiveButton } from "./ui";
 
 export const PINNED_RUNS_STORAGE_KEY = "factory.pinnedRuns";
 
@@ -355,7 +357,7 @@ export function ContextTabs({
         onKeyDown={handleKeyDown}
         {...{ [CONTEXT_TABS_ATTR]: "" }}
       >
-        <button
+        <PrimitiveButton bare
           type="button"
           data-context-tab="all"
           tabIndex={effectiveTabStop === "all" ? 0 : -1}
@@ -378,7 +380,7 @@ export function ContextTabs({
               0
             </span>
           )}
-        </button>
+        </PrimitiveButton>
         <div
           role="presentation"
           data-context-repos-scroll
@@ -390,7 +392,8 @@ export function ContextTabs({
               role="presentation"
               className={`group ${groupedTabClass(name)}`}
             >
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 data-context-tab={name}
                 tabIndex={effectiveTabStop === name ? 0 : -1}
@@ -415,8 +418,8 @@ export function ContextTabs({
                     {idx + 1}
                   </span>
                 )}
-              </button>
-              <button
+              </PrimitiveButton>
+              <PrimitiveButton bare
                 type="button"
                 tabIndex={-1}
                 aria-label={`Close ${name}`}
@@ -429,7 +432,7 @@ export function ContextTabs({
                 }}
               >
                 ×
-              </button>
+              </PrimitiveButton>
             </div>
           ))}
           {pinnedRuns.map((runId) => {
@@ -441,7 +444,8 @@ export function ContextTabs({
                 role="presentation"
                 className={`group ${groupedTabClass(tabKey)}`}
               >
-                <button
+                <PrimitiveButton
+                  bare
                   type="button"
                   data-context-tab={tabKey}
                   tabIndex={effectiveTabStop === tabKey ? 0 : -1}
@@ -459,8 +463,8 @@ export function ContextTabs({
                     ▶
                   </span>
                   <span className="mono max-w-32 truncate">{runId}</span>
-                </button>
-                <button
+                </PrimitiveButton>
+                <PrimitiveButton bare
                   type="button"
                   tabIndex={-1}
                   aria-label={`Close ${runId}`}
@@ -473,7 +477,7 @@ export function ContextTabs({
                   }}
                 >
                   ×
-                </button>
+                </PrimitiveButton>
               </div>
             );
           })}
@@ -483,7 +487,7 @@ export function ContextTabs({
           data-context-filter-divider
           className="mx-0.5 h-5 w-px shrink-0 bg-(--border)"
         />
-        <button
+        <PrimitiveButton bare
           type="button"
           data-context-tab={INFLIGHT}
           tabIndex={effectiveTabStop === INFLIGHT ? 0 : -1}
@@ -509,26 +513,24 @@ export function ContextTabs({
               i
             </span>
           )}
-        </button>
+        </PrimitiveButton>
       </div>
       <div className="relative flex shrink-0 items-center" ref={pickerRef}>
-        <button
+        <IconButton
           ref={plusRef}
-          type="button"
           aria-expanded={picker}
           aria-haspopup="listbox"
           aria-controls="repo-picker-listbox"
           aria-label="Open a repo tab"
-          title="Open a repo tab (g 1–9)"
-          className="flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium text-(--text-dim) outline-none transition-colors hover:bg-(--surface-2) hover:text-(--text) focus-visible:ring-2 focus-visible:ring-(--accent)"
+          tooltip="Open a repo tab (g 1–9)"
+          className="rounded-full text-(--text-dim) outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
           onClick={() => setPicker((open) => !open)}
           onKeyDown={handlePickerTriggerKeyDown}
         >
           <span aria-hidden="true" className="text-[14px] leading-none">
             +
           </span>
-          <span>Repo</span>
-        </button>
+        </IconButton>
         {picker && (
           <div
             ref={listboxRef}
@@ -556,7 +558,7 @@ export function ContextTabs({
               </div>
             ) : (
               available.map((r, i) => (
-                <button
+                <PrimitiveButton bare
                   key={r.name}
                   id={`repo-picker-opt-${i}`}
                   type="button"
@@ -575,7 +577,7 @@ export function ContextTabs({
                   {r.team ? (
                     <span className="ml-2 text-(--text-faint)">{r.team}</span>
                   ) : null}
-                </button>
+                </PrimitiveButton>
               ))
             )}
           </div>

@@ -33,6 +33,7 @@ import type {
   ArtifactInventoryItem,
   StatusView,
 } from "../types";
+import { Button as PrimitiveButton } from "../components/ui";
 
 export { formatBytes };
 
@@ -489,7 +490,8 @@ export function Artifacts({
                     { label: "Orphans", value: true, count: summary.orphans },
                   ] as const
                 ).map((facet) => (
-                  <button
+                  <PrimitiveButton
+                    bare
                     key={facet.label}
                     type="button"
                     role="tab"
@@ -505,7 +507,7 @@ export function Artifacts({
                     <span className="ml-1.5 tabular-nums text-(--text-faint)">
                       {facet.count.toLocaleString()}
                     </span>
-                  </button>
+                  </PrimitiveButton>
                 ))}
               </div>
               <span className="ml-auto">
@@ -740,13 +742,14 @@ export function Artifacts({
               aria-label="Breadcrumb"
               className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
             >
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={closeInspector}
                 className="text-(--text-dim) hover:text-(--accent)"
               >
                 Artifacts
-              </button>
+              </PrimitiveButton>
               <span aria-hidden="true" className="text-(--text-faint)">
                 /
               </span>

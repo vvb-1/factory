@@ -1,3 +1,4 @@
+import { Button as PrimitiveButton } from "./ui";
 /**
  * The "Display" popover (OPS-493, WM-214) — Linear's view-options panel for the table
  * views: grouping, sub-grouping, ordering, list options, display properties,
@@ -143,7 +144,7 @@ function ListboxSelect({
 
   return (
     <div className="relative w-32">
-      <button
+      <PrimitiveButton bare
         ref={triggerRef}
         id={id}
         type="button"
@@ -166,7 +167,7 @@ function ListboxSelect({
         <span aria-hidden className="shrink-0 text-[9px] text-(--text-faint)">
           ▼
         </span>
-      </button>
+      </PrimitiveButton>
       {open && (
         <ul
           ref={listRef}
@@ -218,7 +219,7 @@ function Switch({
   label: string;
 }) {
   return (
-    <button
+    <PrimitiveButton bare
       type="button"
       role="switch"
       aria-checked={checked}
@@ -235,7 +236,7 @@ function Switch({
         }`}
         style={checked ? { background: "var(--on-accent)" } : undefined}
       />
-    </button>
+    </PrimitiveButton>
   );
 }
 
@@ -416,7 +417,7 @@ function DiscoveredFieldSuggestInput({
           onKeyDown={onKeyDown}
           className="mono min-w-0 flex-1 rounded-md border border-(--border) bg-(--surface-0) px-2 py-1 text-[11px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--border-strong)"
         />
-        <button
+        <PrimitiveButton bare
           type="button"
           disabled={!value.trim()}
           onMouseDown={(event) => event.preventDefault()}
@@ -427,7 +428,7 @@ function DiscoveredFieldSuggestInput({
           className="cursor-pointer rounded-md border border-(--border) bg-(--surface-2) px-2 py-1 text-[11px] font-medium text-(--text-dim) hover:bg-(--surface-3) hover:text-(--text) disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Add
-        </button>
+        </PrimitiveButton>
       </div>
 
       {show && (
@@ -593,7 +594,7 @@ export function DisplayOptions<T>({
 
   return (
     <div ref={rootRef} className="relative">
-      <button
+      <PrimitiveButton bare
         ref={triggerRef}
         type="button"
         aria-expanded={open}
@@ -620,7 +621,7 @@ export function DisplayOptions<T>({
             title="Display options customized"
           />
         )}
-      </button>
+      </PrimitiveButton>
 
       {open && (
         <div
@@ -705,7 +706,7 @@ export function DisplayOptions<T>({
                 {(["asc", "desc"] as const).map((direction) => {
                   const pressed = state.sortDir === direction;
                   return (
-                    <button
+                    <PrimitiveButton bare
                       key={direction}
                       type="button"
                       aria-pressed={pressed}
@@ -725,7 +726,7 @@ export function DisplayOptions<T>({
                     >
                       <span aria-hidden>{direction === "asc" ? "↑" : "↓"}</span>{" "}
                       {direction}
-                    </button>
+                    </PrimitiveButton>
                   );
                 })}
               </div>
@@ -749,7 +750,7 @@ export function DisplayOptions<T>({
                 {toggleable.map((c) => {
                   const shown = !state.hiddenColumns.includes(c.key);
                   return (
-                    <button
+                    <PrimitiveButton bare
                       key={c.key}
                       type="button"
                       aria-pressed={shown}
@@ -778,7 +779,7 @@ export function DisplayOptions<T>({
                         </span>
                       )}
                       {c.label}
-                    </button>
+                    </PrimitiveButton>
                   );
                 })}
               </div>
@@ -801,7 +802,7 @@ export function DisplayOptions<T>({
                         : "border-(--border) text-(--text-faint)"
                     }`}
                   >
-                    <button
+                    <PrimitiveButton bare
                       type="button"
                       title={shown ? "Hide column" : "Show column"}
                       onClick={() =>
@@ -815,8 +816,8 @@ export function DisplayOptions<T>({
                       className="cursor-pointer font-medium hover:underline"
                     >
                       {path}
-                    </button>
-                    <button
+                    </PrimitiveButton>
+                    <PrimitiveButton bare
                       type="button"
                       aria-label={`Remove column ${path}`}
                       title="Remove column"
@@ -826,7 +827,7 @@ export function DisplayOptions<T>({
                       className="cursor-pointer text-(--text-faint) hover:text-(--text)"
                     >
                       ×
-                    </button>
+                    </PrimitiveButton>
                   </div>
                 );
               })}
@@ -844,7 +845,7 @@ export function DisplayOptions<T>({
           {(onExport || customized) && (
             <div className="mt-3 flex items-center justify-between border-t border-(--border) pt-2">
               {onExport ? (
-                <button
+                <PrimitiveButton bare
                   type="button"
                   onClick={() => {
                     onExport();
@@ -852,12 +853,12 @@ export function DisplayOptions<T>({
                   className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] font-medium text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
                 >
                   Export JSON
-                </button>
+                </PrimitiveButton>
               ) : (
                 <span />
               )}
               {customized && (
-                <button
+                <PrimitiveButton bare
                   type="button"
                   onClick={() =>
                     onChange({ ...defaultDisplayState(config), collapsed: [] })
@@ -865,7 +866,7 @@ export function DisplayOptions<T>({
                   className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-2) hover:text-(--text)"
                 >
                   Reset to defaults
-                </button>
+                </PrimitiveButton>
               )}
             </div>
           )}

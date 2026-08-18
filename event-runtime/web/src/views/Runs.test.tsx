@@ -443,6 +443,34 @@ describe("Runs component harness: selection & filter retention", () => {
     );
   });
 
+  test("tab counts describe the filtered set instead of the unfiltered totals", async () => {
+    const rows = [
+      stubListItem("run_match_active", "RUNNING", { agent: "triage-scan" }),
+      stubListItem("run_match_done", "COMPLETED", { agent: "triage-scan" }),
+      stubListItem("run_other_failed", "FAILED", { agent: "review-scan" }),
+    ];
+
+    await withApi(
+      {
+        runs: async () => ({ runs: rows }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        await waitFor(() => r.container.querySelector('td[title="run_match_active"]'));
+
+        act(() => {
+          changeInput(r.getByLabelText("Filter runs") as HTMLInputElement, "agent:triage-scan");
+        });
+
+        expect(r.getByRole("tab", { name: /^All 2$/i })).toBeTruthy();
+        expect(r.getByRole("tab", { name: /^Active 1$/i })).toBeTruthy();
+        expect(r.getByRole("tab", { name: /^Completed 1$/i })).toBeTruthy();
+        expect(r.getByRole("tab", { name: /^Failed$/i })).toBeTruthy();
+      },
+    );
+  });
+
   test("switching status tabs clears row selection via onSelectRun(null)", async () => {
     const onSelectRun = mock(() => {});
     const r1 = stubListItem("run_tab_1", "RUNNING");
@@ -751,15 +779,22 @@ describe("Runs copy chords and hints (WM-233)", () => {
         const idBtn = await r.findByRole("button", { name: "Copy run id (c)" });
 
         // Verify icon-action tooltips preserve shortcut discoverability.
-        expect(idBtn.getAttribute("title")).toBe("Copy run id · c");
-        const cliBtn = r.getByRole("button", {
-          name: "Copy CLI inspect command (c i)",
-        });
-        expect(cliBtn.getAttribute("title")).toBe(
-          "Copy CLI inspect command · c i",
+        expect(idBtn).toBeTruthy();
+        expect(
+          r.getByRole("button", { name: "Copy CLI inspect command (c i)" }),
+        ).toBeTruthy();
+        expect(
+          r.getByRole("button", { name: "Copy link (c l)" }),
+        ).toBeTruthy();
+        expect(
+          r.getAllByRole("tooltip").map((tooltip) => tooltip.textContent),
+        ).toEqual(
+          expect.arrayContaining([
+            "Copy run id · c",
+            "Copy CLI inspect command · c i",
+            "Copy link · c l",
+          ]),
         );
-        const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
-        expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
 
         // 1. Press 'c' -> copies runId
         fireEvent.keyDown(document.body, { key: "c" });

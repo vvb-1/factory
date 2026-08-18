@@ -56,6 +56,7 @@ import {
   shortId,
 } from "../components/ui";
 import { health, WORKER_HUES } from "../workerHealth";
+import { Button as PrimitiveButton } from "../components/ui";
 
 export const WORKER_TABS = ["ALL", "LIVE", "STOPPED"] as const;
 export type WorkerTab = (typeof WORKER_TABS)[number];
@@ -768,7 +769,7 @@ export function Workers({
                 aria-label="Worker state"
               >
                 {WORKER_TABS.map((t, idx) => (
-                  <button
+                  <PrimitiveButton bare
                     key={t}
                     type="button"
                     role="tab"
@@ -802,7 +803,7 @@ export function Workers({
                     >
                       {idx + 1}
                     </span>
-                  </button>
+                  </PrimitiveButton>
                 ))}
               </div>
               <span className="ml-auto">

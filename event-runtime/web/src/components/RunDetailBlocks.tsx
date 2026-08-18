@@ -33,6 +33,7 @@ import {
 } from "./ui";
 import { AgentHoverCard } from "./AgentHoverCard";
 import { attrIcon } from "./attrIcons";
+import { Button as PrimitiveButton } from "./ui";
 
 /**
  * The artifact view renderer (WM-455) is fetched on demand: RunDetailBlocks
@@ -250,13 +251,13 @@ export function RunFailureBanner({
           {reason ?? "No reason recorded on the terminal transition."}
         </div>
         {reason && (
-          <button
+          <PrimitiveButton bare
             type="button"
             onClick={() => copyText(reason, "failure reason")}
             className="shrink-0 cursor-pointer text-[11px] text-(--text-faint) hover:text-(--text) hover:underline"
           >
             Copy reason
-          </button>
+          </PrimitiveButton>
         )}
       </div>
     </div>
@@ -340,13 +341,13 @@ export function ArtifactRow({ a }: { a: ArtifactRef }) {
             {formatBytes(a.sizeBytes)}
           </span>
           {textFriendly && (
-            <button
+            <PrimitiveButton bare
               type="button"
               onClick={togglePreview}
               className="text-[12px] text-(--text-dim) hover:text-(--accent)"
             >
               {open ? "Hide" : "Preview"}
-            </button>
+            </PrimitiveButton>
           )}
           <a
             href={artifactUrl(a.sha256, a.kind)}

@@ -71,6 +71,7 @@ import {
   copyLink,
   shortId,
 } from "../components/ui";
+import { Button as PrimitiveButton } from "../components/ui";
 
 const PROPOSAL_TABS = ["open", "history"] as const;
 type ProposalTab = (typeof PROPOSAL_TABS)[number];
@@ -1065,7 +1066,8 @@ export function Proposals({
                               matchesRepo(p.repos, context),
                           ).length;
                     return (
-                      <button
+                      <PrimitiveButton
+                        bare
                         key={t}
                         type="button"
                         role="tab"
@@ -1086,12 +1088,13 @@ export function Proposals({
                         >
                           {idx + 1}
                         </span>
-                      </button>
+                      </PrimitiveButton>
                     );
                   })}
                 </div>
                 {tab === "open" && expiredCount > 0 && (
-                  <button
+                  <PrimitiveButton
+                    bare
                     type="button"
                     aria-pressed={expiredOnly}
                     onClick={() => setExpiredOnly((v) => !v)}
@@ -1106,7 +1109,7 @@ export function Proposals({
                     <span className="ml-1.5 tabular-nums text-(--text-faint)">
                       {expiredCount}
                     </span>
-                  </button>
+                  </PrimitiveButton>
                 )}
                 <span className="ml-auto">
                   <DisplayOptions
@@ -1393,14 +1396,15 @@ export function Proposals({
               aria-label="Breadcrumb"
               className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
             >
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={() => onSelectProposal(null)}
                 className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
                 title="Back to proposals list"
               >
                 Proposals
-              </button>
+              </PrimitiveButton>
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>
@@ -1617,7 +1621,7 @@ export function Proposals({
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {CANNED_REJECTION_REASONS.map((tmpl) => (
-                  <button
+                  <PrimitiveButton bare
                     key={tmpl}
                     type="button"
                     onClick={() => {
@@ -1631,7 +1635,7 @@ export function Proposals({
                     }`}
                   >
                     {tmpl}
-                  </button>
+                  </PrimitiveButton>
                 ))}
               </div>
               <div className="mt-1 flex flex-col gap-2 sm:flex-row">
@@ -1866,7 +1870,7 @@ export function Proposals({
           </div>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {CANNED_REJECTION_REASONS.map((tmpl) => (
-              <button
+              <PrimitiveButton bare
                 key={tmpl}
                 type="button"
                 onClick={() => {
@@ -1880,7 +1884,7 @@ export function Proposals({
                 }`}
               >
                 {tmpl}
-              </button>
+              </PrimitiveButton>
             ))}
           </div>
           <input

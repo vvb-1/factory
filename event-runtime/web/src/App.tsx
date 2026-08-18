@@ -41,12 +41,13 @@ import {
   useGoSequences,
   type PaletteAction,
 } from "./components/CommandPalette";
-import { ToastContainer, copyLink, copyText } from "./components/ui";
+import { IconButton, ToastContainer, copyLink, copyText } from "./components/ui";
 import type { ArtifactFilters } from "./views/Artifacts";
 import { Events } from "./views/Events";
 import { Overview } from "./views/Overview";
 import { Runs } from "./views/Runs";
 import { NAV, type NavKey } from "./nav";
+import { Button as PrimitiveButton } from "./components/ui";
 
 type WorkerHealthFilter = "live" | "busy" | "stale";
 const isWorkerHealthFilter = (
@@ -619,7 +620,8 @@ export function App() {
               />
               <span className="display text-[14px] font-semibold">factory</span>
             </div>
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               className="rounded px-1.5 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
               title={
@@ -636,13 +638,14 @@ export function App() {
               onClick={() => env?.home && copyText(env.home, "runtime home")}
             >
               {envLabel}
-            </button>
+            </PrimitiveButton>
           </div>
           <div className="flex-1 px-2">
             {NAV.map((n) => {
               const badge = navBadges[n.key];
               return (
-                <button
+                <PrimitiveButton
+                  bare
                   key={n.key}
                   type="button"
                   aria-current={
@@ -671,17 +674,18 @@ export function App() {
                      nodes referenced by labelledby/describedby). */
                     <NavCount id={`nav-badge-${n.key}`} badge={badge} />
                   )}
-                </button>
+                </PrimitiveButton>
               );
             })}
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => setInjectOpen(true)}
               className="mt-2 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2)"
             >
               Inject event…{" "}
               <span className="mono ml-1 text-(--text-faint)">i</span>
-            </button>
+            </PrimitiveButton>
           </div>
         </nav>
 
@@ -711,7 +715,8 @@ export function App() {
                   disabled until <span className="mono">/health</span> responds.
                   This is not an empty factory.
                 </span>
-                <button
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={() => health.refetch()}
                   className="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium"
@@ -722,7 +727,7 @@ export function App() {
                   }}
                 >
                   Retry
-                </button>
+                </PrimitiveButton>
               </div>
             </div>
           )}
@@ -1058,15 +1063,14 @@ export function App() {
             <span className="mono">g</span> go · <span className="mono">?</span>{" "}
             keys
           </div>
-          <button
-            type="button"
+          <IconButton
             onClick={cycleTheme}
-            title={`Theme ${theme} — click for ${nextTheme}`}
             aria-label={`Theme: ${theme}. Switch to ${nextTheme}.`}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-(--text-faint) hover:bg-(--surface-2) hover:text-(--text) focus-visible:outline focus-visible:outline-1 focus-visible:outline-(--focus-ring) transition-colors"
+            tooltip={`Theme ${theme} — click for ${nextTheme}`}
+            className="text-(--text-faint) focus-visible:outline focus-visible:outline-1 focus-visible:outline-(--focus-ring)"
           >
             <ThemeIcon theme={theme} />
-          </button>
+          </IconButton>
         </div>
       </footer>
 

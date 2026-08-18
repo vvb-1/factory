@@ -12,6 +12,7 @@ import {
   Dialog,
   FilterInput,
   getValueHue,
+  IconButton,
   KV,
   KVGroup,
   notify,
@@ -71,8 +72,50 @@ describe("shortId (WM-96)", () => {
   });
 });
 
+describe("control sizing (WM-589)", () => {
+  test("Button renders the shared 24, 28, and 32px sizes", () => {
+    const r = render(
+      <>
+        <Button size="sm"><svg aria-hidden="true" />Small</Button>
+        <Button size="md"><svg aria-hidden="true" />Medium</Button>
+        <Button size="lg"><svg aria-hidden="true" />Large</Button>
+      </>,
+    );
+
+    const small = r.getByRole("button", { name: "Small" });
+    const medium = r.getByRole("button", { name: "Medium" });
+    const large = r.getByRole("button", { name: "Large" });
+    expect(classes(small)).toEqual(expect.arrayContaining(["h-6", "px-2", "[&>svg]:size-3"]));
+    expect(classes(medium)).toEqual(expect.arrayContaining(["h-7", "px-2.5", "[&>svg]:size-3.5"]));
+    expect(classes(large)).toEqual(expect.arrayContaining(["h-8", "px-3", "[&>svg]:size-4"]));
+    expect(small.getAttribute("data-control-size")).toBe("sm");
+    expect(medium.getAttribute("data-control-size")).toBe("md");
+    expect(large.getAttribute("data-control-size")).toBe("lg");
+  });
+
+  test("IconButton rejects a missing accessible name", () => {
+    expect(() =>
+      render(
+        // Runtime protection complements the required TypeScript prop for JS/dynamic callers.
+        // @ts-expect-error exercising the runtime guard
+        <IconButton><span aria-hidden="true">×</span></IconButton>,
+      ),
+    ).toThrow("IconButton requires a non-empty aria-label");
+  });
+
+  test("IconButton is a square medium control with a shared tooltip", () => {
+    const r = render(
+      <IconButton aria-label="Copy run id"><span aria-hidden="true">#</span></IconButton>,
+    );
+    const button = r.getByRole("button", { name: "Copy run id" });
+    expect(classes(button)).toContain("h-7");
+    expect(classes(button)).toContain("w-7");
+    expect(r.getByRole("tooltip").textContent).toBe("Copy run id");
+  });
+});
+
 describe("CopyActions (WM-302)", () => {
-  test("renders icon-only actions with accessible labels and shortcut tooltips", () => {
+  test("renders icon-only actions with accessible labels and shared shortcut tooltips", () => {
     const r = render(
       <CopyActions
         id="run_123"
@@ -87,9 +130,11 @@ describe("CopyActions (WM-302)", () => {
       name: "Copy CLI inspect command (c i)",
     });
     const link = r.getByRole("button", { name: "Copy link (c l)" });
-    expect(id.getAttribute("title")).toBe("Copy run id · c");
-    expect(cli.getAttribute("title")).toBe("Copy CLI inspect command · c i");
-    expect(link.getAttribute("title")).toBe("Copy link · c l");
+    expect(r.getAllByRole("tooltip").map((el) => el.textContent)).toEqual([
+      "Copy run id · c",
+      "Copy CLI inspect command · c i",
+      "Copy link · c l",
+    ]);
     expect(id.textContent).toBe("");
     expect(cli.textContent).toBe("");
     expect(link.textContent).toBe("");

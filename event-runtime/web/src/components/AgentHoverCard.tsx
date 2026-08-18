@@ -9,6 +9,7 @@ import { resolveEntity } from "../entities";
 import type { AgentDef } from "../types";
 import { HoverCard } from "./HoverCard";
 import { JumpLink, StateBadge } from "./ui";
+import { Button as PrimitiveButton } from "./ui";
 
 /** Shared empty-value glyph for registry metadata. */
 export const EMPTY_VALUE = "—";
@@ -223,13 +224,14 @@ export function AgentHoverCard({
                 so the card is never a dead end for keyboard or middle-click. */}
           <div className="mt-2.5 pt-2 border-t border-(--border) flex justify-end">
             {onJumpAgent ? (
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={jump(close)}
                 className={FOOTER_LINK_CLASS}
               >
                 Open in Agents <span aria-hidden="true">→</span>
-              </button>
+              </PrimitiveButton>
             ) : (
               entity && (
                 <a

@@ -19,6 +19,7 @@ import {
   hashHref,
   ticketIdOf,
 } from "./RunDetailBlocks";
+import { Button as PrimitiveButton } from "./ui";
 
 /**
  * The per-ticket "why isn't this running?" answer (WM-594). Split out of
@@ -232,7 +233,7 @@ export function TicketDecisions({
             onClick={() => setOpen((o) => !o)}
             title={decisionHeadline(latest, now)}
           >
-            <button
+            <PrimitiveButton bare
               type="button"
               aria-expanded={open}
               aria-label={`${open ? "Hide" : "Show"} all ${decisions.length} planner decisions for ${ticket}`}
@@ -244,7 +245,7 @@ export function TicketDecisions({
             >
               <DisclosureChevron open={open} />
               <span className="text-[11px] text-(--text-faint)">last:</span>
-            </button>
+            </PrimitiveButton>
             <StateBadge
               state={latest.outcome}
               hues={OUTCOME_HUES}
