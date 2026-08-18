@@ -540,39 +540,60 @@ function TicketsHub({
                       {ticket.attempts != null ? ticket.attempts : "—"}
                     </td>
                     <td className="px-3 py-2">
-                      {ticket.pr != null ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <a
-                            href={ticket.prUrl || `#/prs/${ticket.pr}`}
-                            onClick={(e) => {
-                              if (onNavigatePr) {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onNavigatePr(ticket.pr!);
-                              }
-                            }}
-                            className="mono text-(--accent) hover:underline"
-                          >
-                            {`PR #${ticket.pr}`}
-                          </a>
-                          {(ticket.ciStatus || ticket.checksGreen != null) && (
-                            <span
-                              className={`inline-block size-2 rounded-full ring-2 ring-(--surface-1) ${
-                                ticket.ciStatus === "green" ||
-                                ticket.checksGreen === true
-                                  ? "bg-(--hue-ok)"
-                                  : ticket.ciStatus === "red" ||
-                                      ticket.checksGreen === false
-                                    ? "bg-(--hue-err)"
-                                    : "bg-(--hue-warn)"
-                              }`}
-                              title={`CI: ${ticket.ciStatus ?? (ticket.checksGreen ? "green" : "red")}`}
-                            />
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-(--text-faint)">—</span>
-                      )}
+                      {(() => {
+                        const prNumber =
+                          typeof ticket.pr === "number"
+                            ? ticket.pr
+                            : ticket.pr && typeof ticket.pr === "object"
+                              ? ticket.pr.number
+                              : null;
+                        const prUrl =
+                          typeof ticket.pr === "object" && ticket.pr?.url
+                            ? ticket.pr.url
+                            : ticket.prUrl ||
+                              (prNumber ? `#/prs/${prNumber}` : undefined);
+                        const ci =
+                          typeof ticket.pr === "object" && ticket.pr?.ci
+                            ? ticket.pr.ci
+                            : (ticket.ciStatus ??
+                              (ticket.checksGreen != null
+                                ? ticket.checksGreen
+                                  ? "green"
+                                  : "red"
+                                : null));
+
+                        return prNumber != null ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <a
+                              href={prUrl || `#/prs/${prNumber}`}
+                              onClick={(e) => {
+                                if (onNavigatePr) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onNavigatePr(prNumber);
+                                }
+                              }}
+                              className="mono text-(--accent) hover:underline"
+                            >
+                              {`#${prNumber}`}
+                            </a>
+                            {ci && (
+                              <span
+                                className={`inline-block size-2 rounded-full ring-2 ring-(--surface-1) ${
+                                  ci === "green"
+                                    ? "bg-(--hue-ok)"
+                                    : ci === "red"
+                                      ? "bg-(--hue-err)"
+                                      : "bg-(--hue-warn)"
+                                }`}
+                                title={`CI: ${ci}`}
+                              />
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-(--text-faint)">—</span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );

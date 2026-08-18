@@ -848,9 +848,12 @@ export interface TicketSummary {
   lastActivityDescription?: string | null;
   lastActivityKind?: string | null;
   attempts?: number;
-  pr?: number | null;
+  activeRun?: { runId: string; state: string; agent: string } | null;
+  lastDecision?: string | null;
+  pr?: { number: number; url?: string; ci?: string } | number | null;
   prUrl?: string | null;
   checksGreen?: boolean | null;
   ciStatus?: "green" | "red" | "pending" | string | null;
   url?: string | null;
+  merged?: boolean;
 }

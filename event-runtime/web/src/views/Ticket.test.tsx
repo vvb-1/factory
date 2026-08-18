@@ -543,6 +543,26 @@ describe("PR journey view", () => {
 describe("Tickets hub landing view", () => {
   const ticketsFixture = [
     {
+      id: "WM-772",
+      title: "Auto approval workflow fix",
+      state: "Done",
+      repo: "factory",
+      repos: ["factory"],
+      lastActivityAt: "2026-08-18T19:00:00.000Z",
+      lastActivityDescription: "merged into develop",
+      lastActivityKind: "merge",
+      attempts: 23,
+      pr: {
+        number: 772,
+        url: "https://github.com/watt-mind/factory/pull/772",
+        ci: "green",
+      },
+      prUrl: "https://github.com/watt-mind/factory/pull/772",
+      checksGreen: true,
+      ciStatus: "green",
+      url: "https://linear.app/watt-mind/issue/WM-772",
+    },
+    {
       id: "WM-822",
       title: "Tickets hub landing view",
       state: "In Progress",
@@ -631,12 +651,15 @@ describe("Tickets hub landing view", () => {
     await view.findByPlaceholderText(/WM-542/i);
     // Table should contain ticket entries
     await view.findByText("WM-822");
+    expect(view.getByText("WM-772")).toBeTruthy();
     expect(view.getByText("WM-821")).toBeTruthy();
     expect(view.getByText("OPS-91")).toBeTruthy();
     expect(view.getByText("Tickets hub landing view")).toBeTruthy();
     expect(view.getAllByText("In Progress").length).toBeGreaterThan(0);
     expect(view.getAllByText("factory").length).toBeGreaterThan(0);
-    expect(view.getByText("PR #542")).toBeTruthy();
+    expect(view.getByText("#772")).toBeTruthy();
+    expect(view.getByText("#542")).toBeTruthy();
+    expect(view.container.textContent).not.toContain("[object Object]");
     expect(view.getByText("2", { selector: "td" })).toBeTruthy(); // attempts
   });
 
@@ -771,7 +794,7 @@ describe("Tickets hub landing view", () => {
     expect(navigatedTicket).toBe("WM-822");
 
     // Click PR link
-    fireEvent.click(view.getByText("PR #542"));
+    fireEvent.click(view.getByText("#542"));
     expect(navigatedPr).toBe(542);
   });
 
