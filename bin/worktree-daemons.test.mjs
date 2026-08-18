@@ -237,7 +237,9 @@ test("rotate_log_file and rotate_daemon_logs rotate oversized logs", () => {
 });
 
 test("restart_daemon preserves the fake adapter reported by a live serve", () => {
-  const testDir = mkdtempSync(path.join(tmpdir(), "restart-worker-adapter-test-"));
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "restart-worker-adapter-test-"),
+  );
   const runDir = path.join(testDir, ".factory", "run");
   const spawnedArgs = path.join(testDir, "spawned.args");
   mkdirSync(runDir, { recursive: true });
@@ -265,7 +267,9 @@ test("restart_daemon preserves the fake adapter reported by a live serve", () =>
 });
 
 test("restart_daemon defaults a dead serve restart to the fake adapter", () => {
-  const testDir = mkdtempSync(path.join(tmpdir(), "restart-serve-adapter-test-"));
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "restart-serve-adapter-test-"),
+  );
   const runDir = path.join(testDir, ".factory", "run");
   const spawnedArgs = path.join(testDir, "spawned.args");
   mkdirSync(runDir, { recursive: true });
@@ -293,7 +297,9 @@ test("restart_daemon defaults a dead serve restart to the fake adapter", () => {
 });
 
 test("restart_daemon preserves an explicitly configured live adapter mode", () => {
-  const testDir = mkdtempSync(path.join(tmpdir(), "restart-live-adapter-test-"));
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "restart-live-adapter-test-"),
+  );
   const runDir = path.join(testDir, ".factory", "run");
   const spawnedArgs = path.join(testDir, "spawned.args");
   mkdirSync(runDir, { recursive: true });
