@@ -74,3 +74,34 @@ A failed or cancelled test job breaks the streak. Record the five develop run UR
 - **CodeQL** — gated behind `if: ${{ vars.CODEQL_ENABLED == 'true' }}` and currently a placeholder: this repo is private with no GitHub Advanced Security (`code-scanning/default-setup` returns 403). Flip the `CODEQL_ENABLED` repository variable and replace the placeholder step with `github/codeql-action` init/analyze once GHAS is available (project-conventions.md §3D).
 
 Run the same tools locally before pushing with `factory security` (Gitleaks + Semgrep + Actionlint, plus Ruff/pip-audit when a repo has adopted the Python tier) — see `lib/security-check.sh`. Local and CI use identical tool invocations and config files (`.gitleaks.toml`, `.semgrepignore`) so a clean local run predicts a clean CI run.
+
+## Browser E2E
+
+The Playwright smoke suite exercises the event-runtime web UI against an
+isolated fake-adapter runtime seeded by `event-runtime/demo/seed.mjs`. It covers
+Overview, Inbox acknowledgement, proposal approval inspection, Runs detail, and
+the capability Graph.
+
+Run it locally from the web package (Google Chrome must be installed):
+
+```bash
+cd event-runtime/web
+bun run test:e2e
+```
+
+The helper owns and removes a temporary `FACTORY_EVENT_HOME`. It picks two
+free ports per run (so concurrent worktrees never collide or seed each other's
+runtime); set `E2E_API_PORT` and `E2E_WEB_PORT` to pin them. It fails fast if
+the API, worker, or Vite process dies during startup rather than seeding
+whatever else is listening on the port. Set `PLAYWRIGHT_CHANNEL=chromium` to
+use Playwright's downloaded Chromium instead of system Chrome. The pinned
+`@playwright/test` version lives in `e2e/playwright-version.mjs`, read by both
+`test:e2e` and the workflow.
+
+`.github/workflows/e2e.yml` is deliberately opt-in while the suite proves
+stable. It runs for a pull request only when that PR has the `run-e2e` label,
+and it can always be started manually with `workflow_dispatch`. The workflow
+uses the shared verify lock to serialize against every other test job on the
+self-hosted runner, installs Playwright's Chromium build (cached in the
+runner's `~/.cache/ms-playwright`, keyed on the pinned version), and runs the
+same `bun run test:e2e` command.
