@@ -123,7 +123,9 @@ describe("ContextTabs", () => {
     const repoAction = r.getByRole("button", { name: "Open a repo tab" });
     expect(toolbar.contains(repoAction)).toBe(false);
     expect(repoAction.textContent).toBe("+");
-    expect(r.getByRole("tooltip", { name: "Open a repo tab (g 1–9)" })).toBeTruthy();
+    expect(
+      r.getByRole("tooltip", { name: "Open a repo tab (g 1–9)" }),
+    ).toBeTruthy();
 
     for (const name of ["Close factory", "Close run_abc"]) {
       const close = r.getByRole("button", { name });

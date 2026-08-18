@@ -144,7 +144,8 @@ function ListboxSelect({
 
   return (
     <div className="relative w-32">
-      <PrimitiveButton bare
+      <PrimitiveButton
+        bare
         ref={triggerRef}
         id={id}
         type="button"
@@ -219,7 +220,8 @@ function Switch({
   label: string;
 }) {
   return (
-    <PrimitiveButton bare
+    <PrimitiveButton
+      bare
       type="button"
       role="switch"
       aria-checked={checked}
@@ -417,7 +419,8 @@ function DiscoveredFieldSuggestInput({
           onKeyDown={onKeyDown}
           className="mono min-w-0 flex-1 rounded-md border border-(--border) bg-(--surface-0) px-2 py-1 text-[11px] text-(--text) outline-none placeholder:text-(--text-faint) focus:border-(--border-strong)"
         />
-        <PrimitiveButton bare
+        <PrimitiveButton
+          bare
           type="button"
           disabled={!value.trim()}
           onMouseDown={(event) => event.preventDefault()}
@@ -594,7 +597,8 @@ export function DisplayOptions<T>({
 
   return (
     <div ref={rootRef} className="relative">
-      <PrimitiveButton bare
+      <PrimitiveButton
+        bare
         ref={triggerRef}
         type="button"
         aria-expanded={open}
@@ -706,7 +710,8 @@ export function DisplayOptions<T>({
                 {(["asc", "desc"] as const).map((direction) => {
                   const pressed = state.sortDir === direction;
                   return (
-                    <PrimitiveButton bare
+                    <PrimitiveButton
+                      bare
                       key={direction}
                       type="button"
                       aria-pressed={pressed}
@@ -750,7 +755,8 @@ export function DisplayOptions<T>({
                 {toggleable.map((c) => {
                   const shown = !state.hiddenColumns.includes(c.key);
                   return (
-                    <PrimitiveButton bare
+                    <PrimitiveButton
+                      bare
                       key={c.key}
                       type="button"
                       aria-pressed={shown}
@@ -802,7 +808,8 @@ export function DisplayOptions<T>({
                         : "border-(--border) text-(--text-faint)"
                     }`}
                   >
-                    <PrimitiveButton bare
+                    <PrimitiveButton
+                      bare
                       type="button"
                       title={shown ? "Hide column" : "Show column"}
                       onClick={() =>
@@ -817,7 +824,8 @@ export function DisplayOptions<T>({
                     >
                       {path}
                     </PrimitiveButton>
-                    <PrimitiveButton bare
+                    <PrimitiveButton
+                      bare
                       type="button"
                       aria-label={`Remove column ${path}`}
                       title="Remove column"
@@ -845,7 +853,8 @@ export function DisplayOptions<T>({
           {(onExport || customized) && (
             <div className="mt-3 flex items-center justify-between border-t border-(--border) pt-2">
               {onExport ? (
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={() => {
                     onExport();
@@ -858,7 +867,8 @@ export function DisplayOptions<T>({
                 <span />
               )}
               {customized && (
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={() =>
                     onChange({ ...defaultDisplayState(config), collapsed: [] })

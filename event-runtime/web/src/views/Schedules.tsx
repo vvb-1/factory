@@ -472,7 +472,8 @@ export function Schedules({
                       ? enabledCount
                       : disabledCount;
                 return (
-                  <PrimitiveButton bare
+                  <PrimitiveButton
+                    bare
                     key={scheduleTab}
                     id={`schedule-tab-${scheduleTab}`}
                     type="button"

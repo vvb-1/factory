@@ -472,7 +472,10 @@ export function Runs({
   );
   const parsed = useMemo(() => parseFilterQuery(filter, RUN_FACETS), [filter]);
   const filteredScoped = useMemo(
-    () => scoped.filter((r) => matchesFilterQuery(r, parsed, RUN_FACETS, { staleRuns })),
+    () =>
+      scoped.filter((r) =>
+        matchesFilterQuery(r, parsed, RUN_FACETS, { staleRuns }),
+      ),
     [scoped, parsed, staleRuns],
   );
   const visible = useMemo(

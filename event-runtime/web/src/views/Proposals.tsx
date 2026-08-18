@@ -1621,7 +1621,8 @@ export function Proposals({
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {CANNED_REJECTION_REASONS.map((tmpl) => (
-                  <PrimitiveButton bare
+                  <PrimitiveButton
+                    bare
                     key={tmpl}
                     type="button"
                     onClick={() => {
@@ -1870,7 +1871,8 @@ export function Proposals({
           </div>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {CANNED_REJECTION_REASONS.map((tmpl) => (
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 key={tmpl}
                 type="button"
                 onClick={() => {

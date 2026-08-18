@@ -457,10 +457,15 @@ describe("Runs component harness: selection & filter retention", () => {
       },
       async () => {
         const r = renderRuns();
-        await waitFor(() => r.container.querySelector('td[title="run_match_active"]'));
+        await waitFor(() =>
+          r.container.querySelector('td[title="run_match_active"]'),
+        );
 
         act(() => {
-          changeInput(r.getByLabelText("Filter runs") as HTMLInputElement, "agent:triage-scan");
+          changeInput(
+            r.getByLabelText("Filter runs") as HTMLInputElement,
+            "agent:triage-scan",
+          );
         });
 
         expect(r.getByRole("tab", { name: /^All 2$/i })).toBeTruthy();
@@ -783,9 +788,7 @@ describe("Runs copy chords and hints (WM-233)", () => {
         expect(
           r.getByRole("button", { name: "Copy CLI inspect command (c i)" }),
         ).toBeTruthy();
-        expect(
-          r.getByRole("button", { name: "Copy link (c l)" }),
-        ).toBeTruthy();
+        expect(r.getByRole("button", { name: "Copy link (c l)" })).toBeTruthy();
         expect(
           r.getAllByRole("tooltip").map((tooltip) => tooltip.textContent),
         ).toEqual(

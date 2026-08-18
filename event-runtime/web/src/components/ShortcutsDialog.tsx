@@ -131,7 +131,8 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Keyboard" onClose={onClose}>
       <div className="-mt-9 mb-3 flex justify-end">
-        <PrimitiveButton bare
+        <PrimitiveButton
+          bare
           type="button"
           autoFocus
           ref={(node) => node?.setAttribute("autofocus", "")}

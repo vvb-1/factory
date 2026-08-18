@@ -769,7 +769,8 @@ export function Workers({
                 aria-label="Worker state"
               >
                 {WORKER_TABS.map((t, idx) => (
-                  <PrimitiveButton bare
+                  <PrimitiveButton
+                    bare
                     key={t}
                     type="button"
                     role="tab"

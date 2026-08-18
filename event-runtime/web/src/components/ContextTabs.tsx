@@ -357,7 +357,8 @@ export function ContextTabs({
         onKeyDown={handleKeyDown}
         {...{ [CONTEXT_TABS_ATTR]: "" }}
       >
-        <PrimitiveButton bare
+        <PrimitiveButton
+          bare
           type="button"
           data-context-tab="all"
           tabIndex={effectiveTabStop === "all" ? 0 : -1}
@@ -419,7 +420,8 @@ export function ContextTabs({
                   </span>
                 )}
               </PrimitiveButton>
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 type="button"
                 tabIndex={-1}
                 aria-label={`Close ${name}`}
@@ -464,7 +466,8 @@ export function ContextTabs({
                   </span>
                   <span className="mono max-w-32 truncate">{runId}</span>
                 </PrimitiveButton>
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   type="button"
                   tabIndex={-1}
                   aria-label={`Close ${runId}`}
@@ -487,7 +490,8 @@ export function ContextTabs({
           data-context-filter-divider
           className="mx-0.5 h-5 w-px shrink-0 bg-(--border)"
         />
-        <PrimitiveButton bare
+        <PrimitiveButton
+          bare
           type="button"
           data-context-tab={INFLIGHT}
           tabIndex={effectiveTabStop === INFLIGHT ? 0 : -1}
@@ -558,7 +562,8 @@ export function ContextTabs({
               </div>
             ) : (
               available.map((r, i) => (
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   key={r.name}
                   id={`repo-picker-opt-${i}`}
                   type="button"

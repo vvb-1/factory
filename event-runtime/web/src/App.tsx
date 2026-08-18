@@ -41,7 +41,12 @@ import {
   useGoSequences,
   type PaletteAction,
 } from "./components/CommandPalette";
-import { IconButton, ToastContainer, copyLink, copyText } from "./components/ui";
+import {
+  IconButton,
+  ToastContainer,
+  copyLink,
+  copyText,
+} from "./components/ui";
 import type { ArtifactFilters } from "./views/Artifacts";
 import { Events } from "./views/Events";
 import { Overview } from "./views/Overview";

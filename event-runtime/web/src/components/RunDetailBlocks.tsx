@@ -251,7 +251,8 @@ export function RunFailureBanner({
           {reason ?? "No reason recorded on the terminal transition."}
         </div>
         {reason && (
-          <PrimitiveButton bare
+          <PrimitiveButton
+            bare
             type="button"
             onClick={() => copyText(reason, "failure reason")}
             className="shrink-0 cursor-pointer text-[11px] text-(--text-faint) hover:text-(--text) hover:underline"
@@ -341,7 +342,8 @@ export function ArtifactRow({ a }: { a: ArtifactRef }) {
             {formatBytes(a.sizeBytes)}
           </span>
           {textFriendly && (
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               onClick={togglePreview}
               className="text-[12px] text-(--text-dim) hover:text-(--accent)"

@@ -510,7 +510,8 @@ export function Projects({
                 aria-label="Project mode"
               >
                 {PROJECT_MODES.map((mode, idx) => (
-                  <PrimitiveButton bare
+                  <PrimitiveButton
+                    bare
                     key={mode}
                     type="button"
                     role="tab"

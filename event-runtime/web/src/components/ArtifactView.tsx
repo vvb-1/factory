@@ -57,7 +57,8 @@ export function RawToggle({
   onChange: (raw: boolean) => void;
 }) {
   const opt = (value: boolean, label: string) => (
-    <PrimitiveButton bare
+    <PrimitiveButton
+      bare
       type="button"
       aria-pressed={raw === value}
       onClick={() => onChange(value)}
@@ -317,7 +318,8 @@ function Rows({
               {hasExpand && (
                 <td className={`${CELL} w-6 pr-0`}>
                   {expandable && (
-                    <PrimitiveButton bare
+                    <PrimitiveButton
+                      bare
                       type="button"
                       aria-expanded={isOpen}
                       aria-label={isOpen ? "Collapse row" : "Expand row"}
@@ -374,7 +376,8 @@ function GroupRow({
   return (
     <tr>
       <td colSpan={colSpan} className="p-0">
-        <PrimitiveButton bare
+        <PrimitiveButton
+          bare
           type="button"
           aria-expanded={!collapsed}
           onClick={onToggle}

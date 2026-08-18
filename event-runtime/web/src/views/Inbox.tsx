@@ -745,7 +745,8 @@ export function Inbox({
                   aria-label="Inbox status"
                 >
                   {INBOX_TABS.map((t, idx) => (
-                    <PrimitiveButton bare
+                    <PrimitiveButton
+                      bare
                       key={t}
                       type="button"
                       role="tab"

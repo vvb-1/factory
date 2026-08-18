@@ -233,7 +233,8 @@ export function TicketDecisions({
             onClick={() => setOpen((o) => !o)}
             title={decisionHeadline(latest, now)}
           >
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               aria-expanded={open}
               aria-label={`${open ? "Hide" : "Show"} all ${decisions.length} planner decisions for ${ticket}`}

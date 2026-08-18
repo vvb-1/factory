@@ -61,7 +61,8 @@ export function SectionTitle({
 
   if (collapsible) {
     return (
-      <PrimitiveButton bare
+      <PrimitiveButton
+        bare
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
@@ -176,7 +177,8 @@ export function StatLegendItem({
       : "";
 
   return (
-    <PrimitiveButton bare
+    <PrimitiveButton
+      bare
       type="button"
       onClick={onClick}
       aria-label={`${fullLabel}: ${value}`}
@@ -684,7 +686,8 @@ function RecentOutcomesStrip({
                     : "var(--text-faint)";
             const label = `${o.runId} · ${o.to} · ${formatRelative(o.at, now)}`;
             return (
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 key={o.seq}
                 type="button"
                 onClick={() => onJumpRun(o.runId)}
@@ -1287,7 +1290,8 @@ export function Overview({
                       <div className="min-w-0">
                         {deadLetters ? (
                           <>
-                            <PrimitiveButton bare
+                            <PrimitiveButton
+                              bare
                               type="button"
                               onClick={() =>
                                 deadLetters.events.length > 1
@@ -1328,7 +1332,8 @@ export function Overview({
                               <ul className="mt-2 space-y-1 border-l border-(--border) pl-3">
                                 {deadLetters.events.map((event) => (
                                   <li key={`${event.source}:${event.eventId}`}>
-                                    <PrimitiveButton bare
+                                    <PrimitiveButton
+                                      bare
                                       type="button"
                                       onClick={() =>
                                         onJumpEvents({
@@ -1348,7 +1353,8 @@ export function Overview({
                           </>
                         ) : a.proposalId ? (
                           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 break-words text-[12px] text-(--hue-warn)">
-                            <PrimitiveButton bare
+                            <PrimitiveButton
+                              bare
                               type="button"
                               onClick={primaryLink?.go}
                               className="cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
@@ -1356,7 +1362,8 @@ export function Overview({
                               expired open
                             </PrimitiveButton>
                             <span className="text-(--text-faint)">·</span>
-                            <PrimitiveButton bare
+                            <PrimitiveButton
+                              bare
                               type="button"
                               className="mono cursor-pointer text-[11px] text-(--text-dim) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
                               title={`${a.proposalId} — click to copy`}
@@ -1404,7 +1411,8 @@ export function Overview({
                             )}
                           </div>
                         ) : primaryLink ? (
-                          <PrimitiveButton bare
+                          <PrimitiveButton
+                            bare
                             type="button"
                             onClick={primaryLink.go}
                             className="min-w-0 cursor-pointer break-words text-left text-[12px] text-(--hue-warn) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent) sm:truncate"
@@ -1423,7 +1431,8 @@ export function Overview({
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-1">
-                      <PrimitiveButton bare
+                      <PrimitiveButton
+                        bare
                         type="button"
                         onClick={() => copyText(a.text, "anomaly")}
                         className="cursor-pointer rounded px-1.5 py-1 text-[11px] text-(--text-faint) hover:text-(--text) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
@@ -1432,7 +1441,8 @@ export function Overview({
                       </PrimitiveButton>
                       <span className="flex flex-wrap items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/anomaly:opacity-100 sm:group-focus-within/anomaly:opacity-100">
                         {a.dismissProposalId && (
-                          <PrimitiveButton bare
+                          <PrimitiveButton
+                            bare
                             type="button"
                             className={quietActionClass}
                             disabled={!connected || reject.isPending}
@@ -1447,7 +1457,8 @@ export function Overview({
                         )}
                         {deadLetters && deadLetters.events.length > 1 ? (
                           <>
-                            <PrimitiveButton bare
+                            <PrimitiveButton
+                              bare
                               type="button"
                               className={quietActionClass}
                               disabled={!connected || bulkDeadLetter.isPending}
@@ -1460,7 +1471,8 @@ export function Overview({
                             >
                               Archive all
                             </PrimitiveButton>
-                            <PrimitiveButton bare
+                            <PrimitiveButton
+                              bare
                               type="button"
                               className={quietActionClass}
                               disabled={!connected || bulkDeadLetter.isPending}
@@ -1477,7 +1489,8 @@ export function Overview({
                         ) : (
                           <>
                             {a.archive && (
-                              <PrimitiveButton bare
+                              <PrimitiveButton
+                                bare
                                 type="button"
                                 className={quietActionClass}
                                 disabled={
@@ -1494,7 +1507,8 @@ export function Overview({
                               </PrimitiveButton>
                             )}
                             {a.requeue && (
-                              <PrimitiveButton bare
+                              <PrimitiveButton
+                                bare
                                 type="button"
                                 className={quietActionClass}
                                 disabled={!connected || requeue.isPending}
@@ -1506,7 +1520,8 @@ export function Overview({
                           </>
                         )}
                         {a.releaseWorker && (
-                          <PrimitiveButton bare
+                          <PrimitiveButton
+                            bare
                             type="button"
                             className={quietActionClass}
                             disabled={!connected || resolveAnomaly.isPending}
@@ -1521,7 +1536,8 @@ export function Overview({
                           </PrimitiveButton>
                         )}
                         {a.links.slice(1).map((link) => (
-                          <PrimitiveButton bare
+                          <PrimitiveButton
+                            bare
                             type="button"
                             key={link.label}
                             className={quietActionClass}
@@ -1673,7 +1689,8 @@ export function Overview({
                         : "nothing waiting"}
                   </span>
                 </div>
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={() => onNavigate("inbox")}
                   aria-label={`Waiting on you: ${s.inbox.open} open inbox item${s.inbox.open === 1 ? "" : "s"} — open the inbox`}
@@ -1807,7 +1824,8 @@ export function Overview({
                 <span className="font-semibold text-(--text)">
                   Worker Fleet Capacity{factoryWide ? " · factory-wide" : ""}
                 </span>
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={() => onNavigate("workers")}
                   aria-label={`worker capacity${factoryWide ? " · factory-wide" : ""}: ${capacity!.running} running of ${capacity!.capacity}, ${capacity!.queued} queued`}

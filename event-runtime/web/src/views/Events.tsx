@@ -111,7 +111,8 @@ function FacetChoice({
   onClick: () => void;
 }) {
   return (
-    <PrimitiveButton bare
+    <PrimitiveButton
+      bare
       type="button"
       aria-pressed={active}
       title={value}

@@ -1181,7 +1181,8 @@ export function InjectDialog({
           )}
           <span className="flex-1" />
           {f.kind === "string" && isAtField(f.name) && (
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => setField(f.name, new Date().toISOString())}
               className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--text-dim) hover:bg-(--surface-2)"
@@ -1191,7 +1192,8 @@ export function InjectDialog({
             </PrimitiveButton>
           )}
           {f.kind === "string" && isIdField(f.name) && (
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => setField(f.name, triggerId(Date.now()))}
               className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--text-dim) hover:bg-(--surface-2)"
@@ -1278,7 +1280,8 @@ export function InjectDialog({
             onKeyDown={onTemplateKeyDown}
           >
             {initialEnvelope && (
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 type="button"
                 {...radioA11y("__given__")}
                 onClick={() => applySelection("__given__")}
@@ -1305,7 +1308,8 @@ export function InjectDialog({
                     const id = `__recent_${r.eventId}__`;
                     const summary = summarizePayload(r.envelope);
                     return (
-                      <PrimitiveButton bare
+                      <PrimitiveButton
+                        bare
                         key={r.eventId || id}
                         type="button"
                         {...radioA11y(id)}
@@ -1349,7 +1353,8 @@ export function InjectDialog({
                         {group.templates.map((t) => {
                           const summary = t.summary || "no params";
                           return (
-                            <PrimitiveButton bare
+                            <PrimitiveButton
+                              bare
                               key={t.eventType}
                               type="button"
                               {...radioA11y(t.eventType)}
@@ -1392,7 +1397,8 @@ export function InjectDialog({
                 </div>
               )}
 
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               {...radioA11y(null)}
               onClick={() => applySelection(null)}
@@ -1451,7 +1457,8 @@ export function InjectDialog({
                     {jsonStatus.label}
                   </span>
                 </div>
-                <PrimitiveButton bare
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={formatJson}
                   className="text-[11px] text-(--text-dim) hover:text-(--accent)"

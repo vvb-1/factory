@@ -19,7 +19,14 @@ import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard } from "../hooks";
 import type { RunState, TraceEntry, TracePayload } from "../types";
-import { DisclosureChevron, humanSize, IconButton, JsonBlock, Section, notify } from "./ui";
+import {
+  DisclosureChevron,
+  humanSize,
+  IconButton,
+  JsonBlock,
+  Section,
+  notify,
+} from "./ui";
 import { Button as PrimitiveButton } from "./ui";
 
 function copyText(text: string, label: string = "text") {
@@ -1139,7 +1146,8 @@ export function RunTrace({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         {live ? (
           <div className="flex items-center gap-2">
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => {
                 if (followLive) {
@@ -1210,7 +1218,8 @@ export function RunTrace({
             aria-label="Trace kind"
           >
             {filterTabs.map((t, idx) => (
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 key={t.key}
                 type="button"
                 role="tab"
@@ -1248,7 +1257,8 @@ export function RunTrace({
 
           <div className="flex items-center gap-2">
             {counts.errors > 0 && (
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={handleJumpToError}
                 className={TRACE_QUIET_BUTTON}
@@ -1303,7 +1313,8 @@ export function RunTrace({
                   </span>
                   {searchMatches.length > 0 && (
                     <>
-                      <PrimitiveButton bare
+                      <PrimitiveButton
+                        bare
                         type="button"
                         onClick={() =>
                           setActiveMatch(
@@ -1318,7 +1329,8 @@ export function RunTrace({
                       >
                         <span aria-hidden="true">↑</span>
                       </PrimitiveButton>
-                      <PrimitiveButton bare
+                      <PrimitiveButton
+                        bare
                         type="button"
                         onClick={() =>
                           setActiveMatch((m) => (m + 1) % searchMatches.length)
@@ -1331,7 +1343,8 @@ export function RunTrace({
                       </PrimitiveButton>
                     </>
                   )}
-                  <PrimitiveButton bare
+                  <PrimitiveButton
+                    bare
                     type="button"
                     onClick={() => setSearch("")}
                     className="text-(--text-faint) hover:text-(--text)"
@@ -1343,7 +1356,8 @@ export function RunTrace({
                 </>
               )}
             </div>
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => {
                 setExpandAll((v) => !v);
@@ -1438,7 +1452,8 @@ export function RunTrace({
 
           {live && !followLive && (
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
-              <PrimitiveButton bare
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={jumpToLatest}
                 className="flex items-center gap-1.5 rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105 active:scale-95"

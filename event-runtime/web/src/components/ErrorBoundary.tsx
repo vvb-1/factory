@@ -116,7 +116,8 @@ export class ErrorBoundary extends Component<Props, State> {
           <h1 className="display text-lg font-semibold">{title}</h1>
           <p className="mt-2 text-sm text-(--text-dim)">{detail}</p>
           {!reloading && (
-            <PrimitiveButton bare
+            <PrimitiveButton
+              bare
               type="button"
               className="mt-4 rounded-md border border-(--border-strong) px-3 py-1.5 text-sm font-medium hover:bg-(--surface-2)"
               onClick={() =>
