@@ -29,6 +29,8 @@ import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { HEARTBEAT_STALE_MS, satisfiesPlacement } from "./workers.mjs";
 import { createWorkspace, destroyWorkspace, PathViolation, safeJoin } from "./workspace.mjs";
+import { createInboxItem } from "./inbox.mjs";
+import { templateFor } from "./decision-templates.mjs";
 
 /**
  * Runtime-injected artifacts: adapters that capture the agent's output write
@@ -334,6 +336,47 @@ function resolveNow(now) {
 
 function iso(now) {
   return new Date(resolveNow(now)).toISOString();
+}
+
+// Must mirror the refs verify.mjs validated the authored decision against
+// (issue = input.ticket, repo, runId); a divergence here would let a decision
+// that passed verify fail createInboxItem's legality check at write time.
+function refusalInboxRefs(spec) {
+  const refs = { runId: spec.runId };
+  const input = spec.input ?? {};
+  const issue = input.ticket;
+  const repo = input.repo;
+  const pr = input.pr ?? input.prNumber;
+  if (issue !== undefined && issue !== null && String(issue).trim()) refs.issue = String(issue);
+  if (repo !== undefined && repo !== null && String(repo).trim()) refs.repo = String(repo);
+  if (pr !== undefined && pr !== null && String(pr).trim()) refs.pr = String(pr);
+  return refs;
+}
+
+function createRefusalInboxItem(db, spec, result, { now }) {
+  if (result.reasonCode !== "needs_human") return null;
+  const refs = refusalInboxRefs(spec);
+  const decision = result.decision ?? templateFor("ESCALATED", {
+    producer: "escalation",
+    refs,
+  });
+  const subject = refs.issue ?? refs.runId;
+  const body = result.decisionErrors?.length
+    ? `The agent's decision request was rejected:\n${result.decisionErrors.join("\n")}`
+    : null;
+  return createInboxItem(
+    db,
+    {
+      kind: "ESCALATED",
+      title: result.decision?.question ?? `ESCALATED ${subject}: ${result.reasonCode}`,
+      body,
+      refs,
+      source: `agent:${spec.runId}`,
+      decision,
+      dedupeKey: `ESCALATED:${refs.issue ?? refs.runId}`,
+    },
+    { now },
+  );
 }
 
 function finishAttempt(db, runId, attempt, terminalState, reasonCode, now, usage = {}) {
@@ -1654,6 +1697,15 @@ export async function executeClaimed(db, registry, adapters, claim, {
           runId, attempt, canonicalJson(refusedResult), "none", null,
           canonicalJson(refusedResult.verification), canonicalJson(receipt), iso(currentNow),
         );
+        // Best-effort projection: the inbox row must never un-record the
+        // terminal REFUSED state or its result row by throwing out of this tx.
+        try {
+          createRefusalInboxItem(db, spec, refusedResult, { now: currentNow });
+        } catch (err) {
+          console.error(
+            `[worker] refusal inbox item not created for ${runId}: ${err?.message ?? err}`,
+          );
+        }
         finishAttempt(db, runId, attempt, "REFUSED", verified.reasonCode, currentNow, attemptUsage);
         return { ok: true, receipt };
       });

@@ -36,8 +36,102 @@ import {
 } from "./api-test-helpers.mjs";
 import { cpSync } from "node:fs";
 import { emitDueTicks } from "./schedules.mjs";
+import { createInboxItem } from "./inbox.mjs";
+import { decisionRequestHash } from "./decision.mjs";
 import { spawnTracked } from "./test-helpers-process.mjs";
 
+describe("inbox decision API (WM-390)", () => {
+  const request = {
+    schemaVersion: "factory.decision-request/v1",
+    question: "Dismiss this item?",
+    options: [{ id: "dismiss", label: "Dismiss", effect: "dismiss" }],
+  };
+
+  test("detail, decide, conflicts, and retry use typed statuses", async () => {
+    const s = await makeServer({ now: () => 1000 });
+    try {
+      createInboxItem(s.db, {
+        kind: "BLOCKED",
+        title: "decision",
+        decision: request,
+      }, { id: "api_decision" });
+
+      const detail = await fetch(s.url("/inbox/api_decision"));
+      expect(detail.status).toBe(200);
+      expect((await detail.json()).item.decision).toEqual(request);
+      expect((await fetch(s.url("/inbox/missing"))).status).toBe(404);
+
+      const stale = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: "sha256:" + "0".repeat(64),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(stale.status).toBe(409);
+      expect((await stale.json()).error).toBe("stale_request");
+
+      const malformed = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestHash: decisionRequestHash(request),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(malformed.status).toBe(400);
+      expect((await malformed.json()).error).toBe("invalid_response");
+
+      const decided = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(request),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(decided.status).toBe(200);
+      expect(await decided.json()).toMatchObject({
+        item: { resolvedBy: "operator:dismiss", decidedBy: "operator" },
+        effect: { kind: "dismiss", outcome: "applied" },
+      });
+
+      const appliedRetry = await fetch(
+        s.url("/inbox/api_decision/decide/retry"),
+        { method: "POST" },
+      );
+      expect(appliedRetry.status).toBe(409);
+      expect((await appliedRetry.json()).error).toBe("already_applied");
+
+      const again = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestHash: decisionRequestHash(request), optionId: "dismiss", fields: {},
+        }),
+      });
+      expect(again.status).toBe(409);
+      expect((await again.json()).error).toBe("already_decided");
+
+      const undecided = createInboxItem(s.db, {
+        kind: "BLOCKED", title: "not answered", decision: request,
+      }, { id: "not_decided" });
+      const retry = await fetch(s.url(`/inbox/${undecided.id}/decide/retry`), {
+        method: "POST",
+      });
+      expect(retry.status).toBe(409);
+      expect((await retry.json()).error).toBe("not_decided");
+    } finally {
+      s.close();
+    }
+  });
+});
 describe("schedule trigger metadata (WM-259)", () => {
   test("run and trigger return the unchanged next scheduled tick", async () => {
     const nowMs = Date.parse("2026-08-17T11:35:00.000Z");
