@@ -54,46 +54,152 @@ const sampleAgent: AgentDef = {
   ],
 };
 
+const agentsApi = () => ({
+  agents: mock(async () => createAgentsFixture({ agents: [sampleAgent] })),
+});
+
+/** The wrapper the primitive puts the popup ARIA state on. */
+function triggerOf(container: HTMLElement): HTMLElement {
+  const el = container.querySelector<HTMLElement>("[aria-haspopup='dialog']");
+  if (!el) throw new Error("hover card trigger not found");
+  return el;
+}
+
 describe("AgentHoverCard", () => {
   test("renders trigger with agent ref and opens hover card with details", async () => {
     const onJumpAgent = mock(() => {});
 
-    await withApi(
-      {
-        agents: mock(async () =>
-          createAgentsFixture({
-            agents: [sampleAgent],
-          }),
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(
+        <AgentHoverCard agentRef="triage-scan" onJumpAgent={onJumpAgent} />,
+      );
+
+      expect(r.getByText("triage-scan")).toBeTruthy();
+
+      // Hover over the trigger
+      const trigger = r.getByText("triage-scan");
+      fireEvent.mouseEnter(trigger);
+
+      // Wait for hover card portal to render with agent details
+      await waitFor(() => {
+        expect(r.getByRole("dialog")).toBeTruthy();
+        expect(r.getByText("v2")).toBeTruthy();
+        expect(r.getByText("Mutating")).toBeTruthy();
+        expect(r.getByText("claude-3-7-sonnet")).toBeTruthy();
+        expect(r.getByText("triage/v1")).toBeTruthy();
+        expect(r.getByText("ephemeral")).toBeTruthy();
+        expect(r.getByText(/450s timeout/)).toBeTruthy();
+        expect(r.getByText(/github, linear/)).toBeTruthy();
+      });
+
+      // Click "Open in Agents"
+      const openBtn = r.getByRole("button", { name: /Open in Agents/i });
+      fireEvent.click(openBtn);
+      expect(onJumpAgent).toHaveBeenCalledWith("triage-scan");
+    });
+  });
+
+  test("names the card so a screen reader announces which agent it describes", async () => {
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(<AgentHoverCard agentRef="triage-scan" />);
+      fireEvent.mouseEnter(r.getByText("triage-scan"));
+
+      await waitFor(() =>
+        expect(r.getByRole("dialog").getAttribute("aria-label")).toBe(
+          "Agent triage-scan",
         ),
-      },
-      async () => {
-        const r = renderWithClient(
-          <AgentHoverCard agentRef="triage-scan" onJumpAgent={onJumpAgent} />,
-        );
+      );
+    });
+  });
 
-        expect(r.getByText("triage-scan")).toBeTruthy();
+  test("opens on keyboard focus, not only on hover", async () => {
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(<AgentHoverCard agentRef="triage-scan" />);
+      const jump = r.getByRole("button", { name: /triage-scan/ });
 
-        // Hover over the trigger
-        const trigger = r.getByText("triage-scan");
-        fireEvent.mouseEnter(trigger);
+      jump.focus();
+      fireEvent.focus(jump);
 
-        // Wait for hover card portal to render with agent details
-        await waitFor(() => {
-          expect(r.getByRole("tooltip")).toBeTruthy();
-          expect(r.getByText("v2")).toBeTruthy();
-          expect(r.getByText("Mutating")).toBeTruthy();
-          expect(r.getByText("claude-3-7-sonnet")).toBeTruthy();
-          expect(r.getByText("triage/v1")).toBeTruthy();
-          expect(r.getByText("ephemeral")).toBeTruthy();
-          expect(r.getByText(/450s timeout/)).toBeTruthy();
-          expect(r.getByText(/github, linear/)).toBeTruthy();
-        });
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+      expect(triggerOf(r.container).getAttribute("aria-expanded")).toBe("true");
+    });
+  });
 
-        // Click "Open in Agents"
-        const openBtn = r.getByRole("button", { name: /Open in Agents/i });
-        fireEvent.click(openBtn);
-        expect(onJumpAgent).toHaveBeenCalledWith("triage-scan");
-      },
-    );
+  test("Escape closes the card and returns focus to the agent link", async () => {
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(<AgentHoverCard agentRef="triage-scan" />);
+      const jump = r.getByRole("button", { name: /triage-scan/ });
+      jump.focus();
+      fireEvent.focus(jump);
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+      expect(document.activeElement).toBe(jump);
+    });
+  });
+
+  test("ArrowDown opens the card and moves focus into it", async () => {
+    const onJumpAgent = mock(() => {});
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(
+        <AgentHoverCard agentRef="triage-scan" onJumpAgent={onJumpAgent} />,
+      );
+      const trigger = triggerOf(r.container);
+      r.getByRole("button", { name: /triage-scan/ }).focus();
+
+      fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+      await waitFor(() =>
+        expect(document.activeElement).toBe(
+          r.getByRole("button", { name: /Open in Agents/i }),
+        ),
+      );
+    });
+  });
+
+  test("dismisses when the table underneath scrolls", async () => {
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(
+        <div data-testid="table-scroll">
+          <AgentHoverCard agentRef="triage-scan" />
+        </div>,
+      );
+      fireEvent.mouseEnter(r.getByText("triage-scan"));
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+      fireEvent.scroll(r.getByTestId("table-scroll"));
+
+      await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+    });
+  });
+
+  test("falls back to the resolved Agents route when no jump handler is wired", async () => {
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(<AgentHoverCard agentRef="triage-scan" />);
+      fireEvent.mouseEnter(r.getByText("triage-scan"));
+
+      await waitFor(() =>
+        expect(
+          r.getByRole("link", { name: /Open in Agents/i }).getAttribute("href"),
+        ).toBe("#/agents/triage-scan"),
+      );
+    });
+  });
+
+  test("keeps custom trigger content clickable and its own tab stop", async () => {
+    const onJumpAgent = mock(() => {});
+    await withApi(agentsApi(), async () => {
+      const r = renderWithClient(
+        <AgentHoverCard agentRef="triage-scan" onJumpAgent={onJumpAgent}>
+          <span>custom label</span>
+        </AgentHoverCard>,
+      );
+
+      expect(triggerOf(r.container).getAttribute("tabindex")).toBe("0");
+      fireEvent.click(r.getByText("custom label"));
+      expect(onJumpAgent).toHaveBeenCalledWith("triage-scan");
+    });
   });
 });
