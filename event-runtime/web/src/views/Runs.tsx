@@ -6,7 +6,8 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, type RunListFilters } from "../api";
+import { hashSearch } from "../hash";
 import {
   keyGuard,
   refetchIntervals,
@@ -171,6 +172,33 @@ export function tabForRunState(state: string): RunTab {
   if (state === "COMPLETED") return "COMPLETED";
   if (state === "CANCELLED") return "CANCELLED";
   return "ALL";
+}
+
+const RUN_DRILLDOWN_POPULATIONS = new Set<RunListFilters["population"]>([
+  "created",
+  "terminal",
+  "started",
+  "retried",
+  "leased",
+  "finished",
+  "usage",
+]);
+
+export function runDrilldownFilters(hash: string): RunListFilters | null {
+  const query = hashSearch(hash);
+  const from = query.get("from");
+  const to = query.get("to");
+  const population = query.get("population") as
+    RunListFilters["population"] | null;
+  if (!from || !to || !population || !RUN_DRILLDOWN_POPULATIONS.has(population))
+    return null;
+  return {
+    from,
+    to,
+    population,
+    state: query.get("state") ?? undefined,
+    agent: query.get("agent") ?? undefined,
+  };
 }
 
 /**
@@ -483,6 +511,8 @@ export function Runs({
   const [confirm, setConfirm] = useState<"cancel" | "force-retry" | null>(null);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const drilldown = runDrilldownFilters(window.location.hash);
+  const drilldownKey = JSON.stringify(drilldown);
 
   const proposalsQ = useQuery({
     queryKey: ["proposals", "open"],
@@ -500,10 +530,10 @@ export function Runs({
 
   // A project / In-flight filter is client-side; fetching only the active
   // status tab would make every other tab's badge a factory-wide lie.
-  const fetchAll = context.kind !== "all";
+  const fetchAll = context.kind !== "all" || drilldown !== null;
   const list = useQuery({
-    queryKey: ["runs", fetchAll ? "ALL" : tab],
-    queryFn: () => api.runs(),
+    queryKey: ["runs", fetchAll ? "ALL" : tab, drilldownKey],
+    queryFn: () => api.runs(undefined, drilldown ?? {}),
     ...refetchIntervals.primary,
   });
   const statusQ = useQuery({
@@ -1064,6 +1094,24 @@ export function Runs({
         chrome={
           <>
             <h1 className="display mb-4 text-h1 font-semibold">Runs</h1>
+            {drilldown && (
+              <div
+                role="status"
+                className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-(--border) bg-(--surface-2) px-3 py-2 text-[11px] text-(--text-dim)"
+              >
+                <span>
+                  Metrics drill-down ·{" "}
+                  <span className="mono">{drilldown.population}</span>
+                  {drilldown.state ? ` · ${drilldown.state}` : ""}
+                  {drilldown.agent ? ` · ${drilldown.agent}` : ""} ·{" "}
+                  {new Date(drilldown.from!).toLocaleString()} →{" "}
+                  {new Date(drilldown.to!).toLocaleString()}
+                </span>
+                <a href="#/runs" className="font-medium text-(--accent)">
+                  Clear metrics filter
+                </a>
+              </div>
+            )}
 
             {/* `flex-wrap`: the token chips are a full-width item, so they take
             their own line under the tabs and the box instead of squeezing them. */}

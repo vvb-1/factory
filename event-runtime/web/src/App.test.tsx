@@ -9,12 +9,12 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { App, navIsCurrent } from "./App";
+import { App, listSelectionPath, navIsCurrent } from "./App";
 import { goPrefix } from "./goSequence";
 import { refetchIntervals } from "./hooks";
 import { NAV } from "./nav";
 import { createProposalFixture } from "./test-render";
-import type { Proposal, StatusView } from "./types";
+import type { MetricsView, Proposal, StatusView } from "./types";
 
 const ENV = { name: "dev", home: "/tmp/factory", adapter: null };
 
@@ -43,6 +43,24 @@ const HEALTH = { ok: true, policyVersion: "test", env: ENV };
 // One approvable open proposal, so the proposals route renders the detail pane
 // whose Approve button carries the health-derived tooltip (WM-738).
 const OPEN_PROPOSAL_ID = "prop_health_wiring";
+
+const EMPTY_METRICS: MetricsView = {
+  window: "24h",
+  bucket: "1h",
+  buckets: [],
+  series: {
+    "runs.outcomes": {},
+    "runs.started": { total: [] },
+    "latency.queue_wait": { p50: [], p95: [] },
+    "latency.execution": { p50: [], p95: [] },
+    "spend.cost": {},
+    "spend.tokens": {},
+    "proposals.decisions": {},
+    "proposals.time_to_decision": { p50: [], p95: [] },
+    "events.intake": {},
+    "attempts.retries": { total: [] },
+  },
+};
 let currentStatus = STATUS;
 // "pending" never resolves, which is what a first load looks like before
 // /api/health answers; "error" is a runtime that answered with a failure.
@@ -124,6 +142,7 @@ beforeEach(() => {
       });
     }
     if (url.includes("/api/repos")) return jsonResponse({ repos: [] });
+    if (url.includes("/api/metrics")) return jsonResponse(EMPTY_METRICS);
     if (url.includes("/api/runs?ticket=")) {
       const ticket =
         new URL(url, "http://localhost").searchParams.get("ticket") ?? "WM-0";
@@ -353,6 +372,18 @@ describe("responsive primary navigation (WM-175)", () => {
       utils.getByRole("navigation", { name: "Primary" }).getAttribute("id"),
     ).toBe("primary-navigation");
   });
+});
+
+test("metrics list selections preserve the reproducible drill-down query", () => {
+  const hash =
+    "#/runs?from=2026-08-18T08%3A00%3A00.000Z&to=2026-08-18T09%3A00%3A00.000Z&population=terminal&state=FAILED&project=factory";
+  expect(listSelectionPath("runs", "run_1", hash)).toBe(
+    "runs/run_1?from=2026-08-18T08%3A00%3A00.000Z&to=2026-08-18T09%3A00%3A00.000Z&population=terminal&state=FAILED",
+  );
+  expect(listSelectionPath("runs", null, hash)).toStartWith("runs?from=");
+  expect(listSelectionPath("proposals", "prop_1", "#/proposals")).toBe(
+    "proposals/prop_1",
+  );
 });
 
 describe("bottom status bar", () => {
@@ -685,6 +716,13 @@ describe("context strip fast jump chords (WM-235)", () => {
       fireEvent.keyDown(document.body, { key: "r" });
     });
     expect(window.location.hash).toBe("#/runs");
+
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "g" });
+      fireEvent.keyDown(document.body, { key: "m" });
+    });
+    expect(window.location.hash).toBe("#/metrics");
+    expect(await utils.findByRole("heading", { name: "Metrics" })).toBeTruthy();
 
     act(() => {
       fireEvent.keyDown(document.body, { key: "g" });

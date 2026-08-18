@@ -12,6 +12,9 @@ import type {
   InboxItem,
   InboxStatus,
   JournalView,
+  MetricsBreakdownView,
+  MetricsView,
+  MetricsWindow,
   OutboxRow,
   JanitorResult,
   Proposal,
@@ -86,6 +89,76 @@ export interface RepoItem extends BaseRepoItem {
 
 type CachedResponse = { etag: string; body: unknown };
 const responseCache = new Map<string, CachedResponse>();
+
+export type RunListFilters = {
+  state?: string;
+  from?: string;
+  to?: string;
+  population?:
+    | "created"
+    | "terminal"
+    | "started"
+    | "retried"
+    | "leased"
+    | "finished"
+    | "usage";
+  agent?: string;
+};
+
+export type ProposalListFilters = {
+  from?: string;
+  to?: string;
+  population?: "decision";
+  decisionStatus?: string;
+};
+
+function withQuery(path: string, values: Record<string, string | undefined>) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values))
+    if (value) query.set(key, value);
+  return query.size > 0 ? `${path}?${query.toString()}` : path;
+}
+
+export function fetchRuns(filters: RunListFilters = {}) {
+  return call<{ runs: RunListItem[] }>("GET", withQuery("/runs", filters));
+}
+
+export function fetchProposalHistory(
+  status = "all",
+  filters: ProposalListFilters = {},
+) {
+  return call<{ proposals: Proposal[] }>(
+    "GET",
+    withQuery("/proposals", {
+      status,
+      from: filters.from,
+      to: filters.to,
+      population: filters.population,
+      decisionStatus: filters.decisionStatus,
+    }),
+  );
+}
+
+export function fetchMetrics(window: MetricsWindow, bucket: string) {
+  return call<MetricsView>("GET", withQuery("/metrics", { window, bucket }));
+}
+
+export function fetchMetricsBreakdown(
+  window: MetricsWindow,
+  by: string,
+  metric: string,
+  limit?: number,
+) {
+  return call<MetricsBreakdownView>(
+    "GET",
+    withQuery("/metrics/breakdown", {
+      window,
+      by,
+      metric,
+      limit: limit == null ? undefined : String(limit),
+    }),
+  );
+}
 
 async function call<T>(
   method: string,
@@ -168,11 +241,8 @@ export const api = {
     ),
   proposals: () => call<{ proposals: Proposal[] }>("GET", "/proposals"),
   // Full decision history (?status=all), newest first — read-only audit view.
-  proposalHistory: (status = "all") =>
-    call<{ proposals: Proposal[] }>(
-      "GET",
-      `/proposals?status=${encodeURIComponent(status)}`,
-    ),
+  proposalHistory: (status = "all", filters: ProposalListFilters = {}) =>
+    fetchProposalHistory(status, filters),
   approve: (id: string) =>
     call<ApproveOutcome>(
       "POST",
@@ -185,11 +255,8 @@ export const api = {
       `/proposals/${encodeURIComponent(id)}/reject`,
       { reason },
     ),
-  runs: (state?: string) =>
-    call<{ runs: RunListItem[] }>(
-      "GET",
-      `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`,
-    ),
+  runs: (state?: string, filters: RunListFilters = {}) =>
+    fetchRuns(state ? { ...filters, state } : filters),
   run: (id: string) =>
     call<RunDetail>("GET", `/runs/${encodeURIComponent(id)}`),
   // Live agent trace, ascending by seq; `since` is the last seen seq (incremental).

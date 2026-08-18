@@ -2,7 +2,7 @@ import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { Runs, statesForRunTab } from "./Runs";
+import { Runs, runDrilldownFilters, statesForRunTab } from "./Runs";
 import {
   changeInput,
   createAgentsFixture,
@@ -33,6 +33,21 @@ afterEach(() => {
 const noop = () => {};
 const FAILURE_REASON = 'contract_violation: $: unknown property "captured"';
 const NOW = new Date().toISOString();
+
+test("reads a complete metrics drill-down contract from the hash", () => {
+  expect(
+    runDrilldownFilters(
+      "#/runs?from=2026-08-18T08%3A00%3A00.000Z&to=2026-08-18T09%3A00%3A00.000Z&population=terminal&state=FAILED",
+    ),
+  ).toEqual({
+    from: "2026-08-18T08:00:00.000Z",
+    to: "2026-08-18T09:00:00.000Z",
+    population: "terminal",
+    state: "FAILED",
+    agent: undefined,
+  });
+  expect(runDrilldownFilters("#/runs?population=terminal")).toBeNull();
+});
 
 function stubListItem(
   runId: string,

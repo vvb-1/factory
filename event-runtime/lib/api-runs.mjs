@@ -71,22 +71,46 @@ function proposalView(row) {
   };
 }
 
-function proposalHistory(db, status) {
-  const rows = status
-    ? db
-        .query(
-          `SELECT * FROM proposals WHERE status = ? ORDER BY created_at DESC, rowid DESC`,
-        )
-        .all(status)
-    : db
-        .query(`SELECT * FROM proposals ORDER BY created_at DESC, rowid DESC`)
-        .all();
-  return rows.map((row) =>
-    proposalView({
-      ...row,
-      spec: row.spec_json ? JSON.parse(row.spec_json) : null,
-    }),
-  );
+function proposalHistory(db, status, filters = {}) {
+  const filteredDecision = filters.population === "decision";
+  const rows =
+    status && !filteredDecision
+      ? db
+          .query(
+            `SELECT * FROM proposals WHERE status = ? ORDER BY created_at DESC, rowid DESC`,
+          )
+          .all(status)
+      : db
+          .query(`SELECT * FROM proposals ORDER BY created_at DESC, rowid DESC`)
+          .all();
+  return rows.flatMap((row) => {
+    let decisionAt = row.decided_at ?? null;
+    let effectiveStatus = row.status;
+    if (filteredDecision && row.status === "open") {
+      const expiresAt =
+        Date.parse(row.created_at) + Number(row.ttl_seconds) * 1000;
+      if (Number.isFinite(expiresAt) && expiresAt < filters.nowMs) {
+        decisionAt = new Date(expiresAt).toISOString();
+        effectiveStatus = "expired";
+      }
+    }
+    if (filteredDecision) {
+      const at = Date.parse(decisionAt ?? "");
+      if (!Number.isFinite(at) || at < filters.fromMs || at >= filters.toMs)
+        return [];
+      if (filters.decisionStatus && effectiveStatus !== filters.decisionStatus)
+        return [];
+    }
+    return [
+      proposalView({
+        ...row,
+        status: effectiveStatus,
+        decided_at: decisionAt,
+        expired: effectiveStatus === "expired",
+        spec: row.spec_json ? JSON.parse(row.spec_json) : null,
+      }),
+    ];
+  });
 }
 
 function eventsView(db, status) {
@@ -369,8 +393,115 @@ export function ticketJourneyView(db, rawTicket, options = {}) {
 /** States whose attempt deadline is live and render-relevant on the run list. */
 const IN_FLIGHT_STATES = new Set(["LEASED", "RUNNING", "VERIFYING"]);
 
-function runsView(db, state) {
-  const where = state ? `WHERE r.state = ?` : ``;
+const RUN_POPULATIONS = new Set([
+  "created",
+  "terminal",
+  "started",
+  "retried",
+  "leased",
+  "finished",
+  "usage",
+]);
+
+class ListQueryError extends Error {
+  constructor(error, details = {}) {
+    super(error);
+    this.body = { error, ...details };
+  }
+}
+
+function listFilters(url, { proposal = false, nowMs = Date.now() } = {}) {
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  const population = url.searchParams.get("population");
+  if (!from && !to && !population) return {};
+  if (!from || !to || !population) {
+    throw new ListQueryError("incomplete_time_filter", {
+      required: ["from", "to", "population"],
+    });
+  }
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
+    throw new ListQueryError("invalid_time_filter", { from, to });
+  }
+  const valid = proposal ? new Set(["decision"]) : RUN_POPULATIONS;
+  if (!valid.has(population)) {
+    throw new ListQueryError("invalid_population", {
+      population,
+      valid: [...valid],
+    });
+  }
+  return { from, to, fromMs, toMs, population, nowMs };
+}
+
+function runsView(db, filters = {}) {
+  const { state, agent, from, to, population } = filters;
+  const clauses = [];
+  const params = [];
+  if (agent) {
+    clauses.push(`json_extract(r.spec_json, '$.agent') = ?`);
+    params.push(agent);
+  }
+  if (!population || population === "created") {
+    if (state) {
+      clauses.push("r.state = ?");
+      params.push(state);
+    }
+    if (population === "created") {
+      clauses.push("r.created_at >= ? AND r.created_at < ?");
+      params.push(from, to);
+    }
+  } else if (population === "terminal") {
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM lifecycle_events metric_event
+        WHERE metric_event.run_id = r.run_id
+          AND metric_event.at >= ? AND metric_event.at < ?
+          AND metric_event.to_state IN ('COMPLETED', 'FAILED', 'REFUSED', 'TIMED_OUT', 'CANCELLED')
+          ${state ? "AND metric_event.to_state = ?" : ""}
+      )`,
+    );
+    params.push(from, to, ...(state ? [state] : []));
+  } else if (population === "started" || population === "leased") {
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM lifecycle_events metric_event
+        WHERE metric_event.run_id = r.run_id
+          AND metric_event.to_state = ?
+          AND metric_event.at >= ? AND metric_event.at < ?
+      )`,
+    );
+    params.push(population === "started" ? "RUNNING" : "LEASED", from, to);
+  } else if (population === "retried") {
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM attempts metric_attempt
+        WHERE metric_attempt.run_id = r.run_id AND metric_attempt.attempt > 1
+          AND metric_attempt.started_at >= ? AND metric_attempt.started_at < ?
+      )`,
+    );
+    params.push(from, to);
+  } else if (population === "finished") {
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM attempts metric_attempt
+        WHERE metric_attempt.run_id = r.run_id
+          AND metric_attempt.finished_at >= ? AND metric_attempt.finished_at < ?
+      )`,
+    );
+    params.push(from, to);
+  } else if (population === "usage") {
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM run_usage metric_usage
+        WHERE metric_usage.run_id = r.run_id
+          AND metric_usage.recorded_at >= ? AND metric_usage.recorded_at < ?
+      )`,
+    );
+    params.push(from, to);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = db
     .query(
       `SELECT r.*, a.reason_code, a.terminal_state AS attempt_terminal,
@@ -381,7 +512,7 @@ function runsView(db, state) {
        ${where}
        ORDER BY r.created_at DESC, r.rowid DESC`,
     )
-    .all(...(state ? [state] : []));
+    .all(...params);
   return rows.map((row) => {
     const spec = JSON.parse(row.spec_json);
     return {
@@ -570,13 +701,26 @@ export async function handleRunApiRoute({
 
   if (route === "GET /proposals") {
     const status = url.searchParams.get("status");
-    if (status)
+    try {
+      const filters = {
+        ...listFilters(url, { proposal: true, nowMs }),
+        decisionStatus: url.searchParams.get("decisionStatus") ?? undefined,
+      };
+      if (status || filters.population)
+        return send(200, {
+          proposals: proposalHistory(
+            db,
+            status === "all" ? null : status,
+            filters,
+          ),
+        });
       return send(200, {
-        proposals: proposalHistory(db, status === "all" ? null : status),
+        proposals: openProposals(db, { now: nowMs }).map(proposalView),
       });
-    return send(200, {
-      proposals: openProposals(db, { now: nowMs }).map(proposalView),
-    });
+    } catch (err) {
+      if (err instanceof ListQueryError) return send(422, err.body);
+      throw err;
+    }
   }
 
   if (route === "GET /journal") {
@@ -688,7 +832,17 @@ export async function handleRunApiRoute({
       if (!journey) return send(422, { error: "ticket must look like WM-123" });
       return send(200, journey);
     }
-    return send(200, { runs: runsView(db, url.searchParams.get("state")) });
+    try {
+      const filters = {
+        ...listFilters(url, { nowMs }),
+        state: url.searchParams.get("state") ?? undefined,
+        agent: url.searchParams.get("agent") ?? undefined,
+      };
+      return send(200, { runs: runsView(db, filters) });
+    } catch (err) {
+      if (err instanceof ListQueryError) return send(422, err.body);
+      throw err;
+    }
   }
 
   const runExtend = url.pathname.match(/^\/runs\/([^/]+)\/extend$/);
