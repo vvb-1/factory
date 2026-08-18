@@ -398,7 +398,19 @@ export function Projects({
               subject={{ label: "Projects", plural: true }}
             />
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <div className="flex min-w-0 flex-1 flex-wrap gap-1 text-[12px]" role="tablist" aria-label="Project mode">
+              <select
+                aria-label="Project mode"
+                value={filterMode}
+                onChange={(event) => setFilterMode(event.target.value as ProjectMode)}
+                className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
+              >
+                {PROJECT_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode === "ALL" ? "All" : mode === "DISPATCHABLE" ? "Dispatchable" : "Report-Only"} {modeCounts[mode]}
+                  </option>
+                ))}
+              </select>
+              <div className="hidden min-w-0 flex-1 gap-1 text-[12px] sm:flex" role="tablist" aria-label="Project mode">
                 {PROJECT_MODES.map((mode, idx) => (
                   <button
                     key={mode}
@@ -430,7 +442,7 @@ export function Projects({
           </>
         }
       >
-        <table className="w-full border-separate border-spacing-0">
+        <table aria-label="Projects table" className="w-full min-w-[760px] border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
               {PROJECTS_SORT.columns.map((column) => {
@@ -511,7 +523,7 @@ export function Projects({
 
       {sel && (
         <DetailPane
-          widthClass="w-[540px]"
+          widthClass="w-full max-w-full sm:w-[540px]"
           title={
             <div className="flex items-center gap-2">
               <span className="mono font-semibold" title={sel.name}>
