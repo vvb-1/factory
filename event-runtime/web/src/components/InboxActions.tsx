@@ -87,7 +87,7 @@ export function ciRerunEnvelope(
     throw new Error(
       `Rerun CI needs the GitHub owner/name for "${ref}" — config/repos.yaml declares no github remote for it`,
     );
-  const runId = original.runId ?? item.refs.pr?.match(/\d+/)?.[0];
+  const runId = original.runId ?? item.refs.runId;
   if (
     (typeof runId !== "string" && typeof runId !== "number") ||
     String(runId).trim() === ""

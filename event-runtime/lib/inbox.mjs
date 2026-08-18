@@ -6,7 +6,9 @@
  * broken, while notify_log continues to provide runtime-notification dedup.
  */
 import { randomUUID } from "node:crypto";
-import { gql } from "../../orchestrator/reaper.mjs";
+import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import {
   decisionRequestHash,
   validateDecisionRequest,
@@ -861,8 +863,68 @@ function laterCiSuccess(db, row, refs) {
   });
 }
 
+const LINEAR_API_URL = "https://api.linear.app/graphql";
+
+function resolveLinearApiKey({
+  env = process.env,
+  envFile = path.join(homedir(), "Develop", "hdkiller", ".env"),
+} = {}) {
+  if (env.LINEAR_API_KEY) return env.LINEAR_API_KEY;
+  if (!existsSync(envFile)) return null;
+
+  try {
+    for (const line of readFileSync(envFile, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("="))
+        continue;
+      const idx = trimmed.indexOf("=");
+      if (trimmed.slice(0, idx).trim() !== "LINEAR_API_KEY") continue;
+      const value = trimmed
+        .slice(idx + 1)
+        .trim()
+        .replace(/^['"]|['"]$/g, "");
+      if (!value) return null;
+      env.LINEAR_API_KEY = value;
+      return value;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export async function linearGql(query, variables = {}) {
+  const apiKey = resolveLinearApiKey();
+  if (!apiKey) {
+    throw new Error(
+      "Linear API error: LINEAR_API_KEY not found in env or ~/Develop/hdkiller/.env",
+    );
+  }
+  const res = await fetch(LINEAR_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: apiKey,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    throw new Error(`Linear API HTTP ${res.status}: ${res.statusText}`);
+  }
+  const body = await res.json();
+  if (body.errors?.length) {
+    throw new Error(
+      `Linear GraphQL error: ${body.errors.map((e) => e.message).join("; ")}`,
+    );
+  }
+  return body.data;
+}
+
 /** One bounded GraphQL request for the distinct Linear referents in this poll. */
-export async function fetchLinearInboxIssues(issueIds, { request = gql } = {}) {
+export async function fetchLinearInboxIssues(
+  issueIds,
+  { request = linearGql } = {},
+) {
   if (!Array.isArray(issueIds) || issueIds.length === 0) return [];
   const declarations = issueIds.map((_, index) => `$i${index}:String!`);
   const fields = issueIds.map(
@@ -881,14 +943,27 @@ export async function fetchLinearInboxIssues(issueIds, { request = gql } = {}) {
     .filter(Boolean);
 }
 
-function linearIssueResolved(kind, issue) {
+function linearIssueResolved(row, issue, db) {
   const state = issue?.state?.name;
   if (typeof state !== "string" || state === "") return false;
-  if (kind === "BLOCKED") return state !== "Blocked";
-  if (kind === "ESCALATED") {
+  if (row.kind === "BLOCKED") return state !== "Blocked";
+  if (row.kind === "ESCALATED") {
+    const delivery = parseObject(row.delivery_json);
     const labels = (issue?.labels?.nodes ?? []).map((label) => label.name);
+    const hasEscalatedLabel = labels.includes("ai:escalated");
+    if (hasEscalatedLabel && !delivery.seenEscalated) {
+      delivery.seenEscalated = true;
+      if (db) {
+        db.query("UPDATE inbox_items SET delivery_json = ? WHERE id = ?").run(
+          JSON.stringify(delivery),
+          row.id,
+        );
+        row.delivery_json = JSON.stringify(delivery);
+      }
+    }
     return (
-      issue?.state?.type === "completed" || !labels.includes("ai:escalated")
+      Boolean(delivery.seenEscalated) &&
+      (issue?.state?.type === "completed" || !hasEscalatedLabel)
     );
   }
   return false;
@@ -902,7 +977,7 @@ export function reconcileInbox(
   const resolved = [];
   const rows = db
     .query(
-      `SELECT id, kind, refs_json, decision_json, response_json, created_at FROM inbox_items
+      `SELECT id, kind, refs_json, decision_json, response_json, delivery_json, created_at FROM inbox_items
      WHERE resolved_at IS NULL
        AND kind IN (
          'decision_needed', 'proposal_expired', 'human_needed', 'BLOCKED',
@@ -963,7 +1038,7 @@ export function reconcileInbox(
       const byId = new Map(issues.map((issue) => [issue.identifier, issue]));
       for (const { row, refs } of linearRows) {
         const issue = byId.get(refs.issue);
-        if (!issue || !linearIssueResolved(row.kind, issue)) continue;
+        if (!issue || !linearIssueResolved(row, issue, db)) continue;
         const resolvedBy =
           row.kind === "BLOCKED"
             ? "auto:linear_unblocked"
