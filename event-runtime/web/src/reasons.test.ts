@@ -41,6 +41,35 @@ describe("humanizeReason (WM-594)", () => {
     }
   });
 
+  test("every reason code referenced by the timeline and journey fixtures has a shared phrase", () => {
+    for (const code of [
+      "planned",
+      "claimed",
+      "started",
+      "ok",
+      "auto_approved",
+      "approved",
+      "observed",
+      "duplicate_run",
+      "previous_run_in_flight",
+      "proposal_expired",
+      "needs_human",
+      "attempts_exhausted",
+      "timeout",
+      "cancelled",
+      "ticket_assigned",
+      "owned_paths_overlap",
+      "merge_fix_pr_moved",
+      "merge_fix_pr_read_failed",
+      "merge_fix_run_check_failed",
+      "merge_fix_ticket_read_failed",
+      "merge_apply_pr_moved",
+      "merge_apply_base_moved",
+    ]) {
+      expect(REASONS[code], code).toBeTruthy();
+    }
+  });
+
   test("unknown codes fall back to the code with underscores dropped, suffix kept as detail", () => {
     expect(humanizeReason("some_new_code")).toEqual({ text: "some new code", raw: "some_new_code" });
     expect(humanizeReason("some_new_code:extra_detail").text).toBe("some new code — extra detail");

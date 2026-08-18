@@ -6,6 +6,9 @@
  * `SubjectJourneySource` and hand it over.
  */
 
+import { nextScheduledRetry, scheduledRetryLabel } from "./chainTimeline";
+import { REASONS, humanizeReason } from "./reasons";
+
 export const TICKET_ID_PATTERN = /^[A-Z][A-Z0-9]{1,9}-\d+$/;
 
 /** `#541`, `PR 541`, `pr:541`, `pull/541`, `541` — what an operator types for a PR. */
@@ -242,43 +245,21 @@ export interface SubjectJourney {
 /** @deprecated name kept for the WM-595 callers — same shape as `SubjectJourney`. */
 export type TicketJourney = SubjectJourney;
 
-const KNOWN_REASONS: Record<string, string> = {
-  owned_paths_overlap: "Owned paths overlap",
-  ticket_assigned: "Ticket is already assigned",
-  ticket_dispatch_already_live: "A dispatch is already live",
-  same_ticket_worktree_held: "The ticket worktree is still held",
-  proposal_expired: "The proposal expired",
-  needs_human: "Human input is required",
-  attempts_exhausted: "Attempts are exhausted",
-  merge_fix_pr_moved: "PR head moved since the scan",
-  merge_fix_pr_not_open: "PR is no longer open",
-  merge_fix_pr_not_found: "PR not found",
-  merge_fix_run_active: "Another run holds the PR",
-  merge_fix_round_exhausted: "Fix rounds exhausted",
-  merge_fix_ticket_state: "Ticket state does not allow a fix",
-  merge_fix_owned_paths_moved: "Owned paths changed since the scan",
-  merge_fix_not_mechanical_or_in_scope: "Finding is not mechanical or in scope",
-  merge_apply_pr_moved: "PR head moved since the plan",
-  merge_apply_base_moved: "Base moved since the plan",
-};
-
-/**
- * Human-readable planner reason while preserving identifiers in the suffix.
- * Local fallback until `reasons.ts` (WM-594) lands — see the WM-640 Handoff.
- */
-export function humanizeReason(reason: string | null | undefined): string | null {
-  if (!reason) return null;
-  const [code, ...suffix] = reason.split(":");
-  const words = KNOWN_REASONS[code] ?? code.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
-  return suffix.length ? `${words} — ${suffix.join(" · ")}` : words;
+function reasonText(reason: string | null | undefined): string | null {
+  const human = humanizeReason(reason);
+  if (!human.raw) return null;
+  // A PR journey anchors this refusal to the scan that observed the old head.
+  return reason?.split(":", 1)[0] === "merge_fix_pr_moved"
+    ? human.text.replace("since the plan", "since the scan")
+    : human.text;
 }
 
 /** `Human text (raw_code)` — for refusal rows, where the code is the search key. */
 function humanizeWithCode(reason: string | null | undefined): string | null {
-  const text = humanizeReason(reason);
+  const text = reasonText(reason);
   if (!text || !reason) return null;
   const code = reason.split(":")[0];
-  return KNOWN_REASONS[code] ? `${text} (${code})` : text;
+  return REASONS[code] ? `${text} (${code})` : text;
 }
 
 function validDate(value: string | null | undefined): number | null {
@@ -690,7 +671,7 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
   for (const event of source.events) {
     const proposal = proposalFor(event, source.proposals);
     const decision = proposal?.decision ?? (event.status === "planned" ? "planned" : event.status);
-    const reason = humanizeReason(proposal?.reason);
+    const reason = reasonText(proposal?.reason);
     const dispatch = /dispatch/i.test(event.type);
     const agentReady = /agent[-_. ]?ready/i.test(event.type) || /agent[-_. ]?ready/i.test(JSON.stringify(event.envelope));
     const at = timeOf(event.occurredAt, event.admittedAt);
@@ -951,13 +932,19 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .at(-1);
 
-  // The next scheduled visit — computed locally from the schedule registry
-  // until chainTimeline.ts (WM-639) offers the helper; see the WM-640 Handoff.
   const repo = repoOfSource(source);
   const loopType = kind === "pr" ? /^factory\.merge\.requested$/ : /^factory\.(work|dispatch)\.requested$/;
-  const nextSchedule = (source.schedules ?? [])
-    .filter((schedule) => schedule.enabled && schedule.nextDue && loopType.test(schedule.eventType) && (!repo || schedule.repo === repo))
-    .sort((a, b) => (validDate(a.nextDue) ?? 0) - (validDate(b.nextDue) ?? 0))[0];
+  const retryOriginType = [...source.events]
+    .filter((event) => loopType.test(event.type))
+    .sort((a, b) => timeOf(a.occurredAt, a.admittedAt).localeCompare(timeOf(b.occurredAt, b.admittedAt)))[0]?.type ??
+    (source.schedules ?? [])
+      .filter((schedule) => loopType.test(schedule.eventType))
+      .sort((a, b) => (validDate(a.nextDue) ?? Infinity) - (validDate(b.nextDue) ?? Infinity))[0]?.eventType ??
+    (kind === "pr" ? "factory.merge.requested" : "factory.work.requested");
+  const nextSchedule = nextScheduledRetry(
+    { type: retryOriginType, repos: repo ? [repo] : [] },
+    source.schedules ?? [],
+  );
   const nextVisit = nextSchedule?.nextDue ? { loop: nextSchedule.loop, at: nextSchedule.nextDue } : null;
   const merged = timeline.some((item) => item.kind === "merge" && /^merged/.test(item.label));
   const ticketWaiting = kind === "ticket" && (latestNoop != null || /^(todo|backlog)$/i.test(subject.state ?? ""));
@@ -966,8 +953,8 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
       id: `schedule:${nextVisit.loop}`,
       kind: "schedule",
       at: nextVisit.at,
-      label: `next: ${nextVisit.loop} at ${clock(nextVisit.at)}`,
-      detail: `${nextSchedule!.eventType} will revisit this ${kind === "pr" ? "PR" : "ticket"}`,
+      label: scheduledRetryLabel(nextSchedule!),
+      detail: `next: ${nextVisit.loop} at ${clock(nextVisit.at)} · ${nextSchedule!.eventType} will revisit this ${kind === "pr" ? "PR" : "ticket"}`,
       href: `#/schedules/${encodeURIComponent(nextVisit.loop)}`,
       durationMs: null,
     });
@@ -986,7 +973,7 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
   const lastRun = [...source.runs].sort((a, b) => resultAt(a).localeCompare(resultAt(b))).at(-1);
   const lastRefusal = lastRun ? refusalOf(lastRun) : null;
   const blockingReason =
-    humanizeReason(latestNoop?.reason) ??
+    reasonText(latestNoop?.reason) ??
     (kind === "pr" && lastRefusal ? humanizeWithCode(lastRefusal.code) : null);
   const awaitingApproval = [...source.proposals]
     .filter((proposal) => proposal.status === "open" && proposal.decision === "run")

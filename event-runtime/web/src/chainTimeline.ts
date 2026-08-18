@@ -13,7 +13,7 @@
  */
 import type { ScheduleItem } from "./api";
 import { eventNodeId, runNodeId } from "./graph/chainModel";
-import { formatDuration } from "./subjectJourney";
+import { humanizeReason } from "./reasons";
 import type { ChainEvent, ChainRun, ChainView, InboxItem, LifecycleEvent, Proposal, RunDetail } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -62,67 +62,6 @@ function defaultStorage(): StorageLike | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Reasons. Local table until WM-594 lands `src/reasons.ts` (humanizeReason);
-// this folds into that map on rebase.
-// ---------------------------------------------------------------------------
-
-export const RUN_REASONS: Record<string, string> = {
-  // lifecycle actors' own reasons
-  planned: "planned",
-  claimed: "claimed",
-  started: "started",
-  ok: "completed",
-  auto_approved: "auto-approved",
-  approved: "approved",
-  observed: "observed — nothing to do",
-  duplicate_run: "a run for this input already exists",
-  previous_run_in_flight: "the previous run is still in flight",
-  proposal_expired: "the proposal expired before anyone approved it",
-  needs_human: "needs a human decision",
-  attempts_exhausted: "attempts are exhausted",
-  timeout: "timed out",
-  cancelled: "cancelled by the operator",
-  // planner refusals (lib/planner.mjs)
-  capacity_full: "capacity is full for this repo",
-  ticket_assigned: "the ticket is already assigned",
-  ticket_dispatch_already_live: "a dispatch is already live for this ticket",
-  same_ticket_worktree_held: "the ticket worktree is still held",
-  ticket_escalated: "the ticket is escalated",
-  ticket_not_agent_ready: "the ticket is not agent-ready",
-  ticket_not_found: "the ticket was not found in Linear",
-  ticket_not_todo: "the ticket is not in Todo",
-  ticket_security: "the ticket is security-labelled — humans only",
-  owned_paths_overlap: "owned paths overlap a live run",
-  owned_paths_not_closed: "owned paths are not a closed set",
-  owned_paths_unknown: "owned paths are unknown",
-  no_worktree_scripts: "the repo ships no worktree scripts",
-  repo_report_only: "the repo is report-only",
-  repo_unconfigured: "the repo is not configured for Linear",
-  merge_fix_pr_moved: "PR head moved after the plan",
-  merge_fix_pr_not_found: "the PR was not found",
-  merge_fix_pr_not_open: "the PR is no longer open",
-  merge_fix_pr_read_failed: "the PR could not be read from GitHub",
-  merge_fix_run_active: "another run is already working on this PR",
-  merge_fix_run_check_failed: "could not check for competing runs",
-  merge_fix_owned_paths_moved: "the fix touches paths outside the ticket's owned paths",
-  merge_fix_owned_paths_unknown: "the ticket's owned paths could not be parsed",
-  merge_fix_ticket_escalated: "the ticket is escalated",
-  merge_fix_ticket_not_found: "the ticket was not found in Linear",
-  merge_fix_ticket_read_failed: "the ticket could not be read from Linear",
-  merge_fix_ticket_security: "the ticket is security-labelled — humans only",
-  merge_fix_ticket_state: "the ticket is not In Review / In Progress",
-  // worker / verify (lib/worker.mjs, lib/verify.mjs)
-  agent_definition_mismatch: "the agent definition changed since the plan",
-  claim_lock_contention: "another worker held the claim lock",
-  claim_lock_starvation: "could not win the claim lock",
-  contract_violation: "the output violated its contract",
-  linear_unconfigured: "Linear is not configured",
-  unknown_adapter: "unknown adapter",
-  workspace_integrity_violation: "the workspace was modified outside the run",
-  worktree_gate_unknown: "the worktree gate could not decide",
-};
-
 export interface HumanReason {
   text: string;
   raw: string;
@@ -133,11 +72,13 @@ export interface HumanReason {
  * as a mono-ish tail. Unknown codes are de-snaked rather than hidden.
  */
 export function humanizeRunReason(reason: string | null | undefined): HumanReason | null {
-  if (!reason) return null;
-  const [code, ...suffix] = reason.split(":");
-  const words = RUN_REASONS[code] ?? code.replaceAll("_", " ").trim();
-  const tail = suffix.join(":").trim();
-  return { text: tail ? `${words}: ${tail}` : words, raw: reason };
+  const human = humanizeReason(reason);
+  if (!human.raw) return null;
+  // The chain is showing the plan that this particular run consumed.
+  const text = reason?.split(":", 1)[0] === "merge_fix_pr_moved"
+    ? human.text.replace("since the plan", "after the plan")
+    : human.text;
+  return { text, raw: human.raw };
 }
 
 // ---------------------------------------------------------------------------
@@ -221,14 +162,23 @@ export function formatDelta(deltaMs: number | null): string {
   if (deltaMs == null || !Number.isFinite(deltaMs) || deltaMs < 0) return "";
   if (deltaMs === 0) return "+0s";
   if (deltaMs < 1000) return "+<1s";
-  return `+${formatDuration(deltaMs)}`;
+  return `+${formatTimelineDuration(deltaMs)}`;
+}
+
+function formatTimelineDuration(valueMs: number): string {
+  const seconds = Math.round(valueMs / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${seconds % 60 ? ` ${seconds % 60}s` : ""}`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
 }
 
 /** `in 9m`, `now`, `overdue by 3m`. */
 export function formatUntil(atMs: number, now: number): string {
   const diff = atMs - now;
   if (Math.abs(diff) < 30_000) return "now";
-  return diff > 0 ? `in ${formatDuration(diff)}` : `overdue by ${formatDuration(-diff)}`;
+  return diff > 0 ? `in ${formatTimelineDuration(diff)}` : `overdue by ${formatTimelineDuration(-diff)}`;
 }
 
 /** Ticket + PR references named by a run's spec input (merge-fix, dispatch, …). */
@@ -523,18 +473,45 @@ export function chainOriginEvent(chain: Pick<ChainView, "events">): ChainEvent |
   return [...pool].sort((a, b) => a.admittedAt.localeCompare(b.admittedAt))[0] ?? null;
 }
 
-/** The enabled schedule that will re-emit this chain's origin event, if any. */
-export function coveringSchedule(origin: ChainEvent | null, schedules: ScheduleItem[]): ScheduleItem | null {
+export interface ScheduledRetryOrigin {
+  type: string;
+  repos: readonly string[];
+}
+
+export interface ScheduledRetrySchedule {
+  loop: string;
+  repo: string | null;
+  eventType: string;
+  nextDue: string | null;
+  enabled: boolean;
+  stopped?: boolean;
+}
+
+/** The next enabled schedule that will re-emit an origin event. */
+export function nextScheduledRetry<T extends ScheduledRetrySchedule>(
+  origin: ScheduledRetryOrigin | null,
+  schedules: readonly T[],
+): T | null {
   if (!origin) return null;
   const candidates = schedules.filter(
     (s) =>
       s.enabled &&
       !s.stopped &&
+      s.nextDue != null &&
       s.eventType === origin.type &&
       (s.repo == null || origin.repos.length === 0 || origin.repos.includes(s.repo)),
   );
   candidates.sort((a, b) => (a.nextDue ?? "￿").localeCompare(b.nextDue ?? "￿"));
   return candidates[0] ?? null;
+}
+
+/** Shared timeline/journey wording for a scheduled retry. */
+export function scheduledRetryLabel(retry: ScheduledRetrySchedule, now = Date.now()): string {
+  const dueMs = ms(retry.nextDue);
+  const clock = dueMs == null
+    ? retry.nextDue ?? "unknown time"
+    : new Date(dueMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `next: ${retry.loop} · re-examines at ${clock}${dueMs == null ? "" : ` (${formatUntil(dueMs, now)})`}`;
 }
 
 /** Whether the chain ended somewhere a loop or a human must revisit. */
@@ -563,17 +540,15 @@ function inboxItemFor(chain: ChainView, inbox: InboxItem[]): InboxItem | null {
 function nextStepRow(chain: ChainView, schedules: ScheduleItem[], inbox: InboxItem[], now: number): ChainTimelineRow | null {
   if (!chainNeedsRevisit(chain)) return null;
   const origin = chainOriginEvent(chain);
-  const schedule = coveringSchedule(origin, schedules);
+  const schedule = nextScheduledRetry(origin, schedules);
   const base = { id: "next", kind: "next" as const, nodeId: null, deltaMs: null, hues: "muted" as const, reason: null, muted: true };
   if (schedule && schedule.nextDue) {
-    const dueMs = ms(schedule.nextDue);
-    const clock = dueMs == null ? schedule.nextDue : new Date(dueMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
     return {
       ...base,
       at: schedule.nextDue,
       badge: "next",
-      actor: schedule.loop,
-      what: `re-examines at ${clock}${dueMs == null ? "" : ` (${formatUntil(dueMs, now)})`}`,
+      actor: null,
+      what: scheduledRetryLabel(schedule, now),
       refs: [{ kind: "schedule", label: schedule.loop, id: schedule.loop }],
     };
   }
