@@ -728,7 +728,9 @@ describe("Runs custom spec columns (WM-303)", () => {
 
     await withApi(
       {
-        runs: async () => ({ runs: [stubListItem(runId, "COMPLETED", { spec })] }),
+        runs: async () => ({
+          runs: [stubListItem(runId, "COMPLETED", { spec })],
+        }),
         status: async () => createStatusFixture(),
       },
       async () => {
@@ -736,10 +738,18 @@ describe("Runs custom spec columns (WM-303)", () => {
         await r.findByText("run_custom_s");
 
         fireEvent.click(r.getByRole("button", { name: /^Display/ }));
-        const input = r.getByRole("combobox", { name: "Add custom property path" });
+        const input = r.getByRole("combobox", {
+          name: "Add custom property path",
+        });
         fireEvent.focus(input);
-        expect(r.getByRole("option", { name: new RegExp(`spec\\.input\\.model.*${model}`, "i") })).toBeTruthy();
-        expect(r.getByRole("option", { name: /spec\.input\.repo.*factory/i })).toBeTruthy();
+        expect(
+          r.getByRole("option", {
+            name: new RegExp(`spec\\.input\\.model.*${model}`, "i"),
+          }),
+        ).toBeTruthy();
+        expect(
+          r.getByRole("option", { name: /spec\.input\.repo.*factory/i }),
+        ).toBeTruthy();
 
         act(() => changeInput(input as HTMLInputElement, "model"));
         fireEvent.keyDown(input, { key: "Enter" });
