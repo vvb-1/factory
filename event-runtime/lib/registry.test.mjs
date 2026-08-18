@@ -138,8 +138,9 @@ describe("registry", () => {
     // added the triage-factory 8h schedule. Operator decision 2026-08-18: stop
     // burning the pi/codex adapter's quota on ~30-minute chain-triggered triage
     // scans; triage now runs on a fixed 8h clock plus manual operator injection.
+    // Regenerated (WM-769): merge-scan/merge-fix format_and_lint routing changed agent defs (registry inputs).
     const expected =
-      "sha256:f56a7411ba3a3684c2b4cc9d382cc7508f6da33b29ca7668eccfbdc465fa39cb";
+      "sha256:27ff1f911aa62264bb1d689b2e8dc179022928e96c3738398da76de3ee07cda8";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 

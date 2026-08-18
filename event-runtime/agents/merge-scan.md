@@ -88,12 +88,18 @@ and a fix whose next round would exceed `merge.max_fix_rounds`. Existing
 draft/escalated holds stay held and are summarized.
 
 Operational conditions are FIX, never ESCALATE (WM-679). They are mechanical
-and merge-fix already performs them; the round counter bounds them:
+and merge-fix already performs them:
 
 - CONFLICTING, or behind base → FIX, finding `rebase_onto_base`.
 - Green only on an old SHA, or no run at `headRefOid` → FIX, finding
   `rerun_ci_at_head` (rebase first if behind, then a fresh run). The evidence
   is not uncertain; it is old.
+- A red `Verify` whose only failing step is `Formatting check (prettier)` or
+  `Lint (eslint)`, or whose complete failing-test set consists only of eslint
+  diagnostics → FIX, finding exactly `format_and_lint`. Inspect the failed job
+  steps and logs; an umbrella `Verify` name alone is not enough. This is an
+  auto-format operational condition, never ESCALATE and never a review FIX
+  that parks the PR. Mixed failures use their ordinary finding instead.
 - A red check on a test the PR does not touch, where the same test is also red
   on the base branch at the merge-base SHA → this is base red, not the PR. Do
   not escalate the PR. Emit one `CI RED` item for the base (once per base SHA,
@@ -108,7 +114,12 @@ A FIX may auto-dispatch only when it is mechanical and its next round is at
 most `merge.max_fix_rounds` (2). Read PR comments for
 `factory-merge-fix round=<n> finding=<hash>` markers. Set the next round and
 SHA-256 hash of the exact finding. Exhausted rounds, security findings, and
-genuine product ambiguity are ESCALATE.
+genuine product ambiguity are ESCALATE. `format_and_lint` is the deterministic
+exception: its separate
+`factory-merge-fix mechanical=format_and_lint finding=<hash>` marker does not
+consume or increment `max_fix_rounds`; after its fresh verification/CI, scan
+the PR from scratch. In the fast lane, formatting- or eslint-only red means
+auto-fix then re-evaluate every lane criterion, not disqualification.
 
 Fail closed only on what truly cannot be evidenced — GitHub or Linear API
 errors, malformed config, an unresolvable base SHA — and record those as

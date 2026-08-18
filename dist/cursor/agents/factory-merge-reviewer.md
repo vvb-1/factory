@@ -30,10 +30,18 @@ For user-facing PRs, open the ticket's attached screenshots and judge the visual
 
 Then check CI (`gh pr checks <PR> --watch --fail-fast` — never sleep-and-poll) and whether the branch is behind or conflicting with its base. Verify checks actually exist: "no failures" because the repo has no required checks is not green.
 
+Inspect the failed steps/logs behind an umbrella `Verify` result. If every
+failure is Prettier or eslint only — `Formatting check (prettier)`, `Lint (eslint)`, or
+tests failing solely with eslint diagnostics — report verdict `FIX`, canonical
+finding `format_and_lint`, and tag the finding `mechanical`. This tag is
+distinct from `fix-in-branch`: it sends deterministic formatting straight to
+merge-fix instead of parking the PR for judgment. Do not use it when any
+behavioral test, typecheck, build, or code-review finding also blocks.
+
 ## Classify
 
 - **MERGE** — CI green, no blocking findings. Minor/polish findings do not block; list them as `file-to-Triage`.
-- **FIX** — CI red, merge conflicts, or blocking findings that are mechanical to fix (a real bug, missing error handling, a failing test). Findings must be specific enough that the caller can fix them without re-reading the diff.
+- **FIX** — CI red, merge conflicts, or blocking findings that are mechanical to fix (a real bug, missing error handling, a failing test). Findings must be specific enough that the caller can fix them without re-reading the diff. Prettier/eslint-only failures use the distinct `mechanical` tag and canonical `format_and_lint` finding, never `fix-in-branch`.
 - **ESCALATE** — the diff **changes security-relevant behavior**: auth/authz, payments/money movement, credentials/secrets handling, destructive DB migrations, prod infra config, or anything matching the repo's `escalate_paths`; also when the fix would require changing the ticket's intent. The test is behavior, not file-adjacency — a test file next to payment code that changes no payment behavior is not an escalation, and saying so honestly is part of the job. Genuinely ambiguous → ESCALATE; that costs one message, a wrong merge costs an incident.
 
 ## Hard rules
@@ -45,7 +53,7 @@ Then check CI (`gh pr checks <PR> --watch --fail-fast` — never sleep-and-poll)
 ## Report format (your final message)
 
 1. **Verdict** — `MERGE` / `FIX` / `ESCALATE`, with the one-sentence reason.
-2. **Findings**, ranked, each with: severity (`blocking` / `minor` / `polish`), file and line, what is wrong, and the concrete fix. Tag each `blocking`, `fix-in-branch`, or `file-to-Triage`.
+2. **Findings**, ranked, each with: severity (`blocking` / `minor` / `polish`), file and line, what is wrong, and the concrete fix. Tag each `mechanical`, `fix-in-branch`, or `file-to-Triage`; reserve `mechanical` for Prettier/eslint-only `format_and_lint` findings.
 3. **Checks** — CI state (which checks, from where), branch vs base (behind/conflicting/clean), Owned Paths result (clean or the exception list), escalate_paths result.
 4. **For ESCALATE**: the exact behavior change that triggers it, quoted from the diff, with enough context that the human can decide from your report alone.
 
