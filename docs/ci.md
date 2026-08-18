@@ -6,17 +6,25 @@ Factory CI uses self-hosted runners only. The `shadow` label currently maps to e
 
 Treat runner names as parallel executors, not independent machines. CPU, memory, `/tmp`, and process scheduling are shared across all eight shadow services.
 
-## Verify serialization
+## Verify lane
 
-Both test jobs acquire `/tmp/factory-verify-host.lock` with `flock` before installing dependencies or running tests. A guardian process holds the descriptor across GitHub Actions steps; the final `always()` step releases it, and runner process cleanup releases it after cancellation or failure.
+The `Full verification` job and Browser E2E run on `runs-on: [self-hosted, verify-lane]`. `verify-lane` is an extra label carried by a small, fixed number of shadow runner services (initially `watt-mind-runner-1` and `watt-mind-runner-2`, added through the GitHub API: `gh api -X POST orgs/watt-mind/actions/runners/<id>/labels -f 'labels[]=verify-lane'`). GitHub queues those jobs FIFO for a free lane runner; nothing is cancelled and no other runner is occupied while a job waits. The rest of the fleet stays free for `Fast unit tests`, lint, Security scans and other repositories.
 
-The lock is intentionally host-local rather than a GitHub Actions `concurrency` group. A concurrency group keeps only one pending job and replaces older pending jobs when more runs arrive. The host lock lets every started workflow wait its turn while ensuring that no two Factory test critical sections execute on the shared host at once. Job timeouts include lock wait, so they include generous multi-PR queue headroom.
+This replaces the earlier host-local `flock` on `/tmp/factory-verify-host.lock` (WM-300/WM-600/WM-776), which serialized correctly but parked every waiting shadow runner inside the lock — GitHub counted them all as busy, so a deep factory queue starved the whole fleet, and a crashed worker could leave an orphaned guardian holding the lock for the host (WM-776).
 
-Do not add more lock lanes unless the `shadow` label is moved to multiple physical hosts and the lock path is scoped per host.
+Capacity is a runner-config knob, not a workflow change: **lanes = number of runners with the `verify-lane` label**. Two lanes means at most two spawn-heavy suites run concurrently on the host; if that proves flaky under contention, remove the label from one runner (`gh api -X DELETE orgs/watt-mind/actions/runners/<id>/labels/verify-lane`). Do not add lanes beyond what the host's measurements support (WM-773 item 5).
+
+`Fast unit tests` deliberately runs on the general `shadow` pool, outside the lane. Five shadow-runner measurements made while another verification job held the lock are recorded in the WM-773 handoff; all five were green and below the three-minute stability threshold. The first ready-head measurement was [job 95742407011](https://github.com/watt-mind/factory/actions/runs/32146787946/job/95742407011): 36 seconds job wall time and 30 seconds for the test step. Keep its command bounded to `event-runtime/lib`, `--timeout 20000`, and `--max-concurrency=4`; broadening that job requires repeating the overlap measurements before assuming it is safe.
+
+## Draft pull requests
+
+Draft pull requests run `Shadow runner fleet available`, but skip `Fast unit tests`, `Full verification`, and Browser E2E so held work does not consume the verify lane. The required `Verify` check is a lightweight aggregate on the smoke-test runner: it succeeds explicitly for a draft, and for every other event it succeeds only when fleet health and both CI test jobs succeeded. This prevents a failed prerequisite from turning a skipped downstream job into a misleading successful required check.
+
+GitHub's `ready_for_review` event starts a fresh workflow on the ready head. Both workflows name readiness and draft-conversion events explicitly; converting a ready PR back to draft cancels its in-flight CI run through the PR concurrency group. Keep the job-level draft guards when editing either trigger.
 
 ## Lint
 
-`Verify` runs `bun run lint --max-warnings=608` (WM-607) right after installing
+`Full verification` runs `bun run lint --max-warnings=621` (WM-607) right after installing
 `event-runtime/web` deps and before the prettier check. `eslint.config.mjs` at
 repo root covers `**/*.{mjs,js,jsx}` with `@eslint/js` recommended, and
 `event-runtime/web/**/*.{ts,tsx}` with `typescript-eslint` recommended plus
@@ -39,9 +47,9 @@ is disabled or downgraded globally to reach green.
 CI splits tests into separately rerunnable jobs:
 
 - **Fast unit tests:** `event-runtime/lib`
-- **Verify:** every other test, including CLI, daemon, web, demo, orchestration, and process-spawning integration suites
+- **Full verification:** every other test, including CLI, daemon, web, demo, orchestration, and process-spawning integration suites
 
-Both invoke Bun with `--timeout 20000 --max-concurrency=4`. The 20-second default allows for scheduling delays on a busy self-hosted machine instead of failing unrelated tests at Bun's 5-second default. Tests that encode genuine liveness bounds continue to declare explicit, narrower timeouts; the CLI default does not replace those assertions.
+Both invoke Bun with `--timeout 20000 --max-concurrency=4`. The 20-second default allows for scheduling delays on a busy self-hosted machine instead of failing unrelated tests at Bun's 5-second default. Tests that encode genuine liveness bounds continue to declare explicit, narrower timeouts; the CLI default does not replace those assertions. Only `Full verification` joins the shared host-lock queue; the fast suite's 15-minute job timeout is a runaway guard rather than queue headroom.
 
 ## Operational validation
 
@@ -60,7 +68,7 @@ After changing the workflow:
    gh run list --workflow CI --event pull_request --limit 20
    ```
 
-3. For each relevant run, inspect step timestamps with `gh run view <RUN_ID>` and confirm the interval from `Acquire host verify lock` completing through `Release host verify lock` does not overlap that interval in either test job from another Factory workflow run.
+3. For each relevant run, inspect step timestamps with `gh run view <RUN_ID>` and confirm the interval from `Acquire host verify lock` completing through `Release host verify lock` does not overlap the equivalent `Full verification` or Browser E2E interval from another Factory workflow run. `Fast unit tests` is expected to overlap that interval.
 
 A failed or cancelled test job breaks the streak. Record the five develop run URLs in the validating ticket or merge handoff.
 
