@@ -48,28 +48,21 @@ import {
   copyLink,
   copyText,
 } from "./components/ui";
-import type { ArtifactFilters } from "./views/Artifacts";
-import { Events } from "./views/Events";
-import { Overview } from "./views/Overview";
-import { Runs } from "./views/Runs";
-import { NAV, type NavKey } from "./nav";
+import {
+  NAV,
+  navIsCurrent,
+  resolveView,
+  viewLabel as viewLabelFor,
+  workerHash,
+  type NavKey,
+  type Shell,
+  type WorkerHealthFilter,
+} from "./views/registry";
 import { Button as PrimitiveButton } from "./components/ui";
 
-type WorkerHealthFilter = "live" | "busy" | "stale";
-const isWorkerHealthFilter = (
-  value: string | null,
-): value is WorkerHealthFilter =>
-  value === "live" || value === "busy" || value === "stale";
-
-export function navIsCurrent(key: NavKey, view?: string): boolean {
-  return (
-    key === view ||
-    (key === "runs" && view === "run") ||
-    (key === "tickets" && view === "prs") ||
-    (key === "chains" && view === "chain") ||
-    (key === "artifacts" && view === "artifact")
-  );
-}
+// Route helpers moved to the view registry (WM-839); re-exported for callers
+// (and tests) that reach them through App.
+export { listSelectionPath, navIsCurrent } from "./views/registry";
 
 type NavBadge = {
   count: number;
@@ -96,68 +89,6 @@ function NavCount({ id, badge }: { id: string; badge: NavBadge }) {
   );
 }
 
-export function listSelectionPath(
-  view: "runs" | "proposals",
-  id: string | null,
-  hash: string,
-) {
-  const path = hashPath(view, id);
-  const query = hashSearch(hash);
-  if (!query.has("population") || !query.has("from") || !query.has("to"))
-    return path;
-  query.delete("project");
-  return `${path}?${query.toString()}`;
-}
-
-const Artifacts = lazy(() =>
-  import("./views/Artifacts").then((m) => ({ default: m.Artifacts })),
-);
-const ArtifactFull = lazy(() =>
-  import("./views/ArtifactFull").then((m) => ({ default: m.ArtifactFull })),
-);
-const Metrics = lazy(() =>
-  import("./views/Metrics").then((m) => ({ default: m.Metrics })),
-);
-const Graph = lazy(() =>
-  import("./views/Graph").then((m) => ({ default: m.Graph })),
-);
-const Chains = lazy(() =>
-  import("./views/Chains").then((m) => ({ default: m.Chains })),
-);
-const Chain = lazy(() =>
-  import("./views/Chain").then((m) => ({ default: m.Chain })),
-);
-const Projects = lazy(() =>
-  import("./views/Projects").then((m) => ({ default: m.Projects })),
-);
-const Schedules = lazy(() =>
-  import("./views/Schedules").then((m) => ({ default: m.Schedules })),
-);
-const Proposals = lazy(() =>
-  import("./views/Proposals").then((m) => ({ default: m.Proposals })),
-);
-const Agents = lazy(() =>
-  import("./views/Agents").then((m) => ({ default: m.Agents })),
-);
-const RunFull = lazy(() =>
-  import("./views/RunFull").then((m) => ({ default: m.RunFull })),
-);
-const Ticket = lazy(() =>
-  import("./views/Ticket").then((m) => ({ default: m.Ticket })),
-);
-// The PR journey (WM-640) shares the ticket journey chunk — same layout, other subject.
-const PullRequest = lazy(() =>
-  import("./views/Ticket").then((m) => ({ default: m.PullRequest })),
-);
-const Workers = lazy(() =>
-  import("./views/Workers").then((m) => ({ default: m.Workers })),
-);
-const Settings = lazy(() =>
-  import("./views/Settings").then((m) => ({ default: m.Settings })),
-);
-const Inbox = lazy(() =>
-  import("./views/Inbox").then((m) => ({ default: m.Inbox })),
-);
 const ShortcutsDialog = lazy(() =>
   import("./components/ShortcutsDialog").then((m) => ({
     default: m.ShortcutsDialog,
@@ -317,66 +248,6 @@ export function App() {
     };
   }, []);
 
-  const focusRunId = view === "runs" ? (route[1] ?? null) : null;
-  const focusTicketId = view === "tickets" ? (route[1] ?? null) : null;
-  // `#/prs/:number` — the PR journey (WM-640); a drill-in like `#/tickets/:id`.
-  const focusPrNumber = view === "prs" ? (route[1] ?? null) : null;
-  // `#/run/:id` is the full-page run view — a distinct first segment, so
-  // crossing from `#/runs/:id` pushes history and Back restores the panel.
-  const fullRunId = view === "run" ? (route[1] ?? null) : null;
-  // `#/artifact/:digest` is the full-page artifact reader view (WM-828).
-  const fullArtifactDigest = view === "artifact" ? (route[1] ?? null) : null;
-  const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
-  const focusRepoName = view === "projects" ? (route[1] ?? null) : null;
-  const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
-  const focusScheduleLoop = view === "schedules" ? (route[1] ?? null) : null;
-  const focusWorkerId = view === "workers" ? (route[1] ?? null) : null;
-  // `#/inbox/:id` — the Telegram push deep-links here (lib/inbox.mjs telegramMessage).
-  const focusInboxId = view === "inbox" ? (route[1] ?? null) : null;
-  const workerHealthFromHash =
-    view === "workers" ? hashSearch(window.location.hash).get("health") : null;
-  const focusWorkerHealth = isWorkerHealthFilter(workerHealthFromHash)
-    ? workerHealthFromHash
-    : null;
-  const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
-  const focusSettingsSection = view === "settings" ? (route[1] ?? null) : null;
-  const chainsStateFilter =
-    view === "chains" ? hashSearch(window.location.hash).get("state") : null;
-  // `#/chain/:correlationId[/:nodeId]` — the chain trace (WM-527); node
-  // selection rides the hash so a pasted link lands on the same node.
-  const chainId = view === "chain" ? (route[1] ?? null) : null;
-  const focusChainNode = view === "chain" ? (route[2] ?? null) : null;
-  const artifactQuery = hashSearch(window.location.hash);
-  const artifactFilters: ArtifactFilters = {
-    kind: view === "artifacts" ? artifactQuery.get("kind") : null,
-    orphan:
-      view !== "artifacts" || !artifactQuery.has("orphan")
-        ? null
-        : artifactQuery.get("orphan") === "true",
-    search: view === "artifacts" ? (artifactQuery.get("search") ?? "") : "",
-  };
-  const hashEvent: EventFocus | null =
-    view === "events" && route[1] && route[2]
-      ? { source: route[1], eventId: route[2] }
-      : null;
-  const typeFromHash =
-    view === "events" ? hashSearch(window.location.hash).get("type") : null;
-  const focusEvent =
-    view === "events"
-      ? {
-          ...(ephemeralEvent ?? {}),
-          ...(typeFromHash ? { type: typeFromHash } : {}),
-          ...(hashEvent ?? {}),
-        }
-      : null;
-  const hasEventFocus = !!(
-    focusEvent &&
-    (focusEvent.source ||
-      focusEvent.eventId ||
-      focusEvent.status ||
-      focusEvent.type)
-  );
-
   const [rejumpEpoch, setRejumpEpoch] = useState(0);
 
   const jumpToRun = (runId: string) => {
@@ -424,10 +295,6 @@ export function App() {
     navigate("events");
   };
   const jumpToAgent = (ref: string) => navigate(hashPath("agents", ref));
-  const workerHash = (id: string | null, health: WorkerHealthFilter | null) => {
-    const path = hashPath("workers", id);
-    return health ? `${path}?health=${encodeURIComponent(health)}` : path;
-  };
   const jumpToWorker = (id: string) => navigate(workerHash(id, null));
   const jumpToWorkers = (health: WorkerHealthFilter) =>
     navigate(workerHash(null, health));
@@ -557,17 +424,7 @@ export function App() {
     }, [navigate, selectContext, openRepos]),
   );
 
-  const viewLabel =
-    NAV.find((n) => n.key === view)?.label ??
-    (view === "run"
-      ? "Run"
-      : view === "chain"
-        ? "Chain"
-        : view === "prs"
-          ? "PR"
-          : view === "artifact"
-            ? "Artifact"
-            : "Overview");
+  const viewLabel = viewLabelFor(view);
 
   useEffect(() => {
     const id = route.length > 1 ? route[route.length - 1] : null;
@@ -700,6 +557,46 @@ export function App() {
     { label: "Keyboard shortcuts", hint: "?", run: () => setHelpOpen(true) },
     { label: `Cycle theme (${THEMES.join(" → ")})`, run: cycleTheme },
   ];
+
+  // The registry resolves the first hash segment to a view and hands it the
+  // shell slice it needs (WM-839); unknown keys land on Overview.
+  const {
+    def: viewDef,
+    params: viewParams,
+    component: View,
+  } = resolveView(route);
+  const shell: Shell = {
+    connected,
+    healthPending,
+    context,
+    status: status.data,
+    rejumpEpoch,
+    focusRunState,
+    clearFocusRunState: () => setFocusRunState(null),
+    focusExpired,
+    setFocusExpired,
+    ephemeralEvent,
+    setEphemeralEvent,
+    openInject: (seed) => {
+      if (seed) setInjectSeed(seed);
+      setInjectOpen(true);
+    },
+    jump: {
+      run: jumpToRun,
+      runFull: openRunFull,
+      runs: jumpToRuns,
+      artifactFull: openArtifactFull,
+      ticket: jumpToTicket,
+      pr: jumpToPr,
+      proposal: jumpToProposal,
+      event: jumpToEvent,
+      events: jumpToEvents,
+      agent: jumpToAgent,
+      workers: jumpToWorkers,
+      graph: jumpToGraph,
+      chain: jumpToChain,
+    },
+  };
 
   return (
     <div className="flex h-screen flex-col">
@@ -898,317 +795,20 @@ export function App() {
             </div>
           )}
           <div className="min-h-0 flex-1">
-            {view === "proposals" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading proposals…
-                  </div>
-                }
-              >
-                <Proposals
-                  connected={connected}
-                  healthPending={healthPending}
-                  context={context}
-                  onRunQueued={jumpToRun}
-                  focusProposalId={focusProposalId}
-                  onSelectProposal={(id) =>
-                    navigate(
-                      listSelectionPath("proposals", id, window.location.hash),
-                    )
-                  }
-                  focusExpired={focusExpired}
-                  onFocusExpiredConsumed={() => setFocusExpired(false)}
-                  onJumpAgent={jumpToAgent}
-                  onJumpEvent={jumpToEvent}
-                  rejumpEpoch={rejumpEpoch}
-                />
-              </Suspense>
-            ) : view === "run" && fullRunId ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">Loading run…</div>
-                }
-              >
-                <RunFull
-                  runId={fullRunId}
-                  connected={connected}
-                  onBack={() => navigate(hashPath("runs", fullRunId))}
-                  onJumpAgent={jumpToAgent}
-                  onJumpEvent={jumpToEvent}
-                  onJumpProposal={jumpToProposal}
-                  onJumpChain={jumpToChain}
-                />
-              </Suspense>
-            ) : view === "runs" || view === "run" ? (
-              <Runs
-                connected={connected}
-                context={context}
-                focusRunId={focusRunId}
-                onSelectRun={(id) =>
-                  navigate(listSelectionPath("runs", id, window.location.hash))
-                }
-                onOpenFull={openRunFull}
-                focusState={focusRunState}
-                onFocusStateConsumed={() => setFocusRunState(null)}
-                onJumpAgent={jumpToAgent}
-                onJumpEvent={jumpToEvent}
-                onJumpProposal={jumpToProposal}
-                rejumpEpoch={rejumpEpoch}
+            <Suspense
+              fallback={
+                <div className="p-5 text-(--text-faint)">
+                  Loading {viewDef.loading ?? viewDef.label.toLowerCase()}…
+                </div>
+              }
+            >
+              <View
+                params={viewParams}
+                hash={window.location.hash}
+                navigate={navigate}
+                shell={shell}
               />
-            ) : view === "tickets" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading ticket journey…
-                  </div>
-                }
-              >
-                <Ticket
-                  ticketId={focusTicketId}
-                  onNavigate={jumpToTicket}
-                  onNavigatePr={jumpToPr}
-                />
-              </Suspense>
-            ) : view === "prs" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading PR journey…
-                  </div>
-                }
-              >
-                <PullRequest
-                  number={focusPrNumber}
-                  onNavigateTicket={jumpToTicket}
-                />
-              </Suspense>
-            ) : view === "projects" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading projects…
-                  </div>
-                }
-              >
-                <Projects
-                  connected={connected}
-                  focusRepoName={focusRepoName}
-                  onSelectRepo={(name) => navigate(hashPath("projects", name))}
-                />
-              </Suspense>
-            ) : view === "chains" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">Loading chains…</div>
-                }
-              >
-                <Chains
-                  context={context}
-                  initialStateFilter={chainsStateFilter}
-                  onOpenChain={(correlationId) => jumpToChain(correlationId)}
-                />
-              </Suspense>
-            ) : view === "chain" && chainId ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">Loading chain…</div>
-                }
-              >
-                <Chain
-                  correlationId={chainId}
-                  focusNodeId={focusChainNode}
-                  onSelectNode={(id) =>
-                    navigate(hashPath("chain", chainId, id))
-                  }
-                  onJumpEvent={jumpToEvent}
-                  onJumpRun={jumpToRun}
-                  onOpenRunFull={openRunFull}
-                  onJumpProposal={jumpToProposal}
-                  onJumpAgent={jumpToAgent}
-                />
-              </Suspense>
-            ) : view === "graph" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">Loading graph…</div>
-                }
-              >
-                <Graph
-                  context={context}
-                  focusNodeId={focusGraphNode}
-                  onSelectNode={(id) => navigate(hashPath("graph", id))}
-                  onJumpAgent={jumpToAgent}
-                  onJumpEvents={jumpToEvents}
-                  onJumpProposal={jumpToProposal}
-                />
-              </Suspense>
-            ) : view === "agents" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">Loading agents…</div>
-                }
-              >
-                <Agents
-                  context={context}
-                  focusAgentRef={focusAgentRef}
-                  onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
-                />
-              </Suspense>
-            ) : view === "schedules" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading schedules…
-                  </div>
-                }
-              >
-                <Schedules
-                  connected={connected}
-                  context={context}
-                  focusScheduleLoop={focusScheduleLoop}
-                  onSelectSchedule={(loop) =>
-                    navigate(hashPath("schedules", loop))
-                  }
-                  onJumpProposal={jumpToProposal}
-                  onJumpRun={jumpToRun}
-                  onJumpEvent={jumpToEvent}
-                  onJumpAgent={jumpToAgent}
-                  rejumpEpoch={rejumpEpoch}
-                />
-              </Suspense>
-            ) : view === "inbox" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">Loading inbox…</div>
-                }
-              >
-                <Inbox
-                  connected={connected}
-                  focusItemId={focusInboxId}
-                  onSelectItem={(id) => navigate(hashPath("inbox", id))}
-                  onJumpRun={jumpToRun}
-                  onJumpProposal={jumpToProposal}
-                  onJumpEvent={jumpToEvent}
-                />
-              </Suspense>
-            ) : view === "workers" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading workers…
-                  </div>
-                }
-              >
-                <Workers
-                  context={context}
-                  focusWorkerId={focusWorkerId}
-                  onSelectWorker={(id) =>
-                    navigate(workerHash(id, focusWorkerHealth))
-                  }
-                  focusHealth={focusWorkerHealth}
-                  onFocusHealthChange={(health) =>
-                    navigate(workerHash(null, health))
-                  }
-                />
-              </Suspense>
-            ) : view === "artifact" && fullArtifactDigest ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading artifact…
-                  </div>
-                }
-              >
-                <ArtifactFull
-                  digest={fullArtifactDigest}
-                  onBack={() => navigate("artifacts")}
-                  onJumpRun={jumpToRun}
-                />
-              </Suspense>
-            ) : view === "artifacts" || view === "artifact" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading artifacts…
-                  </div>
-                }
-              >
-                <Artifacts
-                  metrics={status.data?.artifacts}
-                  filters={artifactFilters}
-                  onFiltersChange={(filters) =>
-                    navigate(artifactsHash(filters))
-                  }
-                  onJumpRun={jumpToRun}
-                  onOpenFull={openArtifactFull}
-                />
-              </Suspense>
-            ) : view === "metrics" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading metrics…
-                  </div>
-                }
-              >
-                <Metrics />
-              </Suspense>
-            ) : view === "events" ? (
-              <Events
-                connected={connected}
-                context={context}
-                focusEvent={hasEventFocus ? focusEvent : null}
-                onFocusConsumed={() => setEphemeralEvent(null)}
-                onSelectEvent={(source, eventId) =>
-                  navigate(eventsHash(source, eventId, typeFromHash))
-                }
-                onSelectType={(type) =>
-                  navigate(
-                    eventsHash(hashEvent?.source, hashEvent?.eventId, type),
-                  )
-                }
-                onJumpProposal={jumpToProposal}
-                onJumpRun={jumpToRun}
-                onJumpChain={jumpToChain}
-                onTriggerAgain={(envelope) => {
-                  setInjectSeed(envelope);
-                  setInjectOpen(true);
-                }}
-                onInject={() => setInjectOpen(true)}
-                rejumpEpoch={rejumpEpoch}
-              />
-            ) : view === "settings" ? (
-              <Suspense
-                fallback={
-                  <div className="p-5 text-(--text-faint)">
-                    Loading settings…
-                  </div>
-                }
-              >
-                <Settings
-                  focusSectionId={focusSettingsSection}
-                  onSelectSection={(id) => navigate(hashPath("settings", id))}
-                />
-              </Suspense>
-            ) : (
-              <Overview
-                connected={connected}
-                context={context}
-                onJumpRun={jumpToRun}
-                onJumpProposal={jumpToProposal}
-                onJumpEvents={jumpToEvents}
-                onJumpRuns={jumpToRuns}
-                onJumpWorkers={jumpToWorkers}
-                onNavigate={navigate}
-                onJumpExpired={() => {
-                  setFocusExpired(true);
-                  navigate("proposals");
-                }}
-                onJumpGraph={() => jumpToGraph()}
-                onInject={() => setInjectOpen(true)}
-              />
-            )}
+            </Suspense>
           </div>
         </main>
       </div>

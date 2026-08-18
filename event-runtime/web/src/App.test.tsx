@@ -292,6 +292,49 @@ describe("sidebar navigation accessibility", () => {
   });
 });
 
+describe("view registry routing (WM-839)", () => {
+  test("an unknown first segment lands on Overview, with no rail entry current", async () => {
+    window.location.hash = "#/no-such-view";
+    const utils = renderApp();
+    expect(
+      await utils.findByRole("heading", { name: "Overview" }),
+    ).toBeTruthy();
+    for (const n of NAV) {
+      expect(
+        utils.sidebar
+          .getByRole("button", { name: n.label })
+          .getAttribute("aria-current"),
+      ).toBe(null);
+    }
+  });
+
+  test("an id-less drill-in route falls back to its list view and keeps the parent current", async () => {
+    window.location.hash = "#/run";
+    const utils = renderApp();
+    expect(await utils.findByRole("heading", { name: "Runs" })).toBeTruthy();
+    expect(
+      utils.sidebar
+        .getByRole("button", { name: "Runs" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    expect(window.location.hash).toBe("#/run");
+  });
+
+  test("a lazily registered view with a focus param resolves through the registry", async () => {
+    window.location.hash = `#/proposals/${OPEN_PROPOSAL_ID}`;
+    const utils = renderApp();
+    expect(
+      await utils.findByRole("heading", { name: "Proposals" }),
+    ).toBeTruthy();
+    expect(
+      utils.sidebar
+        .getByRole("button", { name: "Proposals" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+    expect(document.title).toBe(`factory · Proposals · ${OPEN_PROPOSAL_ID}`);
+  });
+});
+
 describe("Graph proposal navigation (WM-165)", () => {
   test("Open in Proposals routes through App to the selected proposal", async () => {
     currentProposals = [
