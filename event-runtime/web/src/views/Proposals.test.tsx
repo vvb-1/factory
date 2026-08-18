@@ -100,9 +100,9 @@ describe("Proposals approval availability (WM-738)", () => {
   }
 
   test("pending health says approval is waiting to connect", async () => {
-    expect(
-      await approvalTitle({ connected: false, healthPending: true }),
-    ).toBe("Approval is unavailable while connecting.");
+    expect(await approvalTitle({ connected: false, healthPending: true })).toBe(
+      "Approval is unavailable while connecting.",
+    );
   });
 
   test("failed health says approval is unavailable while disconnected", async () => {

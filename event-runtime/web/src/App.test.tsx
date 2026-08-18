@@ -40,6 +40,9 @@ const STATUS: StatusView = {
 };
 
 const HEALTH = { ok: true, policyVersion: "test", env: ENV };
+// One approvable open proposal, so the proposals route renders the detail pane
+// whose Approve button carries the health-derived tooltip (WM-738).
+const OPEN_PROPOSAL_ID = "prop_health_wiring";
 let currentStatus = STATUS;
 // "pending" never resolves, which is what a first load looks like before
 // /api/health answers; "error" is a runtime that answered with a failure.
@@ -69,6 +72,8 @@ function renderApp() {
   // Scope queries to the sidebar landmark: views render their own controls
   // (Overview has a "Graph" button too) and must not satisfy nav assertions.
   const sidebar = within(utils.getByRole("navigation", { name: "Primary" }));
+  // Exposed so a test can drive a poll tick itself instead of waiting out the
+  // 2s refetch interval.
   return { ...utils, sidebar, queryClient };
 }
 
@@ -90,6 +95,24 @@ beforeEach(() => {
       return jsonResponse(HEALTH);
     }
     if (url.includes("/api/status")) return jsonResponse(currentStatus);
+    if (url.includes("/api/proposals")) {
+      // `?status=all` is the decided-history join; only the open list carries
+      // the proposal the detail pane selects. created_at is minted per request
+      // so the fixture's TTL never lapses mid-suite.
+      if (url.includes("status=")) return jsonResponse({ proposals: [] });
+      return jsonResponse({
+        proposals:
+          currentProposals.length > 0
+            ? currentProposals
+            : [
+                createProposalFixture({
+                  id: OPEN_PROPOSAL_ID,
+                  created_at: new Date().toISOString(),
+                  ttl_seconds: 300,
+                }),
+              ],
+      });
+    }
     if (url.includes("/api/agents")) {
       return jsonResponse({
         agents: [],
@@ -101,8 +124,6 @@ beforeEach(() => {
       });
     }
     if (url.includes("/api/repos")) return jsonResponse({ repos: [] });
-    if (url.includes("/api/proposals"))
-      return jsonResponse({ proposals: currentProposals });
     if (url.includes("/api/runs?ticket=")) {
       const ticket =
         new URL(url, "http://localhost").searchParams.get("ticket") ?? "WM-0";
@@ -399,6 +420,82 @@ describe("health connection chrome (WM-724)", () => {
     expect(statusDot(statusBar).getAttribute("style")).toContain("--hue-ok");
     expect(statusBar.textContent).toContain("connected · test");
     expect(utils.queryByText(/Runtime unreachable —/)).toBeNull();
+  });
+});
+
+describe("Proposals approval tooltip health wiring (WM-738)", () => {
+  // The tooltip sits on the wrapper span around the Approve button, because a
+  // disabled button does not fire hover events (Proposals.tsx).
+  const approvalTooltip = (utils: ReturnType<typeof renderApp>) =>
+    utils
+      .getByRole("button", { name: /^Approve/ })
+      .parentElement?.getAttribute("title");
+
+  async function renderProposalDetail() {
+    window.location.hash = `#/proposals/${OPEN_PROPOSAL_ID}`;
+    const utils = renderApp();
+    await utils.findByRole("button", { name: /^Approve/ });
+    return utils;
+  }
+
+  test("a pending first load says approval is waiting to connect", async () => {
+    healthMode = "pending";
+    const utils = await renderProposalDetail();
+    await waitFor(() => {
+      expect(approvalTooltip(utils)).toBe(
+        "Approval is unavailable while connecting.",
+      );
+    });
+  });
+
+  test("a failed health check says approval is unavailable while disconnected", async () => {
+    healthMode = "error";
+    const utils = await renderProposalDetail();
+    await waitFor(() => {
+      expect(approvalTooltip(utils)).toBe(
+        "Approval is unavailable while disconnected.",
+      );
+    });
+  });
+
+  // The regression WM-738 shipped: the tooltip was wired to
+  // `isPending || isFetching`, so a runtime that died under a live console
+  // downgraded its own outage to "connecting" on every 2s poll. Only
+  // `isPending` means "first load, nothing heard back yet"; `isFetching` is
+  // true again the moment any poll starts, outage or not.
+  test("a failed poll that is refetching still reads as disconnected, not connecting", async () => {
+    const utils = await renderProposalDetail();
+    await waitFor(() => {
+      expect(utils.sidebar.getByText("dev")).toBeTruthy();
+    });
+    expect(approvalTooltip(utils)).toBeNull();
+
+    // The runtime dies under a console that had already connected.
+    healthMode = "error";
+    await act(async () => {
+      await utils.queryClient.refetchQueries({ queryKey: ["health"] });
+    });
+    await waitFor(() => {
+      expect(approvalTooltip(utils)).toBe(
+        "Approval is unavailable while disconnected.",
+      );
+    });
+
+    // The poll after that is in flight and stays that way: fetching, but still
+    // nothing heard back. This is the state the two signals disagree about.
+    healthMode = "pending";
+    const before = healthCalls;
+    void utils.queryClient.refetchQueries({ queryKey: ["health"] });
+    await waitFor(() => {
+      expect(healthCalls).toBeGreaterThan(before);
+    });
+
+    expect(approvalTooltip(utils)).toBe(
+      "Approval is unavailable while disconnected.",
+    );
+    // The chrome must agree with the tooltip — both read the same signal.
+    expect(utils.sidebar.getByText("disconnected")).toBeTruthy();
+    expect(utils.sidebar.queryByText("connecting")).toBeNull();
   });
 });
 
