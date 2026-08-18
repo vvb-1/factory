@@ -295,6 +295,8 @@ export function HoverCard({
     const onScroll = (e: Event) => {
       const target = e.target as Node | null;
       if (target && panelRef.current?.contains(target)) return;
+      const active = document.activeElement;
+      if (active && panelRef.current?.contains(active)) restoreFocus();
       close();
     };
     window.addEventListener("scroll", onScroll, true);
@@ -303,7 +305,7 @@ export function HoverCard({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", reposition);
     };
-  }, [open, close, reposition]);
+  }, [open, close, reposition, restoreFocus]);
 
   // ArrowDown means "take me into the card", so land focus there once it exists.
   useEffect(() => {
@@ -331,6 +333,7 @@ export function HoverCard({
       const ownEnter = e.key === "Enter" && e.target === e.currentTarget;
       if (e.key !== "ArrowDown" && !ownEnter) return;
       e.preventDefault();
+      e.stopPropagation();
       if (e.key === "ArrowDown") focusPanelRef.current = true;
       openNow();
     },

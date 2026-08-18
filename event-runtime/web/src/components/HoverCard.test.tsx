@@ -272,6 +272,23 @@ describe("HoverCard", () => {
     });
   });
 
+  test("ArrowDown on an inner trigger button does not reach a window list-keys listener", async () => {
+    const listKeys = mock((_e: KeyboardEvent) => {});
+    window.addEventListener("keydown", listKeys);
+    try {
+      const r = render(<Fixture focusable={false} interactiveTrigger />);
+      const inner = r.getByRole("button", { name: "triage-scan" });
+      inner.focus();
+
+      fireEvent.keyDown(inner, { key: "ArrowDown" });
+
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+      expect(listKeys).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", listKeys);
+    }
+  });
+
   test("Escape closes the card and restores focus to the trigger", async () => {
     const r = render(<Fixture />);
     const trigger = triggerOf(r.container);
@@ -351,6 +368,28 @@ describe("HoverCard", () => {
     fireEvent.scroll(r.getByTestId("table-scroll"));
 
     await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+  });
+
+  test("a surrounding scroll restores focus when it was inside the panel", async () => {
+    const r = render(
+      <div data-testid="table-scroll">
+        <Fixture />
+      </div>,
+    );
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(r.getByRole("dialog")).toBeTruthy();
+      expect(document.activeElement).toBe(
+        r.getByRole("button", { name: /Open in Agents/ }),
+      );
+    });
+
+    fireEvent.scroll(r.getByTestId("table-scroll"));
+
+    await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(trigger);
   });
 
   test("a scroll inside the panel does not dismiss the card", async () => {
