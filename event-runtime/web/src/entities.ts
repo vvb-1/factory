@@ -75,8 +75,10 @@ function resolvePr(
   const repo =
     url?.[1] ?? (REPO_RE.test(text(options.repo)) ? text(options.repo) : null);
   const number = url?.[2] ?? raw.replace(/^#/, "");
-  if (!/^\d+$/.test(number) || number === "0") return null;
-  const id = String(Number(number));
+  if (!/^\d+$/.test(number)) return null;
+  const n = Number(number);
+  if (n < 1) return null;
+  const id = String(n);
   return entity(
     "pr",
     id,
