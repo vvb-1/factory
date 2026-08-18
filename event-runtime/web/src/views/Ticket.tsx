@@ -28,6 +28,7 @@ import {
 } from "../subjectJourney";
 import { StateBadge, STATE_HUES } from "../components/ui";
 import type { AdmittedEvent, Proposal, RunDetail, RunListItem } from "../types";
+import { Button as PrimitiveButton } from "../components/ui";
 
 async function fetchTicketJourney(
   ticketId: string,
@@ -231,12 +232,13 @@ function TicketPicker({
           aria-invalid={error}
           className="mono min-w-0 flex-1 rounded-md border border-(--border-strong) bg-(--surface-1) px-3 py-2 text-[13px] outline-none focus:border-(--accent)"
         />
-        <button
+        <PrimitiveButton
+          bare
           type="submit"
           className="rounded-md bg-(--accent) px-4 py-2 text-[12px] font-medium text-(--on-accent)"
         >
           Open
-        </button>
+        </PrimitiveButton>
       </form>
       {error && (
         <div role="alert" className="mt-2 text-[11px] text-(--hue-err)">
@@ -500,13 +502,14 @@ export function Ticket({
           Invalid ticket id <span className="mono">{ticketId}</span>. Use an id
           like WM-542.
         </div>
-        <button
+        <PrimitiveButton
+          bare
           type="button"
           onClick={() => onNavigate("")}
           className="mt-3 text-[12px] text-(--accent) hover:underline"
         >
           Choose another ticket
-        </button>
+        </PrimitiveButton>
       </div>
     );
   }

@@ -40,6 +40,7 @@ import {
   VerbError,
   notify,
 } from "./ui";
+import { Button as PrimitiveButton } from "./ui";
 
 const REQUIRED = ["schemaVersion", "eventId", "type", "source", "occurredAt"];
 
@@ -1180,24 +1181,26 @@ export function InjectDialog({
           )}
           <span className="flex-1" />
           {f.kind === "string" && isAtField(f.name) && (
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => setField(f.name, new Date().toISOString())}
               className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--text-dim) hover:bg-(--surface-2)"
               title="Write the current time as an ISO timestamp"
             >
               Now
-            </button>
+            </PrimitiveButton>
           )}
           {f.kind === "string" && isIdField(f.name) && (
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => setField(f.name, triggerId(Date.now()))}
               className="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--text-dim) hover:bg-(--surface-2)"
               title="Generate a fresh web-trigger id"
             >
               Generate
-            </button>
+            </PrimitiveButton>
           )}
         </div>
         {f.description && (
@@ -1277,7 +1280,8 @@ export function InjectDialog({
             onKeyDown={onTemplateKeyDown}
           >
             {initialEnvelope && (
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 {...radioA11y("__given__")}
                 onClick={() => applySelection("__given__")}
@@ -1291,7 +1295,7 @@ export function InjectDialog({
                 <div className="text-[11px] text-(--text-faint) truncate">
                   original triggering payload
                 </div>
-              </button>
+              </PrimitiveButton>
             )}
 
             {filteredRecent.length > 0 && (
@@ -1304,7 +1308,8 @@ export function InjectDialog({
                     const id = `__recent_${r.eventId}__`;
                     const summary = summarizePayload(r.envelope);
                     return (
-                      <button
+                      <PrimitiveButton
+                        bare
                         key={r.eventId || id}
                         type="button"
                         {...radioA11y(id)}
@@ -1324,7 +1329,7 @@ export function InjectDialog({
                             {summary}
                           </span>
                         </div>
-                      </button>
+                      </PrimitiveButton>
                     );
                   })}
                 </div>
@@ -1348,7 +1353,8 @@ export function InjectDialog({
                         {group.templates.map((t) => {
                           const summary = t.summary || "no params";
                           return (
-                            <button
+                            <PrimitiveButton
+                              bare
                               key={t.eventType}
                               type="button"
                               {...radioA11y(t.eventType)}
@@ -1373,7 +1379,7 @@ export function InjectDialog({
                                   {summary}
                                 </span>
                               </div>
-                            </button>
+                            </PrimitiveButton>
                           );
                         })}
                       </div>
@@ -1391,7 +1397,8 @@ export function InjectDialog({
                 </div>
               )}
 
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               {...radioA11y(null)}
               onClick={() => applySelection(null)}
@@ -1405,7 +1412,7 @@ export function InjectDialog({
               <div className="text-[11px] text-(--text-faint)">
                 empty starter envelope
               </div>
-            </button>
+            </PrimitiveButton>
           </div>
         </div>
 
@@ -1450,7 +1457,8 @@ export function InjectDialog({
                     {jsonStatus.label}
                   </span>
                 </div>
-                <button
+                <PrimitiveButton
+                  bare
                   type="button"
                   onClick={formatJson}
                   className="text-[11px] text-(--text-dim) hover:text-(--accent)"
@@ -1463,7 +1471,7 @@ export function InjectDialog({
                   >
                     ⌘⇧F
                   </span>
-                </button>
+                </PrimitiveButton>
               </div>
             )}
           </div>

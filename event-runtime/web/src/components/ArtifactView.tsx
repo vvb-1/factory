@@ -1,3 +1,4 @@
+import { Button as PrimitiveButton } from "./ui";
 /**
  * ArtifactView — schema-derived rendering of a run artifact
  * (docs/event-runtime-artifact-views.md §2.4, WM-455).
@@ -56,7 +57,8 @@ export function RawToggle({
   onChange: (raw: boolean) => void;
 }) {
   const opt = (value: boolean, label: string) => (
-    <button
+    <PrimitiveButton
+      bare
       type="button"
       aria-pressed={raw === value}
       onClick={() => onChange(value)}
@@ -67,7 +69,7 @@ export function RawToggle({
       }`}
     >
       {label}
-    </button>
+    </PrimitiveButton>
   );
   return (
     <span
@@ -316,7 +318,8 @@ function Rows({
               {hasExpand && (
                 <td className={`${CELL} w-6 pr-0`}>
                   {expandable && (
-                    <button
+                    <PrimitiveButton
+                      bare
                       type="button"
                       aria-expanded={isOpen}
                       aria-label={isOpen ? "Collapse row" : "Expand row"}
@@ -327,7 +330,7 @@ function Rows({
                       className="inline-flex cursor-pointer items-center"
                     >
                       <DisclosureChevron open={isOpen} />
-                    </button>
+                    </PrimitiveButton>
                   )}
                 </td>
               )}
@@ -373,7 +376,8 @@ function GroupRow({
   return (
     <tr>
       <td colSpan={colSpan} className="p-0">
-        <button
+        <PrimitiveButton
+          bare
           type="button"
           aria-expanded={!collapsed}
           onClick={onToggle}
@@ -399,7 +403,7 @@ function GroupRow({
               collapsed
             </span>
           )}
-        </button>
+        </PrimitiveButton>
       </td>
     </tr>
   );

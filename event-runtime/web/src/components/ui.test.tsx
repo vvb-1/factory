@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import {
   Button,
   ChipInput,
+  clampTooltipPosition,
   clearToasts,
   CopyActions,
   Countdown,
@@ -12,6 +13,7 @@ import {
   Dialog,
   FilterInput,
   getValueHue,
+  IconButton,
   KV,
   KVGroup,
   notify,
@@ -20,6 +22,7 @@ import {
   StateBadge,
   SuggestInput,
   ToastContainer,
+  Tooltip,
 } from "./ui";
 import { parseFilterQuery, RUN_FACETS } from "../filterQuery";
 import { modal } from "../hooks";
@@ -71,8 +74,244 @@ describe("shortId (WM-96)", () => {
   });
 });
 
+describe("control sizing (WM-589)", () => {
+  test("Button renders the shared 24, 28, and 32px sizes", () => {
+    const r = render(
+      <>
+        <Button size="sm">
+          <svg aria-hidden="true" />
+          Small
+        </Button>
+        <Button size="md">
+          <svg aria-hidden="true" />
+          Medium
+        </Button>
+        <Button size="lg">
+          <svg aria-hidden="true" />
+          Large
+        </Button>
+      </>,
+    );
+
+    const small = r.getByRole("button", { name: "Small" });
+    const medium = r.getByRole("button", { name: "Medium" });
+    const large = r.getByRole("button", { name: "Large" });
+    expect(classes(small)).toEqual(
+      expect.arrayContaining(["h-6", "px-2", "[&>svg]:size-3"]),
+    );
+    expect(classes(medium)).toEqual(
+      expect.arrayContaining(["h-7", "px-2.5", "[&>svg]:size-3.5"]),
+    );
+    expect(classes(large)).toEqual(
+      expect.arrayContaining(["h-8", "px-3", "[&>svg]:size-4"]),
+    );
+    expect(small.getAttribute("data-control-size")).toBe("sm");
+    expect(medium.getAttribute("data-control-size")).toBe("md");
+    expect(large.getAttribute("data-control-size")).toBe("lg");
+  });
+
+  test("IconButton rejects a missing accessible name", () => {
+    expect(() =>
+      render(
+        // Runtime protection complements the required TypeScript prop for JS/dynamic callers.
+        // @ts-expect-error exercising the runtime guard
+        <IconButton>
+          <span aria-hidden="true">×</span>
+        </IconButton>,
+      ),
+    ).toThrow("IconButton requires a non-empty aria-label");
+  });
+
+  test("IconButton is a square medium control with a shared tooltip", () => {
+    const r = render(
+      <IconButton aria-label="Copy run id">
+        <span aria-hidden="true">#</span>
+      </IconButton>,
+    );
+    const button = r.getByRole("button", { name: "Copy run id" });
+    expect(classes(button)).toContain("h-7");
+    expect(classes(button)).toContain("w-7");
+    expect(r.getByRole("tooltip").textContent).toBe("Copy run id");
+  });
+});
+
+describe("Tooltip viewport clamp (WM-589 follow-up)", () => {
+  test("clampTooltipPosition flips above a bottom-pinned trigger instead of opening off-screen", () => {
+    // Footer theme toggle: trigger sits flush with the bottom of the viewport,
+    // so opening downward (the old CSS-only default) put the tooltip entirely
+    // below the visible page.
+    const trigger = { top: 878, left: 700, right: 732, bottom: 900, width: 32 };
+    const tooltip = { width: 140, height: 26 };
+    const viewport = { width: 1440, height: 900 };
+    const pos = clampTooltipPosition(trigger, tooltip, viewport);
+    expect(pos.top).toBeGreaterThanOrEqual(0);
+    expect(pos.top + tooltip.height).toBeLessThanOrEqual(viewport.height);
+    expect(pos.top).toBeLessThan(trigger.top); // flipped above the trigger
+  });
+
+  test("clampTooltipPosition clamps a right-edge trigger's tooltip inside the viewport width", () => {
+    // ContextTabs "+" repo picker: trigger sits top-right, so centering the
+    // tooltip under it (the old CSS-only default) clipped it off the right edge.
+    const trigger = { top: 40, left: 1400, right: 1432, bottom: 68, width: 32 };
+    const tooltip = { width: 220, height: 26 };
+    const viewport = { width: 1440, height: 900 };
+    const pos = clampTooltipPosition(trigger, tooltip, viewport);
+    expect(pos.left).toBeGreaterThanOrEqual(0);
+    expect(pos.left + tooltip.width).toBeLessThanOrEqual(viewport.width);
+  });
+
+  function rect(r: {
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  }): DOMRect {
+    return { ...r, x: r.left, y: r.top, toJSON: () => r } as DOMRect;
+  }
+
+  test("Tooltip keeps a bottom-pinned trigger's tooltip on-screen", () => {
+    Object.defineProperty(window, "innerWidth", {
+      value: 1440,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 900,
+      configurable: true,
+    });
+
+    const r = render(
+      <Tooltip label="Switch to dark theme">
+        <button aria-label="Theme">T</button>
+      </Tooltip>,
+    );
+    const trigger = r.getByRole("button", { name: "Theme" })
+      .parentElement as HTMLElement;
+    const tooltip = r.getByRole("tooltip");
+    trigger.getBoundingClientRect = () =>
+      rect({
+        top: 878,
+        left: 700,
+        right: 732,
+        bottom: 900,
+        width: 32,
+        height: 22,
+      });
+    tooltip.getBoundingClientRect = () =>
+      rect({ top: 0, left: 0, right: 140, bottom: 26, width: 140, height: 26 });
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+    });
+
+    const top = parseFloat(tooltip.style.top);
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top + 26).toBeLessThanOrEqual(900);
+  });
+
+  test("Tooltip keeps a right-edge trigger's tooltip on-screen", () => {
+    Object.defineProperty(window, "innerWidth", {
+      value: 1440,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 900,
+      configurable: true,
+    });
+
+    const r = render(
+      <Tooltip label="Open a repo tab (g 1–9)">
+        <button aria-label="Open repo">+</button>
+      </Tooltip>,
+    );
+    const trigger = r.getByRole("button", { name: "Open repo" })
+      .parentElement as HTMLElement;
+    const tooltip = r.getByRole("tooltip");
+    trigger.getBoundingClientRect = () =>
+      rect({
+        top: 40,
+        left: 1400,
+        right: 1432,
+        bottom: 68,
+        width: 32,
+        height: 28,
+      });
+    tooltip.getBoundingClientRect = () =>
+      rect({ top: 0, left: 0, right: 220, bottom: 26, width: 220, height: 26 });
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+    });
+
+    const left = parseFloat(tooltip.style.left);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + 220).toBeLessThanOrEqual(1440);
+  });
+
+  test("Tooltip recomputes position when its label changes while it stays open", () => {
+    // Regression for a follow-up finding on the theme toggle: the label can
+    // change (and grow) on click without the pointer/focus ever leaving the
+    // button, so the effect must react to the label content too, not just
+    // the open/closed transition.
+    Object.defineProperty(window, "innerWidth", {
+      value: 1440,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 900,
+      configurable: true,
+    });
+
+    function ToggleLabelHarness() {
+      const [long, setLong] = useState(false);
+      return (
+        <Tooltip label={long ? "A much longer label after the click" : "Short"}>
+          <button aria-label="Toggle" onClick={() => setLong(true)}>
+            T
+          </button>
+        </Tooltip>
+      );
+    }
+
+    const r = render(<ToggleLabelHarness />);
+    const button = r.getByRole("button", { name: "Toggle" });
+    const trigger = button.parentElement as HTMLElement;
+    const tooltip = r.getByRole("tooltip");
+    trigger.getBoundingClientRect = () =>
+      rect({
+        top: 40,
+        left: 1400,
+        right: 1432,
+        bottom: 68,
+        width: 32,
+        height: 28,
+      });
+    tooltip.getBoundingClientRect = () =>
+      rect({ top: 0, left: 0, right: 60, bottom: 26, width: 60, height: 26 });
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+    });
+    const shortLeft = parseFloat(tooltip.style.left);
+    expect(shortLeft + 60).toBeLessThanOrEqual(1440);
+
+    // The click grows the label/tooltip without a mouseleave/mouseenter —
+    // pointer stays put, `open` never flips.
+    tooltip.getBoundingClientRect = () =>
+      rect({ top: 0, left: 0, right: 260, bottom: 26, width: 260, height: 26 });
+    act(() => {
+      fireEvent.click(button);
+    });
+
+    const left = parseFloat(tooltip.style.left);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + 260).toBeLessThanOrEqual(1440);
+  });
+});
+
 describe("CopyActions (WM-302)", () => {
-  test("renders icon-only actions with accessible labels and shortcut tooltips", () => {
+  test("renders icon-only actions with accessible labels and shared shortcut tooltips", () => {
     const r = render(
       <CopyActions
         id="run_123"
@@ -87,9 +326,11 @@ describe("CopyActions (WM-302)", () => {
       name: "Copy CLI inspect command (c i)",
     });
     const link = r.getByRole("button", { name: "Copy link (c l)" });
-    expect(id.getAttribute("title")).toBe("Copy run id · c");
-    expect(cli.getAttribute("title")).toBe("Copy CLI inspect command · c i");
-    expect(link.getAttribute("title")).toBe("Copy link · c l");
+    expect(r.getAllByRole("tooltip").map((el) => el.textContent)).toEqual([
+      "Copy run id · c",
+      "Copy CLI inspect command · c i",
+      "Copy link · c l",
+    ]);
     expect(id.textContent).toBe("");
     expect(cli.textContent).toBe("");
     expect(link.textContent).toBe("");

@@ -275,9 +275,13 @@ describe("Projects copy chords and hints (WM-233)", () => {
         });
 
         // Verify icon-action tooltips preserve shortcut discoverability.
-        expect(pathBtn.getAttribute("title")).toBe("Copy repo path · c p");
+        expect(
+          pathBtn.parentElement?.querySelector('[role="tooltip"]')?.textContent,
+        ).toBe("Copy repo path · c p");
         const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
-        expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
+        expect(
+          linkBtn.parentElement?.querySelector('[role="tooltip"]')?.textContent,
+        ).toBe("Copy link · c l");
 
         // 1. Press 'c' -> copies repo name
         fireEvent.keyDown(document.body, { key: "c" });

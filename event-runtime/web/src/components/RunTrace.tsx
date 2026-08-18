@@ -19,7 +19,15 @@ import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard } from "../hooks";
 import type { RunState, TraceEntry, TracePayload } from "../types";
-import { DisclosureChevron, humanSize, JsonBlock, Section, notify } from "./ui";
+import {
+  DisclosureChevron,
+  humanSize,
+  IconButton,
+  JsonBlock,
+  Section,
+  notify,
+} from "./ui";
+import { Button as PrimitiveButton } from "./ui";
 
 function copyText(text: string, label: string = "text") {
   navigator.clipboard.writeText(text);
@@ -36,15 +44,13 @@ function TraceIconButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <IconButton
       aria-label={label}
-      title={label}
       onClick={onClick}
-      className="inline-flex size-6 items-center justify-center rounded text-(--text-faint) transition-colors hover:bg-(--surface-2) hover:text-(--text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
+      className="text-(--text-faint) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
     >
       {children}
-    </button>
+    </IconButton>
   );
 }
 
@@ -1140,7 +1146,8 @@ export function RunTrace({
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         {live ? (
           <div className="flex items-center gap-2">
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => {
                 if (followLive) {
@@ -1177,7 +1184,7 @@ export function RunTrace({
               >
                 l
               </span>
-            </button>
+            </PrimitiveButton>
             {unreadCount > 0 && !followLive ? (
               <span className="text-[11px] font-medium text-(--hue-warn)">
                 {unreadCount} new {unreadCount === 1 ? "event" : "events"}
@@ -1211,7 +1218,8 @@ export function RunTrace({
             aria-label="Trace kind"
           >
             {filterTabs.map((t, idx) => (
-              <button
+              <PrimitiveButton
+                bare
                 key={t.key}
                 type="button"
                 role="tab"
@@ -1243,13 +1251,14 @@ export function RunTrace({
                 >
                   {idx + 1}
                 </span>
-              </button>
+              </PrimitiveButton>
             ))}
           </div>
 
           <div className="flex items-center gap-2">
             {counts.errors > 0 && (
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={handleJumpToError}
                 className={TRACE_QUIET_BUTTON}
@@ -1270,7 +1279,7 @@ export function RunTrace({
                 >
                   .
                 </span>
-              </button>
+              </PrimitiveButton>
             )}
 
             <div className="flex items-center gap-1 rounded border border-(--border) bg-(--surface-0) px-1.5 py-0.5 text-[11px]">
@@ -1304,7 +1313,8 @@ export function RunTrace({
                   </span>
                   {searchMatches.length > 0 && (
                     <>
-                      <button
+                      <PrimitiveButton
+                        bare
                         type="button"
                         onClick={() =>
                           setActiveMatch(
@@ -1318,8 +1328,9 @@ export function RunTrace({
                         aria-label="Previous match"
                       >
                         <span aria-hidden="true">↑</span>
-                      </button>
-                      <button
+                      </PrimitiveButton>
+                      <PrimitiveButton
+                        bare
                         type="button"
                         onClick={() =>
                           setActiveMatch((m) => (m + 1) % searchMatches.length)
@@ -1329,10 +1340,11 @@ export function RunTrace({
                         aria-label="Next match"
                       >
                         <span aria-hidden="true">↓</span>
-                      </button>
+                      </PrimitiveButton>
                     </>
                   )}
-                  <button
+                  <PrimitiveButton
+                    bare
                     type="button"
                     onClick={() => setSearch("")}
                     className="text-(--text-faint) hover:text-(--text)"
@@ -1340,11 +1352,12 @@ export function RunTrace({
                     aria-label="Clear search"
                   >
                     <span aria-hidden="true">×</span>
-                  </button>
+                  </PrimitiveButton>
                 </>
               )}
             </div>
-            <button
+            <PrimitiveButton
+              bare
               type="button"
               onClick={() => {
                 setExpandAll((v) => !v);
@@ -1360,7 +1373,7 @@ export function RunTrace({
               >
                 e
               </span>
-            </button>
+            </PrimitiveButton>
           </div>
         </div>
       )}
@@ -1439,7 +1452,8 @@ export function RunTrace({
 
           {live && !followLive && (
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={jumpToLatest}
                 className="flex items-center gap-1.5 rounded-full bg-(--accent) px-3 py-1 text-[11px] font-medium text-white shadow-lg transition-transform hover:scale-105 active:scale-95"
@@ -1456,7 +1470,7 @@ export function RunTrace({
                 >
                   G
                 </span>
-              </button>
+              </PrimitiveButton>
             </div>
           )}
         </div>
@@ -1468,13 +1482,14 @@ export function RunTrace({
           {onExpand && (
             <>
               {" — "}
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={onExpand}
                 className="text-(--accent) hover:underline"
               >
                 open full view
-              </button>
+              </PrimitiveButton>
             </>
           )}
         </div>

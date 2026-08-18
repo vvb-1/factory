@@ -79,6 +79,7 @@ import {
   copyLink,
   shortId,
 } from "../components/ui";
+import { Button as PrimitiveButton } from "../components/ui";
 
 export type RunTab = "ALL" | "ACTIVE" | "COMPLETED" | "FAILED" | "CANCELLED";
 
@@ -470,12 +471,19 @@ export function Runs({
     [statusQ.data],
   );
   const parsed = useMemo(() => parseFilterQuery(filter, RUN_FACETS), [filter]);
-  const visible = useMemo(
+  const filteredScoped = useMemo(
     () =>
-      byTab.filter((r) =>
+      scoped.filter((r) =>
         matchesFilterQuery(r, parsed, RUN_FACETS, { staleRuns }),
       ),
-    [byTab, parsed, staleRuns],
+    [scoped, parsed, staleRuns],
+  );
+  const visible = useMemo(
+    () =>
+      tab === "ALL"
+        ? filteredScoped
+        : filteredScoped.filter((r) => matchesRunTab(r.state, tab)),
+    [filteredScoped, tab],
   );
 
   // Display options (OPS-493): partition into sections, order inside them,
@@ -691,6 +699,11 @@ export function Runs({
 
   const byState = statusQ.data?.runs?.byState ?? {};
   const tabCount = (t: RunTab) => {
+    if (filter.trim()) {
+      return t === "ALL"
+        ? filteredScoped.length
+        : filteredScoped.filter((r) => matchesRunTab(r.state, t)).length;
+    }
     if (fetchAll) {
       return t === "ALL"
         ? scoped.length
@@ -954,14 +967,15 @@ export function Runs({
                 {RUN_TABS.map((t, idx) => {
                   const count = tabCount(t);
                   return (
-                    <button
+                    <Button
                       key={t}
-                      type="button"
+                      size="sm"
+                      variant="ghost"
                       role="tab"
                       aria-selected={tab === t}
                       onClick={() => selectTab(t)}
                       title={RUN_TAB_TITLES[t]}
-                      className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                      className={`rounded-md ${
                         tab === t
                           ? "bg-(--surface-3) text-(--text)"
                           : "text-(--text-faint) hover:bg-(--surface-1)"
@@ -979,7 +993,7 @@ export function Runs({
                       >
                         {idx + 1}
                       </span>
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
@@ -1246,14 +1260,15 @@ export function Runs({
               aria-label="Breadcrumb"
               className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
             >
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={() => onSelectRun(null)}
                 className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
                 title="Back to runs list"
               >
                 Runs
-              </button>
+              </PrimitiveButton>
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>
@@ -1357,7 +1372,6 @@ export function Runs({
               idLabel="run id"
               cli={`bun event-runtime/cli.mjs inspect ${sel.runId}`}
               cliLabel="CLI inspect command"
-              variant="quiet"
             />
           }
           close={<Button onClick={() => onSelectRun(null)}>Close</Button>}

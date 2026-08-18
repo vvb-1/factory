@@ -44,6 +44,7 @@ import { AgentMutationBadge } from "../components/AgentHoverCard";
 import { EMPTY, NOT_APPLICABLE, formatDuration } from "../format";
 import { eventsHash } from "../hash";
 import { setContextActions } from "../palette";
+import { Button as PrimitiveButton } from "../components/ui";
 
 const caps = (a: AgentDef) =>
   [a.capabilities.filesystem, ...(a.capabilities.services ?? [])]
@@ -367,7 +368,8 @@ export function Agents({
                   aria-label="Agent mutation safety"
                 >
                   {AGENT_TABS.map((item, index) => (
-                    <button
+                    <PrimitiveButton
+                      bare
                       key={item}
                       type="button"
                       role="tab"
@@ -389,7 +391,7 @@ export function Agents({
                       >
                         {index + 1}
                       </span>
-                    </button>
+                    </PrimitiveButton>
                   ))}
                 </div>
                 <span className="ml-auto">

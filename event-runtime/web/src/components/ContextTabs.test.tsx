@@ -84,7 +84,7 @@ describe("ContextTabs", () => {
     expect(all.className).toContain("focus-visible:ring-2");
   });
 
-  test("groups scope chips on the left, separates In flight, and leaves a labeled Repo action on the right", () => {
+  test("groups scope chips on the left, separates In flight, and leaves a labeled repo icon action on the right", () => {
     const r = render(
       <ContextTabs
         repos={[repo("factory")]}
@@ -122,8 +122,10 @@ describe("ContextTabs", () => {
 
     const repoAction = r.getByRole("button", { name: "Open a repo tab" });
     expect(toolbar.contains(repoAction)).toBe(false);
-    expect(repoAction.textContent).toBe("+Repo");
-    expect(repoAction.getAttribute("title")).toBe("Open a repo tab (g 1–9)");
+    expect(repoAction.textContent).toBe("+");
+    expect(
+      r.getByRole("tooltip", { name: "Open a repo tab (g 1–9)" }),
+    ).toBeTruthy();
 
     for (const name of ["Close factory", "Close run_abc"]) {
       const close = r.getByRole("button", { name });

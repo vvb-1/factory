@@ -76,6 +76,7 @@ import {
   copyLink,
   shortId,
 } from "../components/ui";
+import { Button as PrimitiveButton } from "../components/ui";
 
 function removeTokensFromQuery(
   filter: string,
@@ -110,7 +111,8 @@ function FacetChoice({
   onClick: () => void;
 }) {
   return (
-    <button
+    <PrimitiveButton
+      bare
       type="button"
       aria-pressed={active}
       title={value}
@@ -131,7 +133,7 @@ function FacetChoice({
           {count}
         </span>
       )}
-    </button>
+    </PrimitiveButton>
   );
 }
 
@@ -925,7 +927,8 @@ export function Events({
               {STATUS_TABS.map((t, idx) => {
                 const count = tabCount(t);
                 return (
-                  <button
+                  <PrimitiveButton
+                    bare
                     key={t}
                     type="button"
                     role="tab"
@@ -950,7 +953,7 @@ export function Events({
                     >
                       {idx + 1}
                     </span>
-                  </button>
+                  </PrimitiveButton>
                 );
               })}
             </div>
@@ -1287,14 +1290,15 @@ export function Events({
               aria-label="Breadcrumb"
               className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
             >
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={() => onSelectEvent(null)}
                 className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
                 title="Back to events list"
               >
                 Events
-              </button>
+              </PrimitiveButton>
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>

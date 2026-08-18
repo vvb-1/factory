@@ -51,6 +51,7 @@ import {
   notify,
   shortId,
 } from "../components/ui";
+import { Button as PrimitiveButton } from "../components/ui";
 
 /**
  * The human inbox (WM-286): everything the runtime is waiting on the operator
@@ -744,7 +745,8 @@ export function Inbox({
                   aria-label="Inbox status"
                 >
                   {INBOX_TABS.map((t, idx) => (
-                    <button
+                    <PrimitiveButton
+                      bare
                       key={t}
                       type="button"
                       role="tab"
@@ -769,7 +771,7 @@ export function Inbox({
                       >
                         {idx + 1}
                       </span>
-                    </button>
+                    </PrimitiveButton>
                   ))}
                 </div>
                 <span className="ml-auto">
@@ -1033,14 +1035,15 @@ export function Inbox({
               aria-label="Breadcrumb"
               className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
             >
-              <button
+              <PrimitiveButton
+                bare
                 type="button"
                 onClick={() => onSelectItem(null)}
                 className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
                 title="Back to inbox list"
               >
                 Inbox
-              </button>
+              </PrimitiveButton>
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>

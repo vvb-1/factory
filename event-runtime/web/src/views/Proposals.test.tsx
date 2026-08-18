@@ -1342,9 +1342,13 @@ describe("Proposals copy chords and hints (WM-233)", () => {
         });
 
         // Verify icon-action tooltips preserve shortcut discoverability.
-        expect(idBtn.getAttribute("title")).toBe("Copy proposal id · c");
+        expect(
+          idBtn.parentElement?.querySelector('[role="tooltip"]')?.textContent,
+        ).toBe("Copy proposal id · c");
         const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
-        expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
+        expect(
+          linkBtn.parentElement?.querySelector('[role="tooltip"]')?.textContent,
+        ).toBe("Copy link · c l");
 
         // 1. Press 'c' -> copies proposalId
         fireEvent.keyDown(document.body, { key: "c" });

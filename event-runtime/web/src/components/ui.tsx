@@ -1,9 +1,12 @@
 import {
   createContext,
+  forwardRef,
+  type ButtonHTMLAttributes,
   type ReactNode,
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -177,8 +180,20 @@ function CopyActionButton({
   quiet = false,
   children,
 }: CopyActionButtonProps) {
+  if (!quiet) {
+    return (
+      <IconButton
+        aria-label={`${label} (${chord})`}
+        tooltip={`${label} · ${chord}`}
+        onClick={onClick}
+      >
+        {children}
+      </IconButton>
+    );
+  }
   return (
-    <button
+    <Button
+      bare
       type="button"
       title={`${label} · ${chord}`}
       aria-label={`${label} (${chord})`}
@@ -190,7 +205,7 @@ function CopyActionButton({
       }
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -336,7 +351,8 @@ function FilterToken({
   const label = chipLabel(token);
   const help = chipHelp(token, query);
   return (
-    <button
+    <Button
+      bare
       type="button"
       onClick={onRemove}
       title={help}
@@ -356,7 +372,7 @@ function FilterToken({
       >
         ×
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -633,7 +649,8 @@ export function FilterInput<T = unknown, C = unknown>({
               onRemove={() => rewrite(removeFilterToken(value, token))}
             />
           ))}
-          <button
+          <Button
+            bare
             type="button"
             onClick={() => rewrite("")}
             title="Clear query (Esc)"
@@ -641,7 +658,7 @@ export function FilterInput<T = unknown, C = unknown>({
             className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
           >
             clear
-          </button>
+          </Button>
         </div>
       )}
     </>
@@ -787,7 +804,14 @@ export function ListEmpty({
         )}
         {onClear && filtered && !query.isPending && !query.isError && (
           <div className="mt-3">
-            <Button onClick={onClear}>Clear filter</Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="bg-(--surface-3) text-(--text)"
+              onClick={onClear}
+            >
+              Clear filter
+            </Button>
           </div>
         )}
         {action && !query.isPending && !query.isError && !filtered && (
@@ -841,7 +865,8 @@ export function Th({
         className={`group/th flex h-7 w-full items-center justify-between gap-1 px-3 ${align === "right" ? "justify-end" : ""}`}
       >
         {onSort ? (
-          <button
+          <Button
+            bare
             type="button"
             onClick={onSort}
             onKeyDown={(e) =>
@@ -857,23 +882,21 @@ export function Th({
             >
               {(dir ?? naturalDir ?? "asc") === "desc" ? "↓" : "↑"}
             </span>
-          </button>
+          </Button>
         ) : (
           <span>{label}</span>
         )}
         {onRemove && (
-          <button
-            type="button"
+          <IconButton
             onClick={(e) => {
               e.stopPropagation();
               onRemove();
             }}
-            title={`Remove column ${label}`}
             aria-label={`Remove column ${label}`}
-            className="ml-1 inline-flex size-3.5 cursor-pointer items-center justify-center rounded text-[11px] text-(--text-faint) opacity-0 transition-opacity hover:bg-(--surface-2) hover:text-(--text) group-hover/th:opacity-100"
+            className="ml-1 text-[11px] text-(--text-faint) opacity-0 transition-opacity group-hover/th:opacity-100"
           >
             ×
-          </button>
+          </IconButton>
         )}
       </div>
     </th>
@@ -922,7 +945,8 @@ export function GroupHeaderRow({
         colSpan={colSpan}
         className={`p-0 ${sub ? "" : "sticky top-7 z-[5]"}`}
       >
-        <button
+        <Button
+          bare
           type="button"
           aria-expanded={!collapsed}
           onClick={onToggle}
@@ -957,7 +981,7 @@ export function GroupHeaderRow({
               collapsed
             </span>
           )}
-        </button>
+        </Button>
       </td>
     </tr>
   );
@@ -1391,14 +1415,15 @@ export function StatTile({
     "rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left";
   if (!onClick) return <div className={cls}>{inner}</div>;
   return (
-    <button
+    <Button
+      bare
       type="button"
       onClick={onClick}
       aria-label={`${label}: ${value}`}
       className={`${cls} cursor-pointer hover:bg-(--surface-2)`}
     >
       {inner}
-    </button>
+    </Button>
   );
 }
 
@@ -1433,7 +1458,8 @@ export function JumpLink({
     );
   }
   return (
-    <button
+    <Button
+      bare
       type="button"
       className={cls}
       title={title}
@@ -1443,7 +1469,7 @@ export function JumpLink({
       }}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -1602,7 +1628,8 @@ function ToastRegion({
       className="flex flex-col gap-2"
     >
       {toasts.map((t) => (
-        <button
+        <Button
+          bare
           key={t.id}
           type="button"
           title="Dismiss"
@@ -1629,7 +1656,7 @@ function ToastRegion({
             }}
           />
           <span className="text-(--text) font-medium">{t.message}</span>
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -1670,13 +1697,14 @@ export function JsonBlock({ value }: { value: unknown }) {
           ),
         )}
       </pre>
-      <button
+      <Button
+        bare
         type="button"
         onClick={copy}
         className="absolute top-2 right-2 rounded border border-(--border) bg-(--surface-1) px-2 py-0.5 text-[10px] font-medium text-(--text-dim) opacity-0 transition-opacity group-hover:opacity-100 hover:bg-(--surface-2) hover:text-(--text)"
       >
         {copied ? "Copied!" : "Copy"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -1798,7 +1826,8 @@ export function Section({
     <KVIconsContext.Provider value={icons}>
       <div className="mb-5">
         {collapsible ? (
-          <button
+          <Button
+            bare
             type="button"
             onClick={toggle}
             aria-expanded={!collapsed}
@@ -1806,7 +1835,7 @@ export function Section({
           >
             <DisclosureChevron open={!collapsed} />
             {heading}
-          </button>
+          </Button>
         ) : (
           <div className="mb-1.5">{heading}</div>
         )}
@@ -1883,7 +1912,8 @@ export function KV({
         <span className="truncate">{k}</span>
       </div>
       {copyable ? (
-        <button
+        <Button
+          bare
           type="button"
           // The row truncates long values; the tooltip is the only place the
           // full string is readable without copying (WM-129 critique).
@@ -1892,7 +1922,7 @@ export function KV({
           className={`truncate text-left text-(--text-dim) hover:text-(--accent) ${isMono ? "mono" : ""}`}
         >
           {text}
-        </button>
+        </Button>
       ) : (
         <span
           className={`truncate text-left ${unset ? "text-(--text-faint)" : "text-(--text-dim)"} ${isMono ? "mono" : ""}`}
@@ -1927,39 +1957,214 @@ export function KVGroup({
   );
 }
 
-export function Button({
+export type ButtonSize = "sm" | "md" | "lg";
+
+export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  size?: ButtonSize;
+  variant?: "default" | "primary" | "danger" | "ghost";
+  /** Preserve a bespoke non-control surface while still routing it through the
+   * shared primitive. Keep this to structural rows and row-inline text verbs. */
+  bare?: boolean;
+};
+
+const BUTTON_SIZES: Record<ButtonSize, string> = {
+  sm: "h-6 gap-1 px-2 [&>svg]:size-3",
+  md: "h-7 gap-1.5 px-2.5 [&>svg]:size-3.5",
+  lg: "h-8 gap-2 px-3 [&>svg]:size-4",
+};
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button(
+    {
+      children,
+      variant = "default",
+      size = "md",
+      bare = false,
+      className = "",
+      type = "button",
+      ...props
+    },
+    ref,
+  ) {
+    const styles = {
+      default:
+        "border-(--border-strong) bg-(--surface-2) text-(--text) hover:bg-(--surface-3)",
+      primary:
+        "border-transparent bg-(--accent) text-(--on-accent) hover:opacity-90",
+      danger:
+        "border-(--border-strong) bg-(--surface-2) hover:bg-(--surface-3) text-(--hue-err)",
+      ghost:
+        "border-transparent bg-transparent text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)",
+    }[variant];
+    return (
+      <button
+        ref={ref}
+        type={type}
+        data-control-size={bare ? undefined : size}
+        className={
+          bare
+            ? className
+            : `inline-flex shrink-0 items-center justify-center rounded-md border text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${BUTTON_SIZES[size]} ${styles} ${className}`
+        }
+        {...props}
+      >
+        {children}
+      </button>
+    );
+  },
+);
+
+interface TooltipRect {
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
+  width: number;
+}
+
+export interface TooltipPosition {
+  top: number;
+  left: number;
+}
+
+/**
+ * Clamp/flip a tooltip so it stays fully inside the viewport (WM-589
+ * follow-up). Prefers opening below and centered under the trigger — the
+ * previous CSS-only default — but flips above when there isn't room below
+ * (e.g. a trigger pinned to the bottom edge), and always clamps
+ * horizontally so a right- or left-aligned trigger never clips off-screen.
+ */
+export function clampTooltipPosition(
+  trigger: TooltipRect,
+  tooltip: { width: number; height: number },
+  viewport: { width: number; height: number },
+  margin = 8,
+): TooltipPosition {
+  const gap = 6;
+  let top = trigger.bottom + gap;
+  if (top + tooltip.height + margin > viewport.height) {
+    const above = trigger.top - tooltip.height - gap;
+    top =
+      above >= margin
+        ? above
+        : Math.max(margin, viewport.height - tooltip.height - margin);
+  }
+  const maxLeft = Math.max(margin, viewport.width - tooltip.width - margin);
+  const left = Math.min(
+    Math.max(trigger.left + trigger.width / 2 - tooltip.width / 2, margin),
+    maxLeft,
+  );
+  return { top, left };
+}
+
+/**
+ * A real hover/focus tooltip shared by icon-only controls. Position is
+ * fixed and JS-computed (see `clampTooltipPosition`) rather than pure CSS
+ * placement, so it never opens off-screen for edge-pinned triggers (bottom
+ * status bar, right-aligned toolbar buttons, …).
+ */
+export function Tooltip({
+  label,
   children,
-  onClick,
-  variant = "default",
-  disabled,
-  autoFocus,
 }: {
+  label: ReactNode;
   children: ReactNode;
-  onClick?: () => void;
-  variant?: "default" | "primary" | "danger";
-  disabled?: boolean;
-  autoFocus?: boolean;
 }) {
-  const styles = {
-    default:
-      "border-(--border-strong) bg-(--surface-2) text-(--text) hover:bg-(--surface-3)",
-    primary:
-      "border-transparent bg-(--accent) text-(--on-accent) hover:opacity-90",
-    danger:
-      "border-(--border-strong) bg-(--surface-2) hover:bg-(--surface-3) text-(--hue-err)",
-  }[variant];
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<TooltipPosition | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+
+  // Kept mounted (opacity-0 while closed) rather than conditionally rendered,
+  // so callers/tests can find the tooltip by role without simulating hover,
+  // and so there is no mount flash the first time it opens. Depends on
+  // `label` too (not just `open`): a tooltip can stay open across a click
+  // that changes its own text (e.g. the theme toggle's label flips on
+  // click without the pointer/focus leaving the button) — without this,
+  // the position goes stale for the new (often wider) label and can clip
+  // off the edge it was just clamped away from.
+  useLayoutEffect(() => {
+    const position = () => {
+      const trigger = triggerRef.current?.getBoundingClientRect();
+      const tooltip = tooltipRef.current?.getBoundingClientRect();
+      if (!trigger || !tooltip) return;
+      setPos(
+        clampTooltipPosition(
+          trigger,
+          { width: tooltip.width, height: tooltip.height },
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      );
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
+  }, [open, label]);
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      autoFocus={autoFocus}
-      className={`rounded-md border px-2.5 py-1 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}
+    <span
+      ref={triggerRef}
+      className="relative inline-flex"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
     >
       {children}
-    </button>
+      <span
+        ref={tooltipRef}
+        role="tooltip"
+        style={pos ? { top: pos.top, left: pos.left } : undefined}
+        className={`pointer-events-none fixed z-50 rounded border border-(--border-strong) bg-(--surface-2) px-2 py-1 text-[11px] font-normal whitespace-nowrap text-(--text) shadow-lg transition-opacity ${open ? "opacity-100" : "opacity-0"}`}
+      >
+        {label}
+      </span>
+    </span>
   );
 }
+
+export type IconButtonProps = Omit<
+  ButtonProps,
+  "aria-label" | "children" | "size"
+> & {
+  "aria-label": string;
+  children: ReactNode;
+  tooltip?: ReactNode;
+};
+
+/** Square 28px icon control with a mandatory accessible name and tooltip. */
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
+  function IconButton(
+    {
+      "aria-label": ariaLabel,
+      tooltip,
+      className = "",
+      variant = "ghost",
+      ...props
+    },
+    ref,
+  ) {
+    if (!ariaLabel?.trim()) {
+      throw new Error("IconButton requires a non-empty aria-label");
+    }
+    return (
+      <Tooltip label={tooltip ?? ariaLabel}>
+        <Button
+          ref={ref}
+          aria-label={ariaLabel}
+          size="md"
+          variant={variant}
+          className={`w-7 !px-0 ${className}`}
+          {...props}
+        />
+      </Tooltip>
+    );
+  },
+);
 
 const FOCUSABLE =
   "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
@@ -2044,7 +2249,6 @@ export function Dialog({
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose lives in the ref
   }, []);
   return (
     <div
@@ -2087,7 +2291,8 @@ export function Tabs({
       className="inline-flex gap-0.5 rounded-md border border-(--border) bg-(--surface-0) p-0.5"
     >
       {tabs.map((t) => (
-        <button
+        <Button
+          bare
           key={t.id}
           type="button"
           role="tab"
@@ -2104,7 +2309,7 @@ export function Tabs({
           }`}
         >
           {t.label}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -2335,7 +2540,8 @@ export function ChipInput({
       {values.length > 0 && (
         <div className="mb-1.5 flex flex-wrap gap-1">
           {values.map((v) => (
-            <button
+            <Button
+              bare
               key={v}
               type="button"
               onClick={() => onChange(values.filter((x) => x !== v))}
@@ -2350,7 +2556,7 @@ export function ChipInput({
               >
                 ×
               </span>
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -2435,14 +2641,15 @@ export function ChipInput({
             </ul>,
             document.body,
           )}
-        <button
+        <Button
+          bare
           type="button"
           onClick={() => add(draft)}
           disabled={!draft.trim()}
           className="rounded border border-(--border) px-1.5 py-0.5 text-[11px] text-(--text-dim) hover:bg-(--surface-2) disabled:cursor-not-allowed disabled:opacity-40"
         >
           add
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -2489,13 +2696,14 @@ export function BulkActionBar({
       {onClear && (
         <>
           <div className="h-4 w-px bg-(--border)" />
-          <button
+          <Button
+            bare
             type="button"
             onClick={onClear}
             className="cursor-pointer text-[11px] text-(--text-faint) hover:text-(--text)"
           >
             Clear
-          </button>
+          </Button>
         </>
       )}
     </div>

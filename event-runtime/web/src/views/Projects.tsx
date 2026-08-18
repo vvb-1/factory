@@ -14,6 +14,7 @@ import { goPrefixActive } from "../goSequence";
 import { setContextActions } from "../palette";
 import type { JanitorResult, RepoItem } from "../types";
 import { ScopeCaption } from "../components/ContextTabs";
+import { Button as PrimitiveButton } from "../components/ui";
 
 const PROJECT_MODES = ["ALL", "DISPATCHABLE", "REPORT_ONLY"] as const;
 type ProjectMode = (typeof PROJECT_MODES)[number];
@@ -509,7 +510,8 @@ export function Projects({
                 aria-label="Project mode"
               >
                 {PROJECT_MODES.map((mode, idx) => (
-                  <button
+                  <PrimitiveButton
+                    bare
                     key={mode}
                     type="button"
                     role="tab"
@@ -535,7 +537,7 @@ export function Projects({
                     >
                       {idx + 1}
                     </span>
-                  </button>
+                  </PrimitiveButton>
                 ))}
               </div>
               <FilterInput

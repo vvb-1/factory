@@ -33,6 +33,7 @@ import {
   copyText,
   notify,
 } from "../components/ui";
+import { Button as PrimitiveButton } from "../components/ui";
 
 export type { ScheduleItem, TriggerOutcome };
 
@@ -471,7 +472,8 @@ export function Schedules({
                       ? enabledCount
                       : disabledCount;
                 return (
-                  <button
+                  <PrimitiveButton
+                    bare
                     key={scheduleTab}
                     id={`schedule-tab-${scheduleTab}`}
                     type="button"
@@ -490,7 +492,7 @@ export function Schedules({
                     <span className="ml-1.5 tabular-nums text-(--text-faint)">
                       {count}
                     </span>
-                  </button>
+                  </PrimitiveButton>
                 );
               })}
             </div>

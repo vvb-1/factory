@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog } from "./ui";
 import { NAV } from "../nav";
+import { Button as PrimitiveButton } from "./ui";
 
 const CONTEXT_CHORDS: { chord: string; label: string }[] = [
   { chord: "g 0", label: "All context" },
@@ -130,7 +131,8 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Keyboard" onClose={onClose}>
       <div className="-mt-9 mb-3 flex justify-end">
-        <button
+        <PrimitiveButton
+          bare
           type="button"
           autoFocus
           ref={(node) => node?.setAttribute("autofocus", "")}
@@ -138,7 +140,7 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
           className="rounded-md border border-(--border-strong) bg-(--surface-2) px-2.5 py-1 text-[12px] font-medium text-(--text) transition-colors hover:bg-(--surface-3) focus-visible:outline-2 focus-visible:outline-(--accent)"
         >
           Close
-        </button>
+        </PrimitiveButton>
       </div>
       <div className="relative">
         <div
