@@ -401,7 +401,10 @@ exact model; `GET /agents` and `cli.mjs agents` show the declared tier and the
 per-route resolved value. Resolution order: per-definition `"model"` override
 (the one escape hatch for an exact id — both fields may coexist, the override
 wins) > tier map > adapter default (absent fields = no spec fields = today's
-behavior). A declared tier with no mapping for a routed model-consuming
+behavior). Repository dispatches can additionally select a per-ticket tier;
+the payload/label precedence, evidence, and typed refusal rules are defined in
+[event-runtime-dispatch.md](event-runtime-dispatch.md#per-ticket-model-tier).
+A declared tier with no mapping for a routed model-consuming
 adapter is a **load error, fail closed** — never a silent fall-through to the
 adapter default. Only the LLM adapters (`claude`, `pi`, `agy`, `cursor`) consume models; on
 `command`/`actions`/`fake` routes a declared tier is recorded as not

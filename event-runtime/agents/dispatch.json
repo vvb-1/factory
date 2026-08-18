@@ -24,7 +24,7 @@
   "mutating": true,
   "pins": {
     "agents/dispatch.md": "sha256:34a2625aa17cfaa536dc740e527ef333334aaeab22c99cf4ffa71d8501c3b5e1",
-    "schemas/dispatch.input.json": "sha256:7287e8fa923036b1a4f887efef9540a65bf09c03e0e219907e160efa3272f26f",
+    "schemas/dispatch.input.json": "sha256:386b565acd89e60e674d6a5516b872cb46b3bed0fbe05510d299f4d63ee028be",
     "schemas/dispatch.output.json": "sha256:bc25aee1baa16aa21f50e9a3f8c320e57cec11cbdf31c822baee838d49ddb672"
   }
 }

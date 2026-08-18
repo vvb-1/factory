@@ -90,6 +90,25 @@ asymmetry collapses when per-agent Linear identities land (OPS-40); until
 then it is stated here so nobody "fixes" either side to match the other. See
 §9.
 
+### Per-ticket model tier
+
+A `factory.dispatch.requested` run may override the dispatch agent's default
+model tier without changing the agent definition. The effective tier is chosen
+at plan time with this precedence: payload `modelTier` > the ticket's single
+`tier:<strong|standard|light>` label > the definition's `model_tier`. The
+planner records the winning source as
+`evidence.checks.model_tier_source` (`payload`, `label`, or `definition`) and
+pins both the effective `modelTier` and its resolved concrete `model` in the
+RunSpec.
+
+The `tier:*` label vocabulary is closed and must equal the tier keys accepted
+by `config/policy.yaml` (`strong`, `standard`, and `light`). More than one
+`tier:*` label, or any other `tier:` value, refuses dispatch with the typed
+reason `ticket_tier_invalid`; an explicit payload override does not make an
+invalid ticket label safe. As with definition tiers, a valid label whose tier
+has no mapping for the routed adapter fails closed rather than falling back to
+an adapter default.
+
 ---
 
 ## 3. Capacity: one budget, checked at plan and again at execute

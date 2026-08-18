@@ -40,7 +40,12 @@ import {
   idempotencyKeyForNewRun,
   resolveIdempotency,
 } from "./lifecycle.mjs";
-import { getAgent, getEventType, resolveModel } from "./registry.mjs";
+import {
+  getAgent,
+  getEventType,
+  MODEL_TIERS,
+  resolveModel,
+} from "./registry.mjs";
 import { pinRepo } from "./repository.mjs";
 import {
   RepoError,
@@ -108,6 +113,7 @@ export function buildRunSpec(
     adapterOverride,
     now = Date.now(),
     approvalPolicy = null,
+    modelTierOverride,
   } = {},
 ) {
   const def = getAgent(registry, mapping.agent);
@@ -159,10 +165,18 @@ export function buildRunSpec(
     // override: `--adapter-override fake` substitutes execution, and the fake
     // ignores the model; the spec still records what was routed. A null model
     // means the routed adapter takes none (not applicable).
-    ...(def.model_tier !== undefined || def.model !== undefined
+    ...(modelTierOverride !== undefined ||
+    def.model_tier !== undefined ||
+    def.model !== undefined
       ? {
-          modelTier: def.model_tier ?? null,
-          model: resolveModel(def, mapping.adapter, registry.modelTiers),
+          modelTier: modelTierOverride ?? def.model_tier ?? null,
+          model: resolveModel(
+            modelTierOverride === undefined
+              ? def
+              : { ...def, model_tier: modelTierOverride },
+            mapping.adapter,
+            registry.modelTiers,
+          ),
         }
       : {}),
     timeoutSeconds: def.limits.timeout_seconds,
@@ -480,6 +494,39 @@ function evidenceTicket(ticket, ticketId) {
   };
 }
 
+/**
+ * Parse the closed per-ticket model-tier label vocabulary. A ticket may carry
+ * either no tier label or exactly one valid `tier:<MODEL_TIERS>` label. The
+ * full matching label set is returned so refusal evidence explains malformed
+ * and duplicate declarations without relying on a lossy first-match rule.
+ */
+export function ticketModelTier(labels) {
+  const tierLabels = (labels ?? []).filter(
+    (label) => typeof label === "string" && label.startsWith("tier:"),
+  );
+  if (tierLabels.length === 0) {
+    return { ok: true, tier: undefined, labels: [] };
+  }
+  if (tierLabels.length !== 1) {
+    return {
+      ok: false,
+      tier: undefined,
+      labels: tierLabels,
+      detail: `ticket has multiple tier labels: ${tierLabels.join(", ")}`,
+    };
+  }
+  const tier = tierLabels[0].slice("tier:".length);
+  if (!MODEL_TIERS.includes(tier)) {
+    return {
+      ok: false,
+      tier: undefined,
+      labels: tierLabels,
+      detail: `ticket tier label ${JSON.stringify(tierLabels[0])} must be one of ${MODEL_TIERS.map((value) => `tier:${value}`).join(", ")}`,
+    };
+  }
+  return { ok: true, tier, labels: tierLabels };
+}
+
 function evidenceInFlight(issue) {
   const description = issue.description ?? "";
   const parsed = parseOwnedPaths(description);
@@ -572,6 +619,22 @@ export function worktreeDispatchAutoEligibility(
   evidence.ticket = evidenceTicket(ticket, payload?.ticket);
   if (!ticket) return refusal("ticket_not_found", evidence, "human_needed");
   evidence.checks.ticket_found = true;
+
+  const ticketTier = ticketModelTier(evidence.ticket.labels);
+  evidence.ticket.modelTierLabels = ticketTier.labels;
+  evidence.ticket.modelTier = ticketTier.tier ?? null;
+  if (!ticketTier.ok) {
+    evidence.checks.ticket_tier_valid = false;
+    evidence.checks.model_tier_source = null;
+    return refusal("ticket_tier_invalid", evidence, "noop", ticketTier.detail);
+  }
+  evidence.checks.ticket_tier_valid = true;
+  evidence.checks.model_tier_source =
+    payload?.modelTier !== undefined
+      ? "payload"
+      : ticketTier.tier !== undefined
+        ? "label"
+        : "definition";
 
   // A lease-loss retry is the one exception to the ordinary Todo/unassigned
   // admission rule. The prior attempt already performed the Linear claim, so
@@ -1050,7 +1113,7 @@ export function planEvent(
   // write lock across a network round trip. The verdict is applied inside the
   // transaction only when the event is still admitted there — a raced plan
   // simply discards it via the idempotent early return.
-  let worktreeRefusal = null;
+  let worktreeEligibility = null;
   {
     const row = db
       .query(
@@ -1073,11 +1136,10 @@ export function planEvent(
         typeof preEnvelope.payload?.ticket === "string" &&
         !repoNotAllowed(preDef, preEnvelope.payload)
       ) {
-        const eligibility = worktreeDispatchAutoEligibility(
+        worktreeEligibility = worktreeDispatchAutoEligibility(
           preEnvelope.payload,
           dispatch,
         );
-        worktreeRefusal = eligibility.ok ? null : eligibility.refusal;
       }
     }
   }
@@ -1274,6 +1336,8 @@ export function planEvent(
     // WM-108), computed above outside this transaction. Refusals are typed
     // and carry their reason; a null verdict means every check passed at the
     // moment of the read — the doc's execute-time re-check owns the TTL gap.
+    const worktreeRefusal =
+      worktreeEligibility?.ok === false ? worktreeEligibility.refusal : null;
     if (worktreeGateFor(def) === "dispatch" && worktreeRefusal) {
       if (worktreeRefusal.decision === "human_needed") {
         return humanNeeded(db, event, worktreeRefusal.reason, at, ttlSeconds);
@@ -1421,6 +1485,7 @@ export function planEvent(
     const runId = newRunId();
 
     let approvalPolicy = null;
+    let dispatchEvidence = worktreeEligibility?.evidence ?? null;
     if (envelope.source === "chain") {
       approvalPolicy = buildChainApprovalPolicy(envelope.type, {
         source: envelope.source,
@@ -1446,8 +1511,20 @@ export function planEvent(
           ...approvalPolicy,
           dispatchEvidence: result.evidence,
         };
+        dispatchEvidence = result.evidence;
       }
     }
+
+    // Per-ticket routing applies only to factory dispatch. The payload is
+    // already schema-validated above; ticket labels were validated by the
+    // dispatch gate. Passing no override preserves every other event's spec,
+    // and dispatches with neither source retain the definition-only behavior.
+    const modelTierOverride =
+      envelope.type === "factory.dispatch.requested"
+        ? (payload.modelTier ??
+          dispatchEvidence?.ticket?.modelTier ??
+          undefined)
+        : undefined;
 
     const spec = {
       ...buildRunSpec(registry, pinnedEnvelope, mapping, {
@@ -1456,6 +1533,7 @@ export function planEvent(
         adapterOverride,
         now,
         approvalPolicy,
+        modelTierOverride,
       }),
       idempotencyKey,
     };

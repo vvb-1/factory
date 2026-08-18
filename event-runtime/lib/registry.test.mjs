@@ -140,8 +140,9 @@ describe("registry", () => {
     // Regenerated after WM-610 prettier reformat of code and markdown files.
     // Regenerated (WM-722): merge-scan/merge-fix adapter pi→claude; event-types.json is a registry input.
     // Regenerated (WM-391): dispatch admits and documents bounded humanDecision authorisations.
+    // Regenerated (WM-694): dispatch input admits a pinned per-ticket modelTier override.
     const expected =
-      "sha256:44e8dce58d2e4efd92f8e8a7b9483aa219ab32840b3aec34b41ee2c8782dc9a6";
+      "sha256:8d3f8ca1951587fcbd646c3e97590c2daa631be129b867e17e0e8787d66da1cd";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -159,7 +160,7 @@ describe("registry", () => {
     expect(def.pack).toBe("event-runtime");
     expect(Object.keys(def)).not.toContain("pack");
     expect(computeDefHash(def)).toBe(
-      "sha256:93df77f053690c1c2463fea4d497ec9c742fd9200ac369d1682ac575596b4129",
+      "sha256:614eccc3078f9d4d71eb6349d03e45020ff083f54546dbe15d9c1ce3d981d6f2",
     );
   });
 
@@ -478,6 +479,17 @@ describe("registry", () => {
       JSON.stringify({ ...raw, workspace: { type: "ephemeral" } }),
     );
     expect(() => loadRegistry({ root })).toThrow(/mutating/);
+  });
+
+  test("dispatch input exposes the closed per-ticket modelTier vocabulary (WM-694)", () => {
+    const schema = getAgent(loadRegistry(), "dispatch@1").inputSchema;
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.modelTier).toEqual({
+      type: "string",
+      enum: ["strong", "standard", "light"],
+      description:
+        "Optional per-dispatch model tier override; takes precedence over the ticket tier:* label and agent definition",
+    });
   });
 
   test("agent-declared kernel control fields validate fail-closed (WM-469)", () => {

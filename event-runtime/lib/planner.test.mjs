@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { hashJson } from "./canonical.mjs";
+import { canonicalJson, hashJson } from "./canonical.mjs";
 import { DEAD_LETTER_AFTER } from "./config.mjs";
 import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
@@ -764,6 +764,137 @@ describe("planEvent worktree gate (WM-108)", () => {
     payload,
   });
 
+  const tierRepo =
+    `repos:\n  - name: tiered\n    path: /tmp/nowhere\n    base: develop\n` +
+    `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
+    `    worktree_root: /tmp/worktrees\n    escalate_paths: []\n`;
+
+  const tierTicket = (tierLabels = []) => ({
+    identifier: "WM-694",
+    state: { name: "Todo" },
+    assignee: null,
+    labels: {
+      nodes: [
+        { name: "ai:agent-ready" },
+        ...tierLabels.map((name) => ({ name })),
+      ],
+    },
+    description: "## Owned Paths\n- event-runtime/lib/planner.mjs\n",
+  });
+
+  const tierDispatch = (tierLabels = []) => ({
+    countLeases: () => 0,
+    budgetRefusal: () => null,
+    fetchTicket: () => tierTicket(tierLabels),
+    fetchInFlight: () => [],
+  });
+
+  test("dispatch model tier precedence is payload > ticket label > definition and records its source (WM-694)", () => {
+    withReposRoot(tierRepo, () => {
+      const cases = [
+        {
+          eventId: "tier-definition",
+          payload: { repo: "tiered", ticket: "WM-694" },
+          labels: [],
+          source: "definition",
+          tier: "strong",
+          model: "openai-codex/gpt-5.6-sol",
+        },
+        {
+          eventId: "tier-label",
+          payload: { repo: "tiered", ticket: "WM-694" },
+          labels: ["tier:light"],
+          source: "label",
+          tier: "light",
+          model: "openai-codex/gpt-5.6-luna",
+        },
+        {
+          eventId: "tier-payload",
+          payload: {
+            repo: "tiered",
+            ticket: "WM-694",
+            modelTier: "standard",
+          },
+          labels: ["tier:light"],
+          source: "payload",
+          tier: "standard",
+          model: "openai-codex/gpt-5.6-terra",
+        },
+      ];
+
+      for (const item of cases) {
+        const eligibility = worktreeDispatchAutoEligibility(
+          item.payload,
+          tierDispatch(item.labels),
+        );
+        expect(eligibility.ok).toBe(true);
+        expect(eligibility.evidence.checks.model_tier_source).toBe(item.source);
+
+        const db = openDb(":memory:");
+        const ref = admit(db, {
+          type: "factory.dispatch.requested",
+          eventId: item.eventId,
+          correlationId: item.eventId,
+          payload: item.payload,
+        });
+        const outcome = planEvent(db, registry, ref, {
+          now: NOW,
+          policyVersion: "git:test",
+          dispatch: tierDispatch(item.labels),
+        });
+        const spec = JSON.parse(outcome.proposal.spec_json);
+        expect(spec.modelTier).toBe(item.tier);
+        expect(spec.model).toBe(item.model);
+      }
+    });
+  });
+
+  test("duplicate or unknown ticket tier labels refuse with typed evidence (WM-694)", () => {
+    withReposRoot(tierRepo, () => {
+      for (const labels of [["tier:light", "tier:standard"], ["tier:turbo"]]) {
+        const result = worktreeDispatchAutoEligibility(
+          { repo: "tiered", ticket: "WM-694", modelTier: "strong" },
+          tierDispatch(labels),
+        );
+        expect(result.refusal.reason).toBe("ticket_tier_invalid");
+        expect(result.evidence.checks).toMatchObject({
+          ticket_tier_valid: false,
+          model_tier_source: null,
+        });
+        expect(result.evidence.ticket.modelTierLabels).toEqual(labels);
+      }
+    });
+  });
+
+  test("a label tier with no routed-adapter mapping fails closed (WM-694)", () => {
+    withReposRoot(tierRepo, () => {
+      const missingLight = {
+        ...registry,
+        modelTiers: {
+          ...registry.modelTiers,
+          pi: {
+            strong: registry.modelTiers.pi.strong,
+            standard: registry.modelTiers.pi.standard,
+          },
+        },
+      };
+      const db = openDb(":memory:");
+      const ref = admit(db, {
+        type: "factory.dispatch.requested",
+        eventId: "tier-label-unmapped",
+        correlationId: "tier-label-unmapped",
+        payload: { repo: "tiered", ticket: "WM-694" },
+      });
+      expect(() =>
+        planEvent(db, missingLight, ref, {
+          now: NOW,
+          dispatch: tierDispatch(["tier:light"]),
+        }),
+      ).toThrow(/model_tier "light" has no mapping for adapter "pi"/);
+      expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
+    });
+  });
+
   test("a dispatch-exempt worktree agent bypasses dispatch-only planning checks", () => {
     withReposRoot(
       `repos:\n  - name: repairable\n    path: /tmp/nowhere\n    base: develop\n`,
@@ -1444,6 +1575,26 @@ describe("planEvent model pinning (WM-135)", () => {
 });
 
 describe("buildRunSpec", () => {
+  test("a dispatch with no per-ticket tier source stays byte-identical to the definition-only spec (WM-694)", () => {
+    const mapping = registry.eventTypes["factory.dispatch.requested"];
+    const dispatch = envelope({
+      eventId: "dispatch-baseline",
+      type: "factory.dispatch.requested",
+      source: "operator",
+      subject: "WM-694",
+      correlationId: "dispatch-baseline",
+      payload: { repo: "factory", ticket: "WM-694" },
+    });
+    const spec = buildRunSpec(registry, dispatch, mapping, {
+      runId: "run_baseline",
+      policyVersion: "git:test",
+      now: 0,
+    });
+    expect(canonicalJson(spec)).toBe(
+      '{"adapter":"pi","agent":"dispatch@1","capabilities":["linear:write","repo:write","github:write"],"idempotencyKey":"dispatch@1:factory.dispatch-result/v1:sha256:4381f987d301384843e8cf651c969e06c3d9dba79b947f3c07b5c3852926cf59:dispatch-baseline","input":{"repo":"factory","ticket":"WM-694"},"inputHash":"sha256:4381f987d301384843e8cf651c969e06c3d9dba79b947f3c07b5c3852926cf59","maxAttempts":1,"model":"openai-codex/gpt-5.6-sol","modelTier":"strong","outputContract":"factory.dispatch-result/v1","policyVersion":"git:test","promptVersion":"git:test","runId":"run_baseline","schemaVersion":"factory.run-spec/v1","timeoutSeconds":5400,"workspace":{"checkoutDir":"repo","retainOnFailure":true,"type":"worktree"}}',
+    );
+  });
+
   test("is pure and honors adapterOverride", () => {
     const mapping = registry.eventTypes["factory.status-report.requested"];
     const opts = { runId: "run_x", policyVersion: "git:abc", now: NOW };
