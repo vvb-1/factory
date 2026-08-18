@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ApiError,
   decideInboxItem,
@@ -100,13 +100,22 @@ export function DecisionCard({
   const [retrying, setRetrying] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Reset the card when it is pointed at a different item, a changed request,
+  // or a fresh response from the parent's refetch — during render, per the
+  // React "adjusting state when a prop changes" pattern, not in an effect.
+  const [tracked, setTracked] = useState({ itemId, requestHash, response });
+  if (
+    tracked.itemId !== itemId ||
+    tracked.requestHash !== requestHash ||
+    tracked.response !== response
+  ) {
+    setTracked({ itemId, requestHash, response });
     setCurrentRequest(request);
     setCurrentResponse(response);
     setSelected(null);
     setValues(initialValues(request));
     setMessage(null);
-  }, [itemId, requestHash, response]);
+  }
 
   const options = useMemo(() => {
     const recommended = currentRequest.recommended;
