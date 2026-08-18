@@ -836,3 +836,21 @@ export interface InboxItem {
   decidedBy?: string | null;
   dedupeKey?: string | null;
 }
+
+/** One recent ticket summary (GET /tickets). */
+export interface TicketSummary {
+  id: string;
+  title?: string | null;
+  state?: string | null;
+  repo?: string | null;
+  repos?: string[];
+  lastActivityAt?: string;
+  lastActivityDescription?: string | null;
+  lastActivityKind?: string | null;
+  attempts?: number;
+  pr?: number | null;
+  prUrl?: string | null;
+  checksGreen?: boolean | null;
+  ciStatus?: "green" | "red" | "pending" | string | null;
+  url?: string | null;
+}

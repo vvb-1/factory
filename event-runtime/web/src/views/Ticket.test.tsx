@@ -1,8 +1,15 @@
 import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { prCandidateRunIds, PullRequest, Ticket } from "./Ticket";
+import { changeInput } from "../test-render";
 import type { JourneyRun, TicketJourneySource } from "../subjectJourney";
 
 const realFetch = globalThis.fetch;
@@ -530,5 +537,284 @@ describe("PR journey view", () => {
       runs: runs as any,
     });
     expect(ids.sort()).toEqual(["run_dispatch", "run_fix", "run_scan"]);
+  });
+});
+
+describe("Tickets hub landing view", () => {
+  const ticketsFixture = [
+    {
+      id: "WM-822",
+      title: "Tickets hub landing view",
+      state: "In Progress",
+      repo: "factory",
+      repos: ["factory"],
+      lastActivityAt: "2026-08-18T18:00:00.000Z",
+      lastActivityDescription: "dispatch@1 leased",
+      lastActivityKind: "run",
+      attempts: 2,
+      pr: 542,
+      prUrl: "https://github.com/watt-mind/factory/pull/542",
+      checksGreen: true,
+      ciStatus: "green",
+      url: "https://linear.app/watt-mind/issue/WM-822",
+    },
+    {
+      id: "WM-821",
+      title: "Fix broken build",
+      state: "Done",
+      repo: "bj29",
+      repos: ["bj29"],
+      lastActivityAt: "2026-08-18T17:00:00.000Z",
+      lastActivityDescription: "merged into master",
+      lastActivityKind: "merge",
+      attempts: 1,
+      pr: 101,
+      prUrl: "https://github.com/watt-mind/bj29/pull/101",
+      checksGreen: true,
+      ciStatus: "green",
+      url: "https://linear.app/watt-mind/issue/WM-821",
+    },
+    {
+      id: "OPS-91",
+      title: "Uptime monitoring setup",
+      state: "Todo",
+      repo: "hdkiller",
+      repos: ["hdkiller"],
+      lastActivityAt: "2026-08-18T16:00:00.000Z",
+      lastActivityDescription: "triage-scan@1 planned",
+      lastActivityKind: "event",
+      attempts: 0,
+      pr: null,
+      prUrl: null,
+      checksGreen: null,
+      ciStatus: null,
+      url: "https://linear.app/watt-mind/issue/OPS-91",
+    },
+  ];
+
+  function ticketsFetch(data = ticketsFixture) {
+    return (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      if (/\/api\/repos/.test(url)) {
+        return json({
+          repos: [
+            { name: "factory", team: "WM" },
+            { name: "bj29", team: "WM" },
+            { name: "hdkiller", team: "OPS" },
+          ],
+        });
+      }
+      if (/\/api\/tickets/.test(url)) {
+        return json({ tickets: data });
+      }
+      return json({ error: `unexpected ${url}` }, 404);
+    }) as unknown as typeof fetch;
+  }
+
+  test("renders tickets hub table with columns, jump bar, and filters when ticketId is null", async () => {
+    globalThis.fetch = ticketsFetch();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket ticketId={null} onNavigate={() => {}} onNavigatePr={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    // Should display ticket hub title / jump bar
+    await view.findByPlaceholderText(/WM-542/i);
+    // Table should contain ticket entries
+    await view.findByText("WM-822");
+    expect(view.getByText("WM-821")).toBeTruthy();
+    expect(view.getByText("OPS-91")).toBeTruthy();
+    expect(view.getByText("Tickets hub landing view")).toBeTruthy();
+    expect(view.getAllByText("In Progress").length).toBeGreaterThan(0);
+    expect(view.getAllByText("factory").length).toBeGreaterThan(0);
+    expect(view.getByText("PR #542")).toBeTruthy();
+    expect(view.getByText("2", { selector: "td" })).toBeTruthy(); // attempts
+  });
+
+  test("jump bar navigates to ticket or PR upon Enter", async () => {
+    globalThis.fetch = ticketsFetch();
+    let navigatedTicket = "";
+    let navigatedPr = 0;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket
+          ticketId={null}
+          onNavigate={(id) => {
+            navigatedTicket = id;
+          }}
+          onNavigatePr={(pr) => {
+            navigatedPr = pr;
+          }}
+        />
+      </QueryClientProvider>,
+    );
+
+    const input = await view.findByPlaceholderText(/WM-542/i);
+    fireEvent.change(input, { target: { value: "WM-999" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(navigatedTicket).toBe("WM-999");
+
+    fireEvent.change(input, { target: { value: "#541" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(navigatedPr).toBe(541);
+  });
+
+  test("filtering by repo and state works in tickets hub", async () => {
+    globalThis.fetch = ticketsFetch();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket ticketId={null} onNavigate={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    await view.findByText("WM-822");
+    expect(view.getByText("WM-821")).toBeTruthy();
+
+    const repoSelect = view.getByLabelText(/filter by repo/i);
+    fireEvent.change(repoSelect, { target: { value: "bj29" } });
+
+    await waitFor(() => {
+      expect(view.queryByText("WM-822")).toBeNull();
+    });
+    expect(view.getByText("WM-821")).toBeTruthy();
+  });
+
+  test("keyboard navigation j/k and opening ticket in linear with 'o'", async () => {
+    globalThis.fetch = ticketsFetch();
+    let openedUrl = "";
+    const origOpen = window.open;
+    Object.defineProperty(window, "open", {
+      writable: true,
+      value: (url: string) => {
+        openedUrl = url;
+        return null;
+      },
+    });
+
+    try {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false, refetchInterval: false } },
+      });
+      const view = render(
+        <QueryClientProvider client={client}>
+          <Ticket ticketId={null} onNavigate={() => {}} />
+        </QueryClientProvider>,
+      );
+
+      await view.findByText("WM-822");
+      // Fire keydown 'j' to move selection down
+      fireEvent.keyDown(document.body, { key: "j" });
+      // Fire keydown 'o' to open in linear
+      fireEvent.keyDown(document.body, { key: "o" });
+      expect(openedUrl).toContain("linear.app");
+    } finally {
+      Object.defineProperty(window, "open", {
+        writable: true,
+        value: origOpen,
+      });
+    }
+  });
+
+  test("displays empty state when no tickets match", async () => {
+    globalThis.fetch = ticketsFetch([]);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket ticketId={null} onNavigate={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    await view.findByText(/No tickets found/i);
+  });
+
+  test("row click navigates to ticket journey and PR link navigates to PR", async () => {
+    globalThis.fetch = ticketsFetch();
+    let navigatedTicket = "";
+    let navigatedPr = 0;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket
+          ticketId={null}
+          onNavigate={(id) => {
+            navigatedTicket = id;
+          }}
+          onNavigatePr={(pr) => {
+            navigatedPr = pr;
+          }}
+        />
+      </QueryClientProvider>,
+    );
+
+    await view.findByText("WM-822");
+    // Click row
+    fireEvent.click(view.getByText("Tickets hub landing view"));
+    expect(navigatedTicket).toBe("WM-822");
+
+    // Click PR link
+    fireEvent.click(view.getByText("PR #542"));
+    expect(navigatedPr).toBe(542);
+  });
+
+  test("search text filter filters tickets by query", async () => {
+    globalThis.fetch = ticketsFetch();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket ticketId={null} onNavigate={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    await view.findByText("WM-822");
+    const searchInput = view.getByRole("combobox", { name: "Filter tickets" });
+    changeInput(searchInput, "OPS-91");
+
+    await waitFor(() => {
+      expect(view.queryByText("WM-822")).toBeNull();
+    });
+    expect(view.getByText("OPS-91")).toBeTruthy();
+    expect(view.queryByText("WM-821")).toBeNull();
+  });
+
+  test("g k shortcut focuses the jump bar input", async () => {
+    globalThis.fetch = ticketsFetch();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Ticket ticketId={null} onNavigate={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    const jumpInput = await view.findByPlaceholderText(/WM-542 or #541/i);
+    const openBtn = view.getByRole("button", { name: "Open" });
+    openBtn.focus();
+    expect(document.activeElement).toBe(openBtn);
+
+    fireEvent.keyDown(document.body, { key: "g" });
+    fireEvent.keyDown(document.body, { key: "k" });
+    expect(document.activeElement).toBe(jumpInput);
   });
 });

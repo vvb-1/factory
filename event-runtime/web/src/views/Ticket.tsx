@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "../api";
-import { refetchIntervals } from "../hooks";
+import { refetchIntervals, useListKeys, useNow } from "../hooks";
 import {
   buildTicketJourney,
   formatDuration,
@@ -25,14 +25,28 @@ import {
   type SubjectJourney,
   type TimelineItem,
 } from "../subjectJourney";
-import { StateBadge, STATE_HUES } from "../components/ui";
+import {
+  Ago,
+  Button as PrimitiveButton,
+  FilterInput,
+  ListEmpty,
+  ListPane,
+  StateBadge,
+  STATE_HUES,
+  Th,
+} from "../components/ui";
 import {
   fetchTicketJourney,
   isUnindexedTicket,
   TicketText,
 } from "../components/TicketHoverCard";
-import type { AdmittedEvent, Proposal, RunDetail, RunListItem } from "../types";
-import { Button as PrimitiveButton } from "../components/ui";
+import type {
+  AdmittedEvent,
+  Proposal,
+  RunDetail,
+  RunListItem,
+  TicketSummary,
+} from "../types";
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -171,72 +185,403 @@ function TimelineRow({ item, last }: { item: TimelineItem; last: boolean }) {
   );
 }
 
-function TicketPicker({
+function TicketsHub({
   onNavigate,
   onNavigatePr,
 }: {
   onNavigate: (ticketId: string) => void;
   onNavigatePr?: (number: number) => void;
 }) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState(false);
+  const [jumpValue, setJumpValue] = useState("");
+  const [jumpError, setJumpError] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [repoFilter, setRepoFilter] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const now = useNow();
+
   useEffect(() => {
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, []);
-  const submit = (event: FormEvent) => {
+
+  const ticketsQuery = useQuery({
+    queryKey: ["tickets", repoFilter],
+    queryFn: () => api.tickets(undefined, 100, repoFilter || undefined),
+    ...refetchIntervals.fast,
+  });
+
+  const reposQuery = useQuery({
+    queryKey: ["repos"],
+    queryFn: api.repos,
+    ...refetchIntervals.secondary,
+  });
+
+  const tickets: TicketSummary[] = useMemo(
+    () => ticketsQuery.data?.tickets ?? [],
+    [ticketsQuery.data],
+  );
+
+  const repoOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of reposQuery.data?.repos ?? []) {
+      if (r.name) set.add(r.name);
+    }
+    for (const t of tickets) {
+      if (t.repo) set.add(t.repo);
+      if (t.repos) t.repos.forEach((r) => set.add(r));
+    }
+    return Array.from(set).sort();
+  }, [reposQuery.data, tickets]);
+
+  const stateOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of tickets) {
+      if (t.state) set.add(t.state);
+    }
+    return Array.from(set).sort();
+  }, [tickets]);
+
+  const filteredTickets = useMemo(() => {
+    return tickets.filter((t) => {
+      if (repoFilter) {
+        const matchesRepo =
+          t.repo === repoFilter || (t.repos && t.repos.includes(repoFilter));
+        if (!matchesRepo) return false;
+      }
+      if (stateFilter) {
+        if (t.state !== stateFilter) return false;
+      }
+      if (searchQuery) {
+        const q = searchQuery.trim().toLowerCase();
+        const matchId = t.id.toLowerCase().includes(q);
+        const matchTitle = t.title?.toLowerCase().includes(q);
+        const matchRepo =
+          t.repo?.toLowerCase().includes(q) ||
+          t.repos?.some((r) => r.toLowerCase().includes(q));
+        const matchState = t.state?.toLowerCase().includes(q);
+        const matchDesc = t.lastActivityDescription?.toLowerCase().includes(q);
+        if (
+          !matchId &&
+          !matchTitle &&
+          !matchRepo &&
+          !matchState &&
+          !matchDesc
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [tickets, repoFilter, stateFilter, searchQuery]);
+
+  const selectedIndex = useMemo(() => {
+    if (!selectedId) return 0;
+    const idx = filteredTickets.findIndex((t) => t.id === selectedId);
+    return idx >= 0 ? idx : 0;
+  }, [filteredTickets, selectedId]);
+
+  const selectedTicket = filteredTickets[selectedIndex] ?? null;
+
+  useListKeys({
+    count: filteredTickets.length,
+    selected: selectedIndex,
+    onSelect: (index) => setSelectedId(filteredTickets[index]?.id ?? null),
+    onClose: () => {
+      if (searchQuery) setSearchQuery("");
+      else setSelectedId(null);
+    },
+    keys: {
+      Enter: () => {
+        if (selectedTicket) {
+          onNavigate(selectedTicket.id);
+        }
+      },
+      o: () => {
+        if (selectedTicket) {
+          const linearUrl =
+            selectedTicket.url ||
+            `https://linear.app/watt-mind/issue/${encodeURIComponent(selectedTicket.id)}`;
+          window.open(linearUrl, "_blank", "noreferrer");
+        }
+      },
+    },
+  });
+
+  useEffect(() => {
+    let lastKey = "";
+    let lastKeyTime = 0;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if (isInput) return;
+
+      const currentTime = Date.now();
+      if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        lastKey = "g";
+        lastKeyTime = currentTime;
+        return;
+      }
+      if (
+        e.key === "k" &&
+        lastKey === "g" &&
+        currentTime - lastKeyTime < 1000 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        inputRef.current?.focus();
+        if (typeof inputRef.current?.select === "function") {
+          inputRef.current.select();
+        }
+        lastKey = "";
+        return;
+      }
+      if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        inputRef.current?.focus();
+        if (typeof inputRef.current?.select === "function") {
+          inputRef.current.select();
+        }
+        return;
+      }
+      lastKey = "";
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const submitJump = (event: FormEvent) => {
     event.preventDefault();
-    const ticket = value.trim().toUpperCase();
-    const pr = parsePrRef(value);
+    const raw = (inputRef.current?.value || jumpValue).trim();
+    const ticket = raw.toUpperCase();
+    const pr = parsePrRef(raw);
     if (pr && onNavigatePr) {
-      setError(false);
+      setJumpError(false);
       onNavigatePr(pr);
       return;
     }
     if (!TICKET_ID_PATTERN.test(ticket)) {
-      setError(true);
+      setJumpError(true);
       return;
     }
-    setError(false);
+    setJumpError(false);
     onNavigate(ticket);
   };
+
   return (
-    <div className="mx-auto max-w-lg p-8">
-      <h1 className="display text-h1 font-semibold">Ticket journey</h1>
-      <p className="mt-2 text-[13px] text-(--text-dim)">
-        Enter a Linear ticket id to see its decisions, attempts, PR, CI, and
-        merge history on one timeline.
-        {onNavigatePr ? " A PR reference (#541) opens that PR's journey." : ""}
-      </p>
-      <form onSubmit={submit} className="mt-5 flex gap-2">
-        <input
-          ref={inputRef}
-          autoFocus
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder="WM-542"
-          aria-label="Ticket id"
-          aria-invalid={error}
-          className="mono min-w-0 flex-1 rounded-md border border-(--border-strong) bg-(--surface-1) px-3 py-2 text-[13px] outline-none focus:border-(--accent)"
-        />
-        <PrimitiveButton
-          bare
-          type="submit"
-          className="rounded-md bg-(--accent) px-4 py-2 text-[12px] font-medium text-(--on-accent)"
-        >
-          Open
-        </PrimitiveButton>
-      </form>
-      {error && (
-        <div role="alert" className="mt-2 text-[11px] text-(--hue-err)">
-          Use an id like WM-542{onNavigatePr ? " or a PR like #541" : ""}.
-        </div>
-      )}
-      <div className="mt-3 text-[11px] text-(--text-faint)">
-        Shortcut: <span className="mono">g k</span>
+    <ListPane
+      chrome={
+        <>
+          <h1 className="display mb-1 text-lg font-semibold">Tickets</h1>
+          <p className="mb-3 text-[11px] text-(--text-faint)">
+            Recent factory ticket activity, journey timelines, and quick search.
+            {onNavigatePr
+              ? " A PR reference (#541) opens that PR's journey."
+              : ""}
+          </p>
+          <form
+            onSubmit={submitJump}
+            className="mb-3 flex flex-wrap items-center gap-2"
+          >
+            <input
+              ref={inputRef}
+              autoFocus
+              value={jumpValue}
+              onChange={(event) => setJumpValue(event.target.value)}
+              placeholder="WM-542 or #541"
+              aria-label="Ticket id"
+              aria-invalid={jumpError}
+              className="mono min-w-48 flex-1 rounded-md border border-(--border-strong) bg-(--surface-1) px-3 py-1.5 text-[13px] outline-none focus:border-(--accent)"
+            />
+            <PrimitiveButton
+              bare
+              type="submit"
+              className="rounded-md bg-(--accent) px-3.5 py-1.5 text-[12px] font-medium text-(--on-accent)"
+            >
+              Open
+            </PrimitiveButton>
+          </form>
+          {jumpError && (
+            <div role="alert" className="mb-3 text-[11px] text-(--hue-err)">
+              Use an id like WM-542{onNavigatePr ? " or a PR like #541" : ""}.
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Filter tickets…"
+              label="Filter tickets"
+            />
+            <select
+              aria-label="Filter by repo"
+              value={repoFilter}
+              onChange={(e) => setRepoFilter(e.target.value)}
+              className="rounded-md border border-(--border-strong) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text)"
+            >
+              <option value="">All repos</option>
+              {repoOptions.map((repo) => (
+                <option key={repo} value={repo}>
+                  {repo}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by state"
+              value={stateFilter}
+              onChange={(e) => setStateFilter(e.target.value)}
+              className="rounded-md border border-(--border-strong) bg-(--surface-1) px-2.5 py-1 text-[12px] text-(--text)"
+            >
+              <option value="">All states</option>
+              {stateOptions.map((state) => (
+                <option key={state} value={state}>
+                  {state}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-2 text-[11px] text-(--text-faint)">
+            Shortcut: <span className="mono">g k</span> to focus jump bar,{" "}
+            <span className="mono">j</span>/<span className="mono">k</span> to
+            navigate, <span className="mono">Enter</span> to open,{" "}
+            <span className="mono">o</span> to open in Linear
+          </div>
+        </>
+      }
+    >
+      <div className="table-wrap">
+        <table className="w-full text-left text-[12px]">
+          <thead>
+            <tr className="border-b border-(--border)">
+              <Th label="Ticket ID" />
+              <Th label="Repo" />
+              <Th label="State" />
+              <Th label="Last Activity" />
+              <Th label="Attempts" />
+              <Th label="PR / CI" />
+            </tr>
+          </thead>
+          <tbody>
+            {filteredTickets.length === 0 ? (
+              <ListEmpty
+                colSpan={6}
+                query={ticketsQuery}
+                filtered={Boolean(searchQuery || repoFilter || stateFilter)}
+                noun="tickets"
+                empty="No tickets found."
+                onClear={() => {
+                  setSearchQuery("");
+                  setRepoFilter("");
+                  setStateFilter("");
+                }}
+              />
+            ) : (
+              filteredTickets.map((ticket, index) => {
+                const selected =
+                  index === selectedIndex || ticket.id === selectedId;
+                return (
+                  <tr
+                    key={ticket.id}
+                    data-ticket-id={ticket.id}
+                    aria-selected={selected}
+                    onClick={() => onNavigate(ticket.id)}
+                    className={`cursor-pointer border-b border-(--border) hover:bg-(--surface-1) ${
+                      selected ? "bg-(--surface-1)" : ""
+                    }`}
+                  >
+                    <td className="mono px-3 py-2 font-medium">
+                      <a
+                        href={`#/tickets/${encodeURIComponent(ticket.id)}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onNavigate(ticket.id);
+                        }}
+                        className="text-(--accent) hover:underline"
+                      >
+                        {ticket.id}
+                      </a>
+                      {ticket.title && (
+                        <div className="max-w-xs truncate font-sans text-[11px] font-normal text-(--text-dim)">
+                          {ticket.title}
+                        </div>
+                      )}
+                    </td>
+                    <td className="mono px-3 py-2 text-(--text-dim)">
+                      {ticket.repo || ticket.repos?.join(", ") || "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {ticket.state ? (
+                        <StateBadge state={ticket.state} hues={STATE_HUES} />
+                      ) : (
+                        <span className="text-(--text-faint)">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-(--text-dim)">
+                      <div>
+                        {ticket.lastActivityDescription ||
+                          ticket.lastActivityKind ||
+                          "—"}
+                      </div>
+                      {ticket.lastActivityAt && (
+                        <div className="text-[11px] text-(--text-faint)">
+                          <Ago iso={ticket.lastActivityAt} now={now} />
+                        </div>
+                      )}
+                    </td>
+                    <td className="mono px-3 py-2 tabular-nums text-(--text-dim)">
+                      {ticket.attempts != null ? ticket.attempts : "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {ticket.pr != null ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <a
+                            href={ticket.prUrl || `#/prs/${ticket.pr}`}
+                            onClick={(e) => {
+                              if (onNavigatePr) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onNavigatePr(ticket.pr!);
+                              }
+                            }}
+                            className="mono text-(--accent) hover:underline"
+                          >
+                            {`PR #${ticket.pr}`}
+                          </a>
+                          {(ticket.ciStatus || ticket.checksGreen != null) && (
+                            <span
+                              className={`inline-block size-2 rounded-full ring-2 ring-(--surface-1) ${
+                                ticket.ciStatus === "green" ||
+                                ticket.checksGreen === true
+                                  ? "bg-(--hue-ok)"
+                                  : ticket.ciStatus === "red" ||
+                                      ticket.checksGreen === false
+                                    ? "bg-(--hue-err)"
+                                    : "bg-(--hue-warn)"
+                              }`}
+                              title={`CI: ${ticket.ciStatus ?? (ticket.checksGreen ? "green" : "red")}`}
+                            />
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-(--text-faint)">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
       </div>
-    </div>
+    </ListPane>
   );
 }
 
@@ -482,8 +827,8 @@ export function Ticket({
     ...refetchIntervals.secondary,
   });
 
-  if (!ticketId)
-    return <TicketPicker onNavigate={onNavigate} onNavigatePr={onNavigatePr} />;
+  if (!ticketId || ticketId.trim() === "")
+    return <TicketsHub onNavigate={onNavigate} onNavigatePr={onNavigatePr} />;
   if (!valid) {
     return (
       <div className="p-8">
