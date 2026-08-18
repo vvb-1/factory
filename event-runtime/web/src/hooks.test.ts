@@ -1,20 +1,22 @@
 import "./test-dom";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import {
   QueryClient,
   QueryClientProvider,
   useQuery,
 } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { createElement as h, useState } from "react";
+import { createElement as h, useEffect, useState } from "react";
 import { api } from "./api";
 import {
   modal,
   refetchIntervals,
   useHashRoute,
   useListKeys,
+  useRequeuePoll,
   useTheme,
 } from "./hooks";
+import type { Proposal } from "./types";
 
 const originalFetch = globalThis.fetch;
 
@@ -163,6 +165,78 @@ function ThemeProbe() {
   const [theme] = useTheme();
   return h("span", { "data-testid": "theme" }, theme);
 }
+
+type PollRequeue = ReturnType<typeof useRequeuePoll>;
+let exposedPollRequeue: PollRequeue | null = null;
+
+function RequeuePollProbe(props: {
+  onJumpProposal: (proposalId: string) => void;
+}) {
+  const pollRequeue = useRequeuePoll(props.onJumpProposal);
+  useEffect(() => {
+    exposedPollRequeue = pollRequeue;
+  }, [pollRequeue]);
+  return null;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function requeueProposal(id: string, eventId: string): Proposal {
+  return { id, eventSource: "github", eventId } as Proposal;
+}
+
+describe("useRequeuePoll", () => {
+  test("a matched task and source-view unmount do not drop a concurrent task", async () => {
+    const originalProposals = api.proposals;
+    const requests: ReturnType<
+      typeof deferred<Awaited<ReturnType<typeof api.proposals>>>
+    >[] = [];
+    api.proposals = mock(() => {
+      const request = deferred<Awaited<ReturnType<typeof api.proposals>>>();
+      requests.push(request);
+      return request.promise;
+    });
+
+    try {
+      const onJumpProposal = mock((proposalId: string) => {
+        if (proposalId === "prop_first") view.unmount();
+      });
+      const view = render(h(RequeuePollProbe, { onJumpProposal }));
+      const pollRequeue = exposedPollRequeue!;
+
+      const first = pollRequeue("github", "evt_first");
+      const second = pollRequeue("github", "evt_second");
+      expect(requests).toHaveLength(2);
+
+      await act(async () => {
+        requests[0]!.resolve({
+          proposals: [requeueProposal("prop_first", "evt_first")],
+        });
+        await first;
+      });
+      expect(onJumpProposal).toHaveBeenCalledWith("prop_first");
+
+      await act(async () => {
+        requests[1]!.resolve({
+          proposals: [requeueProposal("prop_second", "evt_second")],
+        });
+        await second;
+      });
+      expect(
+        onJumpProposal.mock.calls.map(([proposalId]) => proposalId),
+      ).toEqual(["prop_first", "prop_second"]);
+    } finally {
+      api.proposals = originalProposals;
+      exposedPollRequeue = null;
+    }
+  });
+});
 
 /** Helper list component driving useListKeys */
 function InteractiveList(props: {

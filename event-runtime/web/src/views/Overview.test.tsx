@@ -45,6 +45,14 @@ function renderWithClient(ui: React.ReactElement) {
 
 const noop = () => {};
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function baseStatus(
   overrides: Partial<StatusView["anomalies"]> = {},
 ): StatusView {
@@ -676,6 +684,96 @@ describe("Overview anomaly deck (WM-95)", () => {
       api.proposals = originals.proposals;
       api.outbox = originals.outbox;
       api.journal = originals.journal;
+    }
+  });
+
+  test("bulk requeue keeps peer proposal polls alive when the first match navigates away", async () => {
+    const originals = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+      requeue: api.requeue,
+    };
+    const eventIds = ["evt_concurrent_first", "evt_concurrent_second"];
+    api.status = async () =>
+      baseStatus({
+        deadLettered: eventIds.map((eventId) => ({
+          source: "github",
+          eventId,
+          lastError: "planner unavailable",
+        })),
+      });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+
+    let requeued = 0;
+    api.requeue = mock(async () => {
+      requeued += 1;
+      return { requeued: true };
+    });
+    const pollRequests: ReturnType<
+      typeof deferred<Awaited<ReturnType<typeof api.proposals>>>
+    >[] = [];
+    api.proposals = mock(() => {
+      if (requeued < eventIds.length) return Promise.resolve({ proposals: [] });
+      const request = deferred<Awaited<ReturnType<typeof api.proposals>>>();
+      pollRequests.push(request);
+      return request.promise;
+    });
+
+    try {
+      const onJumpProposal = mock((proposalId: string) => {
+        if (proposalId === "prop_concurrent_first") view.unmount();
+      });
+      const view = renderOverview({ kind: "all" }, { onJumpProposal });
+
+      fireEvent.click(
+        await waitFor(() => view.getByRole("button", { name: "Requeue all" })),
+      );
+      fireEvent.click(view.getByRole("button", { name: "Requeue 2 events" }));
+      await waitFor(() => expect(api.requeue).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(pollRequests).toHaveLength(2));
+
+      await act(async () => {
+        pollRequests[0]!.resolve({
+          proposals: [
+            {
+              ...stubProposal,
+              id: "prop_concurrent_first",
+              eventId: eventIds[0]!,
+              eventSource: "github",
+            },
+          ],
+        });
+      });
+      await waitFor(() =>
+        expect(onJumpProposal).toHaveBeenCalledWith("prop_concurrent_first"),
+      );
+
+      await act(async () => {
+        pollRequests[1]!.resolve({
+          proposals: [
+            {
+              ...stubProposal,
+              id: "prop_concurrent_second",
+              eventId: eventIds[1]!,
+              eventSource: "github",
+            },
+          ],
+        });
+      });
+      await waitFor(() =>
+        expect(
+          onJumpProposal.mock.calls.map(([proposalId]) => proposalId),
+        ).toEqual(["prop_concurrent_first", "prop_concurrent_second"]),
+      );
+    } finally {
+      api.status = originals.status;
+      api.proposals = originals.proposals;
+      api.outbox = originals.outbox;
+      api.journal = originals.journal;
+      api.requeue = originals.requeue;
     }
   });
 

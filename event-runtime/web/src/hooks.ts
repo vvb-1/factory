@@ -439,19 +439,12 @@ export type RequeueTarget = { source: string; eventId: string };
  * - Match found: calls `onJumpProposal(proposal.id)`.
  * - Loop expires without match: shows info toast "Requeued <eventId> — no open proposal appeared".
  * - Error thrown during poll: shows error toast "Requeued <eventId> — could not confirm a proposal appeared".
- * Cancels polling if the component unmounts before completion.
+ * Each invocation owns its full match/timeout/error lifecycle. In particular,
+ * navigating after one match must not cancel concurrent requeue confirmations.
  */
 export function useRequeuePoll(onJumpProposal: (proposalId: string) => void) {
-  const alive = useRef(true);
   const jumpRef = useRef(onJumpProposal);
   jumpRef.current = onJumpProposal;
-
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
 
   return useCallback(
     async (
@@ -464,12 +457,12 @@ export function useRequeuePoll(onJumpProposal: (proposalId: string) => void) {
           : targetOrSource;
       const deadline = Date.now() + 8000;
       try {
-        while (alive.current && Date.now() < deadline) {
+        while (Date.now() < deadline) {
           const { proposals } = await api.proposals();
           const match = proposals.find(
             (p) => p.eventSource === source && p.eventId === eventId,
           );
-          if (match && alive.current) {
+          if (match) {
             jumpRef.current(match.id);
             return;
           }
@@ -478,17 +471,13 @@ export function useRequeuePoll(onJumpProposal: (proposalId: string) => void) {
       } catch {
         // The requeue itself landed; only the confirmation poll broke, so say
         // that rather than claiming no proposal appeared.
-        if (alive.current) {
-          notify(
-            `Requeued ${eventId} — could not confirm a proposal appeared`,
-            "err",
-          );
-        }
+        notify(
+          `Requeued ${eventId} — could not confirm a proposal appeared`,
+          "err",
+        );
         return;
       }
-      if (alive.current) {
-        notify(`Requeued ${eventId} — no open proposal appeared`, "info");
-      }
+      notify(`Requeued ${eventId} — no open proposal appeared`, "info");
     },
     [],
   );
