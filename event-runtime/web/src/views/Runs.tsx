@@ -300,15 +300,20 @@ function budgetPart(c: Clock, timeoutSeconds: number): RemainingPart | null {
   };
 }
 
-/** The lease only earns row space when it can outrun the budget. */
-function leasePart(c: Clock, budgetSpent: boolean): RemainingPart | null {
+/**
+ * The lease is minted at claim for the budget plus a grace, so it usually
+ * expires after the budget and adds nothing to the row. It earns its half of
+ * the line only when it is the deadline that will actually fire first.
+ */
+function leasePart(c: Clock, budget: Clock | null): RemainingPart | null {
   if (c.kind === "off") return null;
   if (c.kind === "spent")
     return { text: "lease due", title: "reap due", hue: "var(--hue-err)" };
+  if (budget?.kind === "live" && c.leftMs >= budget.leftMs) return null;
   return {
     text: `lease ${leftLabel(c.leftMs)}`,
     title: `reaped in ${formatDuration(c.leftMs / 1000)}`,
-    hue: budgetSpent ? "var(--hue-warn)" : undefined,
+    hue: budget?.kind === "spent" ? "var(--hue-warn)" : undefined,
   };
 }
 
@@ -327,8 +332,7 @@ function RemainingCell({ r, now }: { r: RunListItem; now: number }) {
       : null;
   const leaseClock = leaseExpiresAt ? clockTo(leaseExpiresAt, 0, now) : null;
   const budget = budgetClock && budgetPart(budgetClock, timeoutSeconds);
-  const lease =
-    leaseClock && leasePart(leaseClock, budgetClock?.kind === "spent");
+  const lease = leaseClock && leasePart(leaseClock, budgetClock);
   if (!budget && !lease) return <span>{EMPTY}</span>;
 
   return (

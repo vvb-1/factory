@@ -1224,11 +1224,19 @@ describe("Runs in-flight row height (WM-725)", () => {
       leaseExpiresAt: new Date(now + 60_000).toISOString(),
       timeoutSeconds: 600,
     });
+    // The ordinary case: the lease is minted for the budget plus a grace, so it
+    // fires after the budget and has nothing to add to the row.
+    const calm = stubListItem("run_calm", "RUNNING", {
+      startedAt: new Date(now - 2 * 60_000).toISOString(),
+      deadlineAt: new Date(now + 9 * 60_000).toISOString(),
+      leaseExpiresAt: new Date(now + 11 * 60_000).toISOString(),
+      timeoutSeconds: 600,
+    });
     const done = stubListItem("run_done", "COMPLETED");
 
     await withApi(
       {
-        runs: async () => ({ runs: [hang, done] }),
+        runs: async () => ({ runs: [hang, calm, done] }),
         status: async () => createStatusFixture(),
       },
       async () => {
@@ -1256,6 +1264,14 @@ describe("Runs in-flight row height (WM-725)", () => {
         expect(remaining.textContent).toContain("lease");
         expect(remaining.querySelectorAll("div").length).toBe(0);
         expect(remaining.className).toContain("whitespace-nowrap");
+
+        // A lease that outlives the budget is not the binding deadline, so it
+        // stays off the row rather than padding the column with a number the
+        // operator cannot act on.
+        const calmRemaining = cellFor(r, "run_calm", "Remaining");
+        expect(calmRemaining.textContent).toMatch(/\b9m\b/);
+        expect(calmRemaining.textContent).not.toContain("lease");
+        expect(cellFor(r, "run_calm", "State").textContent).toBe("RUNNING");
       },
     );
   });
