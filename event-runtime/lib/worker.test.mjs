@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -5036,7 +5037,8 @@ describe("handoff verification gate (WM-718)", () => {
         ? readFileSync(path.join(repoDir, "web-builds.log"), "utf8")
         : "";
     expect(builds()).toContain(
-      "web_built:" + path.join(wtRoot, "WM-7184", "event-runtime/web"),
+      "web_built:" +
+        path.join(realpathSync(wtRoot), "WM-7184", "event-runtime/web"),
     );
     const result = JSON.parse(
       g.db
