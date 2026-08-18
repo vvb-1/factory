@@ -119,6 +119,22 @@ function stubRun(
 ): RunListItem {
   const now = new Date().toISOString();
   return {
+    spec: {
+      schemaVersion: "factory.run-spec/v1",
+      runId: overrides.runId,
+      agent: "triage-scan",
+      input: { repos: overrides.repos },
+      inputHash: "sha256:overview",
+      workspace: { type: "ephemeral" },
+      adapter: "fake",
+      promptVersion: "1",
+      policyVersion: "1",
+      outputContract: "triage/v1",
+      capabilities: [],
+      timeoutSeconds: 600,
+      maxAttempts: 3,
+      idempotencyKey: `idem-${overrides.runId}`,
+    },
     attempts: 1,
     maxAttempts: 3,
     agent: "triage-scan",

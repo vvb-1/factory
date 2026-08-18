@@ -144,6 +144,8 @@ export interface ChainListItem {
 
 export interface RunListItem {
   runId: string;
+  /** Full run specification for custom columns and field discovery. */
+  spec: RunSpec;
   state: RunState;
   attempts: number;
   maxAttempts: number;

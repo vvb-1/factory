@@ -80,8 +80,10 @@ export function createRunListItemFixture(
   overrides?: Partial<RunListItem>,
 ): RunListItem {
   const now = new Date().toISOString();
+  const runId = overrides?.runId ?? "run_test_1001";
   return {
-    runId: "run_test_1001",
+    runId,
+    spec: createRunSpecFixture(runId),
     state: "RUNNING",
     attempts: 1,
     maxAttempts: 3,

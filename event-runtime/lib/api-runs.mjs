@@ -386,6 +386,7 @@ function runsView(db, state) {
     const spec = JSON.parse(row.spec_json);
     return {
       runId: row.run_id,
+      spec,
       state: row.state,
       attempts: row.attempts,
       maxAttempts: spec.maxAttempts,

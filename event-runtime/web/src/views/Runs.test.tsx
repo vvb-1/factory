@@ -718,6 +718,47 @@ describe("Runs Model column (WM-221)", () => {
   });
 });
 
+describe("Runs custom spec columns (WM-303)", () => {
+  test("renders a nested spec value and discovers spec paths with samples", async () => {
+    const runId = "run_custom_spec";
+    const model = "opus-custom-303";
+    const spec = createRunSpecFixture(runId, {
+      input: { model, repo: "factory" },
+    });
+
+    await withApi(
+      {
+        runs: async () => ({
+          runs: [stubListItem(runId, "COMPLETED", { spec })],
+        }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        await r.findByText("run_custom_s");
+
+        fireEvent.click(r.getByRole("button", { name: /^Display/ }));
+        const input = r.getByRole("combobox", {
+          name: "Add custom property path",
+        });
+        fireEvent.focus(input);
+        expect(
+          r.getByRole("option", {
+            name: new RegExp(`spec\\.input\\.model.*${model}`, "i"),
+          }),
+        ).toBeTruthy();
+        expect(
+          r.getByRole("option", { name: /spec\.input\.repo.*factory/i }),
+        ).toBeTruthy();
+
+        act(() => changeInput(input as HTMLInputElement, "model"));
+        fireEvent.keyDown(input, { key: "Enter" });
+        expect(await r.findByText(model)).toBeTruthy();
+      },
+    );
+  });
+});
+
 describe("Runs copy chords and hints (WM-233)", () => {
   test("copy chords: c (id), c l (link), c i / c c (CLI inspect command) and utility hints", async () => {
     let written = "";

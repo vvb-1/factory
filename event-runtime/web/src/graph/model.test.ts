@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildCapabilityGraph } from "./model";
-import type { AgentsView } from "../types";
+import type { AgentsView, RunListItem, RunState } from "../types";
 
 // The topology rules are pure data — tested without React or a browser.
 
@@ -34,6 +34,37 @@ const view = (over: Partial<AgentsView> = {}): AgentsView => ({
   eventTypes: [],
   contracts: {},
   ...over,
+});
+
+const run = (runId: string, state: RunState, maxAttempts = 3): RunListItem => ({
+  runId,
+  spec: {
+    schemaVersion: "factory.run-spec/v1",
+    runId,
+    agent: "doctor@1",
+    input: { repo: "factory" },
+    inputHash: `sha256:${runId}`,
+    workspace: { type: "ephemeral" },
+    adapter: "claude",
+    promptVersion: "1",
+    policyVersion: "1",
+    outputContract: "doctor/v1",
+    capabilities: [],
+    timeoutSeconds: 600,
+    maxAttempts,
+    idempotencyKey: `idem-${runId}`,
+  },
+  state,
+  agent: "doctor@1",
+  attempts: 1,
+  maxAttempts,
+  adapter: "claude",
+  reasonCode: null,
+  eventId: null,
+  eventSource: null,
+  created_at: "",
+  updated_at: "",
+  repos: [],
 });
 
 describe("buildCapabilityGraph", () => {
@@ -241,62 +272,10 @@ describe("buildCapabilityGraph", () => {
       }),
       {
         runs: [
-          {
-            runId: "r1",
-            state: "RUNNING",
-            agent: "doctor@1",
-            attempts: 1,
-            maxAttempts: 3,
-            adapter: "claude",
-            reasonCode: null,
-            eventId: null,
-            eventSource: null,
-            created_at: "",
-            updated_at: "",
-            repos: [],
-          },
-          {
-            runId: "r2",
-            state: "QUEUED",
-            agent: "doctor@1",
-            attempts: 1,
-            maxAttempts: 3,
-            adapter: "claude",
-            reasonCode: null,
-            eventId: null,
-            eventSource: null,
-            created_at: "",
-            updated_at: "",
-            repos: [],
-          },
-          {
-            runId: "r3",
-            state: "QUEUED",
-            agent: "doctor@1",
-            attempts: 1,
-            maxAttempts: 3,
-            adapter: "claude",
-            reasonCode: null,
-            eventId: null,
-            eventSource: null,
-            created_at: "",
-            updated_at: "",
-            repos: [],
-          },
-          {
-            runId: "r4",
-            state: "COMPLETED",
-            agent: "doctor@1",
-            attempts: 1,
-            maxAttempts: 3,
-            adapter: "claude",
-            reasonCode: null,
-            eventId: null,
-            eventSource: null,
-            created_at: "",
-            updated_at: "",
-            repos: [],
-          },
+          run("r1", "RUNNING"),
+          run("r2", "QUEUED"),
+          run("r3", "QUEUED"),
+          run("r4", "COMPLETED"),
         ],
       },
     );
@@ -427,34 +406,8 @@ describe("buildCapabilityGraph", () => {
       }),
       {
         runs: [
-          {
-            runId: "run-doc-101",
-            state: "COMPLETED",
-            agent: "doctor@1",
-            attempts: 1,
-            maxAttempts: 1,
-            adapter: "claude",
-            reasonCode: null,
-            eventId: null,
-            eventSource: null,
-            created_at: "",
-            updated_at: "",
-            repos: [],
-          },
-          {
-            runId: "run-doc-102",
-            state: "COMPLETED",
-            agent: "doctor@1",
-            attempts: 1,
-            maxAttempts: 1,
-            adapter: "claude",
-            reasonCode: null,
-            eventId: null,
-            eventSource: null,
-            created_at: "",
-            updated_at: "",
-            repos: [],
-          },
+          run("run-doc-101", "COMPLETED", 1),
+          run("run-doc-102", "COMPLETED", 1),
         ],
         events: [
           {
