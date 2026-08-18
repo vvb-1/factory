@@ -1,0 +1,51 @@
+{
+  "title": "factory.panel-view/v1 — a declarative Overview tile bound to one loopback API endpoint (docs/event-runtime-artifact-views.md §2.6)",
+  "description": "A panel names a GET endpoint of the loopback API, an optional query and an RFC 6901 pointer into the response, and describes how to draw the selected node with the artifact-view vocabulary. `view` is a `factory.artifact-view/v1` body without `schemaVersion` (`sections`, optional `summary`/`status`); it is validated by lib/artifact-view.mjs against the artifact-view schema, and `source.endpoint` is checked against the allow-list in lib/api-panels.mjs — both by lib/panel-view.mjs, because lib/schema.mjs has no $ref and knows no routes.",
+  "type": "object",
+  "required": ["format", "name", "title", "source", "view"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "factory.panel-view/v1" },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)?(:[a-z0-9][a-z0-9-]*)?$",
+      "description": "unique across every contributor: `slug` for built-ins, `<namespace>:<slug>` for pack panels, `<publisher>/<extension>:<slug>` for extension panels"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+    "description": { "type": "string", "maxLength": 200 },
+    "source": {
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^/[a-z][a-z0-9/-]*$",
+          "description": "one of the allow-listed GET routes (lib/api-panels.mjs PANEL_ENDPOINTS); no query string here"
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 200 },
+          "description": "query parameters appended to the endpoint, string values only"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(/|$)",
+          "description": "RFC 6901 pointer into the response selecting the node the view renders; `\"\"` (the default) is the whole response"
+        }
+      }
+    },
+    "refreshSeconds": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 3600,
+      "description": "how often the web refetches the source; default 60"
+    },
+    "view": {
+      "type": "object",
+      "description": "artifact-view body over the selected node: `sections` (each `path` relative to the node, `\"\"` for the node itself), optional `summary` and `status`; per-`as` keys and vocabulary as in schemas/factory.artifact-view.v1.json"
+    }
+  }
+}

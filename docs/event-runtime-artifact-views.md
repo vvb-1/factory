@@ -167,6 +167,74 @@ hardest to read as JSON. `dispatch`, `work-scan`, `run-postmortem` follow in
 the Backlog ticket once the first two have shown what the vocabulary is
 missing.
 
+### 2.6 Panels — `factory.panel-view/v1` (WM-840)
+
+The same vocabulary, one level up. An artifact view describes one agent's
+output; a **panel** describes a dashboard tile bound to an existing loopback
+API endpoint, so a pack or extension can put "open needs-me items" or "tickets
+blocked > 24h" on Overview without shipping React. No client-side code is
+loaded — a panel is data, validated at registry load, drawn by the same
+`ArtifactView` renderer.
+
+```json
+{
+  "format": "factory.panel-view/v1",
+  "name": "wattmind/mobile:blocked-tickets",
+  "title": "Blocked > 24h",
+  "source": {
+    "endpoint": "/tickets",
+    "query": { "state": "blocked" },
+    "path": "/tickets"
+  },
+  "refreshSeconds": 60,
+  "view": {
+    "sections": [
+      {
+        "path": "",
+        "as": "table",
+        "columns": ["identifier", "title"],
+        "formats": { "identifier": "issue" }
+      }
+    ]
+  }
+}
+```
+
+| Key              | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| :--------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`         | `factory.panel-view/v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `name`           | Unique across every contributor; `slug` for built-ins, `<namespace>:<slug>` for pack panels, `<publisher>/<extension>:<slug>` for extension panels. A duplicate is a configuration anomaly for the later contributor (built-in, then packs in policy order, then extensions).                                                                                                                                                                                                                                                          |
+| `title`          | ≤ 60 chars, the tile heading. Optional `description` (≤ 200) is the heading's tooltip.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `source`         | `endpoint` — one of the loopback API's GET routes, **allow-listed** in `lib/api-panels.mjs` (`PANEL_ENDPOINTS`; `/agents /artifacts /chains /config /events /health /inbox /journal /metrics /metrics/breakdown /outbox /proposals /repos /runs /schedules /status /tickets /workers`) — no arbitrary URLs, no detail routes, no `/panels`; optional `query` (string values, appended as `?k=v`); optional `path`, an RFC 6901 pointer into the response selecting the node the view draws (`""`, the default, is the whole response). |
+| `refreshSeconds` | 5–3600, default 60: how often the web refetches the source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `view`           | An artifact-view body (§2.2) without `schemaVersion`: `sections` (each `path` **relative to the selected node**, `""` for the node itself), optional `summary` and `status`. Same `as`, `formats` and `tone` sets, same per-`as` keys.                                                                                                                                                                                                                                                                                                 |
+
+Validation is `lib/panel-view.mjs`: the panel schema
+(`schemas/panel-view.schema.json`), the endpoint allow-list, and `view` through
+the artifact-view validator's shape check (`validateArtifactViewShape` — the
+schema and per-`as` key rules, minus the pointer-drift check, because an
+endpoint has no published output schema). Pointers are RFC 6901 throughout, as
+everywhere else in this document — not JSONPath. A panel that fails any check
+is recorded under `/status.anomalies.configuration` and skipped; the rest of
+its contributor still loads.
+
+**Where panels come from.** `event-runtime/panels/*.panel.json` (built-in;
+`inbox-open` ships as the proof), `<pack>/panels/*.panel.json` for a configured
+pack (`lib/registry.mjs` loads them next to artifact views, origin
+`pack:<namespace>`), and an extension's `contributes.panels` directories
+([`extensions.md` § Panels](extensions.md#panels), origin `extension:<name>`).
+`GET /panels` lists the accepted panels with `origin` and `file` plus the
+endpoint allow-list; `lib/client.mjs` and `web/src/api.ts` mirror it as
+`panels()`.
+
+**Rendering.** `web/src/components/PanelGrid.tsx` reads `/panels` and mounts
+one tile per panel below Overview's own content — nothing at all when there
+are none. Each tile fetches its `source.endpoint` on its own TanStack Query
+at `refreshSeconds`, applies `source.path`, and draws the node with
+`ArtifactView`; a fetch that fails, a pointer that misses, or a render fault
+shows an inline error tile (with Retry) and never takes the grid down. The
+client also refuses to fetch an endpoint outside the list `/panels` returned.
+
 ---
 
 ## 3. Layer B — `factory.presentation/v1`

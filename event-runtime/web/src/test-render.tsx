@@ -362,6 +362,10 @@ export function createDefaultApiMocks(): Record<ApiKey, any> {
       runId,
     })),
     agents: mock(async () => createAgentsFixture()),
+    panels: mock(async () => ({ panels: [], endpoints: [] })),
+    panelSource: mock(
+      async (_endpoint: string, _query?: Record<string, string>) => ({}),
+    ),
     repos: mock(async (): Promise<{ repos: RepoItem[] }> => ({ repos: [] })),
     janitor: mock(
       async (name: string, apply = false): Promise<JanitorResult> => ({

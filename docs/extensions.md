@@ -25,10 +25,14 @@ Today an extension can contribute:
   Settings (§Config below);
 - **hooks** — decision-returning modules run at a named point of the runtime,
   today `approve.before` (immediately before each chain auto-approval); a
-  fail-closed waterfall whose every decision is persisted (§Hooks below).
+  fail-closed waterfall whose every decision is persisted (§Hooks below);
+- **panels** — declarative `factory.panel-view/v1` Overview tiles
+  ([`event-runtime-artifact-views.md` §2.6](event-runtime-artifact-views.md#26-panels--factorypanel-viewv1-wm-840));
+  data only, drawn by the web's existing artifact-view renderer, bound to an
+  allow-listed loopback API endpoint (§Panels below).
 
-The manifest also **reserves** `connectors`, `views` and `panels` for
-the tickets that land them (§Panels below). A
+The manifest also **reserves** `connectors` and `views` for the tickets that
+land them. A
 manifest that carries a reserved key loads its packs and adapters and records a
 "not supported yet" configuration anomaly for the rest — it is accepted, not
 rejected, so an extension written for a later runtime still does what this one
@@ -49,6 +53,8 @@ Implementation: `event-runtime/lib/extensions.mjs`, schema
   hooks/
     no-infra-merges.mjs       # an approve.before hook (id + default (ctx) => decision) (§Hooks)
   config.schema.json          # the shape of the extension's operator config (§Config)
+  panels/
+    blocked-tickets.panel.json  # a factory.panel-view/v1 panel
 ```
 
 Nothing about the layout is fixed except the manifest's name and place: every
@@ -67,22 +73,24 @@ directory, and must stay inside it.
     "packs": ["./pack"],
     "adapters": { "argent": "./adapters/argent.mjs" },
     "config": { "namespace": "mobile", "schema": "./config.schema.json" },
-    "hooks": { "approve.before": "./hooks/no-infra-merges.mjs" }
+    "hooks": { "approve.before": "./hooks/no-infra-merges.mjs" },
+    "panels": ["./panels"]
   }
 }
 ```
 
-| Key                                           | Required | Meaning                                                                                                                                                                                                                                         |
-| :-------------------------------------------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                                        | yes      | `publisher/extension`, matching `^[a-z0-9-]+/[a-z0-9-]+$`. Recorded as the `source` of every adapter the extension registers, so `bun event-runtime/cli.mjs adapters` can say where an adapter came from.                                       |
-| `version`                                     | yes      | Semver (`MAJOR.MINOR.PATCH`, optional pre-release/build).                                                                                                                                                                                       |
-| `description`                                 | no       | Up to 200 characters, for listings.                                                                                                                                                                                                             |
-| `factory.min`                                 | no       | The oldest factory the extension was written for. Informational until the runtime carries a version; the loader records it and does not enforce it.                                                                                             |
-| `contributes.packs`                           | no       | Array of relative directories, each containing a `pack.json`. The pack's `name` and `namespace` come from its own `pack.json` (`docs/kernel-and-packs.md` § Pack format) — the policy entry names the extension, not the pack.                  |
-| `contributes.adapters`                        | no       | Object `name → relative .mjs path`. Names must match the adapter pattern `^[a-z][a-z0-9-]*$`; the module must export `execute` and `SANDBOX_SUPPORT`. An extension may not replace an existing adapter (built-in or from an earlier extension). |
-| `contributes.config`                          | no       | Object `{ namespace, schema }`: the name the extension's operator values are published under (`^[a-z][a-z0-9-]*$`, unique across loaded extensions) and the relative path of the JSON-schema those values must satisfy. See § Config.           |
-| `contributes.hooks`                           | no       | Object `hook point → relative .mjs path`. The only point today is `approve.before`; an unknown key is a schema violation. The module must export a string `id` and a default `(ctx) => decision` function. See § Hooks.                         |
-| `contributes.connectors`, `.views`, `.panels` | no       | **Reserved.** Accepted by the schema, ignored by the loader, reported as a configuration anomaly `contributes.<key> is not supported yet`.                                                                                                      |
+| Key                                | Required | Meaning                                                                                                                                                                                                                                                      |
+| :--------------------------------- | :------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                             | yes      | `publisher/extension`, matching `^[a-z0-9-]+/[a-z0-9-]+$`. Recorded as the `source` of every adapter the extension registers, so `bun event-runtime/cli.mjs adapters` can say where an adapter came from.                                                    |
+| `version`                          | yes      | Semver (`MAJOR.MINOR.PATCH`, optional pre-release/build).                                                                                                                                                                                                    |
+| `description`                      | no       | Up to 200 characters, for listings.                                                                                                                                                                                                                          |
+| `factory.min`                      | no       | The oldest factory the extension was written for. Informational until the runtime carries a version; the loader records it and does not enforce it.                                                                                                          |
+| `contributes.packs`                | no       | Array of relative directories, each containing a `pack.json`. The pack's `name` and `namespace` come from its own `pack.json` (`docs/kernel-and-packs.md` § Pack format) — the policy entry names the extension, not the pack.                               |
+| `contributes.adapters`             | no       | Object `name → relative .mjs path`. Names must match the adapter pattern `^[a-z][a-z0-9-]*$`; the module must export `execute` and `SANDBOX_SUPPORT`. An extension may not replace an existing adapter (built-in or from an earlier extension).              |
+| `contributes.config`               | no       | Object `{ namespace, schema }`: the name the extension's operator values are published under (`^[a-z][a-z0-9-]*$`, unique across loaded extensions) and the relative path of the JSON-schema those values must satisfy. See § Config.                        |
+| `contributes.hooks`                | no       | Object `hook point → relative .mjs path`. The only point today is `approve.before`; an unknown key is a schema violation. The module must export a string `id` and a default `(ctx) => decision` function. See § Hooks.                                      |
+| `contributes.panels`               | no       | Array of relative directories; every `*.panel.json` directly inside is a `factory.panel-view/v1` panel (§Panels). The manifest check proves the directories exist inside the extension; the registry validates each panel at load and skips a bad one alone. |
+| `contributes.connectors`, `.views` | no       | **Reserved.** Accepted by the schema, ignored by the loader, reported as a configuration anomaly `contributes.<key> is not supported yet`.                                                                                                                   |
 
 Unknown top-level keys and unknown `contributes` keys are schema violations.
 Validate a manifest without loading anything:
@@ -94,15 +102,20 @@ bun event-runtime/cli.mjs extensions validate ~/.factory/extensions/wattmind-mob
 
 `validate` checks the schema, that every contributed path exists and stays
 inside the extension directory, and that adapter names and hook points are
-well-formed. It does not load a pack or import an adapter or hook module —
-running third-party code is what enabling does.
+well-formed. It does not load a pack, import an adapter or hook module, or
+read a panel document — running third-party code is what enabling does, and
+panel documents are validated by the registry at load (an invalid one is a
+`/status` anomaly).
 
 ## Trust model
 
 There are two kinds of contribution, and the difference is what runs.
 
-- **Data-only packs.** A pack is JSON and prose: definitions, schemas, prompts,
-  routing maps. Loading one executes nothing. The kernel then holds it to the
+- **Data-only packs and panels.** A pack is JSON and prose: definitions,
+  schemas, prompts, routing maps. A panel is JSON too — an endpoint the
+  runtime already serves, a pointer and rendering hints; the web loads no
+  code for it and fetches only endpoints the runtime allow-lists. Loading
+  either executes nothing. The kernel then holds it to the
   configured-pack rules — its own namespace, no shadowing of built-ins, pinned
   prompts and schemas, no `mutating: true` — so a pack can add agents but
   cannot widen what an agent may do. This is the surface an _agent_ may author
@@ -182,7 +195,9 @@ message naming both packs; fix the pack (or the order) and restart.
 5. If the extension gates unattended work, add an `approve.before` hook
    (§Hooks); the smallest conformant module is
    `event-runtime/test-support/extensions/sample/hooks/approve-before.mjs`.
-6. `bun event-runtime/cli.mjs extensions validate <dir>` until it is clean,
+6. Add panels as `panels/<slug>.panel.json` (§Panels); the fixture's
+   `panels/open-proposals.panel.json` is a complete one.
+7. `bun event-runtime/cli.mjs extensions validate <dir>` until it is clean,
    enable it, `extensions list`, restart.
 
 The fixture `event-runtime/test-support/extensions/sample/` is a complete,
@@ -191,9 +206,61 @@ failure mode and what the anomaly for it says.
 
 ## Panels
 
-_Reserved key `contributes.panels` — lands in WM-840 (declarative
-`factory.panel-view/v1` panels rendered on Overview). Until then the loader
-accepts the key and reports it as not supported yet._
+`contributes.panels` lists directories, relative to the manifest, whose
+`*.panel.json` files are `factory.panel-view/v1` panels — declarative
+Overview tiles bound to one allow-listed loopback API endpoint and drawn by
+the web's artifact-view renderer. The full format, the endpoint allow-list
+and the rendering rules are in
+[`event-runtime-artifact-views.md` §2.6](event-runtime-artifact-views.md#26-panels--factorypanel-viewv1-wm-840);
+what is specific to extensions:
+
+```json
+{
+  "format": "factory.panel-view/v1",
+  "name": "wattmind/mobile:blocked-tickets",
+  "title": "Blocked > 24h",
+  "source": {
+    "endpoint": "/tickets",
+    "query": { "state": "blocked" },
+    "path": "/tickets"
+  },
+  "refreshSeconds": 60,
+  "view": {
+    "sections": [
+      {
+        "path": "",
+        "as": "table",
+        "columns": ["identifier", "title"],
+        "formats": { "identifier": "issue" }
+      }
+    ]
+  }
+}
+```
+
+- **Names** are `<publisher>/<extension>:<slug>` — the extension's own name
+  as prefix — and must be unique across built-ins, packs and every extension;
+  a clash is a configuration anomaly for the later contributor and the earlier
+  panel stays.
+- **Origin.** `GET /panels` reports each of these with
+  `origin: "extension:<name>"`, and the tile shows that origin under its title.
+- **Order.** Extension panel directories load after every pack (built-in and
+  `packs:`), in policy order, into the same registry list.
+- **Failure.** A panel that does not validate — bad schema, an endpoint that
+  is not allow-listed, a `view` the artifact-view vocabulary rejects,
+  unparseable JSON — is skipped alone with a `/status.anomalies.configuration`
+  line naming the file; the extension's other panels, packs and adapters still
+  load. A directory that is missing or escapes the extension is a manifest
+  error and skips the extension whole, like any other bad path.
+- **Panels inside packs.** A pack an extension contributes may also carry
+  `panels/*.panel.json`; those load with the pack (origin `pack:<namespace>`),
+  no manifest key needed. Use `contributes.panels` for tiles that belong to
+  the extension rather than to one pack.
+
+Implementation: `event-runtime/lib/panel-view.mjs` (validation and
+directory loading), `lib/registry.mjs` (`loadRegistry({ panelRoots })`),
+`lib/api-panels.mjs` (`GET /panels`, `PANEL_ENDPOINTS`),
+`web/src/components/PanelGrid.tsx`.
 
 ## Config
 

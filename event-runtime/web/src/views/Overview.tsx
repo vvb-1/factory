@@ -46,6 +46,13 @@ const OverviewNeedsYou = lazy(() =>
     default: OverviewNeedsYou,
   })),
 );
+// Lazy like Needs-you: the artifact-view renderer behind the panels is not
+// entry-chunk material, and a stock install without panels never draws it.
+const PanelGrid = lazy(() =>
+  import("../components/PanelGrid").then(({ PanelGrid }) => ({
+    default: PanelGrid,
+  })),
+);
 
 export function SectionTitle({
   title,
@@ -2177,6 +2184,15 @@ export function Overview({
           </div>
         </OverviewSection>
       </div>
+
+      {/*
+        Declarative panels (WM-840): tiles contributed by packs and extensions,
+        drawn with the artifact-view renderer. Renders nothing when there are
+        none, so the page above is unchanged on a stock install without them.
+      */}
+      <Suspense fallback={null}>
+        <PanelGrid onJumpRun={onJumpRun} />
+      </Suspense>
 
       {bulkDeadLetterAction && (
         <Dialog

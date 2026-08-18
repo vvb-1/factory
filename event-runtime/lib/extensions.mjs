@@ -22,9 +22,13 @@
  *      registered — while every other extension still loads. `serve`/`work`
  *      never fail to start because a third-party manifest is broken.
  *   3. **Reserved manifest keys are accepted, not rejected.** `connectors`,
- *      `views` and `panels` belong to follow-up tickets; a manifest
- *      that carries them loads its packs and adapters here and records a
- *      "not supported yet" anomaly for the rest.
+ *      `views` belong to follow-up tickets; a manifest that carries them
+ *      loads its packs, adapters, config, hooks and panels here and
+ *      records a "not supported yet" anomaly for the rest. `panels` (WM-840)
+ *      contributes directories of `*.panel.json`; the manifest check only
+ *      proves they exist inside the extension, and lib/registry.mjs loads
+ *      and validates the panels themselves (a bad panel is skipped alone,
+ *      never the extension).
  *   4. **Config is declared, validated, defaulted (WM-841).** An extension
  *      may declare `contributes.config: { namespace, schema }`; the operator's
  *      values live on the policy entry (`extensions[].config`). At load the
@@ -74,11 +78,7 @@ export const EXTENSION_SCHEMA = JSON.parse(
 );
 
 /** Manifest keys the schema accepts today but no ticket has implemented yet. */
-export const RESERVED_CONTRIBUTIONS = Object.freeze([
-  "connectors",
-  "views",
-  "panels",
-]);
+export const RESERVED_CONTRIBUTIONS = Object.freeze(["connectors", "views"]);
 
 /** The `source` a hook registered by an extension carries (lib/hooks.mjs). */
 export function extensionHookSource(name) {
@@ -303,6 +303,7 @@ export function validateExtensionManifest(dir) {
       );
     }
   }
+  errors.push(...panelDirErrors(root, file, contributes.panels));
   return result(manifest);
 }
 
@@ -429,6 +430,46 @@ export function loadedExtensions() {
   return LOADED;
 }
 
+/**
+ * `contributes.panels` (WM-840): relative directories of `*.panel.json`,
+ * each inside the extension and existing. Only the directories are checked
+ * here — panel documents are validated when the registry loads them, one
+ * anomaly per bad panel, so `extensions validate` stays a manifest check.
+ */
+function panelDirErrors(root, file, panels) {
+  const errors = [];
+  const seen = new Set();
+  for (const [i, rel] of (panels ?? []).entries()) {
+    const abs = path.resolve(root, rel);
+    if (!isInside(root, abs)) {
+      errors.push(
+        `${file}: contributes.panels[${i}] "${rel}" escapes the extension directory`,
+      );
+      continue;
+    }
+    if (seen.has(abs)) {
+      errors.push(`${file}: contributes.panels[${i}] "${rel}" listed twice`);
+      continue;
+    }
+    seen.add(abs);
+    if (!existsSync(abs) || !statSync(abs).isDirectory()) {
+      errors.push(
+        `${file}: contributes.panels[${i}] "${rel}" is not a directory (${abs})`,
+      );
+    }
+  }
+  return errors;
+}
+
+/** The registry `panelRoots` entries for one accepted extension (lib/registry.mjs loadRegistry). */
+function panelRootsFor(dir, manifest) {
+  return (manifest.contributes?.panels ?? []).map((rel) => ({
+    dir: path.resolve(dir, rel),
+    origin: `extension:${manifest.name}`,
+    base: dir,
+  }));
+}
+
 function isInside(root, abs) {
   const rel = path.relative(root, abs);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
@@ -466,12 +507,16 @@ function packRootFor(extensionRoot, rel) {
  * @param {Array<object>} [options.packRoots] - the policy `packs:` roots the extension packs join (default: loadPackRoots({ root }))
  * @param {string} [options.registryRoot] - the built-in registry root the dry load uses (tests point it at a copy)
  * @returns {Promise<{
- *   extensions: Array<{ name: string, version: string, path: string, packs: string[], adapters: string[], hooks: Array<{ point: string, id: string }>, reserved: string[], config: { namespace: string, schema: string, values: object }|null }>,
+ *   extensions: Array<{ name: string, version: string, path: string, packs: string[], adapters: string[], hooks: Array<{ point: string, id: string }>, panels: string[], reserved: string[], config: { namespace: string, schema: string, values: object }|null }>,
+ *   panelRoots: Array<{ dir: string, origin: string, base: string }>,
  *   packRoots: Array<object>,
+ *   panelRoots: Array<{ dir: string, origin: string, base: string }>,
  *   anomalies: string[],
  *   disabled: Array<{ name: string|null, version: string|null, path: string, namespace: string|null, reason: string }>,
  * }>} `packRoots` is the full list — policy packs first, then every accepted
- *   extension pack in policy order — ready to hand to `loadRegistry`.
+ *   extension pack in policy order — ready to hand to `loadRegistry`;
+ *   `panelRoots` is every accepted extension's `contributes.panels`
+ *   directories, in the same order, for `loadRegistry({ panelRoots })`.
  *   `disabled` lists every extension an anomaly skipped, for `/config`.
  */
 export async function loadExtensions({
@@ -492,6 +537,7 @@ export async function loadExtensions({
   }
   const { roots, anomalies } = loadExtensionRoots({ root, policy });
   const extensions = [];
+  const panelRoots = [];
   const accepted = [...basePackRoots];
   const acceptedPackNames = new Set(basePackRoots.map((p) => p.name));
   const acceptedAdapterNames = new Set();
@@ -641,6 +687,8 @@ export async function loadExtensions({
     for (const warning of checked.warnings) anomalies.push(warning);
     if (config) acceptedNamespaces.set(config.namespace, manifest.name);
     const { schemaJson, ...publicConfig } = config ?? {};
+    const extPanelRoots = panelRootsFor(dir, manifest);
+    panelRoots.push(...extPanelRoots);
     extensions.push({
       name: manifest.name,
       version: manifest.version,
@@ -648,6 +696,7 @@ export async function loadExtensions({
       packs: extPackRoots.map((p) => p.name),
       adapters: modules.map((m) => m.name),
       hooks: hookModules.map(({ point, id }) => ({ point, id })),
+      panels: extPanelRoots.map((p) => p.dir),
       reserved: RESERVED_CONTRIBUTIONS.filter((key) =>
         Object.hasOwn(contributes, key),
       ),
@@ -662,5 +711,5 @@ export async function loadExtensions({
   }
 
   LOADED = { extensions: loaded, disabled };
-  return { extensions, packRoots: accepted, anomalies, disabled };
+  return { extensions, packRoots: accepted, panelRoots, anomalies, disabled };
 }

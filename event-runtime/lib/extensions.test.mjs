@@ -171,9 +171,18 @@ describe("validateExtensionManifest", () => {
       m.contributes.packs.push("./missing", "../escape");
       m.contributes.adapters["bad-path"] = "./adapters/nope.mjs";
       m.contributes.adapters["Bad Name"] = "./adapters/echo.mjs";
+      m.contributes.panels.push("./nope", "../escape", "./panels");
     });
     const out = validateExtensionManifest(dir);
     expect(out.valid).toBe(false);
+    // Panels (WM-840): directories only — documents are validated at load.
+    expect(out.errors.join("\n")).toMatch(
+      /panels\[1\] ".\/nope" is not a directory/,
+    );
+    expect(out.errors.join("\n")).toMatch(/panels\[2\] "..\/escape" escapes/);
+    expect(out.errors.join("\n")).toMatch(
+      /panels\[3\] ".\/panels" listed twice/,
+    );
     expect(out.errors.join("\n")).toMatch(
       /packs\[1\] ".\/missing" has no pack.json/,
     );
@@ -199,6 +208,7 @@ describe("loadExtensions", () => {
         hooks: [
           { point: "approve.before", id: "factory/sample:approve-before" },
         ],
+        panels: [path.join(SAMPLE_EXTENSION, "panels")],
         reserved: [],
         config: {
           namespace: "sample",
@@ -216,6 +226,15 @@ describe("loadExtensions", () => {
         kind: "fs",
         name: "sample-ext",
         path: path.join(SAMPLE_EXTENSION, "pack"),
+      },
+    ]);
+    // Panels (WM-840): the directories are handed to the registry, which
+    // loads and validates the documents (lib/panel-view.test.mjs covers that).
+    expect(out.panelRoots).toEqual([
+      {
+        dir: path.join(SAMPLE_EXTENSION, "panels"),
+        origin: "extension:factory/sample",
+        base: SAMPLE_EXTENSION,
       },
     ]);
     // Adapters go through the registry: contract-checked, sandbox-guarded, sourced.
@@ -378,14 +397,14 @@ describe("loadExtensions", () => {
   test("reserved keys load the rest and record a not-supported-yet anomaly", async () => {
     const dir = tempExtension((m) => {
       m.name = "factory/future";
-      m.contributes.panels = [{ id: "x" }];
+      m.contributes.views = [{ id: "x" }];
     });
     const out = await load(policyFor(dir));
-    expect(out.extensions[0].reserved).toEqual(["panels"]);
+    expect(out.extensions[0].reserved).toEqual(["views"]);
     expect(out.extensions[0].adapters).toEqual(["echo"]);
     expect(out.packRoots.map((p) => p.name)).toEqual(["sample-ext"]);
     expect(out.anomalies).toEqual([
-      expect.stringMatching(/contributes\.panels is not supported yet/),
+      expect.stringMatching(/contributes\.views is not supported yet/),
     ]);
   });
 

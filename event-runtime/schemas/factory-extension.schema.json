@@ -1,6 +1,6 @@
 {
   "title": "factory-extension.json — the manifest of one factory extension (docs/extensions.md)",
-  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `connectors`, `views` and `panels` are reserved keys: the loader accepts them and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs and adapters here. Adapter names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
+  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `connectors` and `views` are reserved keys: the loader accepts them and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs and adapters here. Adapter names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
   "type": "object",
   "required": ["name", "version"],
   "additionalProperties": false,
@@ -54,7 +54,12 @@
           "description": "reserved — web views; not supported yet"
         },
         "panels": {
-          "description": "reserved — declarative Overview panels; lands in WM-840"
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "relative directory of factory.panel-view/v1 `*.panel.json` files (docs/extensions.md § Panels)"
+          }
         },
         "config": {
           "type": "object",
