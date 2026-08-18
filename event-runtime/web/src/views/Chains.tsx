@@ -277,8 +277,9 @@ export function Chains({
 
   const hiddenSingles = scoped.filter((chain) => chain.single).length;
   return (
-    <ListPane
-      chrome={
+    <div className="flex h-full min-w-0">
+      <ListPane
+        chrome={
         <>
           <h1 className="display mb-1 text-lg font-semibold">Chains</h1>
           <p className="mb-3 text-[11px] text-(--text-faint)">
@@ -498,5 +499,6 @@ export function Chains({
         </tbody>
       </table>
     </ListPane>
+  </div>
   );
 }
