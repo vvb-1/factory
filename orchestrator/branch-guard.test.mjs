@@ -219,12 +219,23 @@ describe("gh helper failure modes", () => {
   });
 
   test("resolveHeadBranch returns branch name on success", () => {
+    // The forge reads `--json headRefName` and picks the field itself (WM-836);
+    // the fake answers the way gh does, as JSON.
     const run = recorder(() => ({
       status: 0,
-      stdout: "feat/my-branch\n",
+      stdout: JSON.stringify({ headRefName: "feat/my-branch" }) + "\n",
       stderr: "",
     }));
     expect(resolveHeadBranch("/fake", 123, run)).toBe("feat/my-branch");
+    expect(run.calls[0].cmd).toBe("gh");
+    expect(run.calls[0].args).toEqual([
+      "pr",
+      "view",
+      "123",
+      "--json",
+      "headRefName",
+    ]);
+    expect(run.calls[0].opts.cwd).toBe("/fake");
   });
 
   test("listOpenPrs returns null on gh failure or JSON parse error", () => {

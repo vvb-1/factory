@@ -8,8 +8,9 @@ export function noRequiredChecksDiagnostic(headRef) {
 }
 
 /**
- * Resolve the supported `gh pr checks --required --json name,bucket,state`
- * result. GitHub CLI uses status 1 plus an exact diagnostic when the branch has
+ * Resolve the supported required-checks result (GitHub CLI: `pr checks
+ * --required --json name,bucket,state`). GitHub CLI uses status 1 plus an
+ * exact diagnostic when the branch has
  * no required checks, so that one result is deliberately equivalent to `[]`.
  * Every other nonzero or ambiguous result fails closed.
  */

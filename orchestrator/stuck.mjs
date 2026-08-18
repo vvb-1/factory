@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { gql, isAgentClaim, lastActivity } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 import { parseOwnedPaths } from "./owned-paths.mjs";
 import { AI_BLOCKED, answeredHeldTickets } from "./reply-detection.mjs";
 
@@ -95,22 +96,13 @@ function supervisorAlive(name) {
   });
 }
 
-/** Open, non-draft PR numbers for a repo, via `gh` — [] on any failure. */
+const forge = loadForge();
+
+/** Open, non-draft PR numbers for a repo, via the forge — [] on any failure. */
 function openPRs(nameWithOwner) {
-  const p = Bun.spawnSync([
-    "gh",
-    "pr",
-    "list",
-    "--repo",
-    nameWithOwner,
-    "--state",
-    "open",
-    "--json",
-    "number,isDraft",
-  ]);
-  if (p.exitCode !== 0) return [];
   try {
-    return JSON.parse(p.stdout.toString())
+    return forge
+      .prList(nameWithOwner, { state: "open", fields: ["number", "isDraft"] })
       .filter((pr) => !pr.isDraft)
       .map((pr) => pr.number);
   } catch {

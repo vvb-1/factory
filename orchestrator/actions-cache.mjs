@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 import {
   renderActionsCacheUsage,
   summarizeActionsCacheUsage,
@@ -55,16 +56,14 @@ if (process.env.FACTORY_ACTIONS_CACHE_USAGE_JSON) {
   // Test-only fixture seam: production always reads the GitHub API.
   raw = process.env.FACTORY_ACTIONS_CACHE_USAGE_JSON;
 } else {
-  const api = Bun.spawnSync([
-    "gh",
-    "api",
-    `orgs/${organization}/actions/cache/usage-by-repository?per_page=100`,
-  ]);
-  if (api.exitCode !== 0) {
-    process.stderr.write(api.stderr);
-    process.exit(api.exitCode || 1);
+  try {
+    raw = loadForge().apiRaw(
+      `orgs/${organization}/actions/cache/usage-by-repository?per_page=100`,
+    );
+  } catch (err) {
+    process.stderr.write(err.stderr ?? String(err.message ?? err));
+    process.exit(err.status || 1);
   }
-  raw = api.stdout.toString();
 }
 
 let payload;

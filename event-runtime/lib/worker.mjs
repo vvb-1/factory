@@ -31,6 +31,7 @@ import {
   renewWorkerLease,
   writeWorkerLease,
 } from "../../lib/worker-leases.mjs";
+import { loadForge } from "../../lib/forge/index.mjs";
 import { storeCollected } from "./artifacts.mjs";
 import { canonicalJson, hashJson, sha256Hex } from "./canonical.mjs";
 import { artifactsRoot, FACTORY_ROOT } from "./config.mjs";
@@ -1427,21 +1428,17 @@ export function defaultReturnHandoffTicket({
 /** Convert an already-opened PR to draft and say why, so nobody merges a red handoff. */
 function defaultHoldPullRequest({ github, prNumber, body }) {
   if (!github || !Number.isInteger(prNumber)) return false;
-  const gh = (args) =>
-    execFileSync("gh", args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: workerSubprocessTimeoutMs(),
-    });
+  const forge = loadForge();
+  const opts = { timeout: workerSubprocessTimeoutMs() };
   let held = false;
   try {
-    gh(["pr", "ready", "--undo", String(prNumber), "--repo", github]);
+    forge.prSetDraft(github, prNumber, true, opts);
     held = true;
   } catch {
-    /* already a draft, or gh unavailable — the comment still lands */
+    /* already a draft, or forge unavailable — the comment still lands */
   }
   try {
-    gh(["pr", "comment", String(prNumber), "--repo", github, "--body", body]);
+    forge.prComment(github, prNumber, body, opts);
     held = true;
   } catch {
     /* intentionally ignored */

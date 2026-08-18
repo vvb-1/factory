@@ -34,6 +34,7 @@ import path from "node:path";
 import { gql, lastActivity } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
 import { emitFactoryEvent } from "../lib/emit-event.mjs";
+import { githubForge, loadForge } from "../lib/forge/index.mjs";
 
 export function parseArgs(argv) {
   const val = (f) => {
@@ -88,21 +89,19 @@ export function prNumbers(issue, nameWithOwner) {
   return [...out];
 }
 
-export function prState(nameWithOwner, number, run = Bun.spawnSync) {
-  const p = run([
-    "gh",
-    "pr",
-    "view",
-    String(number),
-    "--repo",
-    nameWithOwner,
-    "--json",
-    "state,isDraft,labels",
-  ]);
-  if ((p.exitCode ?? p.status) !== 0) return null;
+/**
+ * `{state,isDraft,labels}` of one PR, or null when the forge could not answer.
+ * `run` is the legacy Bun.spawnSync-shaped seam (`run([cmd, ...args])`) the
+ * tests inject; when given it drives the GitHub implementation.
+ */
+export function prState(nameWithOwner, number, run = undefined) {
+  const forge = run
+    ? githubForge({ exec: (cmd, args) => run([cmd, ...args]) })
+    : loadForge();
   try {
-    const raw = p.stdout ? p.stdout.toString() : "";
-    return JSON.parse(raw);
+    return forge.prView(nameWithOwner, number, {
+      fields: ["state", "isDraft", "labels"],
+    });
   } catch {
     return null;
   }

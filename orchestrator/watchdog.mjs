@@ -13,6 +13,7 @@ import { existsSync, appendFileSync } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 
 const c = {
   bold: (s) => `\x1b[1m${s}\x1b[0m`,
@@ -21,24 +22,6 @@ const c = {
   yellow: (s) => `\x1b[33m${s}\x1b[0m`,
   red: (s) => `\x1b[31m${s}\x1b[0m`,
 };
-
-function sh(args, cwd = ROOT) {
-  try {
-    const result = Bun.spawnSync({
-      cmd: args,
-      cwd,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    return {
-      ok: result.exitCode === 0,
-      out: result.stdout.toString().trim(),
-      err: result.stderr.toString().trim(),
-    };
-  } catch (err) {
-    return { ok: false, out: "", err: String(err) };
-  }
-}
 
 export async function runWatchdogCheck({
   host = "127.0.0.1",
@@ -189,29 +172,23 @@ export async function runWatchdogCheck({
   // 4. CI Runner Fleet Check
   if (checkShadowFleet) {
     try {
-      const ciqRes = sh([
-        "gh",
-        "run",
-        "list",
-        "--repo",
-        "watt-mind/factory",
-        "--limit",
-        "10",
-        "--json",
-        "status",
-        "-q",
-        '[.[] | select(.status=="queued")] | length',
-      ]);
-      const queuedCount = parseInt(ciqRes.out, 10) || 0;
+      const forge = loadForge();
+      const queuedCount = forge
+        .runList("watt-mind/factory", {
+          limit: 10,
+          fields: ["status"],
+          cwd: ROOT,
+        })
+        .filter((r) => r.status === "queued").length;
       if (queuedCount > 2) {
-        const shadowRes = sh([
-          "gh",
-          "api",
-          "orgs/watt-mind/actions/runners",
-          "--jq",
-          '[.runners[] | select(.labels | map(.name) | index("shadow")) | select(.status=="online")] | length',
-        ]);
-        const onlineShadows = parseInt(shadowRes.out, 10) || 0;
+        const onlineShadows =
+          parseInt(
+            forge.apiRaw("orgs/watt-mind/actions/runners", {
+              jq: '[.runners[] | select(.labels | map(.name) | index("shadow")) | select(.status=="online")] | length',
+              cwd: ROOT,
+            }),
+            10,
+          ) || 0;
         if (onlineShadows === 0) {
           issues.push({
             severity: "CRITICAL",

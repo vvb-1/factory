@@ -24,6 +24,15 @@ chain_auto_approval:
 merge:
   max_fix_rounds: 2
 
+# Forge connector (WM-836): which code host implementation `lib/forge/`
+# loads. Everything that used to shell out to `gh` goes through it now.
+#   github — wraps the `gh` CLI (default when this stanza is absent)
+#   memory — in-process fake for tests and the offline demo; no network
+# Anything else is a configuration error: an unreachable forge must never
+# be silently read as "no open PRs".
+forge:
+  kind: github
+
 dispatch:
   # Owned Paths collision handling at dispatch (WM-677).
   #   strict   — any overlap with an in-flight ticket refuses dispatch. Fail-closed
