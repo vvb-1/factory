@@ -316,6 +316,32 @@ describe("Artifacts inventory (WM-207)", () => {
     fireEvent.click(runLink.getByRole("link", { name: "Open" }));
     expect(window.location.hash).toBe(`#/${`artifacts/${"b".repeat(64)}`}`);
   });
+
+  test("preserves URL-backed facets when opening and closing the inspector", async () => {
+    globalThis.fetch = mock(
+      async () => new Response("artifact report", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const query =
+      "kind=report&orphan=false&search=reporter%401&project=factory";
+    window.location.hash = `#/artifacts?${query}`;
+    const view = renderArtifacts(
+      mock(() => {}),
+      {
+        kind: "report",
+        orphan: false,
+        search: "reporter@1",
+      },
+    );
+
+    fireEvent.click(await view.findByRole("link", { name: "aaaaaaaaaaaa" }));
+    expect(window.location.hash).toBe(`#/artifacts/${"a".repeat(64)}?${query}`);
+    expect(
+      await view.findByRole("region", { name: "Artifact content" }),
+    ).toBeTruthy();
+
+    fireEvent.click(view.getByRole("button", { name: "Close" }));
+    expect(window.location.hash).toBe(`#/artifacts?${query}`);
+  });
 });
 
 describe("Artifact rows inspect on click, download on demand (WM-699)", () => {

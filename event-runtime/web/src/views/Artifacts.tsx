@@ -26,7 +26,7 @@ import {
   type DisplayConfig,
 } from "../displayOptions";
 import { EMPTY, formatBytes, formatRelative } from "../format";
-import { hashPath, hashProject, withProject } from "../hash";
+import { hashSearch } from "../hash";
 import { refetchIntervals, useDisplayOptions, useNow } from "../hooks";
 import { viewApplies } from "../lib/artifactView";
 import type {
@@ -141,11 +141,13 @@ function artifactShaFromHash(hash = window.location.hash): string | null {
   }
 }
 
+function withCurrentArtifactQuery(path: string): string {
+  const query = hashSearch(window.location.hash).toString();
+  return `#/${path}${query ? `?${query}` : ""}`;
+}
+
 function artifactInspectorHash(sha256: string): string {
-  return `#/${withProject(
-    hashPath("artifacts", sha256),
-    hashProject(window.location.hash),
-  )}`;
+  return withCurrentArtifactQuery(`artifacts/${encodeURIComponent(sha256)}`);
 }
 
 function openArtifactInspector(sha256: string) {
@@ -408,10 +410,7 @@ export function Artifacts({
   const closeInspector = () => {
     setSelectedSha(null);
     setContentSearch("");
-    window.location.hash = `#/${withProject(
-      "artifacts",
-      hashProject(window.location.hash),
-    )}`;
+    window.location.hash = withCurrentArtifactQuery("artifacts");
   };
 
   const fallbackMetrics = useMemo(
