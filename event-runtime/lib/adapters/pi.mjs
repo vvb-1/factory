@@ -54,6 +54,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 import { FACTORY_ROOT } from "../config.mjs";
+import { normalizePolicy } from "../sandbox/gondolin.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
 import {
   guestBinary,
@@ -608,9 +609,6 @@ async function executeSandboxed({
   abortSignal,
   runSandbox,
 }) {
-  const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
-  writeFileSync(path.join(workspaceDir, SANDBOX_PROMPT_FILE), prompt, "utf8");
-
   if (resume?.sessionId) {
     onTrace?.("lifecycle", {
       note: "sandbox_resume_unavailable",
@@ -618,6 +616,13 @@ async function executeSandboxed({
     });
   }
   const bin = guestBinary(def, "pi");
+  // Validate all definition-controlled guest configuration before creating a
+  // workspace prompt. runInSandbox normalizes again at its trust boundary;
+  // this preflight also covers injected VM runners used by tests and leaves
+  // no stray prompt behind when the definition itself is invalid.
+  normalizePolicy(def.sandbox, { workspaceDir });
+  const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
+  writeFileSync(path.join(workspaceDir, SANDBOX_PROMPT_FILE), prompt, "utf8");
   const argv = [
     bin,
     ...buildPiArgv({ def, model: spec?.model, resumeSessionId: null }),
