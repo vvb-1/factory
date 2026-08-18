@@ -34,6 +34,8 @@ import {
   utimesSync,
   writeFileSync,
 } from "./api-test-helpers.mjs";
+import { decisionRequestHash } from "./decision.mjs";
+import { templateFor } from "./decision-templates.mjs";
 
 describe("human inbox API (WM-285)", () => {
   test("POST writes before a failed delivery, rejects unknown kinds, and GET/ack/resolve filter rows", async () => {
@@ -120,6 +122,114 @@ describe("human inbox API (WM-285)", () => {
       expect(s.db.query("SELECT COUNT(*) AS n FROM inbox_items").get().n).toBe(
         0,
       );
+    } finally {
+      s.close();
+    }
+  });
+
+  test("approving an expired proposal retargets the item onto the re-planned one (WM-714)", async () => {
+    const refs = {
+      proposalId: "prop-old",
+      eventSource: "linear",
+      eventId: "evt-1",
+    };
+    const request = templateFor("proposal_expired", {
+      producer: "proposal",
+      refs,
+    });
+    const s = await makeServer({
+      now: () => 1000,
+      inboxSend: async () => ({ ok: true, exitCode: 0, error: null }),
+      inboxPlanner: {
+        // WM-391's expired-proposal path: no approval, a fresh open proposal.
+        approveProposal: () => ({
+          approved: false,
+          replanned: true,
+          proposal: { id: "prop-fresh" },
+        }),
+        rejectProposal: () => ({ ok: true }),
+        requeue: () => ({ ok: true }),
+        admit: () => ({ admitted: true }),
+      },
+    });
+    try {
+      const created = await fetch(s.url("/inbox"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "proposal_expired",
+          title: "DECISION NEEDED proposal prop-old: expired undecided",
+          refs,
+          source: "serve:notify",
+          decision: request,
+          dedupeKey: "proposal_expired:prop-old",
+        }),
+      });
+      expect(created.status).toBe(201);
+      const id = (await created.json()).item.id;
+
+      const decided = await fetch(s.url(`/inbox/${id}/decide`), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(request),
+          optionId: "approve",
+          fields: {},
+        }),
+      });
+      expect(decided.status).toBe(200);
+      expect((await decided.json()).effect).toMatchObject({
+        kind: "approve_proposal",
+        outcome: "applied",
+        detail: "replanned_awaiting_approval",
+        newProposalId: "prop-fresh",
+      });
+
+      const detail = (await (await fetch(s.url(`/inbox/${id}`))).json()).item;
+      expect(detail.resolvedAt).toBeNull();
+      expect(detail.refs.proposalId).toBe("prop-fresh");
+      expect(detail.response).toBeNull();
+      expect(detail.decidedAt).toBeNull();
+      expect(detail.decision.question).toContain("prop-fresh");
+      expect(detail.decision.context).toContain("please re-review");
+      expect(detail.dedupeKey).toBe("proposal_expired:prop-fresh");
+      expect(detail.responseHistory).toHaveLength(1);
+      expect(detail.responseHistory[0]).toMatchObject({
+        retargetedFrom: "prop-old",
+        retargetedTo: "prop-fresh",
+      });
+      expect(detail.responseHistory[0].response.optionId).toBe("approve");
+
+      // Nothing to replay: the answer was consumed by the retarget rather than
+      // applied, so retry reports the item undecided instead of already_applied.
+      const retried = await fetch(s.url(`/inbox/${id}/decide/retry`), {
+        method: "POST",
+      });
+      expect(retried.status).toBe(409);
+      expect((await retried.json()).error).toBe("not_decided");
+
+      // The fresh request is pending, so a bare resolve is still refused.
+      const resolved = await fetch(s.url(`/inbox/${id}/resolve`), {
+        method: "POST",
+        body: "{}",
+      });
+      expect(resolved.status).toBe(409);
+
+      const again = await fetch(s.url(`/inbox/${id}/decide`), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(detail.decision),
+          optionId: "reject",
+          fields: { reason: "the re-planned spec is too different" },
+        }),
+      });
+      expect(again.status).toBe(200);
+      const settled = (await again.json()).item;
+      expect(settled.resolvedBy).toBe("operator:reject_proposal");
+      expect(settled.responseHistory).toHaveLength(1);
     } finally {
       s.close();
     }

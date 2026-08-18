@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { validateDecisionRequest } from "./decision.mjs";
-import { templateFor } from "./decision-templates.mjs";
+import {
+  replannedProposalContext,
+  templateFor,
+} from "./decision-templates.mjs";
 
 describe("default decision templates (WM-390)", () => {
   const cases = [
@@ -38,5 +41,53 @@ describe("default decision templates (WM-390)", () => {
     expect(() => templateFor("BLOCKED", { producer: "mystery", refs })).toThrow(
       "unknown decision template producer",
     );
+  });
+
+  test("a re-planned proposal reuses the proposal template with a re-review context (WM-714)", () => {
+    const refs = { proposalId: "prop_2" };
+    const context = replannedProposalContext("prop_1", "prop_2");
+    expect(context).toContain("prop_1");
+    expect(context).toContain("prop_2");
+    expect(context).toContain("re-planned after expiry");
+    expect(context).toContain("please re-review");
+
+    const request = templateFor("proposal_expired", {
+      producer: "proposal",
+      refs,
+      context,
+    });
+    expect(validateDecisionRequest(request, { refs })).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(request.context).toBe(context);
+    expect(request.question).toContain("prop_2");
+    expect(request.options.map((option) => option.effect)).toEqual([
+      "approve_proposal",
+      "reject_proposal",
+      "dismiss",
+    ]);
+  });
+
+  test("context is omitted when absent and refused when unusable", () => {
+    const refs = { proposalId: "prop_2" };
+    expect(
+      "context" in
+        templateFor("decision_needed", { producer: "proposal", refs }),
+    ).toBe(false);
+    expect(() =>
+      templateFor("decision_needed", {
+        producer: "proposal",
+        refs,
+        context: "",
+      }),
+    ).toThrow("context must be a non-empty string");
+    expect(() =>
+      templateFor("decision_needed", {
+        producer: "proposal",
+        refs,
+        context: 7,
+      }),
+    ).toThrow("context must be a non-empty string");
   });
 });

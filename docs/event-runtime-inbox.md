@@ -213,15 +213,15 @@ Every option carries exactly one `effect` from this closed set. The renderer
 does not know what an effect does; the API does, and applies it in the same
 transaction that stores the response.
 
-| Effect             | What the runtime does                                                                                                                                                                                      | Legal only when the item has            |
-| :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------- |
-| `authorise`        | Records the authorisation (§3.1) and emits a `factory.dispatch.requested` envelope for `refs.issue` on `refs.repo` with `humanDecision` in the payload (§5). The item resolves as `operator:authorised`.   | `refs.issue`, `refs.repo`, `refs.runId` |
-| `send_to_triage`   | Moves `refs.issue` to `Triage`, removes `ai:agent-ready`, comments the operator's fields (`tools/linear.mjs`). Resolves as `operator:triaged`.                                                             | `refs.issue`                            |
-| `answer`           | Comments the operator's `text` field(s) on `refs.issue` (at least one applicable field is required), moves it `Blocked → Todo` (WM-287's "Answer" verb, unchanged). Resolves as `operator:answered`.       | `refs.issue`                            |
-| `requeue`          | `POST /events/requeue` for `refs.eventSource`/`refs.eventId` (existing planner path). Resolves as `operator:requeued`.                                                                                     | `refs.eventSource`, `refs.eventId`      |
-| `approve_proposal` | `approveProposal(refs.proposalId)`; an expired proposal takes the existing SpecDiff re-plan path and the item stays open until that second approval — never auto-approve. Resolves as `operator:approved`. | `refs.proposalId`                       |
-| `reject_proposal`  | `rejectProposal(refs.proposalId, reason)` with the operator's applicable required `text` field as the reason. Resolves as `operator:rejected`.                                                             | `refs.proposalId`                       |
-| `dismiss`          | Resolves the item as `operator:dismissed`, records the fields, touches nothing else. Every default template offers it; agents are told to offer it.                                                        | —                                       |
+| Effect             | What the runtime does                                                                                                                                                                                                                                                                | Legal only when the item has            |
+| :----------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------- |
+| `authorise`        | Records the authorisation (§3.1) and emits a `factory.dispatch.requested` envelope for `refs.issue` on `refs.repo` with `humanDecision` in the payload (§5). The item resolves as `operator:authorised`.                                                                             | `refs.issue`, `refs.repo`, `refs.runId` |
+| `send_to_triage`   | Moves `refs.issue` to `Triage`, removes `ai:agent-ready`, comments the operator's fields (`tools/linear.mjs`). Resolves as `operator:triaged`.                                                                                                                                       | `refs.issue`                            |
+| `answer`           | Comments the operator's `text` field(s) on `refs.issue` (at least one applicable field is required), moves it `Blocked → Todo` (WM-287's "Answer" verb, unchanged). Resolves as `operator:answered`.                                                                                 | `refs.issue`                            |
+| `requeue`          | `POST /events/requeue` for `refs.eventSource`/`refs.eventId` (existing planner path). Resolves as `operator:requeued`.                                                                                                                                                               | `refs.eventSource`, `refs.eventId`      |
+| `approve_proposal` | `approveProposal(refs.proposalId)`; an expired proposal takes the existing SpecDiff re-plan path, and the item is **retargeted** onto the fresh proposal rather than resolved (§3.2) — never auto-approve. Resolves as `operator:approve_proposal` only when a run actually started. | `refs.proposalId`                       |
+| `reject_proposal`  | `rejectProposal(refs.proposalId, reason)` with the operator's applicable required `text` field as the reason. Resolves as `operator:rejected`.                                                                                                                                       | `refs.proposalId`                       |
+| `dismiss`          | Resolves the item as `operator:dismissed`, records the fields, touches nothing else. Every default template offers it; agents are told to offer it.                                                                                                                                  | —                                       |
 
 For both `answer` and `reject_proposal`, the applicable required `text` field
 rule accounts for `whenOption` gating before the effect is offered.
@@ -279,6 +279,42 @@ Two bindings make it safe:
 An authorisation is single-use: it lives in one run's input. A second refusal
 raises a second item; the operator decides again. Blanket approval per ticket
 or per area is deliberately not a thing.
+
+### 3.2 An `applied` outcome is not always a decision (WM-714)
+
+`approve_proposal` is the one effect whose success can leave the question
+unanswered. Approving a proposal that has already expired re-plans it: the old
+proposal goes `superseded`, a fresh `open` one is inserted with the new spec,
+and the effect returns
+
+```json
+{
+  "outcome": "applied",
+  "detail": "replanned_awaiting_approval",
+  "newProposalId": "…"
+}
+```
+
+Resolving on that `applied` is what WM-714 fixes. The operator approved a spec
+that is no longer on offer, so the ledger **retargets** the item in the same
+transaction instead:
+
+- `refs.proposalId` becomes `newProposalId`, and the dedupe key follows it
+  (`<kind>:<newProposalId>`), so the next producer for the fresh proposal
+  supersedes this item rather than stacking a second one. A key another open
+  item already holds is left alone — the partial unique index would abort the
+  transaction and take the operator's answer with it.
+- A fresh proposal request replaces the answered one: the same §4.3 `proposal`
+  template, with a `context` saying the spec was re-planned after expiry and
+  asking for a re-review.
+- `response`, `decided_at`, and `decided_by` clear, so the item is undecided
+  again. The answer is not lost — it moves to `responseHistory` (§6) with
+  `retargetedFrom`/`retargetedTo`.
+
+Because `refs.proposalId` now names the live open proposal, `reconcileInbox`
+leaves the item alone; it auto-resolves only once that proposal is decided.
+`POST /inbox/:id/decide/retry` reports `not_decided` — there is no failed
+effect to replay, there is a new question to answer.
 
 ---
 
@@ -410,17 +446,27 @@ with a key that collides with an open item **updates** that item's `decision`,
 free text) carry no key and are never deduplicated — the human typed them on
 purpose.
 
+An answer the ledger archives instead of keeping — today only the §3.2
+retarget — goes to `responseHistory`, exposed on the item view alongside
+`response` and stored in `delivery_json` next to `supersededDecisions`. It
+needs no column and no migration, and the view lifts it back out so `delivery`
+stays about the projection. Each entry is the full stored response (effect
+included) plus `retargetedFrom`, `retargetedTo`, and `retargetedAt`, which is
+how `GET /inbox/:id` shows an operator why the question in front of them is not
+the one they answered.
+
 `resolved_by` gains the `operator:<effect>` family alongside `operator` and
 `auto:*`.
 
 API:
 
 ```
-GET  /inbox/:id                → the item, with decision and response
+GET  /inbox/:id                → the item, with decision, response, responseHistory
 POST /inbox/:id/decide         → body: factory.decision-response/v1 minus decidedAt
                                   200 { item, effect: { kind, outcome } }
                                   400 invalid response · 404 · 409 stale_request | already_decided
 POST /inbox/:id/decide/retry   → re-run a failed effect with the stored response
+                                  409 not_decided after a §3.2 retarget
 ```
 
 `ack` and `resolve` remain for items without a decision and for the

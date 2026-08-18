@@ -12,6 +12,10 @@ import {
   validateDecisionResponse,
 } from "./decision.mjs";
 import { applyDecisionEffect } from "./decision-effects.mjs";
+import {
+  replannedProposalContext,
+  templateFor,
+} from "./decision-templates.mjs";
 import { txImmediate } from "./db.mjs";
 
 export const INBOX_KINDS = Object.freeze([
@@ -99,6 +103,11 @@ export class InboxDecisionError extends Error {
 
 export function itemView(row) {
   if (!row) return null;
+  // Answers that were archived rather than kept (retargets, §6) ride in
+  // delivery_json: the v6 ledger has no column for them, and that blob already
+  // carries WM-390's supersededDecisions counter. Lift them out so the view
+  // reads as a ledger field and `delivery` stays about the projection.
+  const { responseHistory, ...delivery } = parseObject(row.delivery_json);
   return {
     id: row.id,
     kind: row.kind,
@@ -111,9 +120,10 @@ export function itemView(row) {
     ackedAt: row.acked_at ?? null,
     resolvedAt: row.resolved_at ?? null,
     resolvedBy: row.resolved_by ?? null,
-    delivery: parseObject(row.delivery_json),
+    delivery,
     decision: parseNullableObject(row.decision_json),
     response: parseNullableObject(row.response_json),
+    responseHistory: Array.isArray(responseHistory) ? responseHistory : [],
     decidedAt: row.decided_at ?? null,
     decidedBy: row.decided_by ?? null,
     dedupeKey: row.dedupe_key ?? null,
@@ -264,6 +274,140 @@ function decisionRow(db, id) {
   return row;
 }
 
+/** WM-391: the approve found the proposal expired and re-planned it instead. */
+const REPLANNED_DETAIL = "replanned_awaiting_approval";
+
+/**
+ * Move the WM-390 v5 dedupe key (`<kind>:<primary ref>`) onto the fresh
+ * proposal, so the next producer for it supersedes this item instead of
+ * stacking a second one. A key that is not the proposal formula is left alone
+ * rather than guessed at.
+ */
+function retargetedDedupeKey(db, row, previousProposalId, proposalId) {
+  const current = row.dedupe_key ?? null;
+  const suffix = previousProposalId ? `:${previousProposalId}` : null;
+  if (!current || !suffix || !current.endsWith(suffix)) return current;
+  const next = `${current.slice(0, -suffix.length)}:${proposalId}`;
+  // inbox_items_open_dedupe is unique across open rows. Taking a key another
+  // open item already holds would abort the transaction and lose the answer,
+  // so leave ours behind and let that item own the fresh proposal.
+  const taken = db
+    .query(
+      `SELECT id FROM inbox_items
+     WHERE dedupe_key = ? AND resolved_at IS NULL AND id <> ?
+     LIMIT 1`,
+    )
+    .get(next, row.id);
+  return taken ? current : next;
+}
+
+/**
+ * Point a decided item at the proposal a re-plan opened, and re-open it.
+ *
+ * One statement moves refs, the fresh request, the dedupe key, and the
+ * archived answer together while clearing `decided_at`/`decided_by`, so no
+ * reader sees the item half-retargeted — pointing at the superseded proposal
+ * with the new request installed, or decided against a question nobody asked.
+ */
+function retargetInboxDecision(db, id, answer, proposalId, { now }) {
+  const row = decisionRow(db, id);
+  const refs = parseObject(row.refs_json);
+  const previousProposalId = refs.proposalId ?? null;
+  const nextRefs = { ...refs, proposalId };
+  const request = templateFor(row.kind, {
+    producer: "proposal",
+    refs: nextRefs,
+    context: replannedProposalContext(previousProposalId, proposalId),
+  });
+  const checked = validateDecisionRequest(request, { refs: nextRefs });
+  if (!checked.valid) {
+    // Fail closed. Rolling the whole decision back leaves the operator on the
+    // original, answerable request; installing this would leave them holding
+    // an item nobody can decide.
+    throw new InboxDecisionError(
+      "retarget_failed",
+      `inbox item ${id} could not be retargeted to ${proposalId}: ${checked.errors.join("; ")}`,
+      500,
+      checked.errors,
+    );
+  }
+
+  const { responseHistory, ...delivery } = parseObject(row.delivery_json);
+  const history = Array.isArray(responseHistory) ? responseHistory : [];
+  db.query(
+    `UPDATE inbox_items
+     SET refs_json = ?, decision_json = ?, dedupe_key = ?, delivery_json = ?,
+         response_json = NULL, decided_at = NULL, decided_by = NULL
+     WHERE id = ?`,
+  ).run(
+    JSON.stringify(nextRefs),
+    JSON.stringify(request),
+    retargetedDedupeKey(db, row, previousProposalId, proposalId),
+    JSON.stringify({
+      ...delivery,
+      responseHistory: [
+        ...history,
+        {
+          retargetedFrom: previousProposalId,
+          retargetedTo: proposalId,
+          retargetedAt: new Date(now).toISOString(),
+          response: answer,
+        },
+      ],
+    }),
+    id,
+  );
+  return getInboxItem(db, id);
+}
+
+/**
+ * Record the effect outcome on the answer and settle the item.
+ *
+ * An `approve_proposal` on an expired proposal re-plans rather than approves
+ * (WM-391), so the operator bought a fresh undecided proposal, not a decision.
+ * Resolving on that `applied` outcome dropped the approve and left the new
+ * proposal with no inbox item (WM-714); retarget the row instead.
+ */
+function settleInboxDecision(
+  db,
+  id,
+  response,
+  effect,
+  { now, recordedEffect = effect },
+) {
+  const answer = { ...response, effect: recordedEffect };
+  const replanned =
+    effect.outcome === "applied" && effect.detail === REPLANNED_DETAIL;
+  if (
+    replanned &&
+    typeof effect.newProposalId === "string" &&
+    effect.newProposalId.trim() !== ""
+  ) {
+    return {
+      item: retargetInboxDecision(db, id, answer, effect.newProposalId, {
+        now,
+      }),
+      effect,
+    };
+  }
+  db.query("UPDATE inbox_items SET response_json = ? WHERE id = ?").run(
+    JSON.stringify(answer),
+    id,
+  );
+  // A re-plan with no fresh id is a broken effect — WM-391 throws on it rather
+  // than returning one. Leave the item open and retryable instead of resolving
+  // on a detail the ledger cannot act on.
+  if (effect.outcome === "applied" && !replanned) {
+    db.query(
+      `UPDATE inbox_items
+       SET resolved_at = COALESCE(resolved_at, ?),
+           resolved_by = COALESCE(resolved_by, ?)
+       WHERE id = ?`,
+    ).run(new Date(now).toISOString(), `operator:${effect.kind}`, id);
+  }
+  return { item: getInboxItem(db, id), effect };
+}
+
 function normalizeEffect(effect, item, response) {
   const kind =
     item.decision.options.find((option) => option.id === response.optionId)
@@ -373,19 +517,7 @@ function decideInboxItemInTransaction(
       storedResponse,
     );
   }
-  db.query("UPDATE inbox_items SET response_json = ? WHERE id = ?").run(
-    JSON.stringify({ ...storedResponse, effect }),
-    id,
-  );
-  if (effect.outcome === "applied") {
-    db.query(
-      `UPDATE inbox_items
-       SET resolved_at = COALESCE(resolved_at, ?),
-           resolved_by = COALESCE(resolved_by, ?)
-       WHERE id = ?`,
-    ).run(decidedAt, `operator:${effect.kind}`, id);
-  }
-  return { item: getInboxItem(db, id), effect };
+  return settleInboxDecision(db, id, storedResponse, effect, { now });
 }
 
 export function decideInboxItem(db, id, response, options = {}) {
@@ -443,22 +575,10 @@ function retryInboxDecisionInTransaction(
       response,
     );
   }
-  db.query("UPDATE inbox_items SET response_json = ? WHERE id = ?").run(
-    JSON.stringify({
-      ...response,
-      effect: { ...effect, retryAttempt },
-    }),
-    id,
-  );
-  if (effect.outcome === "applied") {
-    db.query(
-      `UPDATE inbox_items
-       SET resolved_at = COALESCE(resolved_at, ?),
-           resolved_by = COALESCE(resolved_by, ?)
-       WHERE id = ?`,
-    ).run(new Date(now).toISOString(), `operator:${effect.kind}`, id);
-  }
-  return { item: getInboxItem(db, id), effect };
+  return settleInboxDecision(db, id, response, effect, {
+    now,
+    recordedEffect: { ...effect, retryAttempt },
+  });
 }
 
 export function retryInboxDecision(db, id, options = {}) {
@@ -618,8 +738,14 @@ export async function deliverInboxItem(
   } catch (err) {
     outcome = { ok: false, exitCode: null, error: err.message };
   }
+  // Read the stored blob rather than the view: the view lifts responseHistory
+  // out of it, and writing the view back would drop the archived answers.
+  const stored = parseObject(
+    db.query("SELECT delivery_json FROM inbox_items WHERE id = ?").get(id)
+      ?.delivery_json,
+  );
   const delivery = {
-    ...item.delivery,
+    ...stored,
     telegram: {
       sent_at: new Date(now).toISOString(),
       exit_code: outcome.exitCode ?? null,

@@ -108,11 +108,10 @@ function vendorChunk(id: string): string | undefined {
 // proportion as the WM-286 and WM-483 raises. If the next raise buys less than
 // this, split Overview's stage cards instead.
 //
-// WM-291 re-baselined to 625 kB on 2026-08-18. Eager UI additions from recent
-// PR merges (event and run hover cards with causation glyphs WM-702, proposal
-// health indicators WM-738, responsive navigation WM-175) took the entry chunk
-// to 603.24 kB. Vendor split verified: xyflow 197.04 kB, elk 1440.95 kB both
-// properly isolated. Slack is ~21 kB (~3.5%).
+// WM-714 re-baselined to 625 kB on 2026-08-18. develop reached ~603 kB from
+// recently merged hovercards/health features (#701, #702, #738). Vendor split
+// verified unchanged: xyflow still 197.04 kB, elk still its own chunk. Slack
+// ~22.5 kB (~3.6%).
 const ENTRY_CHUNK_BUDGET_BYTES = 625 * 1000;
 
 function entryChunkBudget(): Plugin {
