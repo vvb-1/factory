@@ -379,6 +379,9 @@ if pid_alive "$RUN_DIR/serve.pid"; then
   info "event runtime already running (pid $(cat "$RUN_DIR/serve.pid"), port $API_PORT)"
 else
   info "starting event runtime on $API_PORT ($([[ "$LIVE" -eq 1 ]] && echo "live adapters" || echo "fake adapter"), home $HOME_DIR)"
+  # Record the requested mode before spawn so the supervisor can reconstruct
+  # the command even if serve dies before its first successful /health check.
+  write_adapter_override "$WT" "${ADAPTER_ARGS[1]:-}"
   spawn_daemon "$RUN_DIR/serve.pid" "$RUN_DIR/serve.log" "$WT" \
     env FACTORY_EVENT_HOME="$HOME_DIR" FACTORY_EVENT_PORT="$API_PORT" \
     bun event-runtime/cli.mjs serve ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"}
@@ -423,6 +426,7 @@ fi
 assert_event_home "$HEALTH_JSON" "$HOME_DIR" "$API_PORT"
 assert_event_adapter "$HEALTH_JSON" "$LIVE" "$API_PORT"
 HEALTH_ADAPTER=$(health_field "$HEALTH_JSON" adapter)
+write_adapter_override "$WT" "$HEALTH_ADAPTER"
 
 # The worker is its own process (OPS-233): restarting the runtime or the web
 # server must never interrupt a running agent.
