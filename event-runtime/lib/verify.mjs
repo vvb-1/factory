@@ -159,33 +159,66 @@ function runHandoffCommand({ command, cwd, logPath, timeoutMs }) {
   };
 }
 
+/** Best-effort timeout for the pre-diff `git fetch origin <base>` (F4). */
+const FETCH_BASE_TIMEOUT_MS = 10_000;
+
 /**
  * Files the PR carries: `merge-base(origin/<base>, HEAD)..HEAD` in the
  * worktree. `null` files means the diff could not be computed (not a git
  * checkout, unknown base) — reported, never silently treated as empty.
+ *
+ * `origin/<base>` in the worktree can be stale by the time the handoff gate
+ * runs — the worktree was materialized once, but develop keeps moving while
+ * the agent works. A quiet, best-effort `git fetch origin <base>` right
+ * before computing merge-base keeps the deviation diff honest against
+ * current develop; a fetch failure (offline, auth, timeout) never blocks the
+ * gate — it proceeds against the local ref and says so via `base_ref_stale`.
+ *
+ * `git` defaults to the real `execFileSync` runner and exists only so tests
+ * can inject a stub that records call order and fails the fetch on cue.
  */
-export function changedFilesSince({ worktreePath, base }) {
-  const git = (args) =>
+export function changedFilesSince({
+  worktreePath,
+  base,
+  git = (args, { timeout = 60_000 } = {}) =>
     execFileSync("git", args, {
       cwd: worktreePath,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 60_000,
-    }).trim();
+      timeout,
+    }).trim(),
+}) {
+  let baseRefStale = false;
+  if (base) {
+    try {
+      git(["fetch", "--quiet", "origin", base], {
+        timeout: FETCH_BASE_TIMEOUT_MS,
+      });
+    } catch {
+      baseRefStale = true;
+    }
+  }
+  const staleField = baseRefStale ? { base_ref_stale: true } : {};
   const candidates = base ? [`origin/${base}`, base] : [];
   for (const ref of candidates) {
     try {
       const mergeBase = git(["merge-base", ref, "HEAD"]);
       const out = git(["diff", "--name-only", `${mergeBase}..HEAD`]);
       const files = out ? out.split("\n").filter(Boolean) : [];
-      return { ok: true, baseRef: ref, mergeBase, files };
+      return { ok: true, baseRef: ref, mergeBase, files, ...staleField };
     } catch (err) {
       const stderr = String(err?.stderr ?? err?.message ?? "")
         .trim()
         .split("\n")
         .pop();
       if (ref === candidates.at(-1))
-        return { ok: false, baseRef: ref, files: null, error: stderr };
+        return {
+          ok: false,
+          baseRef: ref,
+          files: null,
+          error: stderr,
+          ...staleField,
+        };
     }
   }
   return {
@@ -193,6 +226,7 @@ export function changedFilesSince({ worktreePath, base }) {
     baseRef: null,
     files: null,
     error: base ? "base unresolved" : "no base branch on the worktree record",
+    ...staleField,
   };
 }
 
@@ -275,6 +309,11 @@ export function composeHandoffVerification(handoff) {
   } else {
     lines.push(
       `- Files: diff unavailable (${handoff.diff?.error ?? "unknown"}); Owned Paths deviations: unknown`,
+    );
+  }
+  if (handoff.descriptionHash) {
+    lines.push(
+      `- ticket description hash at claim: \`${handoff.descriptionHash}\``,
     );
   }
   const claim = handoff.agentReported;
@@ -895,6 +934,7 @@ function verifyCompleted({
       ownedPathsKnown,
       ownedPathsConformance: conformance,
       ownedPathsDeviations: [],
+      descriptionHash: worktreeRecord.handoff?.descriptionHash ?? null,
       agentReported: claim
         ? {
             command: claim.command ?? null,

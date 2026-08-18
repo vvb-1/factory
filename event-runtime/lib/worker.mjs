@@ -1350,8 +1350,16 @@ function defaultCommentTicket({ ticket, body }) {
  * no-op here. Return it to Todo + ai:agent-ready — the harness caught the
  * agent, the spec is fine — and leave the worker-observed verification as
  * the record of why. Never Blocked.
+ *
+ * `runCli` defaults to the real `runLinearCli` and exists only so tests can
+ * inject a stub that fails the first call without touching Linear.
  */
-function defaultReturnHandoffTicket({ ticket, body, fetchTicket }) {
+export function defaultReturnHandoffTicket({
+  ticket,
+  body,
+  fetchTicket,
+  runCli = runLinearCli,
+}) {
   try {
     const cur =
       typeof fetchTicket === "function"
@@ -1371,18 +1379,46 @@ function defaultReturnHandoffTicket({ ticket, body, fetchTicket }) {
       "--remove",
       "ai:needs-review",
     ];
+    let agentReadyRestored = true;
+    let labelWarning = null;
     try {
-      runLinearCli(args);
+      runCli(args);
     } catch {
-      // `--add ai:agent-ready` re-runs the Owned Paths closure check; a
-      // ticket that dispatched already passed it, but never let a label
-      // policy strand the ticket In Review with a held PR.
-      runLinearCli(
+      // `--add ai:agent-ready` can fail independently of the state move
+      // (e.g. the Owned Paths closure check re-running on `--add`). Retry as
+      // two separate calls — state+unassign+removes first, then the label
+      // add on its own — so a labels-endpoint failure never silently strands
+      // the ticket Todo/unassigned WITHOUT the label that makes it
+      // dispatchable again.
+      runCli(
         args.filter((a, i) => !(a === "--add" || args[i - 1] === "--add")),
       );
+      try {
+        runCli(["labels", ticket, "--add", "ai:agent-ready"]);
+      } catch (err) {
+        agentReadyRestored = false;
+        labelWarning = String(err?.stderr ?? err?.message ?? err)
+          .trim()
+          .split("\n")
+          .pop();
+        // This must never be silent: the ticket is now Todo/unassigned
+        // without the label that makes it dispatchable, and nothing else
+        // will notice.
+        console.error(
+          `[worker] ai:agent-ready NOT restored on ${ticket} after handoff return: ${labelWarning}`,
+        );
+      }
     }
-    if (body) runLinearCli(["comment", ticket, body]);
-    return true;
+    const finalBody = agentReadyRestored
+      ? body
+      : [
+          body,
+          `**ai:agent-ready NOT restored** — the label add failed after the ticket returned to Todo (${labelWarning ?? "unknown error"}). This ticket will not redispatch until the label is added manually.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+    if (finalBody) runCli(["comment", ticket, finalBody]);
+    return { ok: true, agentReadyRestored, warning: labelWarning };
   } catch {
     return false;
   }
@@ -2449,7 +2485,7 @@ export async function executeClaimed(
         HANDOFF_REASON_CODES.has(err.reasonCode)
           ? err.reasonCode
           : "contract_violation";
-      const failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
+      let failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
       const handoff = err.handoff ?? null;
       const handoffBody = handoff
         ? `${composeHandoffVerification(handoff)}\n\n**Result:** run ${runId} FAILED \`${reasonCode}\` — ${err.violations.join("; ")}`
@@ -2476,13 +2512,19 @@ export async function executeClaimed(
       if (mayMutateClaimedTicket()) {
         if (HANDOFF_REASON_CODES.has(reasonCode)) {
           try {
-            returnHandoffTicketFn({
+            const returned = returnHandoffTicketFn({
               repo: repoName,
               ticket: ticketId,
               why: failureReason,
               body: `${handoffBody}\n\nClaim released back to Todo + ai:agent-ready.`,
               handoff,
             });
+            // Surface a failed label restore in the journal/returned summary
+            // too — the comment posted on the ticket is not the only place a
+            // human (or the next dispatch pass) looks.
+            if (returned && returned.agentReadyRestored === false) {
+              failureReason = `${failureReason} (ai:agent-ready NOT restored: ${returned.warning ?? "unknown error"})`;
+            }
           } catch {
             /* intentionally ignored */
           }

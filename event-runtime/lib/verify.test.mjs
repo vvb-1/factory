@@ -989,6 +989,52 @@ describe("handoff verification helpers (WM-718)", () => {
     ).toContain("no base branch");
   });
 
+  test("changedFilesSince fetches origin/<base> before computing merge-base (WM-718 F4)", () => {
+    const calls = [];
+    const gitStub = (args) => {
+      calls.push(args);
+      if (args[0] === "fetch") return "";
+      if (args[0] === "merge-base") return "deadbeef";
+      if (args[0] === "diff") return "a.txt\nb.txt";
+      throw new Error(`unexpected git call: ${args.join(" ")}`);
+    };
+    const diff = changedFilesSince({
+      worktreePath: "/irrelevant",
+      base: "develop",
+      git: gitStub,
+    });
+    expect(diff.ok).toBe(true);
+    expect(diff.files).toEqual(["a.txt", "b.txt"]);
+    expect(diff.base_ref_stale).toBeUndefined();
+    // The fetch must precede the merge-base computation it is meant to keep
+    // honest — not race it, not follow it.
+    expect(calls[0]).toEqual(["fetch", "--quiet", "origin", "develop"]);
+    expect(calls[1][0]).toBe("merge-base");
+  });
+
+  test("changedFilesSince proceeds on the local ref and flags base_ref_stale when the fetch fails (WM-718 F4)", () => {
+    const calls = [];
+    const gitStub = (args) => {
+      calls.push(args);
+      if (args[0] === "fetch") throw new Error("network unreachable");
+      if (args[0] === "merge-base") return "deadbeef";
+      if (args[0] === "diff") return "a.txt";
+      throw new Error(`unexpected git call: ${args.join(" ")}`);
+    };
+    const diff = changedFilesSince({
+      worktreePath: "/irrelevant",
+      base: "develop",
+      git: gitStub,
+    });
+    expect(diff.ok).toBe(true);
+    expect(diff.base_ref_stale).toBe(true);
+    // Still computed against the local origin/develop ref — a fetch failure
+    // degrades, it never blocks the gate.
+    expect(diff.baseRef).toBe("origin/develop");
+    expect(calls[0][0]).toBe("fetch");
+    expect(calls[1]).toEqual(["merge-base", "origin/develop", "HEAD"]);
+  });
+
   test("policyOwnedPathsConformance defaults to advisory and only 'strict' tightens", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-policy-"));
     expect(policyOwnedPathsConformance(root)).toBe("advisory");
@@ -1029,6 +1075,7 @@ describe("handoff verification helpers (WM-718)", () => {
       ownedPathsKnown: true,
       ownedPathsConformance: "advisory",
       ownedPathsDeviations: ["docs/b.md"],
+      descriptionHash: "sha256:deadbeef",
       agentReported: { command: "bun test", passed: true, output: "all green" },
     });
     const lines = body.split("\n");
@@ -1046,6 +1093,11 @@ describe("handoff verification helpers (WM-718)", () => {
       "- Owned Paths deviations (advisory): 1 file(s) outside the ticket's Owned Paths",
     );
     expect(body).toContain("  - `docs/b.md`");
+    // WM-718 F5: descriptionHash is otherwise dead — this is the one place
+    // it is read, so a reader can tell if the ticket was amended after claim.
+    expect(body).toContain(
+      "- ticket description hash at claim: `sha256:deadbeef`",
+    );
     expect(body).toContain("- agent-reported: `bun test` — pass, all green");
     expect(lines.filter((l) => l.startsWith("- Verification:"))).toHaveLength(
       1,
