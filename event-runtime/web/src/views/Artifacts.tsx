@@ -616,7 +616,7 @@ export function Artifacts({
                         onClick={(event) => event.stopPropagation()}
                         aria-label={`Download ${name}`}
                         title={`Download ${name}`}
-                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-(--border) text-(--text-faint) hover:border-(--border-strong) hover:text-(--accent)"
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-(--border) text-(--text-faint) hover:border-(--border-strong) hover:text-(--accent)"
                       >
                         <span aria-hidden="true">↓</span>
                       </a>
