@@ -48,10 +48,13 @@ describe("serve command", () => {
     child.stderr.on("data", (b) => {
       out += b;
     });
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && !out.includes("control API on")) {
-      await Bun.sleep(100);
-    }
+    const box = {
+      child,
+      get out() {
+        return out;
+      },
+    };
+    expect(await waitFor(box, "control API on", 8000)).toBe(true);
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
     expect(out).toContain(
@@ -74,10 +77,13 @@ describe("serve command", () => {
     child.stderr.on("data", (b) => {
       out += b;
     });
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && !out.includes("control API on")) {
-      await Bun.sleep(100);
-    }
+    const box = {
+      child,
+      get out() {
+        return out;
+      },
+    };
+    expect(await waitFor(box, "control API on", 8000)).toBe(true);
     let health;
     try {
       expect(out).toContain("control API on");
@@ -109,10 +115,13 @@ describe("serve command", () => {
     child.stderr.on("data", (b) => {
       out += b;
     });
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && !out.includes("control API on")) {
-      await Bun.sleep(100);
-    }
+    const box = {
+      child,
+      get out() {
+        return out;
+      },
+    };
+    expect(await waitFor(box, "control API on", 8000)).toBe(true);
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
 

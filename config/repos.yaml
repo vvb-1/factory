@@ -440,6 +440,10 @@ repos:
     # required contexts remain preferred when present; this exact workflow/job
     # set is used only because Factory intentionally has no required contexts.
     merge_ci:
+      # WM-689 addressed the shared-host spawn flake: every runtime-spawning
+      # suite is now routed through the host flock, CI rejects spawn suites
+      # outside those routes, and liveness ceilings scale with measured load.
+      # Keep rerun classification for genuinely non-reproducible failures only.
       workflow: CI
       required_checks:
         - Shadow runner fleet available
