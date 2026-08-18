@@ -59,6 +59,7 @@ Once the startup check passes, before starting visual verification:
 
 - **Mobile app (React Native / native):** follow this repo's argent rules — `list-devices`, prefer a booted device, `launch-app`, discover elements with `describe`/`debugger-component-tree` before every tap, screenshot each meaningful step.
 - **Web app:** start the dev server (`preview_start` / the project's documented command), then drive it with the browser tools — `navigate`, `read_page`, `computer`, screenshots. Use an **isolated headless Chrome browser profile** (temp profile per session, e.g. `--headless=new --disable-gpu --no-sandbox --disable-crash-reporter --disable-background-networking`) to prevent hangs or profile lock contention. Check both desktop and mobile viewport (`resize_window`) unless told the app is single-form-factor.
+  - Under Pi the browser tools are `chrome_devtools_*`; the first call auto-launches its own isolated Chromium (dynamic DevTools port, temp profile) — do **not** start Chrome by hand or point the tools at a shared port. On a display-less Linux runner that launch only works because the extension is pointed at the factory's headless wrapper, `bin/chrome-headless.sh` (`--headless=new --no-sandbox --disable-dev-shm-usage`, via `browser.executablePath` in `~/.pi/agent/pi-chrome-devtools.json`); an unconfigured extension launches Chrome headed and it dies with `Missing X server or $DISPLAY`. If `chrome_devtools_list_pages` (or any tool) fails to launch — "Unable to auto-launch a Chromium-family browser", "exited before DevTools became available" — quote that error **verbatim** in your `NOT-ASSESSED` report and add `fix: bun orchestrator/doctor.mjs (browser checks, WM-670)`, so the operator sees the gate is down without opening a transcript.
 - **Electron / Chromium app:** argent chromium mode (`boot-device` with `electronAppPath`, `gesture-scroll`/`gesture-drag`).
 
 Experience the app **first**, before reading any diff. You may read code afterwards only to check whether a suggestion is cheap or expensive — never to soften a finding.
@@ -103,7 +104,7 @@ A tight report citing four screenshots beats an exhaustive one citing thirty.
 1. **Verdict** — one of:
    - `SHIP` — no blocking issues; any findings are follow-up material.
    - `FIX-FIRST` — list the specific finding numbers that should be fixed in this branch before the PR.
-   - `NOT-ASSESSED` — browser/simulator tooling was unavailable or failed to launch/render; lists the flows that could not be visually verified.
+   - `NOT-ASSESSED` — browser/simulator tooling was unavailable or failed to launch/render; lists the flows that could not be visually verified, and quotes the tool's launch error verbatim (WM-670).
    - `BLOCKED` — the startup sanity check failed. Emitted verbatim as `VERDICT: BLOCKED - environment mismatch or unresponsive shell`, with no findings section; the caller fixes the spawn inputs and re-spawns.
 2. **Findings**, ranked by severity, each with: severity (`blocker` / `major` / `minor` / `polish`), the screen/step, what you experienced as the persona, and a concrete suggestion. Mark each finding **in-scope** (belongs in this branch) or **follow-up** (should become a Linear issue).
 3. **What worked** — 2–3 lines; the main agent needs to know what not to touch.
