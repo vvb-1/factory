@@ -60,6 +60,13 @@ describe("resolveEntity pull requests", () => {
   test("rejects a non-numeric or zero pull request", () => {
     expect(resolveEntity("pr", "abc")).toBeNull();
     expect(resolveEntity("pr", "0")).toBeNull();
+    expect(resolveEntity("pr", "00")).toBeNull();
+  });
+
+  test("canonicalises a leading-zero positive number", () => {
+    const pr = resolveEntity("pr", "0541");
+    expect(pr?.id).toBe("541");
+    expect(pr?.href).toBe("#/prs/541");
   });
 });
 
