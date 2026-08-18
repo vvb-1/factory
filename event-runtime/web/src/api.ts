@@ -6,6 +6,8 @@ import type {
   ApproveOutcome,
   CancelOutcome,
   EnvIdentity,
+  DecisionEffect,
+  DecisionResponseInput,
   InboxItem,
   InboxStatus,
   JournalView,
@@ -243,6 +245,25 @@ export const api = {
       prNumbers === undefined ? {} : { prNumbers },
     ),
 };
+
+// Decision detail endpoints are named exports so the generic API test harness
+// does not need an unrelated mock every time this self-contained flow grows.
+export const getInboxItem = (id: string) =>
+  call<{ item: InboxItem }>("GET", `/inbox/${encodeURIComponent(id)}`);
+
+export const decideInboxItem = (id: string, response: DecisionResponseInput) =>
+  call<{ item: InboxItem; effect: DecisionEffect }>(
+    "POST",
+    `/inbox/${encodeURIComponent(id)}/decide`,
+    response,
+  );
+
+export const retryInboxDecision = (id: string) =>
+  call<{ item: InboxItem; effect: DecisionEffect }>(
+    "POST",
+    `/inbox/${encodeURIComponent(id)}/decide/retry`,
+    {},
+  );
 
 export interface ScheduleItem {
   loop: string;

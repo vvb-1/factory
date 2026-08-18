@@ -24,6 +24,7 @@ import {
 } from "../displayOptions";
 import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { CustomCell } from "../components/CustomCell";
+import { DecisionCard } from "../components/DecisionCard";
 import {
   INBOX_FACETS,
   matchesFilterQuery,
@@ -436,10 +437,10 @@ export function Inbox({
     [visible, selectedIds],
   );
   const ackableSelected = selectedRows.filter(
-    (it) => itemStatus(it) === "open",
+    (it) => itemStatus(it) === "open" && !it.decision,
   );
   const resolvableSelected = selectedRows.filter(
-    (it) => itemStatus(it) !== "resolved",
+    (it) => itemStatus(it) !== "resolved" && !it.decision,
   );
 
   useEffect(() => {
@@ -517,9 +518,17 @@ export function Inbox({
   });
 
   const canAck =
-    !!sel && connected && itemStatus(sel) === "open" && !ack.isPending;
+    !!sel &&
+    !sel.decision &&
+    connected &&
+    itemStatus(sel) === "open" &&
+    !ack.isPending;
   const canResolve =
-    !!sel && connected && itemStatus(sel) !== "resolved" && !resolve.isPending;
+    !!sel &&
+    !sel.decision &&
+    connected &&
+    itemStatus(sel) !== "resolved" &&
+    !resolve.isPending;
 
   const handleBulkAck = async () => {
     if (!connected || bulkAcking || ackableSelected.length === 0) return;
@@ -910,6 +919,14 @@ export function Inbox({
                               className="truncate text-(--text)"
                               title={item.title}
                             >
+                              {item.decision && !item.response && (
+                                <span
+                                  className="mono mr-1.5 text-(--hue-warn)"
+                                  aria-label="Decision required"
+                                >
+                                  ?
+                                </span>
+                              )}
                               {displayTitle(item)}
                             </div>
                           </td>
@@ -1043,7 +1060,7 @@ export function Inbox({
             </nav>
           }
           actions={
-            itemStatus(sel) !== "resolved" ? (
+            !sel.decision && itemStatus(sel) !== "resolved" ? (
               <div className="flex items-center gap-1.5">
                 <Button
                   disabled={!canResolve}
@@ -1123,6 +1140,18 @@ export function Inbox({
               )}
             </div>
           </Section>
+
+          {sel.decision && (
+            <Section title="Decision" card={false}>
+              <DecisionCard
+                itemId={sel.id}
+                request={sel.decision}
+                response={sel.response}
+                connected={connected}
+                onItemChange={invalidate}
+              />
+            </Section>
+          )}
 
           {Object.keys(sel.refs).length > 0 && (
             <Section title="References" icons>

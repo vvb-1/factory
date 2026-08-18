@@ -1,0 +1,113 @@
+{
+  "cases": [
+    {
+      "name": "section-2.1-authorise",
+      "request": {
+        "schemaVersion": "factory.decision-request/v1",
+        "question": "WM-313 changes how the pi adapter reads FACTORY_EVENT_SECRET. May I proceed?",
+        "context": "The ticket moves secret handling from env to a file the worker mounts…\n\nRisk: a wrong path leaks the secret into the run journal.",
+        "recommended": "authorise",
+        "options": [
+          {
+            "id": "authorise",
+            "label": "Authorise within these paths",
+            "description": "Re-dispatch me with your approval bound to WM-313 as written now.",
+            "effect": "authorise",
+            "tone": "primary",
+            "scope": {
+              "paths": [
+                "event-runtime/lib/adapters/pi.mjs",
+                "event-runtime/lib/security-env.mjs"
+              ],
+              "summary": "Read the event secret from FACTORY_EVENT_SECRET_FILE when set; never log its value."
+            }
+          },
+          {
+            "id": "triage",
+            "label": "Send back to Triage",
+            "description": "The ticket should be re-scoped before anyone touches this.",
+            "effect": "send_to_triage",
+            "tone": "neutral"
+          },
+          {
+            "id": "dismiss",
+            "label": "Not now",
+            "effect": "dismiss",
+            "tone": "neutral"
+          }
+        ],
+        "fields": [
+          {
+            "id": "insight",
+            "kind": "text",
+            "label": "Anything I should know before I start",
+            "placeholder": "e.g. the file path convention, or a test to add",
+            "required": false,
+            "maxLength": 2000
+          },
+          {
+            "id": "paths",
+            "kind": "multi-choice",
+            "label": "Restrict me to",
+            "choices": [
+              { "id": "pi", "label": "event-runtime/lib/adapters/pi.mjs" },
+              { "id": "env", "label": "event-runtime/lib/security-env.mjs" }
+            ],
+            "required": true,
+            "whenOption": ["authorise"]
+          },
+          {
+            "id": "confirm",
+            "kind": "confirm",
+            "label": "I understand this changes secret handling on every worker",
+            "required": true,
+            "whenOption": ["authorise"]
+          }
+        ]
+      },
+      "hash": "sha256:22f0c1d578d4277a62531859bf8028821329225ef439a7a05e8657969ddec614",
+      "responses": [
+        {
+          "name": "valid-authorise",
+          "valid": true,
+          "value": {
+            "schemaVersion": "factory.decision-response/v1",
+            "requestHash": "sha256:22f0c1d578d4277a62531859bf8028821329225ef439a7a05e8657969ddec614",
+            "optionId": "authorise",
+            "fields": {
+              "insight": "Use the mounted secret file.",
+              "paths": ["pi"],
+              "confirm": true
+            },
+            "decidedBy": "operator",
+            "decidedAt": "2026-08-16T12:41:07.000Z"
+          }
+        },
+        {
+          "name": "missing-confirm",
+          "valid": false,
+          "value": {
+            "schemaVersion": "factory.decision-response/v1",
+            "requestHash": "sha256:22f0c1d578d4277a62531859bf8028821329225ef439a7a05e8657969ddec614",
+            "optionId": "authorise",
+            "fields": { "paths": ["pi"] },
+            "decidedBy": "operator",
+            "decidedAt": "2026-08-16T12:41:07.000Z"
+          }
+        },
+        {
+          "name": "gated-fields-omitted-for-dismiss",
+          "valid": true,
+          "value": {
+            "schemaVersion": "factory.decision-response/v1",
+            "requestHash": "sha256:22f0c1d578d4277a62531859bf8028821329225ef439a7a05e8657969ddec614",
+            "optionId": "dismiss",
+            "fields": {},
+            "decidedBy": "operator",
+            "decidedAt": "2026-08-16T12:41:07.000Z"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -660,6 +660,105 @@ export interface InboxDelivery {
   };
 }
 
+export type DecisionTone = "primary" | "danger" | "neutral";
+export type DecisionEffectKind =
+  | "authorise"
+  | "send_to_triage"
+  | "answer"
+  | "requeue"
+  | "approve_proposal"
+  | "reject_proposal"
+  | "dismiss";
+
+export interface DecisionChoice {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+interface DecisionFieldBase {
+  id: string;
+  label: string;
+  required?: boolean;
+  whenOption?: string[];
+}
+
+export type DecisionField =
+  | (DecisionFieldBase & {
+      kind: "text";
+      placeholder?: string;
+      maxLength?: number;
+    })
+  | (DecisionFieldBase & {
+      kind: "single-choice";
+      choices: DecisionChoice[];
+    })
+  | (DecisionFieldBase & {
+      kind: "multi-choice";
+      choices: DecisionChoice[];
+      minItems?: number;
+      maxItems?: number;
+    })
+  | (DecisionFieldBase & { kind: "confirm" })
+  | (DecisionFieldBase & {
+      kind: "number";
+      minimum?: number;
+      maximum?: number;
+      integer?: boolean;
+    });
+
+export interface DecisionOption {
+  id: string;
+  label: string;
+  description?: string;
+  effect: DecisionEffectKind;
+  tone?: DecisionTone;
+  scope?: { paths: string[]; summary: string };
+}
+
+export interface DecisionRequest {
+  schemaVersion: "factory.decision-request/v1";
+  question: string;
+  context?: string;
+  recommended?: string;
+  options: DecisionOption[];
+  fields?: DecisionField[];
+}
+
+export interface DecisionEffect {
+  kind: DecisionEffectKind | string;
+  outcome: "applied" | "failed" | string;
+  error?: string;
+  retryAttempt?: number;
+  [key: string]: unknown;
+}
+
+export interface DecisionResponse {
+  schemaVersion: "factory.decision-response/v1";
+  requestHash: string;
+  optionId: string;
+  fields: Record<string, unknown>;
+  decidedBy: string;
+  decidedAt: string;
+  effect?: DecisionEffect;
+}
+
+export interface DecisionSupersededResponse {
+  superseded: true;
+  reason: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+
+export type InboxDecisionResponse =
+  DecisionResponse | DecisionSupersededResponse;
+
+/** The browser sends this shape; the API supplies actor and timestamp. */
+export type DecisionResponseInput = Omit<
+  DecisionResponse,
+  "decidedBy" | "decidedAt" | "effect"
+>;
+
 /** One row of the human inbox ledger (GET /inbox). */
 export interface InboxItem {
   id: string;
@@ -675,4 +774,9 @@ export interface InboxItem {
   resolvedAt: string | null;
   resolvedBy: string | null;
   delivery: InboxDelivery;
+  decision?: DecisionRequest | null;
+  response?: InboxDecisionResponse | null;
+  decidedAt?: string | null;
+  decidedBy?: string | null;
+  dedupeKey?: string | null;
 }
