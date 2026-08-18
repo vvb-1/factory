@@ -61,6 +61,10 @@ describe("resolveEntity pull requests", () => {
     expect(resolveEntity("pr", "abc")).toBeNull();
     expect(resolveEntity("pr", "0")).toBeNull();
     expect(resolveEntity("pr", "00")).toBeNull();
+    expect(resolveEntity("pr", "000")).toBeNull();
+    expect(
+      resolveEntity("pr", "https://github.com/watt-mind/factory/pull/00"),
+    ).toBeNull();
   });
 
   test("canonicalises a leading-zero positive number", () => {
