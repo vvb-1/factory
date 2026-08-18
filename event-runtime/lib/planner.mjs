@@ -35,6 +35,7 @@ import {
 import { isBusyError, tx, txImmediate } from "./db.mjs";
 import { newProposalId, newRunId } from "./ids.mjs";
 import {
+  TERMINAL_STATES,
   createRun,
   idempotencyKeyForNewRun,
   resolveIdempotency,
@@ -373,6 +374,32 @@ function singletonApplies(registry, envelope, agentRef) {
     return schedule.singleton !== false;
   }
   return agentSingletonEnabled(registry, agentRef);
+}
+
+/**
+ * Ticket-named worktrees are mutually exclusive across dispatch and merge-fix.
+ * FAILED remains in flight because lifecycle retries may queue it again; only
+ * the lifecycle's four terminal states release the ticket.
+ */
+function inFlightRunForTicket(db, agentRef, { repo, ticket }) {
+  const terminalPlaceholders = [...TERMINAL_STATES].map(() => "?").join(",");
+  return (
+    db
+      .query(
+        `SELECT run_id, state, created_at FROM runs
+       WHERE state NOT IN (${terminalPlaceholders})
+         AND json_extract(spec_json, '$.agent') = ?
+         AND json_extract(spec_json, '$.input.repo') = ?
+         AND json_extract(spec_json, '$.input.ticket') = ?
+       ORDER BY created_at ASC, rowid ASC
+       LIMIT 1`,
+      )
+      .get(...TERMINAL_STATES, agentRef, repo, ticket) ?? null
+  );
+}
+
+export function inFlightDispatchForTicket(db, payload) {
+  return inFlightRunForTicket(db, "dispatch@1", payload);
 }
 
 function loadRepoEscalatePaths(repoName, root = reposRoot()) {
@@ -1207,6 +1234,41 @@ export function planEvent(
         at,
         ttlSeconds,
       );
+
+    // merge-fix and dispatch derive the same repo-owned
+    // worktree_root/<ticket> path. Enforce both planning orders inside this
+    // write transaction, before either side can create another RunSpec.
+    const ticketWorktreeBlocker =
+      def.ref === "merge-fix@1"
+        ? {
+            run: inFlightDispatchForTicket(db, envelope.payload),
+            reason: "ticket_dispatch_in_flight",
+          }
+        : def.ref === "dispatch@1"
+          ? {
+              run: inFlightRunForTicket(db, "merge-fix@1", envelope.payload),
+              reason: "ticket_merge_fix_in_flight",
+            }
+          : null;
+    if (ticketWorktreeBlocker?.run) {
+      const proposal = insertProposal(db, {
+        id: newProposalId(),
+        event,
+        runId: ticketWorktreeBlocker.run.run_id,
+        decision: "noop",
+        status: "resolved",
+        reason: ticketWorktreeBlocker.reason,
+        at,
+        ttlSeconds,
+      });
+      setEventStatus(db, event, "noop");
+      return {
+        decision: "noop",
+        proposal,
+        runId: ticketWorktreeBlocker.run.run_id,
+        reason: ticketWorktreeBlocker.reason,
+      };
+    }
 
     // Tier-2 dispatch gate verdict (docs/event-runtime-dispatch.md §§2–5,
     // WM-108), computed above outside this transaction. Refusals are typed

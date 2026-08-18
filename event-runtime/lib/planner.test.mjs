@@ -714,21 +714,21 @@ describe("planEvent", () => {
 describe("planEvent worktree gate (WM-108)", () => {
   // A synthetic worktree-workspace agent: the real dispatch@1 lands with its
   // own tests; this proves the gate itself, independent of any one agent.
-  function syntheticRegistry() {
+  function syntheticRegistry({ agentRef = "test-worktree@1" } = {}) {
     const synthetic = {
       ...registry,
       agents: new Map(registry.agents),
       eventTypes: { ...registry.eventTypes },
     };
     synthetic.eventTypes["test.worktree.requested"] = {
-      agent: "test-worktree@1",
+      agent: agentRef,
       adapter: "claude",
       idempotencyScope: ["inputHash"],
     };
-    synthetic.agents.set("test-worktree@1", {
+    synthetic.agents.set(agentRef, {
       id: "test-worktree",
       version: 1,
-      ref: "test-worktree@1",
+      ref: agentRef,
       output_contract: "factory.test/v1",
       workspace: { type: "worktree" },
       capabilities: { services: [] },
@@ -1102,6 +1102,52 @@ describe("planEvent worktree gate (WM-108)", () => {
         expect(outcome.proposal.reason).toBe(
           "intersecting escalate_paths globs: src/auth/**",
         );
+      },
+    );
+  });
+
+  test("dispatch also defers when merge-fix already owns the ticket worktree", () => {
+    withReposRoot(
+      `repos:\n  - name: fixture\n    path: /tmp/fixture\n    base: develop\n    team: WM\n    project: Factory\n    worktree_up: /tmp/worktree-up\n    worktree_down: /tmp/worktree-down\n    worktree_root: /tmp/worktrees\n    escalate_paths: []\n`,
+      () => {
+        const synthetic = syntheticRegistry({ agentRef: "dispatch@1" });
+        const db = openDb(":memory:");
+        db.query(
+          `INSERT INTO runs (run_id,idempotency_key,spec_json,spec_hash,state,attempts,created_at,updated_at)
+           VALUES ('run_mergefix','mergefix-key',?,'hash','QUEUED',0,?,?)`,
+        ).run(
+          JSON.stringify({
+            agent: "merge-fix@1",
+            input: { repo: "fixture", ticket: "WM-526" },
+          }),
+          new Date(NOW).toISOString(),
+          new Date(NOW).toISOString(),
+        );
+        const ref = admit(
+          db,
+          dispatchEnvelope({ repo: "fixture", ticket: "WM-526" }),
+        );
+        const outcome = planEvent(db, synthetic, ref, {
+          now: NOW,
+          dispatch: {
+            budgetRefusal: () => null,
+            countLeases: () => 0,
+            fetchTicket: () => ({
+              state: { name: "Todo" },
+              assignee: null,
+              labels: { nodes: [{ name: "ai:agent-ready" }] },
+              description: "## Owned Paths\n* `src/**`",
+            }),
+            fetchInFlight: () => [],
+          },
+        });
+
+        expect(outcome).toMatchObject({
+          decision: "noop",
+          reason: "ticket_merge_fix_in_flight",
+          runId: "run_mergefix",
+        });
+        expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
       },
     );
   });
