@@ -3,7 +3,10 @@ import { api } from "../api";
 import type { AdmittedEvent, InboxItem } from "../types";
 import { Button, JumpLink, VerbError } from "./ui";
 
-type ActionApi = Pick<typeof api, "events" | "replay" | "triggerSchedule">;
+type ActionApi = Pick<
+  typeof api,
+  "events" | "replay" | "triggerSchedule" | "repos" | "schedules"
+>;
 
 const PLAIN_ACTION_KINDS = new Set([
   "human_needed",
@@ -13,6 +16,10 @@ const PLAIN_ACTION_KINDS = new Set([
   "SMOKE RED",
   "CIRCUIT BREAKER",
 ]);
+
+// Jump chips read as links, not stray mono text: pill border + underline on hover.
+const CHIP_CLASS =
+  "inline-flex items-center rounded-full border border-(--border-strong) px-2 py-0.5 text-[11px] text-(--text) hover:border-(--accent) hover:underline";
 
 export function hasInboxPlainActions(kind: string): boolean {
   return PLAIN_ACTION_KINDS.has(kind);
@@ -58,16 +65,29 @@ export function replayEnvelope(
   };
 }
 
+/**
+ * `factory.ci-rerun.requested` wants the GitHub `owner/name` slug, not the
+ * config/repos.yaml short name most inbox refs carry; `slugFor` maps one to
+ * the other (from `GET /repos`) when the referenced event has no slug of its
+ * own.
+ */
 export function ciRerunEnvelope(
   item: InboxItem,
   event: AdmittedEvent | null,
   now = Date.now(),
+  slugFor: (repo: string) => string | null = (repo) =>
+    repo.includes("/") ? repo : null,
 ): Record<string, unknown> {
   const original = payloadOf(event);
-  const repo = original.repo ?? item.refs.repo;
-  const runId = original.runId ?? item.refs.pr?.match(/\d+/)?.[0];
-  if (typeof repo !== "string" || repo === "")
+  const ref = original.repo ?? item.refs.repo;
+  if (typeof ref !== "string" || ref === "")
     throw new Error("Rerun CI needs a repository reference");
+  const repo = ref.includes("/") ? ref : slugFor(ref);
+  if (!repo)
+    throw new Error(
+      `Rerun CI needs the GitHub owner/name for "${ref}" — config/repos.yaml declares no github remote for it`,
+    );
+  const runId = original.runId ?? item.refs.pr?.match(/\d+/)?.[0];
   if (
     (typeof runId !== "string" && typeof runId !== "number") ||
     String(runId).trim() === ""
@@ -141,13 +161,22 @@ export function InboxActions({
         item.refs.eventSource && item.refs.eventId
           ? await loadReferencedEvent()
           : null;
-      await apiCalls.replay(ciRerunEnvelope(item, event, now()));
+      const { repos } = await apiCalls.repos();
+      const slugFor = (name: string) =>
+        repos.find((repo) => repo.name === name)?.github ?? null;
+      await apiCalls.replay(ciRerunEnvelope(item, event, now(), slugFor));
     });
 
   const ship = () =>
     run("Ship", async () => {
       if (!item.refs.repo) throw new Error("Ship needs a repository reference");
-      await apiCalls.triggerSchedule(`ship-${item.refs.repo}`);
+      const loop = `ship-${item.refs.repo}`;
+      const { schedules } = await apiCalls.schedules();
+      if (!schedules.some((schedule) => schedule.loop === loop))
+        throw new Error(
+          `No ship schedule is configured for "${item.refs.repo}" (expected "${loop}" in event-runtime/schedules.json) — this repo cannot be shipped from the inbox`,
+        );
+      await apiCalls.triggerSchedule(loop);
     });
 
   const issueUrl = item.refs.issue
@@ -167,17 +196,26 @@ export function InboxActions({
       {item.kind === "ESCALATED" && (
         <p className="text-[12px] leading-relaxed text-(--text-dim)">
           This escalation must be reviewed at its source. The inbox deliberately
-          cannot merge the pull request.
+          cannot merge{" "}
+          {prUrl ? "the pull request." : "or approve anything on its behalf."}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         {jumpChips && prUrl && (
-          <JumpLink href={prUrl} title="Open pull request">
+          <JumpLink
+            href={prUrl}
+            title="Open pull request"
+            className={CHIP_CLASS}
+          >
             Open PR
           </JumpLink>
         )}
         {jumpChips && issueUrl && (
-          <JumpLink href={issueUrl} title="Open issue in Linear">
+          <JumpLink
+            href={issueUrl}
+            title="Open issue in Linear"
+            className={CHIP_CLASS}
+          >
             Open issue
           </JumpLink>
         )}
@@ -213,6 +251,7 @@ export function InboxActions({
             <JumpLink
               href={`#/proposals/${encodeURIComponent(item.refs.proposalId)}`}
               title="Open the watched proposal"
+              className={CHIP_CLASS}
             >
               Open proposal
             </JumpLink>

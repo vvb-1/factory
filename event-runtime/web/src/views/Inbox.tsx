@@ -1155,6 +1155,9 @@ export function Inbox({
           {hasInboxPlainActions(sel.kind) && itemStatus(sel) !== "resolved" && (
             <Section title="Actions" card={false}>
               <InboxActions
+                // Per-item state: a failed verb on one item must not follow
+                // the operator to the next.
+                key={sel.id}
                 item={sel}
                 connected={connected}
                 prUrl={inboxActionPrHref(sel)}

@@ -85,6 +85,8 @@ test("renders only diagnose-first jump/resolve chrome and explains escalations",
       eventId: "x",
     })),
     triggerSchedule: mock(async (_loop: string) => ({}) as never),
+    repos: mock(async () => ({ repos: [] }) as never),
+    schedules: mock(async () => ({ schedules: [] }) as never),
   };
   const escalated = render(
     <InboxActions
@@ -128,6 +130,15 @@ test("Replay, Rerun CI, and Ship use their existing API request shapes and refet
     events: mock(async () => ({ events: [event] })),
     replay,
     triggerSchedule,
+    repos: mock(
+      async () =>
+        ({
+          repos: [{ name: "factory", github: "watt-mind/factory" }],
+        }) as never,
+    ),
+    schedules: mock(
+      async () => ({ schedules: [{ loop: "ship-factory" }] }) as never,
+    ),
   };
   const changed = mock(() => {});
 
@@ -206,6 +217,8 @@ test("an item already correlated to a proposal replaces its mutating action", ()
       eventId: "x",
     })),
     triggerSchedule: mock(async (_loop: string) => ({}) as never),
+    repos: mock(async () => ({ repos: [] }) as never),
+    schedules: mock(async () => ({ schedules: [] }) as never),
   };
   const view = render(
     <InboxActions
@@ -223,4 +236,59 @@ test("an item already correlated to a proposal replaces its mutating action", ()
     "#/proposals/prop_ship",
   );
   expect(view.queryByRole("button", { name: "Ship" })).toBeNull();
+});
+
+test("Rerun CI maps a short repo name to its GitHub slug, and Ship refuses a repo with no ship schedule", async () => {
+  const replay = mock(async (_envelope: unknown) => ({
+    admitted: true,
+    duplicate: false,
+    eventId: "new",
+  }));
+  const triggerSchedule = mock(async (_loop: string) => ({}) as never);
+  const apiCalls = {
+    events: mock(async () => ({ events: [] })),
+    replay,
+    triggerSchedule,
+    repos: mock(
+      async () =>
+        ({
+          repos: [{ name: "factory", github: "watt-mind/factory" }],
+        }) as never,
+    ),
+    schedules: mock(
+      async () => ({ schedules: [{ loop: "ship-bj29" }] }) as never,
+    ),
+  };
+  const rerun = render(
+    <InboxActions
+      item={item({ kind: "CI RED", refs: { repo: "factory", pr: "PR #123" } })}
+      connected
+      onResolve={() => {}}
+      onItemChange={() => {}}
+      apiCalls={apiCalls}
+      now={() => 1_700_000_000_000}
+    />,
+  );
+  fireEvent.click(rerun.getByRole("button", { name: "Rerun CI" }));
+  await waitFor(() => expect(replay).toHaveBeenCalledTimes(1));
+  const envelope = replay.mock.calls[0][0] as { payload: { repo: string } };
+  expect(envelope.payload.repo).toBe("watt-mind/factory");
+  cleanup();
+
+  const ship = render(
+    <InboxActions
+      item={item({ kind: "RC READY", refs: { repo: "factory" } })}
+      connected
+      onResolve={() => {}}
+      onItemChange={() => {}}
+      apiCalls={apiCalls}
+    />,
+  );
+  fireEvent.click(ship.getByRole("button", { name: "Ship" }));
+  await waitFor(() =>
+    expect(
+      ship.getByText(/No ship schedule is configured for "factory"/),
+    ).toBeTruthy(),
+  );
+  expect(triggerSchedule).not.toHaveBeenCalled();
 });
