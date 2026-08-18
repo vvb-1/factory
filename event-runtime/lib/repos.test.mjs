@@ -221,6 +221,31 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
     }
   });
 
+  test("a malformed escalate_paths on one repo reads as null and never fails the whole registry load", () => {
+    // The plan-time gate is the strict reader (fail closed for THAT repo); the
+    // view must not turn one bad list into repo_unknown for every repo.
+    const repos = loadRepos({
+      root: factoryRoot(`repos:
+  - name: good
+    path: /tmp/good
+    escalate_paths: [src/auth/**]
+  - name: explicit-none
+    path: /tmp/none
+    escalate_paths: []
+  - name: malformed
+    path: /tmp/bad
+    escalate_paths: not-a-list
+  - name: undeclared
+    path: /tmp/undeclared
+`),
+    });
+    expect(repos.size).toBe(4);
+    expect(repos.get("good").escalatePaths).toEqual(["src/auth/**"]);
+    expect(repos.get("explicit-none").escalatePaths).toEqual([]);
+    expect(repos.get("malformed").escalatePaths).toBeNull();
+    expect(repos.get("undeclared").escalatePaths).toBeNull();
+  });
+
   test("owned_paths_policy is parsed and validated, defaulting to empty when absent", () => {
     const repos = loadRepos({
       root: factoryRoot(`repos:

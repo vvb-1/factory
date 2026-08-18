@@ -196,18 +196,20 @@ export function loadRepos({ root = reposRoot() } = {}) {
       }
       mergeCi = { workflow, requiredChecks: [...requiredChecks] };
     }
+    // Read-only projection for the view. A malformed list is NOT a load
+    // error here: one repo's bad escalate_paths must not take the whole
+    // registry down (and every other repo's dispatch with it). The strict,
+    // fail-closed check stays where the gate is evaluated — the planner's
+    // escalate_paths reader (planner.mjs, `escalate_paths_intersect` /
+    // `escalate_paths_unverifiable`), at plan time, for that repo alone. Malformed → null, i.e. "not
+    // declared / cannot be evaluated", which is exactly how the gate treats it.
     let escalatePaths = null;
-    if (entry.escalate_paths !== undefined && entry.escalate_paths !== null) {
-      if (
-        !Array.isArray(entry.escalate_paths) ||
-        !entry.escalate_paths.every(
-          (glob) => typeof glob === "string" && glob.trim().length > 0,
-        )
-      ) {
-        throw new RepoError(
-          `${file}: repo ${entry.name} escalate_paths must be an array of non-empty path globs`,
-        );
-      }
+    if (
+      Array.isArray(entry.escalate_paths) &&
+      entry.escalate_paths.every(
+        (glob) => typeof glob === "string" && glob.trim().length > 0,
+      )
+    ) {
       escalatePaths = [...entry.escalate_paths];
     }
     let deployment = null;

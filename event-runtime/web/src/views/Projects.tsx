@@ -60,7 +60,7 @@ const emptyValue = <span className="text-(--text-faint)">{EMPTY}</span>;
 
 function ConfigSource() {
   return (
-    <div className="mb-2 border-b border-(--border) pb-1.5 text-[10px] text-(--text-faint)">
+    <div className="mb-2 border-b border-(--border) pb-1.5 text-[11px] text-(--text-faint)">
       Source: <code className="mono text-(--text-dim)">config/repos.yaml</code>
     </div>
   );
@@ -863,7 +863,7 @@ export function Projects({
                     <span className="mono text-(--text)">
                       {sel.effective?.maxInFlight ?? sel.maxInFlight ?? EMPTY}
                     </span>
-                    <span className="rounded bg-(--surface-2) px-1.5 py-0.5 text-[10px] text-(--text-faint)">
+                    <span className="rounded bg-(--surface-2) px-1.5 py-0.5 text-[11px] text-(--text-faint)">
                       {(sel.effective?.maxInFlightSource ??
                         (sel.maxInFlight === null ? "default" : "repo")) ===
                       "repo"
