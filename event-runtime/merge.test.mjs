@@ -254,6 +254,21 @@ function admitEvent(db, registryForAdmission, env) {
   });
 }
 
+function seedActiveDispatch(db, { runId, state, ticket, repo = "factory" }) {
+  const now = "2026-08-16T12:00:00.000Z";
+  db.query(
+    `INSERT INTO runs (run_id,idempotency_key,spec_json,spec_hash,state,attempts,created_at,updated_at)
+     VALUES (?,?,?,'hash',?,1,?,?)`,
+  ).run(
+    runId,
+    `idem-${runId}`,
+    canonicalJson({ agent: "dispatch@1", input: { repo, ticket } }),
+    state,
+    now,
+    now,
+  );
+}
+
 function seedCompleted(db, { runId, agent, input, artifact }) {
   const now = "2026-08-16T12:00:00.000Z";
   const eventId = `event-${runId}`;
@@ -1234,6 +1249,123 @@ describe("merge transition chains", () => {
       .get();
     expect(row.type).toBe("factory.merge.requested");
     expect(JSON.parse(row.envelope_json).payload).toEqual({ repo: "factory" });
+  });
+});
+
+describe("merge-fix dispatch worktree exclusion (WM-526)", () => {
+  test("RUNNING and VERIFYING dispatches for the same ticket defer merge-fix with a typed noop", () => {
+    for (const state of ["RUNNING", "VERIFYING"]) {
+      const db = openDb(":memory:");
+      const eventId = `fix-during-${state.toLowerCase()}`;
+      const ticket = `WM-${state === "RUNNING" ? "601" : "602"}`;
+      const dispatchRunId = `dispatch-${state.toLowerCase()}`;
+      const payload = {
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        pr: state === "RUNNING" ? 101 : 102,
+        headSha: SHA,
+        baseSha: BASE_SHA,
+        headRef: `feat/${ticket}`,
+        ticket,
+        finding: "mechanical conflict correction",
+        findingHash: FINDING_HASH,
+        round: 1,
+        mechanical: true,
+        withinOwnedPaths: true,
+        ownedPaths: ["event-runtime/merge.test.mjs"],
+      };
+
+      admitEvent(
+        db,
+        registry,
+        envelope("factory.merge-fix.requested", payload, eventId),
+      );
+      seedActiveDispatch(db, {
+        runId: dispatchRunId,
+        state,
+        ticket,
+      });
+
+      planAdmittedEvents(db, registry, { policyVersion: PV });
+
+      expect(
+        db
+          .query(
+            `SELECT status FROM events WHERE source='chain' AND event_id=?`,
+          )
+          .get(eventId).status,
+      ).toBe("noop");
+      expect(
+        db
+          .query(
+            `SELECT decision,reason,run_id FROM proposals WHERE event_source='chain' AND event_id=?`,
+          )
+          .get(eventId),
+      ).toMatchObject({
+        decision: "noop",
+        reason: "ticket_dispatch_in_flight",
+        run_id: dispatchRunId,
+      });
+      expect(
+        db
+          .query(
+            `SELECT COUNT(*) AS n FROM runs
+           WHERE json_extract(spec_json,'$.agent')='merge-fix@1'`,
+          )
+          .get().n,
+      ).toBe(0);
+      db.close();
+    }
+  });
+
+  test("a terminal dispatch releases the ticket for merge-fix planning", () => {
+    const db = openDb(":memory:");
+    const payload = {
+      repo: "factory",
+      github: "watt-mind/factory",
+      base: "develop",
+      pr: 103,
+      headSha: SHA,
+      baseSha: BASE_SHA,
+      headRef: "feat/WM-603",
+      ticket: "WM-603",
+      finding: "mechanical conflict correction",
+      findingHash: FINDING_HASH,
+      round: 1,
+      mechanical: true,
+      withinOwnedPaths: true,
+      ownedPaths: ["event-runtime/merge.test.mjs"],
+    };
+    admitEvent(
+      db,
+      registry,
+      envelope("factory.merge-fix.requested", payload, "fix-after-dispatch"),
+    );
+    seedActiveDispatch(db, {
+      runId: "dispatch-completed",
+      state: "COMPLETED",
+      ticket: payload.ticket,
+    });
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+
+    expect(
+      db
+        .query(
+          `SELECT COUNT(*) AS n FROM runs
+         WHERE json_extract(spec_json,'$.agent')='merge-fix@1'`,
+        )
+        .get().n,
+    ).toBe(1);
+    expect(
+      db
+        .query(
+          `SELECT status FROM events WHERE source='chain' AND event_id='fix-after-dispatch'`,
+        )
+        .get().status,
+    ).toBe("planned");
+    db.close();
   });
 });
 
