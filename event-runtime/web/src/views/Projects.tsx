@@ -530,7 +530,10 @@ export function Projects({
           </>
         }
       >
-        <table aria-label="Projects table" className="w-full min-w-[760px] border-separate border-spacing-0">
+        <table
+          aria-label="Projects table"
+          className="w-full min-w-[760px] border-separate border-spacing-0"
+        >
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
               {PROJECTS_SORT.columns.map((column) => {
