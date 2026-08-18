@@ -50,44 +50,69 @@ function normalizeOwnedPathsPolicy(raw = {}, repoName, file) {
     return { direct: [], pinManifests: [] };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new RepoError(`${file}: repo ${repoName} owned_paths_policy must be an object`);
+    throw new RepoError(
+      `${file}: repo ${repoName} owned_paths_policy must be an object`,
+    );
   }
 
-  const unknown = Object.keys(raw).filter((key) => !["direct", "pin_manifests"].includes(key));
+  const unknown = Object.keys(raw).filter(
+    (key) => !["direct", "pin_manifests"].includes(key),
+  );
   if (unknown.length) {
-    throw new RepoError(`${file}: repo ${repoName} owned_paths_policy has unknown keys (${unknown.join(", ")})`);
+    throw new RepoError(
+      `${file}: repo ${repoName} owned_paths_policy has unknown keys (${unknown.join(", ")})`,
+    );
   }
 
   const direct = [];
   if (raw.direct !== undefined) {
     if (!Array.isArray(raw.direct)) {
-      throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct must be an array`);
+      throw new RepoError(
+        `${file}: repo ${repoName} owned_paths_policy.direct must be an array`,
+      );
     }
     for (const rule of raw.direct) {
       if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
-        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct entries must be objects`);
+        throw new RepoError(
+          `${file}: repo ${repoName} owned_paths_policy.direct entries must be objects`,
+        );
       }
       if (typeof rule.source !== "string" || !rule.source.trim()) {
-        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct.source must be a non-empty string`);
+        throw new RepoError(
+          `${file}: repo ${repoName} owned_paths_policy.direct.source must be a non-empty string`,
+        );
       }
       if (!Array.isArray(rule.requires) || rule.requires.length === 0) {
-        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct.requires must be a non-empty array`);
+        throw new RepoError(
+          `${file}: repo ${repoName} owned_paths_policy.direct.requires must be a non-empty array`,
+        );
       }
-      if (!rule.requires.every((req) => typeof req === "string" && req.trim())) {
-        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.direct.requires must contain only non-empty strings`);
+      if (
+        !rule.requires.every((req) => typeof req === "string" && req.trim())
+      ) {
+        throw new RepoError(
+          `${file}: repo ${repoName} owned_paths_policy.direct.requires must contain only non-empty strings`,
+        );
       }
-      direct.push({ source: rule.source.trim(), requires: rule.requires.map((req) => req.trim()) });
+      direct.push({
+        source: rule.source.trim(),
+        requires: rule.requires.map((req) => req.trim()),
+      });
     }
   }
 
   const pinManifests = [];
   if (raw.pin_manifests !== undefined) {
     if (!Array.isArray(raw.pin_manifests)) {
-      throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.pin_manifests must be an array`);
+      throw new RepoError(
+        `${file}: repo ${repoName} owned_paths_policy.pin_manifests must be an array`,
+      );
     }
     for (const manifest of raw.pin_manifests) {
       if (typeof manifest !== "string" || !manifest.trim()) {
-        throw new RepoError(`${file}: repo ${repoName} owned_paths_policy.pin_manifests must contain only non-empty strings`);
+        throw new RepoError(
+          `${file}: repo ${repoName} owned_paths_policy.pin_manifests must contain only non-empty strings`,
+        );
       }
       pinManifests.push(manifest.trim());
     }
@@ -117,10 +142,15 @@ export function loadRepos({ root = reposRoot() } = {}) {
   const repos = new Map();
   for (const entry of parsed?.repos ?? []) {
     if (!entry?.name) throw new RepoError(`${file}: a repo entry has no name`);
-    if (!entry.path) throw new RepoError(`${file}: repo ${entry.name} has no path`);
+    if (!entry.path)
+      throw new RepoError(`${file}: repo ${entry.name} has no path`);
     let maxInFlight = null;
     if (entry.max_in_flight !== undefined && entry.max_in_flight !== null) {
-      if (typeof entry.max_in_flight !== "number" || !Number.isFinite(entry.max_in_flight) || entry.max_in_flight <= 0) {
+      if (
+        typeof entry.max_in_flight !== "number" ||
+        !Number.isFinite(entry.max_in_flight) ||
+        entry.max_in_flight <= 0
+      ) {
         throw new RepoError(
           `${file}: repo ${entry.name} max_in_flight must be a positive number, got ${JSON.stringify(entry.max_in_flight)}`,
         );
@@ -128,9 +158,14 @@ export function loadRepos({ root = reposRoot() } = {}) {
       maxInFlight = entry.max_in_flight;
     }
     let smokeDeadlineSeconds = null;
-    const rawSmokeDeadline = entry.smoke_deadline_seconds ?? entry.deployment?.smoke_deadline_seconds;
+    const rawSmokeDeadline =
+      entry.smoke_deadline_seconds ?? entry.deployment?.smoke_deadline_seconds;
     if (rawSmokeDeadline !== undefined && rawSmokeDeadline !== null) {
-      if (typeof rawSmokeDeadline !== "number" || !Number.isFinite(rawSmokeDeadline) || rawSmokeDeadline <= 0) {
+      if (
+        typeof rawSmokeDeadline !== "number" ||
+        !Number.isFinite(rawSmokeDeadline) ||
+        rawSmokeDeadline <= 0
+      ) {
         throw new RepoError(
           `${file}: repo ${entry.name} smoke_deadline_seconds must be a positive number, got ${JSON.stringify(rawSmokeDeadline)}`,
         );
@@ -141,11 +176,14 @@ export function loadRepos({ root = reposRoot() } = {}) {
     if (entry.merge_ci !== undefined && entry.merge_ci !== null) {
       const workflow = entry.merge_ci?.workflow;
       const requiredChecks = entry.merge_ci?.required_checks;
-      const validWorkflow = typeof workflow === "string" && workflow.trim().length > 0;
+      const validWorkflow =
+        typeof workflow === "string" && workflow.trim().length > 0;
       const validChecks =
         Array.isArray(requiredChecks) &&
         requiredChecks.length > 0 &&
-        requiredChecks.every((check) => typeof check === "string" && check.trim().length > 0) &&
+        requiredChecks.every(
+          (check) => typeof check === "string" && check.trim().length > 0,
+        ) &&
         new Set(requiredChecks).size === requiredChecks.length;
       if (!validWorkflow || !validChecks) {
         throw new RepoError(
@@ -171,12 +209,18 @@ export function loadRepos({ root = reposRoot() } = {}) {
       maxInFlight,
       smokeDeadlineSeconds,
       mergeCi,
-      worktreeRoot: entry.worktree_root ? expandHome(entry.worktree_root) : null,
+      worktreeRoot: entry.worktree_root
+        ? expandHome(entry.worktree_root)
+        : null,
       worktreeUp: entry.worktree_up ?? null,
       worktreeDown: entry.worktree_down ?? null,
       worktreeWarm: entry.worktree_warm ?? null,
       verify: entry.verify ?? null,
-      ownedPathsPolicy: normalizeOwnedPathsPolicy(entry.owned_paths_policy, entry.name, file),
+      ownedPathsPolicy: normalizeOwnedPathsPolicy(
+        entry.owned_paths_policy,
+        entry.name,
+        file,
+      ),
     });
   }
   return repos;
@@ -239,7 +283,10 @@ export function selectMergeCheckGate(repo, githubRequiredContexts) {
   const valid = githubRequiredContexts.every(
     (name) => typeof name === "string" && name.trim().length > 0,
   );
-  if (!valid || new Set(githubRequiredContexts).size !== githubRequiredContexts.length) {
+  if (
+    !valid ||
+    new Set(githubRequiredContexts).size !== githubRequiredContexts.length
+  ) {
     throw new RepoError("GitHub required contexts are malformed or ambiguous");
   }
   if (githubRequiredContexts.length > 0) {
@@ -250,7 +297,9 @@ export function selectMergeCheckGate(repo, githubRequiredContexts) {
     };
   }
   if (!repo?.mergeCi) {
-    throw new RepoError("GitHub required contexts are empty and no merge_ci fallback is configured");
+    throw new RepoError(
+      "GitHub required contexts are empty and no merge_ci fallback is configured",
+    );
   }
   return {
     source: "config",
@@ -265,7 +314,12 @@ export function selectMergeCheckGate(repo, githubRequiredContexts) {
  * Unnamed extra checks are irrelevant: the selected gate is deliberately an
  * exact allow-list, not a snapshot of whatever happened to be visible first.
  */
-export function proveMergeChecks({ expectedChecks, actualChecks, expectedSha, workflow = null }) {
+export function proveMergeChecks({
+  expectedChecks,
+  actualChecks,
+  expectedSha,
+  workflow = null,
+}) {
   if (
     !Array.isArray(expectedChecks) ||
     expectedChecks.length === 0 ||
@@ -278,7 +332,9 @@ export function proveMergeChecks({ expectedChecks, actualChecks, expectedSha, wo
   for (const name of expectedChecks) {
     const matches = actualChecks.filter((check) => check?.name === name);
     if (matches.length !== 1) {
-      throw new RepoError(`required check ${JSON.stringify(name)} is missing or ambiguous`);
+      throw new RepoError(
+        `required check ${JSON.stringify(name)} is missing or ambiguous`,
+      );
     }
     const check = matches[0];
     if (
@@ -287,7 +343,9 @@ export function proveMergeChecks({ expectedChecks, actualChecks, expectedSha, wo
       check.conclusion !== "success" ||
       (workflow !== null && check.workflow !== workflow)
     ) {
-      throw new RepoError(`required check ${JSON.stringify(name)} is not green at the exact SHA`);
+      throw new RepoError(
+        `required check ${JSON.stringify(name)} is not green at the exact SHA`,
+      );
     }
   }
   return true;

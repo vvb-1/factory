@@ -1,6 +1,12 @@
 import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, cleanup, createEvent, fireEvent, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+} from "@testing-library/react";
 import type { OperatorContext } from "../context";
 import type { RepoItem } from "../types";
 import { ContextTabs, ScopeCaption } from "./ContextTabs";
@@ -47,7 +53,9 @@ describe("ContextTabs", () => {
     expect(r.queryByRole("tablist")).toBeNull();
     expect(r.queryByRole("tab")).toBeNull();
 
-    const pressed = r.getAllByRole("button").filter((el) => el.getAttribute("aria-pressed") === "true");
+    const pressed = r
+      .getAllByRole("button")
+      .filter((el) => el.getAttribute("aria-pressed") === "true");
     expect(pressed).toHaveLength(1);
     expect(pressed[0].textContent).toBe("factory");
 
@@ -76,7 +84,7 @@ describe("ContextTabs", () => {
     expect(all.className).toContain("focus-visible:ring-2");
   });
 
-  test("gives the navbar breathing room and every context tab consistent pill geometry", () => {
+  test("groups scope chips on the left, separates In flight, and leaves a labeled Repo action on the right", () => {
     const r = render(
       <ContextTabs
         repos={[repo("factory")]}
@@ -96,9 +104,26 @@ describe("ContextTabs", () => {
 
     for (const name of ["All", "factory", "run_abc", "In flight"]) {
       const tab = r.getByRole("button", { name });
+      expect(toolbar.contains(tab)).toBe(true);
       expect(tab.className).toContain("h-7");
       expect(tab.className).toContain("rounded-full");
     }
+
+    const repoScroller = toolbar.querySelector("[data-context-repos-scroll]");
+    expect(repoScroller?.className).toContain("min-w-0");
+    expect(repoScroller?.className).toContain("overflow-x-auto");
+    expect(repoScroller?.className).not.toContain("flex-1");
+
+    const divider = toolbar.querySelector("[data-context-filter-divider]");
+    expect(divider).not.toBeNull();
+    expect(divider?.nextElementSibling).toBe(
+      r.getByRole("button", { name: "In flight" }),
+    );
+
+    const repoAction = r.getByRole("button", { name: "Open a repo tab" });
+    expect(toolbar.contains(repoAction)).toBe(false);
+    expect(repoAction.textContent).toBe("+Repo");
+    expect(repoAction.getAttribute("title")).toBe("Open a repo tab (g 1–9)");
 
     for (const name of ["Close factory", "Close run_abc"]) {
       const close = r.getByRole("button", { name });
@@ -206,7 +231,9 @@ describe("ContextTabs", () => {
       fireEvent.keyDown(allBtn, { key: "ArrowRight" });
     });
 
-    expect(document.activeElement).toBe(r.getByRole("button", { name: "factory" }));
+    expect(document.activeElement).toBe(
+      r.getByRole("button", { name: "factory" }),
+    );
     expect(selected).toEqual([]);
     expect(opened).toEqual([]);
   });
@@ -404,7 +431,11 @@ describe("ContextTabs", () => {
     expect(document.activeElement?.getAttribute("role")).toBe("listbox");
 
     const options = r.getAllByRole("option");
-    expect(options.map((el) => el.textContent)).toEqual(["alpha", "bravo", "charlie"]);
+    expect(options.map((el) => el.textContent)).toEqual([
+      "alpha",
+      "bravo",
+      "charlie",
+    ]);
     expect(options[0].getAttribute("aria-selected")).toBe("true");
     expect(options[1].getAttribute("aria-selected")).toBe("false");
 
@@ -422,7 +453,10 @@ describe("ContextTabs", () => {
   });
 
   test("keyboard navigation scrolls each highlighted picker option into view", () => {
-    const scrolls: Array<{ element: HTMLElement; options?: boolean | ScrollIntoViewOptions }> = [];
+    const scrolls: Array<{
+      element: HTMLElement;
+      options?: boolean | ScrollIntoViewOptions;
+    }> = [];
     const original = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = function (
       this: HTMLElement,
@@ -460,7 +494,10 @@ describe("ContextTabs", () => {
         act(() => {
           fireEvent.keyDown(listbox, { key });
         });
-        expect(scrolls.at(-1)).toEqual({ element: expected, options: { block: "nearest" } });
+        expect(scrolls.at(-1)).toEqual({
+          element: expected,
+          options: { block: "nearest" },
+        });
       }
     } finally {
       HTMLElement.prototype.scrollIntoView = original;
@@ -486,13 +523,17 @@ describe("ContextTabs", () => {
     act(() => {
       fireEvent.keyDown(listbox, { key: "End" });
     });
-    expect(r.getAllByRole("option")[2].getAttribute("aria-selected")).toBe("true");
+    expect(r.getAllByRole("option")[2].getAttribute("aria-selected")).toBe(
+      "true",
+    );
 
     r.rerender(<ContextTabs {...props} openRepos={["bravo", "charlie"]} />);
 
     const remaining = r.getByRole("option", { name: "alpha" });
     expect(remaining.getAttribute("aria-selected")).toBe("true");
-    expect(r.getByRole("listbox").getAttribute("aria-activedescendant")).toBe(remaining.id);
+    expect(r.getByRole("listbox").getAttribute("aria-activedescendant")).toBe(
+      remaining.id,
+    );
     act(() => {
       fireEvent.keyDown(r.getByRole("listbox"), { key: "Enter" });
     });
@@ -578,7 +619,9 @@ describe("ContextTabs", () => {
       fireEvent.keyDown(window, { key: "Escape" });
     });
     expect(r.queryByRole("listbox")).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Open a repo tab");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Open a repo tab",
+    );
     expect(opened).toEqual([]);
   });
 
@@ -628,9 +671,15 @@ describe("ContextTabs", () => {
     );
 
     expect(r.getByRole("button", { name: "All" }).textContent).toBe("All");
-    expect(r.getByRole("button", { name: "factory" }).textContent).toBe("factory");
-    expect(r.getByRole("button", { name: "client" }).textContent).toBe("client");
-    expect(r.getByRole("button", { name: "In flight" }).textContent).toBe("In flight");
+    expect(r.getByRole("button", { name: "factory" }).textContent).toBe(
+      "factory",
+    );
+    expect(r.getByRole("button", { name: "client" }).textContent).toBe(
+      "client",
+    );
+    expect(r.getByRole("button", { name: "In flight" }).textContent).toBe(
+      "In flight",
+    );
   });
 
   test("provides shortcut hint titles on context tab buttons", () => {
@@ -647,13 +696,19 @@ describe("ContextTabs", () => {
       />,
     );
 
-    expect(r.getByRole("button", { name: "All" }).getAttribute("title")).toBe("All (g 0)");
+    expect(r.getByRole("button", { name: "All" }).getAttribute("title")).toBe(
+      "All (g 0)",
+    );
     for (let i = 0; i < 9; i++) {
       const btn = r.getByRole("button", { name: `repo-${i + 1}` });
       expect(btn.getAttribute("title")).toBe(`repo-${i + 1} (g ${i + 1})`);
     }
-    expect(r.getByRole("button", { name: "repo-10" }).getAttribute("title")).toBe("repo-10");
-    expect(r.getByRole("button", { name: "In flight" }).getAttribute("title")).toBe("In flight (g i)");
+    expect(
+      r.getByRole("button", { name: "repo-10" }).getAttribute("title"),
+    ).toBe("repo-10");
+    expect(
+      r.getByRole("button", { name: "In flight" }).getAttribute("title"),
+    ).toBe("In flight (g i)");
   });
 });
 
@@ -661,14 +716,22 @@ describe("ScopeCaption", () => {
   const repoCtx: OperatorContext = { kind: "repo", name: "factory" };
 
   test("kind=all renders nothing (no caption to leak jargon)", () => {
-    const r = render(<ScopeCaption context={{ kind: "all" }} surface="fleet" />);
+    const r = render(
+      <ScopeCaption context={{ kind: "all" }} surface="fleet" />,
+    );
     expect(r.container.textContent).toBe("");
   });
 
   test("fixed surfaces use view names, not internal surface names", () => {
     const cases = [
-      { surface: "fleet" as const, expect: "Workers are not scoped to factory" },
-      { surface: "overview" as const, expect: "Overview counts are not scoped to factory" },
+      {
+        surface: "fleet" as const,
+        expect: "Workers are not scoped to factory",
+      },
+      {
+        surface: "overview" as const,
+        expect: "Overview counts are not scoped to factory",
+      },
       { surface: "graph" as const, expect: "Graph is not scoped to factory" },
     ];
 
@@ -704,7 +767,11 @@ describe("ScopeCaption", () => {
     for (const c of cases) {
       window.location.hash = c.hash;
       const r = render(
-        <ScopeCaption context={repoCtx} surface="registry" subject={c.subject} />,
+        <ScopeCaption
+          context={repoCtx}
+          surface="registry"
+          subject={c.subject}
+        />,
       );
       expect(r.container.textContent).toContain(c.expect);
       cleanup();

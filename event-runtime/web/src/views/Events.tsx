@@ -1,8 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { keyGuard, useDisplayOptions, useListKeys, useNow, useRequeuePoll, useTabKeys } from "../hooks";
+import {
+  keyGuard,
+  refetchIntervals,
+  tableTokens,
+  useDisplayOptions,
+  useListKeys,
+  useNow,
+  useRequeuePoll,
+  useTabKeys,
+  useTableWindow,
+} from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -19,10 +29,27 @@ import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { CustomCell } from "../components/CustomCell";
 import { setContextActions } from "../palette";
 import { ScopeCaption } from "../components/ContextTabs";
-import type { AdmittedEvent, EventFocus } from "../types";
+import type {
+  AdmittedEvent,
+  EventFocus,
+  Proposal,
+  RunListItem,
+} from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
-import { EVENT_FACETS, matchesFilterQuery, parseFilterQuery, type FilterToken } from "../filterQuery";
+import {
+  EVENT_FACETS,
+  matchesFilterQuery,
+  parseFilterQuery,
+  type EventFilterRow,
+  type FilterToken,
+} from "../filterQuery";
+import { humanizeReason } from "../reasons";
+import {
+  ReasonText,
+  TicketDecisionsPanel,
+  eventTicket,
+} from "../components/RunDetailBlocks";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import {
   Ago,
@@ -42,6 +69,7 @@ import {
   GroupHeaderRow,
   Section,
   StateBadge,
+  TableWindowFooter,
   Th,
   VerbError,
   copyText,
@@ -49,7 +77,10 @@ import {
   shortId,
 } from "../components/ui";
 
-function removeTokensFromQuery(filter: string, tokens: readonly FilterToken[]): string {
+function removeTokensFromQuery(
+  filter: string,
+  tokens: readonly FilterToken[],
+): string {
   const ordered = [...tokens].sort((a, b) => a.start - b.start);
   let cursor = 0;
   let next = "";
@@ -63,7 +94,77 @@ function removeTokensFromQuery(filter: string, tokens: readonly FilterToken[]): 
   return next.replace(/\s+/g, " ").trim();
 }
 
-function toggleFacetInQuery(filter: string, key: "type" | "source", value: string): string {
+const FACET_PREVIEW_LIMIT = 2;
+
+function FacetChoice({
+  value,
+  count,
+  active,
+  mono = false,
+  onClick,
+}: {
+  value: string;
+  count: number;
+  active: boolean;
+  mono?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={value}
+      onClick={onClick}
+      className={`inline-flex min-w-0 max-w-44 items-center rounded-md px-2 py-0.5 text-[11px] transition-colors ${
+        mono ? "mono" : ""
+      } ${
+        active
+          ? "bg-(--surface-3) font-medium text-(--text)"
+          : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
+      }`}
+    >
+      <span className="min-w-0 truncate">{value}</span>
+      {count > 0 && (
+        <span
+          className={`${mono ? "font-sans" : ""} ml-1.5 shrink-0 tabular-nums text-(--text-faint)`}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function FacetOverflow({
+  children,
+  count,
+  label,
+}: {
+  children: React.ReactNode;
+  count: number;
+  label: string;
+}) {
+  if (count === 0) return null;
+  return (
+    <details className="relative shrink-0">
+      <summary
+        className="cursor-pointer list-none rounded-md px-2 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text) [&::-webkit-details-marker]:hidden"
+        title={`Show ${count} more ${label.toLowerCase()}`}
+      >
+        +{count} more
+      </summary>
+      <div className="absolute top-full right-0 z-30 mt-1 flex min-w-56 max-w-80 flex-col items-stretch gap-1 rounded-md border border-(--border-strong) bg-(--surface-1) p-1 shadow-xl">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function toggleFacetInQuery(
+  filter: string,
+  key: "type" | "source",
+  value: string,
+): string {
   const parsed = parseFilterQuery(filter, EVENT_FACETS);
   const existingTokens = parsed.tokens.filter(
     (t): t is Extract<FilterToken, { kind: "field" }> =>
@@ -85,7 +186,11 @@ function toggleFacetInQuery(filter: string, key: "type" | "source", value: strin
   return next ? `${next} ${addition}` : addition;
 }
 
-function setFacetInQuery(filter: string, key: "type" | "source", value: string): string {
+function setFacetInQuery(
+  filter: string,
+  key: "type" | "source",
+  value: string,
+): string {
   const parsed = parseFilterQuery(filter, EVENT_FACETS);
   const existingTokens = parsed.tokens.filter(
     (t): t is Extract<FilterToken, { kind: "field" }> =>
@@ -96,11 +201,21 @@ function setFacetInQuery(filter: string, key: "type" | "source", value: string):
   return next ? `${next} ${addition}` : addition;
 }
 
-const STATUS_TABS = ["all", "admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
+const STATUS_TABS = [
+  "all",
+  "admitted",
+  "planned",
+  "noop",
+  "human_needed",
+  "dead_lettered",
+] as const;
 type StatusTab = (typeof STATUS_TABS)[number];
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable=true]"))
+  );
 }
 
 /** Only these two statuses may be requeued (planner.mjs requeueEvent). */
@@ -117,12 +232,76 @@ const TAB_LABEL: Record<StatusTab, string> = {
 
 const keyOf = (e: AdmittedEvent) => `${e.source}:${e.eventId}`;
 
+/**
+ * What the planner decided about one event (WM-594): the proposal it opened
+ * (`planned` / `noop` / `human_needed` + reason), or `refused` when the run it
+ * planned was turned away by the dispatch gate, or the plan error on an event
+ * that never got a proposal. `null` when there is nothing to explain yet.
+ */
+export interface EventDecision {
+  outcome: string;
+  status: string | null;
+  reason: string | null;
+}
+
+export function decisionOf(
+  e: AdmittedEvent,
+  proposalsById: ReadonlyMap<string, Proposal>,
+  proposalsByEvent: ReadonlyMap<string, Proposal>,
+  runsById: ReadonlyMap<string, RunListItem>,
+): EventDecision | null {
+  // A noop proposal can point at the *blocking* run (`duplicate_run`,
+  // `ticket_dispatch_already_live`); only a run planned from this very event
+  // makes the event's decision `refused`.
+  const run = e.runId ? runsById.get(e.runId) : undefined;
+  if (
+    run?.state === "REFUSED" &&
+    run.eventSource === e.source &&
+    run.eventId === e.eventId
+  )
+    return { outcome: "refused", status: null, reason: run.reasonCode };
+  const proposal =
+    (e.proposalId ? proposalsById.get(e.proposalId) : undefined) ??
+    proposalsByEvent.get(keyOf(e));
+  if (proposal) {
+    return {
+      outcome: proposal.decision === "run" ? "planned" : proposal.decision,
+      status: proposal.status,
+      reason: proposal.reason,
+    };
+  }
+  if (e.lastPlanError)
+    return { outcome: e.status, status: null, reason: e.lastPlanError };
+  return null;
+}
+
+/** `noop · Owned paths overlap` — badge tooltip and the decision row's text. */
+export function decisionText(d: EventDecision | null): string {
+  if (!d) return "";
+  const reason = humanizeReason(d.reason).text;
+  const status =
+    d.outcome === "planned" && d.status && d.status !== "approved"
+      ? ` (${d.status})`
+      : "";
+  return `${d.outcome}${status}${reason ? ` · ${reason}` : ""}`;
+}
+
 function isStatusTab(value: string | undefined): value is StatusTab {
   return !!value && (STATUS_TABS as readonly string[]).includes(value);
 }
 
+/** The list badge can also read `refused` — an event whose planned run the gate turned away. */
+const LIST_STATUS_HUES: Record<string, string> = {
+  ...EVENT_STATUS_HUES,
+  refused: "var(--hue-warn)",
+};
+
 const rowWash = (s: string) =>
-  s === "dead_lettered" ? "row-wash-err" : s === "human_needed" ? "row-wash-warn" : "";
+  s === "dead_lettered"
+    ? "row-wash-err"
+    : s === "human_needed"
+      ? "row-wash-warn"
+      : "";
 
 /**
  * Grouping/ordering/columns (OPS-493) — one config across every status tab:
@@ -148,11 +327,32 @@ const EVENTS_DISPLAY: DisplayConfig<AdmittedEvent> = {
     { key: "event", label: "Event", get: (e) => e.eventId, column: "event" },
     { key: "source", label: "Source", get: (e) => e.source, column: "source" },
     { key: "type", label: "Type", get: (e) => e.type, column: "type" },
-    { key: "subject", label: "Subject", get: (e) => e.subject ?? "", column: "subject" },
+    {
+      key: "subject",
+      label: "Subject",
+      get: (e) => e.subject ?? "",
+      column: "subject",
+    },
     { key: "status", label: "Status", get: (e) => e.status, column: "status" },
-    { key: "admitted", label: "Admitted", get: (e) => e.admittedAt, defaultDir: "desc", column: "admitted" },
-    { key: "occurred", label: "Occurred", get: (e) => e.occurredAt, defaultDir: "desc" },
-    { key: "received", label: "Received", get: (e) => e.receivedAt, defaultDir: "desc" },
+    {
+      key: "admitted",
+      label: "Admitted",
+      get: (e) => e.admittedAt,
+      defaultDir: "desc",
+      column: "admitted",
+    },
+    {
+      key: "occurred",
+      label: "Occurred",
+      get: (e) => e.occurredAt,
+      defaultDir: "desc",
+    },
+    {
+      key: "received",
+      label: "Received",
+      get: (e) => e.receivedAt,
+      defaultDir: "desc",
+    },
   ],
   columns: [
     { key: "event", label: "Event", always: true },
@@ -201,22 +401,73 @@ export function Events({
   const now = useNow();
   const queryClient = useQueryClient();
   const pollRequeue = useRequeuePoll(onJumpProposal);
-  const [tab, setTab] = useState<StatusTab>(isStatusTab(focusEvent?.status) ? focusEvent.status : "all");
-  const [filter, setFilter] = useState(focusEvent?.type ? `type:${focusEvent.type}` : "");
+  const [tab, setTab] = useState<StatusTab>(
+    isStatusTab(focusEvent?.status) ? focusEvent.status : "all",
+  );
+  const [filter, setFilter] = useState(
+    focusEvent?.type ? `type:${focusEvent.type}` : "",
+  );
   const [confirmReplay, setConfirmReplay] = useState(false);
 
   const fetchAll = context.kind === "repo";
   const list = useQuery({
     queryKey: ["events", fetchAll ? "all" : tab],
     queryFn: () => api.events(fetchAll || tab === "all" ? undefined : tab),
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
-  const rows = list.data?.events ?? [];
+  const statusQ = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    ...refetchIntervals.fast,
+  });
+  // The reason behind a noop / refused row lives on the proposal and the run,
+  // not the event (WM-594); both lists are already cached by other views.
+  const proposalsQ = useQuery({
+    queryKey: ["proposals", "history"],
+    queryFn: () => api.proposalHistory("all"),
+    ...refetchIntervals.secondary,
+  });
+  const runsQ = useQuery({
+    queryKey: ["runs", "ALL"],
+    queryFn: () => api.runs(),
+    ...refetchIntervals.secondary,
+  });
+  const decisions = useMemo(() => {
+    const byId = new Map<string, Proposal>();
+    const byEvent = new Map<string, Proposal>();
+    for (const p of proposalsQ.data?.proposals ?? []) {
+      byId.set(p.id, p);
+      const k = `${p.eventSource}:${p.eventId}`;
+      const prev = byEvent.get(k);
+      if (!prev || prev.created_at < p.created_at) byEvent.set(k, p);
+    }
+    const runsById = new Map<string, RunListItem>();
+    for (const r of runsQ.data?.runs ?? []) runsById.set(r.runId, r);
+    return { byId, byEvent, runsById };
+  }, [proposalsQ.data, runsQ.data]);
+  const decisionFor = (e: AdmittedEvent) =>
+    decisionOf(e, decisions.byId, decisions.byEvent, decisions.runsById);
+  const rows: EventFilterRow[] = useMemo(
+    () =>
+      (list.data?.events ?? []).map((e) => {
+        const d = decisionOf(
+          e,
+          decisions.byId,
+          decisions.byEvent,
+          decisions.runsById,
+        );
+        return d?.reason ? { ...e, decisionReason: d.reason } : e;
+      }),
+    [list.data, decisions],
+  );
   const scoped = useMemo(() => {
     const focusKey =
-      focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
-    return rows.filter((e) => keyOf(e) === focusKey || matchesRepo(e.repos, context));
+      focusEvent?.source && focusEvent?.eventId
+        ? `${focusEvent.source}:${focusEvent.eventId}`
+        : null;
+    return rows.filter(
+      (e) => keyOf(e) === focusKey || matchesRepo(e.repos, context),
+    );
   }, [rows, context, focusEvent?.source, focusEvent?.eventId]);
 
   const tabScoped = useMemo(() => {
@@ -245,24 +496,52 @@ export function Events({
   const types = useMemo(
     () =>
       Object.keys(typeCounts).sort(
-        (a, b) => (typeCounts[b] ?? 0) - (typeCounts[a] ?? 0) || a.localeCompare(b),
+        (a, b) =>
+          (typeCounts[b] ?? 0) - (typeCounts[a] ?? 0) || a.localeCompare(b),
       ),
     [typeCounts],
   );
   const sources = useMemo(
     () =>
       Object.keys(sourceCounts).sort(
-        (a, b) => (sourceCounts[b] ?? 0) - (sourceCounts[a] ?? 0) || a.localeCompare(b),
+        (a, b) =>
+          (sourceCounts[b] ?? 0) - (sourceCounts[a] ?? 0) || a.localeCompare(b),
       ),
     [sourceCounts],
   );
 
-  const parsed = useMemo(() => parseFilterQuery(filter, EVENT_FACETS), [filter]);
+  const parsed = useMemo(
+    () => parseFilterQuery(filter, EVENT_FACETS),
+    [filter],
+  );
+
+  // `reason:` value suggestions come from the reasons actually in the loaded
+  // set (head code only, most frequent first) — the vocabulary is the planner's.
+  const facets = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of tabScoped) {
+      const raw = e.decisionReason;
+      if (!raw) continue;
+      const head = raw.includes(":") ? raw.slice(0, raw.indexOf(":")) : raw;
+      if (/\s/.test(head)) continue;
+      counts.set(head, (counts.get(head) ?? 0) + 1);
+    }
+    const reasons = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([r]) => r);
+    return {
+      ...EVENT_FACETS,
+      values: { ...EVENT_FACETS.values, reason: reasons },
+    };
+  }, [tabScoped]);
 
   const activeTypes = useMemo(() => {
     return new Set(
       parsed.tokens
-        .filter((t): t is Extract<FilterToken, { kind: "field" }> => t.kind === "field" && t.key === "type")
+        .filter(
+          (t): t is Extract<FilterToken, { kind: "field" }> =>
+            t.kind === "field" && t.key === "type",
+        )
         .map((t) => t.value.toLowerCase()),
     );
   }, [parsed.tokens]);
@@ -270,7 +549,10 @@ export function Events({
   const activeSources = useMemo(() => {
     return new Set(
       parsed.tokens
-        .filter((t): t is Extract<FilterToken, { kind: "field" }> => t.kind === "field" && t.key === "source")
+        .filter(
+          (t): t is Extract<FilterToken, { kind: "field" }> =>
+            t.kind === "field" && t.key === "source",
+        )
         .map((t) => t.value.toLowerCase()),
     );
   }, [parsed.tokens]);
@@ -292,7 +574,9 @@ export function Events({
         ? EVENTS_DISPLAY
         : {
             ...EVENTS_DISPLAY,
-            groups: EVENTS_DISPLAY.groups.map((g) => (g.key === "status" ? { ...g, order: [tab] } : g)),
+            groups: EVENTS_DISPLAY.groups.map((g) =>
+              g.key === "status" ? { ...g, order: [tab] } : g,
+            ),
           },
     [tab],
   );
@@ -306,30 +590,53 @@ export function Events({
     [sections, display.collapsed],
   );
   const cols = visibleColumns(displayConfig, display);
-  const show = useMemo(() => new Set(cols.map((c) => c.key)), [cols]);
 
   const selectedKey =
-    focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
+    focusEvent?.source && focusEvent?.eventId
+      ? `${focusEvent.source}:${focusEvent.eventId}`
+      : null;
   // Keyboard index walks the open sections; the detail pane keys off the row
   // itself so collapsing the group under a selection never closes the pane.
   const selectedIndex = useMemo(
     () => flat.findIndex((e) => keyOf(e) === selectedKey),
     [flat, selectedKey],
   );
+  const tokens = tableTokens(sections, display.collapsed, grouped(display));
+  const [windowTokens, windowStart, windowEnd, moveWindow] = useTableWindow(
+    tokens,
+    selectedKey,
+    keyOf,
+    JSON.stringify([tab, filter, context, display]),
+  );
   const sel = useMemo(
-    () => (selectedKey ? (visible.find((e) => keyOf(e) === selectedKey) ?? null) : null),
+    () =>
+      selectedKey
+        ? (visible.find((e) => keyOf(e) === selectedKey) ?? null)
+        : null,
     [visible, selectedKey],
   );
+  // The detail pane leaves a compact triage list. Keep the columns needed to
+  // identify and compare events; the complete row remains in Display when the
+  // pane closes, and every field remains available in the pane itself.
+  const listCols = sel
+    ? cols.filter((c) =>
+        ["event", "type", "subject", "status", "admitted"].includes(c.key),
+      )
+    : cols;
+  const show = useMemo(() => new Set(listCols.map((c) => c.key)), [listCols]);
 
   useEffect(() => {
-    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+    document
+      .querySelector("tr.row-selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex, windowStart]);
 
   // Ephemeral Overview/Graph jumps: apply tab/type then drop them so the hash
   // (if any) is the only remaining selection source.
   useEffect(() => {
     if (!focusEvent) return;
-    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) setTab(focusEvent.status);
+    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status)
+      setTab(focusEvent.status);
     if (focusEvent.type) {
       setFilter((cur) => setFacetInQuery(cur, "type", focusEvent.type!));
     }
@@ -373,7 +680,12 @@ export function Events({
     const emptyFilters = {
       filter: "",
     };
-    const decision = decideRevealFilters(latch.snapshot, currentFilters, emptyFilters, isVisible);
+    const decision = decideRevealFilters(
+      latch.snapshot,
+      currentFilters,
+      emptyFilters,
+      isVisible,
+    );
     if (decision.cleared) {
       if (decision.clearedFields.includes("filter")) {
         setFilter(decision.next.filter);
@@ -429,7 +741,16 @@ export function Events({
       setTab("all");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusEvent?.source, focusEvent?.eventId, focusEvent?.status, rows, tab, fetchAll, list.isPending, list.data]);
+  }, [
+    focusEvent?.source,
+    focusEvent?.eventId,
+    focusEvent?.status,
+    rows,
+    tab,
+    fetchAll,
+    list.isPending,
+    list.data,
+  ]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -452,7 +773,12 @@ export function Events({
     onSuccess: (data) => {
       queryClient.invalidateQueries();
       setConfirmReplay(false);
-      notify(data.duplicate ? `Duplicate event ${data.eventId}` : `Replayed event ${data.eventId}`, "info");
+      notify(
+        data.duplicate
+          ? `Duplicate event ${data.eventId}`
+          : `Replayed event ${data.eventId}`,
+        "info",
+      );
     },
   });
 
@@ -506,7 +832,11 @@ export function Events({
         pendingC.current = Date.now();
       },
       l: () => {
-        if (sel && pendingC.current > 0 && Date.now() - pendingC.current < 800) {
+        if (
+          sel &&
+          pendingC.current > 0 &&
+          Date.now() - pendingC.current < 800
+        ) {
           copyLink();
           pendingC.current = 0;
         }
@@ -521,14 +851,28 @@ export function Events({
     } else {
       setContextActions([
         ...(canRequeue
-          ? [{ label: `Requeue ${sel.eventId} (re-plan admitted event)`, hint: "q", run: () => requeue.mutate(sel) }]
+          ? [
+              {
+                label: `Requeue ${sel.eventId} (re-plan admitted event)`,
+                hint: "q",
+                run: () => requeue.mutate(sel),
+              },
+            ]
           : []),
-        { label: `Replay ${sel.eventId} through intake…`, run: () => setConfirmReplay(true) },
+        {
+          label: `Replay ${sel.eventId} through intake…`,
+          run: () => setConfirmReplay(true),
+        },
         {
           label: `Trigger ${sel.type} again (new event id)…`,
-          run: () => onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now())),
+          run: () =>
+            onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now())),
         },
-        { label: `Copy ${sel.eventId}`, hint: "c", run: () => copyText(sel.eventId, "event id") },
+        {
+          label: `Copy ${sel.eventId}`,
+          hint: "c",
+          run: () => copyText(sel.eventId, "event id"),
+        },
         { label: "Copy link to this event", hint: "c l", run: copyLink },
       ]);
     }
@@ -551,7 +895,10 @@ export function Events({
     const sorted = sortRows(visible, displayConfig, display);
     const dateStr = new Date().toISOString().slice(0, 10);
     exportJson(`events-export-${dateStr}.json`, sorted);
-    notify(`Exported ${sorted.length} event${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+    notify(
+      `Exported ${sorted.length} event${sorted.length === 1 ? "" : "s"} to JSON`,
+      "info",
+    );
   };
 
   return (
@@ -559,141 +906,211 @@ export function Events({
       <ListPane
         chrome={
           <>
-        <h1 className="display mb-4 text-lg font-semibold">Events</h1>
-        {context.kind === "inflight" && <ScopeCaption context={context} surface="fleet" />}
-        {context.kind === "repo" && (
-          <p className="mb-3 text-[11px] text-(--text-faint)">
-            Scoped to <span className="mono">{context.name}</span> — only rows naming this repo.
-          </p>
-        )}
+            <h1 className="display mb-4 text-lg font-semibold">Events</h1>
+            {context.kind === "inflight" && (
+              <ScopeCaption context={context} surface="fleet" />
+            )}
+            {context.kind === "repo" && (
+              <p className="mb-3 text-[11px] text-(--text-faint)">
+                Scoped to <span className="mono">{context.name}</span> — only
+                rows naming this repo.
+              </p>
+            )}
 
-        <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Event status">
-          {STATUS_TABS.map((t, idx) => {
-            const count = tabCount(t);
-            return (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => selectTab(t)}
-                title={t}
-                className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                  tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
-                }`}
-              >
-                {TAB_LABEL[t]}
-                {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
-                <span aria-hidden="true" className="mono ml-1 text-(--text-faint) text-[10px] opacity-70">
-                  {idx + 1}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {(types.length > 1 || sources.length > 1) && (
-          <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
-            {types.length > 1 && (
-              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Event types">
-                <span className="text-[11px] font-medium text-(--text-dim)">Type:</span>
-                {types.map((t) => {
-                  const isPressed = activeTypes.has(t.toLowerCase());
-                  const count = typeCounts[t] ?? 0;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      aria-pressed={isPressed}
-                      onClick={() => {
-                        const next = isPressed ? null : t;
-                        setFilter((cur) => toggleFacetInQuery(cur, "type", t));
-                        onSelectType(next);
-                      }}
-                      className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${
-                        isPressed
-                          ? "bg-(--surface-3) text-(--text) font-medium"
-                          : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
-                      }`}
+            <div
+              className="mb-3 flex flex-wrap gap-1"
+              role="tablist"
+              aria-label="Event status"
+            >
+              {STATUS_TABS.map((t, idx) => {
+                const count = tabCount(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t}
+                    onClick={() => selectTab(t)}
+                    title={t}
+                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                      tab === t
+                        ? "bg-(--surface-3) text-(--text)"
+                        : "text-(--text-faint) hover:bg-(--surface-1)"
+                    }`}
+                  >
+                    {TAB_LABEL[t]}
+                    {count > 0 && (
+                      <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                        {count}
+                      </span>
+                    )}
+                    <span
+                      aria-hidden="true"
+                      className="mono ml-1 text-(--text-faint) text-[10px] opacity-70"
                     >
-                      <span>{t}</span>
-                      {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
-                    </button>
-                  );
-                })}
+                      {idx + 1}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {(types.length > 1 || sources.length > 1) && (
+              <div className="mb-2 flex min-w-0 items-center gap-x-4 whitespace-nowrap text-[11px]">
+                {types.length > 1 && (
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-1.5"
+                    role="group"
+                    aria-label="Event types"
+                  >
+                    <span className="shrink-0 text-[11px] font-medium text-(--text-dim)">
+                      Type:
+                    </span>
+                    {types.slice(0, FACET_PREVIEW_LIMIT).map((t) => {
+                      const isPressed = activeTypes.has(t.toLowerCase());
+                      return (
+                        <FacetChoice
+                          key={t}
+                          value={t}
+                          count={typeCounts[t] ?? 0}
+                          active={isPressed}
+                          onClick={() => {
+                            setFilter((cur) =>
+                              toggleFacetInQuery(cur, "type", t),
+                            );
+                            onSelectType(isPressed ? null : t);
+                          }}
+                        />
+                      );
+                    })}
+                    <FacetOverflow
+                      count={Math.max(0, types.length - FACET_PREVIEW_LIMIT)}
+                      label="event types"
+                    >
+                      {types.slice(FACET_PREVIEW_LIMIT).map((t) => {
+                        const isPressed = activeTypes.has(t.toLowerCase());
+                        return (
+                          <FacetChoice
+                            key={t}
+                            value={t}
+                            count={typeCounts[t] ?? 0}
+                            active={isPressed}
+                            onClick={() => {
+                              setFilter((cur) =>
+                                toggleFacetInQuery(cur, "type", t),
+                              );
+                              onSelectType(isPressed ? null : t);
+                            }}
+                          />
+                        );
+                      })}
+                    </FacetOverflow>
+                  </div>
+                )}
+                {sources.length > 1 && (
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-1.5"
+                    role="group"
+                    aria-label="Event sources"
+                  >
+                    <span className="shrink-0 text-[11px] font-medium text-(--text-dim)">
+                      Source:
+                    </span>
+                    {sources.slice(0, FACET_PREVIEW_LIMIT).map((s) => (
+                      <FacetChoice
+                        key={s}
+                        value={s}
+                        count={sourceCounts[s] ?? 0}
+                        active={activeSources.has(s.toLowerCase())}
+                        mono
+                        onClick={() =>
+                          setFilter((cur) =>
+                            toggleFacetInQuery(cur, "source", s),
+                          )
+                        }
+                      />
+                    ))}
+                    <FacetOverflow
+                      count={Math.max(0, sources.length - FACET_PREVIEW_LIMIT)}
+                      label="event sources"
+                    >
+                      {sources.slice(FACET_PREVIEW_LIMIT).map((s) => (
+                        <FacetChoice
+                          key={s}
+                          value={s}
+                          count={sourceCounts[s] ?? 0}
+                          active={activeSources.has(s.toLowerCase())}
+                          mono
+                          onClick={() =>
+                            setFilter((cur) =>
+                              toggleFacetInQuery(cur, "source", s),
+                            )
+                          }
+                        />
+                      ))}
+                    </FacetOverflow>
+                  </div>
+                )}
               </div>
             )}
-            {sources.length > 1 && (
-              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Event sources">
-                <span className="text-[11px] font-medium text-(--text-dim)">Source:</span>
-                {sources.map((s) => {
-                  const isPressed = activeSources.has(s.toLowerCase());
-                  const count = sourceCounts[s] ?? 0;
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      aria-pressed={isPressed}
-                      onClick={() => {
-                        setFilter((cur) => toggleFacetInQuery(cur, "source", s));
-                      }}
-                      className={`rounded-md px-2 py-0.5 mono text-[11px] transition-colors ${
-                        isPressed
-                          ? "bg-(--surface-3) text-(--text) font-medium"
-                          : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
-                      }`}
-                    >
-                      <span>{s}</span>
-                      {count > 0 && <span className="ml-1.5 font-sans tabular-nums text-(--text-faint)">{count}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="ml-auto">
-            <DisplayOptions
-              config={displayConfig}
-              state={display}
-              onChange={setDisplay}
-              onExport={visible.length > 0 ? handleExport : undefined}
-              rows={scoped}
-            />
-          </span>
-          {/* Last in the row: the token chips are a full-width item, so anything
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="ml-auto">
+                <DisplayOptions
+                  config={displayConfig}
+                  state={display}
+                  onChange={setDisplay}
+                  onExport={visible.length > 0 ? handleExport : undefined}
+                  rows={scoped}
+                />
+              </span>
+              {/* Last in the row: the token chips are a full-width item, so anything
               after the filter box would be pushed onto a third line the moment
               a chip appeared. */}
-          <FilterInput
-            value={filter}
-            onChange={setFilter}
-            placeholder="source:… type:… is:stale"
-            label="Filter events"
-            query={parsed}
-          />
-        </div>
+              <FilterInput
+                value={filter}
+                onChange={setFilter}
+                placeholder="source:… type:… reason:… is:stale"
+                label="Filter events"
+                query={parsed}
+                facets={facets}
+              />
+            </div>
           </>
         }
       >
-
-        <table className="w-full border-separate border-spacing-0">
+        <table className="w-full table-fixed border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              {cols.map((c) => {
-                const sort = displayConfig.sorts.find((s) => s.column === c.key);
+              {listCols.map((c) => {
+                const sort = displayConfig.sorts.find(
+                  (s) => s.column === c.key,
+                );
                 const isCustom = c.isCustom || c.key.startsWith("custom:");
                 const customPath = c.key.replace(/^custom:/, "");
-                const isCurrentSort = isCustom ? display.sortBy === c.key : (sort && display.sortBy === sort.key);
+                const isCurrentSort = isCustom
+                  ? display.sortBy === c.key
+                  : sort && display.sortBy === sort.key;
                 return (
                   <Th
                     key={c.key}
                     label={c.label}
                     dir={isCurrentSort ? display.sortDir : null}
                     naturalDir={sort?.defaultDir ?? "asc"}
-                    onSort={sort || isCustom ? () => setDisplay((s) => cycleColumnSort(displayConfig, s, c.key)) : undefined}
-                    onRemove={isCustom ? () => setDisplay((s) => removeCustomColumn(s, customPath)) : undefined}
+                    onSort={
+                      sort || isCustom
+                        ? () =>
+                            setDisplay((s) =>
+                              cycleColumnSort(displayConfig, s, c.key),
+                            )
+                        : undefined
+                    }
+                    onRemove={
+                      isCustom
+                        ? () =>
+                            setDisplay((s) => removeCustomColumn(s, customPath))
+                        : undefined
+                    }
                   />
                 );
               })}
@@ -701,8 +1118,9 @@ export function Events({
           </thead>
           <tbody>
             {(() => {
-              const renderRow = (e: AdmittedEvent) => {
-                const proposalReason = (e as any).proposalReason ?? (e as any).proposal_reason ?? null;
+              const renderRow = (e: EventFilterRow) => {
+                const decision = decisionFor(e);
+                const decisionTitle = decisionText(decision);
                 const isSelected = keyOf(e) === selectedKey;
                 return (
                   <tr
@@ -711,46 +1129,82 @@ export function Events({
                     aria-selected={isSelected}
                     className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(e.status)} ${isSelected ? "row-selected" : ""}`}
                   >
-                    <td className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap" title={e.eventId}>
+                    <td
+                      className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap"
+                      title={e.eventId}
+                    >
                       {shortId(e.eventId)}
                     </td>
                     {show.has("source") && (
-                      <td className="mono max-w-24 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)" title={e.source}>
+                      <td
+                        className="mono max-w-24 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
+                        title={e.source}
+                      >
                         {e.source}
                       </td>
                     )}
                     {show.has("type") && (
-                      <td className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)" title={e.type}>
+                      <td
+                        className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)"
+                        title={e.type}
+                      >
                         {e.type}
                       </td>
                     )}
                     {show.has("subject") && (
-                      <td className="max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)" title={e.subject ?? undefined}>
+                      <td
+                        className="max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
+                        title={e.subject ?? undefined}
+                      >
                         {e.subject ?? "-"}
                       </td>
                     )}
                     {show.has("status") && (
-                      <td className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                        <div className="flex items-center whitespace-nowrap">
-                          <StateBadge state={e.status} hues={EVENT_STATUS_HUES} />
+                      <td
+                        className="max-w-44 overflow-hidden border-b border-(--border) px-3 py-1.5 whitespace-nowrap"
+                        title={e.lastPlanError ?? undefined}
+                      >
+                        <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
+                          {/* Why, on hover (WM-594): `noop · Owned paths overlap` — the
+                              raw code follows on a second line for copy/grep. */}
+                          <span
+                            className="flex shrink-0 items-center"
+                            title={
+                              decisionTitle
+                                ? decision?.reason &&
+                                  decision.reason !== decisionTitle
+                                  ? `${decisionTitle}\n${decision.reason}`
+                                  : decisionTitle
+                                : undefined
+                            }
+                            data-decision={decision?.outcome ?? undefined}
+                          >
+                            <StateBadge
+                              state={e.status}
+                              hues={EVENT_STATUS_HUES}
+                            />
+                            {decision?.outcome === "refused" && (
+                              <span className="ml-1.5">
+                                <StateBadge
+                                  state="refused"
+                                  hues={LIST_STATUS_HUES}
+                                  dot={false}
+                                />
+                              </span>
+                            )}
+                          </span>
                           {e.planFailures > 0 && (
-                            <span className="ml-2 whitespace-nowrap text-[11px] text-(--hue-err)">
-                              {e.planFailures} plan failure{e.planFailures === 1 ? "" : "s"}
+                            <span className="shrink-0 text-[11px] text-(--hue-err)">
+                              {e.planFailures} failure
+                              {e.planFailures === 1 ? "" : "s"}
+                            </span>
+                          )}
+                          {e.lastPlanError && (
+                            <span className="mono min-w-0 truncate text-(--text-dim)">
+                              {e.lastPlanError}
                             </span>
                           )}
                         </div>
-                        {/* Why the event is parked, on the row: `.mono` carries its own
-                            11.5px, so no size utility (it is unlayered and would win).
-                            The detail pane keeps the untruncated error. */}
-                        {e.lastPlanError ? (
-                          <div className="mono mt-0.5 truncate whitespace-nowrap text-(--text-dim)" title={e.lastPlanError}>
-                            {e.lastPlanError}
-                          </div>
-                        ) : proposalReason ? (
-                          <div className="mono mt-0.5 truncate whitespace-nowrap text-(--text-dim)" title={proposalReason}>
-                            {proposalReason}
-                          </div>
-                        ) : null}
                       </td>
                     )}
                     {show.has("admitted") && (
@@ -758,48 +1212,43 @@ export function Events({
                         <Ago iso={e.admittedAt} now={now} />
                       </td>
                     )}
-                    {cols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
-                      <CustomCell key={c.key} row={e} path={c.key.replace(/^custom:/, "")} />
-                    ))}
+                    {listCols
+                      .filter((c) => c.isCustom || c.key.startsWith("custom:"))
+                      .map((c) => (
+                        <CustomCell
+                          key={c.key}
+                          row={e}
+                          path={c.key.replace(/^custom:/, "")}
+                        />
+                      ))}
                   </tr>
                 );
               };
-              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
-              return sections.map((s) => {
-                const closed = display.collapsed.includes(s.key);
+              return windowTokens.map((token) => {
+                if (token.length === 1) return renderRow(token[0]);
+                const [s, sub] = token;
                 return (
-                  <Fragment key={s.key}>
-                    <GroupHeaderRow
-                      colSpan={cols.length}
-                      section={s}
-                      collapsed={closed}
-                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
-                    />
-                    {!closed &&
-                      (s.subsections
-                        ? s.subsections.map((child) => {
-                            const childClosed = display.collapsed.includes(child.key);
-                            return (
-                              <Fragment key={child.key}>
-                                <GroupHeaderRow
-                                  colSpan={cols.length}
-                                  section={child}
-                                  collapsed={childClosed}
-                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
-                                  sub
-                                />
-                                {!childClosed && child.rows.map(renderRow)}
-                              </Fragment>
-                            );
-                          })
-                        : s.rows.map(renderRow))}
-                  </Fragment>
+                  <GroupHeaderRow
+                    key={`group:${s.key}`}
+                    colSpan={listCols.length}
+                    section={s}
+                    collapsed={display.collapsed.includes(s.key)}
+                    onToggle={() =>
+                      setDisplay((st) => toggleCollapsed(st, s.key))
+                    }
+                    sub={sub}
+                  />
                 );
               });
             })()}
+            <TableWindowFooter
+              colSpan={listCols.length}
+              range={[windowStart, windowEnd, tokens.length]}
+              move={moveWindow}
+            />
             {visible.length === 0 && (
               <ListEmpty
-                colSpan={cols.length}
+                colSpan={listCols.length}
                 query={list}
                 filtered={tabScoped.length > 0}
                 onClear={
@@ -815,8 +1264,8 @@ export function Events({
                   context.kind === "repo"
                     ? `No events for ${context.name}.`
                     : tab === "all"
-                    ? "No events."
-                    : `No ${TAB_LABEL[tab].toLowerCase()} events.`
+                      ? "No events."
+                      : `No ${TAB_LABEL[tab].toLowerCase()} events.`
                 }
                 escHint={Boolean(filter.trim())}
                 action={
@@ -834,7 +1283,10 @@ export function Events({
         <DetailPane
           widthClass="w-[440px]"
           title={
-            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal">
+            <nav
+              aria-label="Breadcrumb"
+              className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
+            >
               <button
                 type="button"
                 onClick={() => onSelectEvent(null)}
@@ -846,7 +1298,10 @@ export function Events({
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>
-              <span className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)" aria-current="page">
+              <span
+                className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)"
+                aria-current="page"
+              >
                 <StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />
                 <span className="truncate mono" title={sel.eventId}>
                   {shortId(sel.eventId)}
@@ -862,23 +1317,39 @@ export function Events({
                   disabled={!connected || requeue.isPending}
                   onClick={() => requeue.mutate(sel)}
                 >
-                  Requeue <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">q</span>
+                  Requeue{" "}
+                  <span
+                    className="mono ml-1 text-(--text-faint)"
+                    aria-hidden="true"
+                  >
+                    q
+                  </span>
                 </Button>
               )}
               <div className="flex items-center gap-1.5">
                 {onJumpChain && (
                   <Button
-                    onClick={() => onJumpChain(sel.correlationId ?? sel.eventId, `event:${sel.source}:${sel.eventId}`)}
+                    onClick={() =>
+                      onJumpChain(
+                        sel.correlationId ?? sel.eventId,
+                        `event:${sel.source}:${sel.eventId}`,
+                      )
+                    }
                   >
                     View chain
                   </Button>
                 )}
-                <Button disabled={!connected || replay.isPending} onClick={() => setConfirmReplay(true)}>
+                <Button
+                  disabled={!connected || replay.isPending}
+                  onClick={() => setConfirmReplay(true)}
+                >
                   Replay…
                 </Button>
                 <Button
                   disabled={!connected}
-                  onClick={() => onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now()))}
+                  onClick={() =>
+                    onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now()))
+                  }
                 >
                   Trigger again…
                 </Button>
@@ -888,17 +1359,69 @@ export function Events({
           utility={<CopyActions id={sel.eventId} idLabel="event id" />}
           close={<Button onClick={() => onSelectEvent(null)}>Close</Button>}
         >
-
           <Section title="Event" icons>
             <KV k="source" v={sel.source} />
             <KV k="type" v={sel.type} />
             <KV k="subject" v={sel.subject} />
-            <KV k="status" v={<StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />} />
+            <KV
+              k="status"
+              v={<StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />}
+            />
+            {(() => {
+              // Why the planner did what it did (WM-594): directly under status,
+              // humanized, raw code in the tooltip, references as jump links.
+              const d = decisionFor(sel);
+              if (!d) return null;
+              return (
+                <KV
+                  k="decision"
+                  v={
+                    <span
+                      className="flex min-w-0 flex-wrap items-baseline gap-1.5 whitespace-normal"
+                      data-testid="event-decision"
+                      title={d.reason ?? undefined}
+                    >
+                      <StateBadge
+                        state={d.outcome}
+                        hues={LIST_STATUS_HUES}
+                        dot={false}
+                      />
+                      {d.outcome === "planned" &&
+                        d.status &&
+                        d.status !== "approved" && (
+                          <span className="text-(--text-faint)">
+                            ({d.status})
+                          </span>
+                        )}
+                      {d.reason && (
+                        <>
+                          <span
+                            className="text-(--text-faint)"
+                            aria-hidden="true"
+                          >
+                            ·
+                          </span>
+                          <ReasonText
+                            code={d.reason}
+                            onJumpRun={onJumpRun}
+                            onJumpProposal={onJumpProposal}
+                            className="min-w-0 break-words"
+                          />
+                        </>
+                      )}
+                    </span>
+                  }
+                />
+              );
+            })()}
             <KV
               k="correlationId"
               v={
                 sel.correlationId && onJumpChain ? (
-                  <JumpLink onClick={() => onJumpChain(sel.correlationId!)} title="Open chain trace">
+                  <JumpLink
+                    onClick={() => onJumpChain(sel.correlationId!)}
+                    title="Open chain trace"
+                  >
                     {sel.correlationId}
                   </JumpLink>
                 ) : (
@@ -910,7 +1433,10 @@ export function Events({
               k="causationId"
               v={
                 sel.causationId ? (
-                  <JumpLink onClick={() => onJumpRun(sel.causationId!)} title="The run that emitted this event">
+                  <JumpLink
+                    onClick={() => onJumpRun(sel.causationId!)}
+                    title="The run that emitted this event"
+                  >
                     {shortId(sel.causationId)}
                   </JumpLink>
                 ) : null
@@ -923,7 +1449,10 @@ export function Events({
               k="proposal"
               v={
                 sel.proposalId ? (
-                  <JumpLink onClick={() => onJumpProposal(sel.proposalId!)} title={sel.proposalId}>
+                  <JumpLink
+                    onClick={() => onJumpProposal(sel.proposalId!)}
+                    title={sel.proposalId}
+                  >
                     {shortId(sel.proposalId)}
                   </JumpLink>
                 ) : null
@@ -933,7 +1462,10 @@ export function Events({
               k="run"
               v={
                 sel.runId ? (
-                  <JumpLink onClick={() => onJumpRun(sel.runId!)} title={sel.runId}>
+                  <JumpLink
+                    onClick={() => onJumpRun(sel.runId!)}
+                    title={sel.runId}
+                  >
                     {shortId(sel.runId)}
                   </JumpLink>
                 ) : null
@@ -942,15 +1474,28 @@ export function Events({
           </Section>
 
           {(() => {
-            const r = (sel as any).proposalReason ?? (sel as any).proposal_reason ?? null;
-            if (sel.planFailures <= 0 && !sel.lastPlanError && !r) return null;
+            const ticket = eventTicket(sel);
+            if (!ticket) return null;
+            return (
+              <TicketDecisionsPanel
+                ticket={ticket}
+                now={now}
+                onJumpRun={onJumpRun}
+                onJumpProposal={onJumpProposal}
+              />
+            );
+          })()}
+
+          {(() => {
+            if (sel.planFailures <= 0 && !sel.lastPlanError) return null;
             const err = sel.lastPlanError;
-            const hue = err ? "var(--hue-err)" : "var(--hue-warn)";
+            const hue = "var(--hue-err)";
             return (
               <Section title="Planning" icons>
-                {sel.planFailures > 0 && <KV k="planFailures" v={String(sel.planFailures)} />}
-                {r && <KV k="proposalReason" v={r} />}
-                {(err || r) && (
+                {sel.planFailures > 0 && (
+                  <KV k="planFailures" v={String(sel.planFailures)} />
+                )}
+                {err && (
                   <div
                     className="mt-1.5 rounded-md px-2.5 py-1.5 text-[12px]"
                     style={{
@@ -958,7 +1503,7 @@ export function Events({
                       background: `color-mix(in oklch, ${hue} 10%, transparent)`,
                     }}
                   >
-                    {err ?? r}
+                    {err}
                   </div>
                 )}
               </Section>
@@ -976,7 +1521,10 @@ export function Events({
       )}
 
       {confirmReplay && sel && (
-        <Dialog title={`Replay ${sel.eventId} through intake?`} onClose={() => setConfirmReplay(false)}>
+        <Dialog
+          title={`Replay ${sel.eventId} through intake?`}
+          onClose={() => setConfirmReplay(false)}
+        >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             Replay re-injects this envelope through intake.
           </div>

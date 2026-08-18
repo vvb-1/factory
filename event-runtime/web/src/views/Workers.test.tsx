@@ -1,8 +1,15 @@
 import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  CapacityBand,
   Workers,
   capacityFromWorkers,
   defaultWorkerTab,
@@ -17,11 +24,16 @@ import type { Worker, WorkerCapacity, WorkerState } from "../types";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
 });
 
 const NOW = new Date().toISOString();
 
-function stubWorker(workerId: string, state: WorkerState, stale = false): Worker {
+function stubWorker(
+  workerId: string,
+  state: WorkerState,
+  stale = false,
+): Worker {
   return {
     workerId,
     host: "lab-1",
@@ -41,20 +53,33 @@ function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 const noop = () => {};
 
 function renderWorkers() {
   return renderWithClient(
-    <Workers context={{ kind: "all" }} focusWorkerId={null} onSelectWorker={noop} />,
+    <Workers
+      context={{ kind: "all" }}
+      focusWorkerId={null}
+      onSelectWorker={noop}
+    />,
   );
 }
 
-function withWorkers(workers: Worker[], fn: () => Promise<void>, capacity?: WorkerCapacity) {
+function withWorkers(
+  workers: Worker[],
+  fn: () => Promise<void>,
+  capacity?: WorkerCapacity,
+) {
   const orig = api.workers;
-  api.workers = async () => ({ workers, capacity: capacity ?? capacityFromWorkers(workers) });
+  api.workers = async () => ({
+    workers,
+    capacity: capacity ?? capacityFromWorkers(workers),
+  });
   return fn().finally(() => {
     api.workers = orig;
   });
@@ -80,15 +105,21 @@ describe("worker live/stopped partition (WM-98)", () => {
     ];
     const { live, stopped } = partitionWorkers(rows);
     expect(live.map((w) => w.workerId)).toEqual(["w_idle", "w_stale"]);
-    expect(stopped.map((w) => w.workerId)).toEqual(["w_stopped_1", "w_stopped_2"]);
+    expect(stopped.map((w) => w.workerId)).toEqual([
+      "w_stopped_1",
+      "w_stopped_2",
+    ]);
   });
 });
 
 describe("default worker tab (WM-98)", () => {
   test("opens on Live when at least one worker is live", () => {
-    expect(defaultWorkerTab([stubWorker("w_stopped", "stopped"), stubWorker("w_idle", "idle")])).toBe(
-      "LIVE",
-    );
+    expect(
+      defaultWorkerTab([
+        stubWorker("w_stopped", "stopped"),
+        stubWorker("w_idle", "idle"),
+      ]),
+    ).toBe("LIVE");
   });
 
   test("opens on All when every worker is stopped, and when the registry is empty", () => {
@@ -99,11 +130,58 @@ describe("default worker tab (WM-98)", () => {
 
 describe("worker capacity and draining state (WM-228)", () => {
   test("draining is explicit unless stale overrides the supervisor request", () => {
-    expect(workerDisplayState({ ...stubWorker("w_drain", "idle"), draining: true })).toBe("draining");
-    expect(workerDisplayState({ ...stubWorker("w_stale", "busy", true), draining: true })).toBe("stale");
+    expect(
+      workerDisplayState({ ...stubWorker("w_drain", "idle"), draining: true }),
+    ).toBe("draining");
+    expect(
+      workerDisplayState({
+        ...stubWorker("w_stale", "busy", true),
+        draining: true,
+      }),
+    ).toBe("stale");
   });
 
-  test("shows running/capacity, queue limiter, class caps, and an explicit draining row", async () => {
+  test("uses worker-health hues on the running number only", () => {
+    const capacity: WorkerCapacity = {
+      running: 1,
+      capacity: 2,
+      queued: 0,
+      live: 2,
+      idle: 1,
+      draining: 0,
+      target: 2,
+      min: 1,
+      max: 2,
+      supervisor: "active",
+      source: "worker-policy",
+      limitingFactor: null,
+      classes: [],
+    };
+    const view = render(<CapacityBand capacity={capacity} />);
+    const runningValue = () =>
+      view.container.querySelector("[data-stat-value]");
+
+    expect(runningValue()?.textContent).toBe("1");
+    expect(runningValue()?.getAttribute("style")).toContain("var(--hue-ok)");
+    expect(runningValue()?.nextElementSibling?.textContent).toBe(" / 2");
+    expect(
+      runningValue()?.nextElementSibling?.getAttribute("style"),
+    ).toBeNull();
+
+    view.rerender(
+      <CapacityBand
+        capacity={{ ...capacity, queued: 1, limitingFactor: "at worker max" }}
+      />,
+    );
+    expect(runningValue()?.getAttribute("style")).toContain("var(--hue-warn)");
+
+    view.rerender(
+      <CapacityBand capacity={{ ...capacity, supervisor: "stopped" }} />,
+    );
+    expect(runningValue()?.getAttribute("style")).toContain("var(--hue-err)");
+  });
+
+  test("shows four capacity stat cells, queue limiter, class caps, and an explicit draining row", async () => {
     const worker = {
       ...stubWorker("w_drain", "busy"),
       draining: true,
@@ -125,36 +203,63 @@ describe("worker capacity and draining state (WM-228)", () => {
       limitingFactor: "at worker max",
       classes: [{ name: "heavy", running: 1, capacity: 2 }],
     };
-    await withWorkers([worker], async () => {
-      const { getByText, getAllByText, getByTitle } = renderWorkers();
-      await waitFor(() => expect(getByText("1 running / 2 capacity")).toBeTruthy());
-      expect(getByText("4 queued runs")).toBeTruthy();
-      expect(getByText("at worker max")).toBeTruthy();
-      expect(getByText("heavy 1/2")).toBeTruthy();
-      expect(getAllByText("draining").length).toBeGreaterThan(0);
-      expect(getByTitle("Open run_capacity_123456")).toBeTruthy();
-      expect(getByTitle(new RegExp(`Started ${NOW}`))).toBeTruthy();
-    }, capacity);
+    await withWorkers(
+      [worker],
+      async () => {
+        const { getByText, getAllByText, getByTitle, getByRole } =
+          renderWorkers();
+        const summary = await waitFor(() =>
+          getByRole("region", { name: "Worker pool capacity" }),
+        );
+        const statCells = summary.querySelectorAll("[data-stat-card]");
+        expect(statCells).toHaveLength(4);
+        expect(Array.from(statCells).map((cell) => cell.textContent)).toEqual([
+          "Running1 / 2",
+          "Queued4",
+          "Idle0",
+          "Target0supervisor active",
+        ]);
+        expect(
+          statCells[0]?.querySelector("[data-stat-value]")?.textContent,
+        ).toBe("1");
+        expect(
+          statCells[0]
+            ?.querySelector("[data-stat-value]")
+            ?.getAttribute("style"),
+        ).toContain("var(--hue-warn)");
+        expect(getByText("at worker max")).toBeTruthy();
+        expect(getByText("heavy 1/2")).toBeTruthy();
+        expect(getAllByText("draining").length).toBeGreaterThan(0);
+        expect(getByTitle("Open run_capacity_123456")).toBeTruthy();
+        expect(getByTitle(new RegExp(`Started ${NOW}`))).toBeTruthy();
+      },
+      capacity,
+    );
   });
 });
 
 describe("Workers responsive state control (WM-163)", () => {
   test("offers every state in a compact mobile control and keeps bracket cycling in sync", async () => {
-    const workers = [stubWorker("w_idle", "idle"), stubWorker("w_stopped", "stopped")];
+    const workers = [
+      stubWorker("w_idle", "idle"),
+      stubWorker("w_stopped", "stopped"),
+    ];
     await withWorkers(workers, async () => {
       const { getByRole, getByText } = renderWorkers();
-      const stateControl = await waitFor(() => getByRole("combobox", { name: "Worker state" })) as HTMLSelectElement;
+      const stateControl = (await waitFor(() =>
+        getByRole("combobox", { name: "Worker state" }),
+      )) as HTMLSelectElement;
 
-      expect(Array.from(stateControl.options).map((option) => option.textContent)).toEqual([
-        "All 2",
-        "Live 1",
-        "Stopped 1",
-      ]);
+      expect(
+        Array.from(stateControl.options).map((option) => option.textContent),
+      ).toEqual(["All 2", "Live 1", "Stopped 1"]);
       expect(stateControl.value).toBe("LIVE");
 
       fireEvent.change(stateControl, { target: { value: "STOPPED" } });
       await waitFor(() => expect(getByText("w_stopped")).toBeTruthy());
-      expect(getByRole("tab", { selected: true }).textContent).toContain("Stopped");
+      expect(getByRole("tab", { selected: true }).textContent).toContain(
+        "Stopped",
+      );
 
       fireEvent.keyDown(document.body, { key: "]" });
       await waitFor(() => expect(stateControl.value).toBe("ALL"));
@@ -185,7 +290,10 @@ describe("Workers empty tab copy (WM-162)", () => {
       expect(await findByText("No live workers")).toBeTruthy();
 
       act(() => {
-        changeInput(getByRole("combobox", { name: "Filter workers" }), "missing");
+        changeInput(
+          getByRole("combobox", { name: "Filter workers" }),
+          "missing",
+        );
       });
       expect(await findByText("No workers match this filter.")).toBeTruthy();
       expect(await findByText("Esc clears the filter")).toBeTruthy();
@@ -207,12 +315,17 @@ describe("Workers view default visibility (WM-98)", () => {
       });
       expect(queryByText("w_stopped_old")).toBeNull();
       expect(queryByText("w_stopped_new")).toBeNull();
-      expect(getByRole("tab", { selected: true }).textContent).toContain("Live");
+      expect(getByRole("tab", { selected: true }).textContent).toContain(
+        "Live",
+      );
     });
   });
 
   test("an all-stopped registry opens on All so the page is not blank", async () => {
-    const workers = [stubWorker("w_stopped_1", "stopped"), stubWorker("w_stopped_2", "stopped")];
+    const workers = [
+      stubWorker("w_stopped_1", "stopped"),
+      stubWorker("w_stopped_2", "stopped"),
+    ];
     await withWorkers(workers, async () => {
       const { getByText, getByRole } = renderWorkers();
       await waitFor(() => {
@@ -227,13 +340,28 @@ describe("Workers view default visibility (WM-98)", () => {
 describe("fleet banner vs Live tab (WM-155)", () => {
   test("classifier: empty, all-stopped, and stale-only are distinct; idle/busy suppress the banner", () => {
     expect(fleetBanner([])).toEqual({ kind: "empty" });
-    expect(fleetBanner([stubWorker("w_stopped", "stopped")])).toEqual({ kind: "all-stopped", count: 1 });
-    expect(fleetBanner([stubWorker("w_stale", "busy", true)])).toEqual({ kind: "stale", stale: 1, stopped: 0 });
+    expect(fleetBanner([stubWorker("w_stopped", "stopped")])).toEqual({
+      kind: "all-stopped",
+      count: 1,
+    });
+    expect(fleetBanner([stubWorker("w_stale", "busy", true)])).toEqual({
+      kind: "stale",
+      stale: 1,
+      stopped: 0,
+    });
     expect(
-      fleetBanner([stubWorker("w_stale", "idle", true), stubWorker("w_stopped", "stopped")]),
+      fleetBanner([
+        stubWorker("w_stale", "idle", true),
+        stubWorker("w_stopped", "stopped"),
+      ]),
     ).toEqual({ kind: "stale", stale: 1, stopped: 1 });
     expect(fleetBanner([stubWorker("w_idle", "idle")])).toBeNull();
-    expect(fleetBanner([stubWorker("w_idle", "idle"), stubWorker("w_stale", "busy", true)])).toBeNull();
+    expect(
+      fleetBanner([
+        stubWorker("w_idle", "idle"),
+        stubWorker("w_stale", "busy", true),
+      ]),
+    ).toBeNull();
   });
 
   test("stale-only fleet opens on Live with the stale row and does not say “No live workers detected”", async () => {
@@ -243,7 +371,9 @@ describe("fleet banner vs Live tab (WM-155)", () => {
       await waitFor(() => {
         expect(getByText("w_stale_only")).toBeTruthy();
       });
-      expect(getByRole("tab", { selected: true }).textContent).toContain("Live");
+      expect(getByRole("tab", { selected: true }).textContent).toContain(
+        "Live",
+      );
       expect(queryByText("No live workers detected")).toBeNull();
       expect(getByText("Workers are stale")).toBeTruthy();
       expect(getByText(/missed the heartbeat window/i)).toBeTruthy();
@@ -255,12 +385,17 @@ describe("fleet banner vs Live tab (WM-155)", () => {
       const { getByText, queryByText, findByText } = renderWorkers();
       expect(await findByText("No workers registered")).toBeTruthy();
       expect(queryByText("No live workers detected")).toBeNull();
-      expect(getByText(/No workers have registered with the runtime/i)).toBeTruthy();
+      expect(
+        getByText(/No workers have registered with the runtime/i),
+      ).toBeTruthy();
     });
   });
 
   test("all-stopped banner says workers are stopped, not stale-or-stopped", async () => {
-    const workers = [stubWorker("w_stopped_1", "stopped"), stubWorker("w_stopped_2", "stopped")];
+    const workers = [
+      stubWorker("w_stopped_1", "stopped"),
+      stubWorker("w_stopped_2", "stopped"),
+    ];
     await withWorkers(workers, async () => {
       const { getByText, queryByText } = renderWorkers();
       await waitFor(() => {
@@ -295,9 +430,15 @@ describe("Workers copy chords and hints (WM-233)", () => {
     const w = stubWorker("worker-copy-test", "idle");
     await withWorkers([w], async () => {
       const r = renderWithClient(
-        <Workers context={{ kind: "all" }} focusWorkerId="worker-copy-test" onSelectWorker={noop} />,
+        <Workers
+          context={{ kind: "all" }}
+          focusWorkerId="worker-copy-test"
+          onSelectWorker={noop}
+        />,
       );
-      const idBtn = await r.findByRole("button", { name: "Copy worker id (c)" });
+      const idBtn = await r.findByRole("button", {
+        name: "Copy worker id (c)",
+      });
 
       // Verify icon-action tooltips preserve shortcut discoverability.
       expect(idBtn.getAttribute("title")).toBe("Copy worker id · c");
@@ -323,7 +464,11 @@ describe("Workers Open run action shortcut badge (WM-236)", () => {
     };
     await withWorkers([workerWithRun], async () => {
       const { getByRole } = renderWithClient(
-        <Workers context={{ kind: "all" }} focusWorkerId="w_busy_1" onSelectWorker={noop} />,
+        <Workers
+          context={{ kind: "all" }}
+          focusWorkerId="w_busy_1"
+          onSelectWorker={noop}
+        />,
       );
 
       await waitFor(() => {
@@ -348,7 +493,11 @@ describe("Workers Open run action shortcut badge (WM-236)", () => {
     const workerIdle: Worker = stubWorker("w_idle_1", "idle");
     await withWorkers([workerIdle], async () => {
       const { queryByRole, container } = renderWithClient(
-        <Workers context={{ kind: "all" }} focusWorkerId="w_idle_1" onSelectWorker={noop} />,
+        <Workers
+          context={{ kind: "all" }}
+          focusWorkerId="w_idle_1"
+          onSelectWorker={noop}
+        />,
       );
 
       await waitFor(() => {
@@ -378,10 +527,17 @@ describe("Active agent, target, and model columns in Workers view (WM-463)", () 
     repos: ["factory"],
   };
 
-  function withRunsAndWorkers(workers: Worker[], runs: typeof stubRun[], fn: () => Promise<void>) {
+  function withRunsAndWorkers(
+    workers: Worker[],
+    runs: (typeof stubRun)[],
+    fn: () => Promise<void>,
+  ) {
     const origWorkers = api.workers;
     const origRuns = api.runs;
-    api.workers = async () => ({ workers, capacity: capacityFromWorkers(workers) });
+    api.workers = async () => ({
+      workers,
+      capacity: capacityFromWorkers(workers),
+    });
     api.runs = async () => ({ runs });
     return fn().finally(() => {
       api.workers = origWorkers;
@@ -389,7 +545,7 @@ describe("Active agent, target, and model columns in Workers view (WM-463)", () 
     });
   }
 
-  test("renders Agent, Target, Active Model columns by default with run details and inline agent", async () => {
+  test("renders Agent, Target, and Model columns by default without repeating the agent in Current run", async () => {
     const workerBusy: Worker = {
       ...stubWorker("w_busy_active", "busy"),
       currentRun: "run_active_463",
@@ -406,15 +562,55 @@ describe("Active agent, target, and model columns in Workers view (WM-463)", () 
       // Verify Column headers exist
       expect(getByRole("columnheader", { name: "Agent" })).toBeTruthy();
       expect(getByRole("columnheader", { name: "Target" })).toBeTruthy();
-      expect(getByRole("columnheader", { name: "Active Model" })).toBeTruthy();
+      expect(getByRole("columnheader", { name: "Model" })).toBeTruthy();
 
-      // Verify busy worker displays agent, target, active model, and inline agent with run
-      expect(getAllByText("dispatch@1").length).toBeGreaterThanOrEqual(1);
+      // Verify busy worker displays agent once, plus target and active model.
+      expect(getAllByText("dispatch@1")).toHaveLength(1);
       expect(getByText("factory · WM-253")).toBeTruthy();
       expect(getByText("openai-codex/gpt-5.6-sol")).toBeTruthy();
 
       // Verify idle worker displays dashes for active columns
       expect(getByText("w_idle_free")).toBeTruthy();
+    });
+  });
+
+  test("uses the compact default column set and renders optional adapters as a titled count", async () => {
+    const workerBusy: Worker = {
+      ...stubWorker("w_busy_active", "busy"),
+      currentRun: "run_active_463",
+      adapters: ["actions", "agy", "claude", "command", "cursor", "fake", "pi"],
+    };
+
+    await withRunsAndWorkers([workerBusy], [stubRun], async () => {
+      const { getByRole, getByTitle, queryByRole } = renderWorkers();
+      await waitFor(() =>
+        expect(getByRole("columnheader", { name: "Worker" })).toBeTruthy(),
+      );
+
+      for (const name of [
+        "Worker",
+        "State",
+        "Agent",
+        "Target",
+        "Model",
+        "Current run",
+        "Uptime",
+        "Heartbeat",
+      ]) {
+        expect(getByRole("columnheader", { name })).toBeTruthy();
+      }
+      for (const name of ["Host", "PID", "Adapters", "Labels"]) {
+        expect(queryByRole("columnheader", { name })).toBeNull();
+      }
+
+      fireEvent.click(getByRole("button", { name: /display/i }));
+      fireEvent.click(getByRole("button", { name: "Adapters" }));
+
+      expect(getByRole("columnheader", { name: "Adapters" })).toBeTruthy();
+      const adapters = getByTitle(
+        "actions, agy, claude, command, cursor, fake, pi",
+      );
+      expect(adapters.textContent).toBe("7 adapters");
     });
   });
 
@@ -433,7 +629,10 @@ describe("Active agent, target, and model columns in Workers view (WM-463)", () 
       });
 
       act(() => {
-        changeInput(getByRole("combobox", { name: "Filter workers" }), "dispatch");
+        changeInput(
+          getByRole("combobox", { name: "Filter workers" }),
+          "dispatch",
+        );
       });
 
       await waitFor(() => {
@@ -442,7 +641,10 @@ describe("Active agent, target, and model columns in Workers view (WM-463)", () 
       });
 
       act(() => {
-        changeInput(getByRole("combobox", { name: "Filter workers" }), "WM-253");
+        changeInput(
+          getByRole("combobox", { name: "Filter workers" }),
+          "WM-253",
+        );
       });
 
       await waitFor(() => {
@@ -460,15 +662,19 @@ describe("Active agent, target, and model columns in Workers view (WM-463)", () 
 
     await withRunsAndWorkers([workerBusy], [stubRun], async () => {
       const { findByText, getAllByText } = renderWithClient(
-        <Workers context={{ kind: "all" }} focusWorkerId="w_busy_active" onSelectWorker={noop} />,
+        <Workers
+          context={{ kind: "all" }}
+          focusWorkerId="w_busy_active"
+          onSelectWorker={noop}
+        />,
       );
 
       await findByText("Active Run");
       expect(getAllByText("dispatch@1").length).toBeGreaterThanOrEqual(2);
       expect(getAllByText("factory · WM-253").length).toBeGreaterThanOrEqual(1);
-      expect(getAllByText("openai-codex/gpt-5.6-sol").length).toBeGreaterThanOrEqual(1);
+      expect(
+        getAllByText("openai-codex/gpt-5.6-sol").length,
+      ).toBeGreaterThanOrEqual(1);
     });
   });
 });
-
-

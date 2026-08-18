@@ -13,7 +13,7 @@ container every agent must live in, and not a replacement for the nav rail.
   It is the home for anything that is not a `repos.yaml` project: unscoped
   runs, registry agents, workers, the graph, inject.
 - **A factory repo tab** filters Events / Proposals / Runs (and Overview
-  lists that can be filtered honestly) to rows whose spec or envelope *names*
+  lists that can be filtered honestly) to rows whose spec or envelope _names_
   that repo. It does not remount a different app. A run's repo is optional
   input (`repoPin.repo` / `input.repo` / `input.repos[]`), not a foreign key.
 - **In flight** is a query tab, not a fake repo: Runs in `LEASED` or
@@ -31,8 +31,8 @@ container every agent must live in, and not a replacement for the nav rail.
 - `g e` / `g r` / `j`/`k` / Esc stay inside the current context. Do not steal
   `[` / `]` (status tabs). One poller; background tabs restore a filter on
   focus, they are not keep-alive iframes.
-- The Projects *view* (OPS-300) is a list of the registry, including janitor
-  later. Context tabs *use* `GET /repos`; they do not replace that view.
+- The Projects _view_ (OPS-300) is a list of the registry, including janitor
+  later. Context tabs _use_ `GET /repos`; they do not replace that view.
 - Pinning a specific run as a document tab on the same strip is OPS-357
   (v2) — not this decision.
 
@@ -53,3 +53,23 @@ this decision.
 
 See that ticket. Dry is default; Apply is behind a typed confirm of the repo
 name, and only after a Dry in the same panel. Out of scope for context tabs.
+
+## Code formatting & Prettier check (WM-610)
+
+Decided 2026-08-18. Big-bang one-shot `prettier --write` reformat across the ~283 code
+files (`.mjs`, `.ts`, `.tsx`, `.md`) to land when the review queue drains. Sequence
+strictly after WM-607 (ESLint) is merged so ESLint and Prettier rules do not conflict.
+Configure `.prettierrc` and `.prettierignore` (ignoring `dist/`, `graphify-out/`,
+`node_modules/`, `bun.lock`, `deploy/launchd/`).
+
+## Web UI Browser E2E suite (WM-611)
+
+Decided 2026-08-18. Browser-level Playwright test suite in `event-runtime/web/e2e/`,
+covering 5 core user journeys against mock/seed runtime. Gated in GitHub Actions via
+an opt-in `run-e2e` label until proven stable on self-hosted runners.
+
+## Telegram actions and write paths (WM-288)
+
+Decided 2026-08-18. Telegram notifications remain outbound-only deep links to the Web UI
+over Tailscale. No inbound Telegram bot webhook endpoint or long-polling write path will
+be introduced into `serve`, preserving the loopback-only security confinement (OPS-408, WM-61).

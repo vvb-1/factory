@@ -1,14 +1,34 @@
 import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Overview, groupJournalEntries, buildAnomalyRows } from "./Overview";
+import {
+  Overview,
+  groupJournalEntries,
+  formatActivityGroup,
+  buildAnomalyRows,
+  groupDeadLetters,
+  stripAnomalyKindPrefix,
+} from "./Overview";
 import { shortId } from "../components/ui";
 import { api } from "../api";
 import type { OperatorContext } from "../context";
 import { scopedCount, scopedTally } from "../context";
 import { changeInput } from "../test-render";
-import type { AdmittedEvent, JournalEntry, Proposal, RunListItem, StatusView } from "../types";
+import type {
+  AdmittedEvent,
+  EventFocus,
+  JournalEntry,
+  Proposal,
+  RunListItem,
+  StatusView,
+} from "../types";
 
 afterEach(() => {
   cleanup();
@@ -18,12 +38,16 @@ function renderWithClient(ui: React.ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 const noop = () => {};
 
-function baseStatus(overrides: Partial<StatusView["anomalies"]> = {}): StatusView {
+function baseStatus(
+  overrides: Partial<StatusView["anomalies"]> = {},
+): StatusView {
   return {
     env: { name: "test", home: "/tmp/test", adapter: null },
     events: {},
@@ -59,7 +83,10 @@ function baseStatus(overrides: Partial<StatusView["anomalies"]> = {}): StatusVie
   };
 }
 
-function stubEvent(overrides: Partial<AdmittedEvent> & Pick<AdmittedEvent, "eventId" | "status" | "repos">): AdmittedEvent {
+function stubEvent(
+  overrides: Partial<AdmittedEvent> &
+    Pick<AdmittedEvent, "eventId" | "status" | "repos">,
+): AdmittedEvent {
   const now = new Date().toISOString();
   return {
     source: "github",
@@ -78,7 +105,10 @@ function stubEvent(overrides: Partial<AdmittedEvent> & Pick<AdmittedEvent, "even
   };
 }
 
-function stubRun(overrides: Partial<RunListItem> & Pick<RunListItem, "runId" | "state" | "repos">): RunListItem {
+function stubRun(
+  overrides: Partial<RunListItem> &
+    Pick<RunListItem, "runId" | "state" | "repos">,
+): RunListItem {
   const now = new Date().toISOString();
   return {
     attempts: 1,
@@ -115,7 +145,11 @@ const stubProposal: Proposal = {
 type OverviewCallbacks = Partial<
   Pick<
     React.ComponentProps<typeof Overview>,
-    "onJumpRun" | "onJumpProposal" | "onJumpEvents" | "onJumpRuns" | "onNavigate"
+    | "onJumpRun"
+    | "onJumpProposal"
+    | "onJumpEvents"
+    | "onJumpRuns"
+    | "onNavigate"
   >
 >;
 
@@ -140,7 +174,9 @@ function renderOverview(
 }
 
 /** Build a journal entry; the feed keeps entries newest-first, so tests pass them that way. */
-function entry(overrides: Partial<JournalEntry> & Pick<JournalEntry, "seq" | "runId" | "to">): JournalEntry {
+function entry(
+  overrides: Partial<JournalEntry> & Pick<JournalEntry, "seq" | "runId" | "to">,
+): JournalEntry {
   return {
     from: null,
     actor: "worker",
@@ -166,6 +202,13 @@ describe("groupJournalEntries (WM-100)", () => {
     expect(groups[0]!.from).toBe("PROPOSED");
     expect(groups[0]!.to).toBe("FAILED");
     expect(groups[0]!.count).toBe(4);
+    expect(groups[0]!.path).toEqual([
+      "PROPOSED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "FAILED",
+    ]);
     // Key, timestamp, and actor come from the most recent transition.
     expect(groups[0]!.seq).toBe(5);
     expect(groups[0]!.at).toBe(entries[0]!.at);
@@ -192,7 +235,13 @@ describe("groupJournalEntries (WM-100)", () => {
     const entries: JournalEntry[] = [
       entry({ seq: 3, runId: "run_c", from: "RUNNING", to: "COMPLETED" }),
       entry({ seq: 2, runId: "run_b", from: null, to: "QUEUED" }),
-      entry({ seq: 1, runId: "run_a", from: "QUEUED", to: "CANCELLED", reason: "operator" }),
+      entry({
+        seq: 1,
+        runId: "run_a",
+        from: "QUEUED",
+        to: "CANCELLED",
+        reason: "operator",
+      }),
     ];
     const groups = groupJournalEntries(entries);
     expect(groups.length).toBe(3);
@@ -201,8 +250,73 @@ describe("groupJournalEntries (WM-100)", () => {
     expect(groups[2]!.reason).toBe("operator");
   });
 
+  test("formats collapsed steps without ellipsis and suppresses state-duplicate reasons", () => {
+    const [group] = groupJournalEntries([
+      entry({
+        seq: 3,
+        runId: "run_a",
+        from: "RUNNING",
+        to: "COMPLETED",
+        reason: "exit_0",
+      }),
+      entry({ seq: 2, runId: "run_a", from: "LEASED", to: "RUNNING" }),
+      entry({ seq: 1, runId: "run_a", from: "QUEUED", to: "LEASED" }),
+    ]);
+
+    const row = formatActivityGroup(group!);
+    expect(row.steps).toBe("+3 steps");
+    expect(row.path).toBe("QUEUED → LEASED → RUNNING → COMPLETED");
+    expect(row.path).not.toContain("…");
+    expect(row.reason).toBeNull();
+  });
+
   test("empty input produces no rows", () => {
     expect(groupJournalEntries([])).toEqual([]);
+  });
+});
+
+describe("anomaly normalization (WM-548)", () => {
+  test("groups dead letters only when source and error message both match", () => {
+    const groups = groupDeadLetters([
+      { source: "chain", eventId: "chain-run_1", lastError: "duplicate key" },
+      { source: "chain", eventId: "chain-run_2", lastError: "duplicate key" },
+      { source: "chain", eventId: "chain-run_3", lastError: "timeout" },
+      { source: "github", eventId: "delivery_1", lastError: "duplicate key" },
+    ]);
+
+    expect(
+      groups.map((group) => [
+        group.source,
+        group.errorMessage,
+        group.events.length,
+      ]),
+    ).toEqual([
+      ["chain", "duplicate key", 2],
+      ["chain", "timeout", 1],
+      ["github", "duplicate key", 1],
+    ]);
+    expect(groups[0]!.events.map((event) => event.eventId)).toEqual([
+      "chain-run_1",
+      "chain-run_2",
+    ]);
+  });
+
+  test("strips a redundant kind prefix without altering unrelated text", () => {
+    expect(
+      stripAnomalyKindPrefix(
+        "configuration",
+        "configuration: FACTORY_EVENT_SECRET is unset",
+      ),
+    ).toBe("FACTORY_EVENT_SECRET is unset");
+    expect(
+      stripAnomalyKindPrefix(
+        "dead_letter",
+        "dead-lettered (chain, chain-run_123): UNIQUE constraint failed",
+      ),
+    ).toBe("chain, chain-run_123: UNIQUE constraint failed");
+    expect(
+      stripAnomalyKindPrefix("proposal", "expired open proposal prop_123"),
+    ).toBe("expired open proposal prop_123");
   });
 });
 
@@ -220,7 +334,12 @@ describe("Overview activity feed rendering (WM-100)", () => {
       entries: [
         entry({ seq: 4, runId: "run_cda2b3c0", from: "RUNNING", to: "FAILED" }),
         entry({ seq: 3, runId: "run_cda2b3c0", from: "LEASED", to: "RUNNING" }),
-        entry({ seq: 2, runId: "run_cda2b3c0", from: "PROPOSED", to: "LEASED" }),
+        entry({
+          seq: 2,
+          runId: "run_cda2b3c0",
+          from: "PROPOSED",
+          to: "LEASED",
+        }),
         entry({ seq: 1, runId: "run_other", from: null, to: "QUEUED" }),
       ],
     });
@@ -230,9 +349,11 @@ describe("Overview activity feed rendering (WM-100)", () => {
 
       await waitFor(() => getByTitle("run_cda2b3c0"));
 
-      // One row spanning the whole run: first state, ellipsis, transition count.
-      expect(getByText(/PROPOSED → … →/)).toBeTruthy();
-      expect(getByText(/· 3 transitions/)).toBeTruthy();
+      // The final state stays prominent while collapsed detail is plain-language and inspectable.
+      expect(getByText("+3 steps")).toBeTruthy();
+      expect(getByTitle("PROPOSED → LEASED → RUNNING → FAILED")).toBeTruthy();
+      expect(document.body.textContent).not.toContain("…");
+      expect(document.body.textContent).not.toContain("transitions");
       // Last state keeps its badge; the single-transition run renders plainly.
       expect(getByText("FAILED")).toBeTruthy();
       expect(getByTitle("run_other")).toBeTruthy();
@@ -300,7 +421,10 @@ describe("Overview keyboard navigation (WM-292)", () => {
     const onNavigate = mock(() => {});
 
     try {
-      const view = renderOverview({ kind: "all" }, { onJumpEvents, onNavigate });
+      const view = renderOverview(
+        { kind: "all" },
+        { onJumpEvents, onNavigate },
+      );
       fireEvent.keyDown(document.body, { key: "1", metaKey: true });
       fireEvent.keyDown(document.body, { key: "2", ctrlKey: true });
       const input = document.createElement("input");
@@ -319,12 +443,17 @@ describe("Overview keyboard navigation (WM-292)", () => {
       baseStatus({
         expiredOpenProposals: ["prop_expired"],
         deadLettered: [
-          { source: "github", eventId: "evt_dead", lastError: "planner failed" },
+          {
+            source: "github",
+            eventId: "evt_dead",
+            lastError: "planner failed",
+          },
         ],
       }),
     );
     const requeue = mock(
-      (_source: string, _eventId: string) => new Promise<{ requeued: boolean }>(() => {}),
+      (_source: string, _eventId: string) =>
+        new Promise<{ requeued: boolean }>(() => {}),
     );
     api.requeue = requeue;
 
@@ -332,8 +461,12 @@ describe("Overview keyboard navigation (WM-292)", () => {
       const view = renderOverview();
       await waitFor(() => view.getByText(/Anomalies · 2 active issues/));
 
-      const first = view.getByText("expired open proposal").closest('[tabindex="-1"]');
-      const second = view.getByText(/dead-lettered \(github, evt_dead\)/).closest('[tabindex="-1"]');
+      const first = view
+        .getByRole("button", { name: "expired open" })
+        .closest('[tabindex="-1"]');
+      const second = view
+        .getByRole("button", { name: /github.*planner failed/ })
+        .closest('[tabindex="-1"]');
       expect(first).toBeTruthy();
       expect(second).toBeTruthy();
 
@@ -345,7 +478,9 @@ describe("Overview keyboard navigation (WM-292)", () => {
       fireEvent.keyDown(document.body, { key: "." });
       expect(document.activeElement).toBe(second);
       fireEvent.keyDown(document.body, { key: "r" });
-      await waitFor(() => expect(requeue).toHaveBeenCalledWith("github", "evt_dead"));
+      await waitFor(() =>
+        expect(requeue).toHaveBeenCalledWith("github", "evt_dead"),
+      );
 
       fireEvent.keyDown(document.body, { key: "." });
       expect(document.activeElement).toBe(first);
@@ -375,7 +510,11 @@ describe("Overview anomaly deck (WM-95)", () => {
       expect(getByText(/agent: triage-scan/)).toBeTruthy();
       expect(getByText(/human_needed/)).toBeTruthy();
       expect(getByText(/ambiguous repo pin/)).toBeTruthy();
-      expect(getByText(/origin github\/evt-789/)).toBeTruthy();
+      const originId = queryByTitle("evt-789");
+      expect(originId).toBeTruthy();
+      expect(originId?.parentElement?.textContent).toBe(
+        "origin github/evt-789",
+      );
 
       // Raw id is demoted to secondary, copyable text rather than the primary label.
       const idNode = queryByTitle(`${stubProposal.id} — click to copy`);
@@ -409,13 +548,19 @@ describe("Overview anomaly deck (WM-95)", () => {
 
     try {
       const view = renderOverview();
-      const reject = await waitFor(() => view.getByRole("button", { name: "Reject…" }));
+      const reject = await waitFor(() =>
+        view.getByRole("button", { name: "Reject…" }),
+      );
 
       expect(view.queryByRole("button", { name: "Dismiss" })).toBeNull();
       fireEvent.click(reject);
 
-      const confirm = view.getByRole("button", { name: "Reject proposal" }) as HTMLButtonElement;
-      const reasonInput = view.getByLabelText("Rejection reason") as HTMLInputElement;
+      const confirm = view.getByRole("button", {
+        name: "Reject proposal",
+      }) as HTMLButtonElement;
+      const reasonInput = view.getByLabelText(
+        "Rejection reason",
+      ) as HTMLInputElement;
       expect(reasonInput.placeholder).toMatch(/Reason \(required/i);
       expect(confirm.disabled).toBe(true);
 
@@ -445,7 +590,8 @@ describe("Overview anomaly deck (WM-95)", () => {
     const origProposals = api.proposals;
     const origOutbox = api.outbox;
     const origJournal = api.journal;
-    api.status = async () => baseStatus({ expiredOpenProposals: ["prop_missing"] });
+    api.status = async () =>
+      baseStatus({ expiredOpenProposals: ["prop_missing"] });
     api.proposals = async () => ({ proposals: [] });
     api.outbox = async () => ({ outbox: [] });
     api.journal = async () => ({ entries: [], head: 0 });
@@ -465,10 +611,84 @@ describe("Overview anomaly deck (WM-95)", () => {
     }
   });
 
+  test("collapses matching dead letters, expands short event ids, and confirms bulk actions with the count", async () => {
+    const originals = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+    };
+    const eventIds = [
+      "chain-run_abcdef123456",
+      "chain-run_bcdefa234567",
+      "chain-run_cdefab345678",
+    ];
+    api.status = async () =>
+      baseStatus({
+        deadLettered: [
+          ...eventIds.map((eventId) => ({
+            source: "chain",
+            eventId,
+            lastError: "duplicate key",
+          })),
+          {
+            source: "chain",
+            eventId: "chain-run_timeout123456",
+            lastError: "timeout",
+          },
+        ],
+      });
+    api.proposals = async () => ({ proposals: [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+    const onJumpEvents = mock((_focus: EventFocus) => {});
+
+    try {
+      const view = renderOverview({ kind: "all" }, { onJumpEvents });
+      const group = await waitFor(() =>
+        view.getByRole("button", {
+          name: /3 dead-lettered.*chain.*duplicate key/,
+        }),
+      );
+
+      expect(
+        view.getByText(/Anomalies · 2 active issues · \(4 events\)/),
+      ).toBeTruthy();
+      expect(group.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(group);
+      expect(group.getAttribute("aria-expanded")).toBe("true");
+
+      const firstEvent = view.getByTitle(eventIds[0]!);
+      expect(firstEvent.textContent).toBe(shortId(eventIds[0]!));
+      fireEvent.click(firstEvent);
+      expect(onJumpEvents).toHaveBeenCalledWith({
+        source: "chain",
+        eventId: eventIds[0],
+      });
+
+      fireEvent.click(view.getByRole("button", { name: "Archive all" }));
+      expect(view.getByText("Archive 3 dead-lettered events?")).toBeTruthy();
+      expect(
+        view.getByRole("button", { name: "Archive 3 events" }),
+      ).toBeTruthy();
+    } finally {
+      api.status = originals.status;
+      api.proposals = originals.proposals;
+      api.outbox = originals.outbox;
+      api.journal = originals.journal;
+    }
+  });
+
   test("archives dead letters and releases stalled worker leases, removing both rows (WM-326)", async () => {
     const mutableApi = api as typeof api & {
-      archive: (source: string, eventId: string) => Promise<{ archived: boolean }>;
-      releaseWorker: (workerId: string, runId: string) => Promise<{ released: boolean; runId: string }>;
+      archive: (
+        source: string,
+        eventId: string,
+      ) => Promise<{ archived: boolean }>;
+      releaseWorker: (
+        workerId: string,
+        runId: string,
+      ) => Promise<{ released: boolean; runId: string }>;
     };
     const originals = {
       status: api.status,
@@ -483,22 +703,41 @@ describe("Overview anomaly deck (WM-95)", () => {
     api.status = async () =>
       baseStatus({
         deadLettered: deadLettered
-          ? [{ source: "github", eventId: "dead-1", lastError: "historical failure" }]
+          ? [
+              {
+                source: "github",
+                eventId: "dead-1",
+                lastError: "historical failure",
+              },
+            ]
           : [],
         stalledWorkers: stalled
-          ? [{ workerId: "worker-1", runId: "run-1", host: "lab", lastSeen: new Date(0).toISOString() }]
+          ? [
+              {
+                workerId: "worker-1",
+                runId: "run-1",
+                host: "lab",
+                lastSeen: new Date(0).toISOString(),
+              },
+            ]
           : [],
       });
     api.proposals = async () => ({ proposals: [] });
     api.outbox = async () => ({ outbox: [] });
     api.journal = async () => ({ entries: [], head: 0 });
     mutableApi.archive = async (source, eventId) => {
-      expect({ source, eventId }).toEqual({ source: "github", eventId: "dead-1" });
+      expect({ source, eventId }).toEqual({
+        source: "github",
+        eventId: "dead-1",
+      });
       deadLettered = false;
       return { archived: true };
     };
     mutableApi.releaseWorker = async (workerId, runId) => {
-      expect({ workerId, runId }).toEqual({ workerId: "worker-1", runId: "run-1" });
+      expect({ workerId, runId }).toEqual({
+        workerId: "worker-1",
+        runId: "run-1",
+      });
       stalled = false;
       return { released: true, runId };
     };
@@ -507,10 +746,20 @@ describe("Overview anomaly deck (WM-95)", () => {
       const view = renderOverview();
       await waitFor(() => view.getByRole("button", { name: "Archive" }));
 
+      expect(
+        view.getByRole("button", { name: /github.*historical failure/ }),
+      ).toBeTruthy();
       view.getByRole("button", { name: "Archive" }).click();
-      await waitFor(() => expect(view.queryByText(/dead-lettered \(github, dead-1\)/)).toBeNull());
+      await waitFor(() =>
+        expect(
+          view.queryByRole("button", { name: /github.*historical failure/ }),
+        ).toBeNull(),
+      );
 
-      view.getByRole("button", { name: "Release lease" }).click();
+      const releaseLease = await waitFor(() =>
+        view.getByRole("button", { name: "Release lease" }),
+      );
+      releaseLease.click();
       await waitFor(() => view.getByText(/Doctor: All systems nominal/));
       expect(view.queryByText(/stalled worker worker-1/)).toBeNull();
     } finally {
@@ -521,7 +770,9 @@ describe("Overview anomaly deck (WM-95)", () => {
       mutableApi.archive = originals.archive;
       mutableApi.releaseWorker = originals.releaseWorker;
     }
-  });
+    // Two 2s status polls plus the waitFor budgets put this right at bun's
+    // default 5s — it passed on develop by ~100ms. Give it its real budget.
+  }, 15_000);
 
   test("other anomaly kinds (stale leases, unpublished outbox) render unchanged", async () => {
     const origStatus = api.status;
@@ -559,8 +810,12 @@ describe("scopedCount / scopedTally (WM-147)", () => {
 
   test("repo tab counts named-repo rows only; unscoped rows stay out", () => {
     expect(scopedCount(rows, repo, { repos: (r) => r.repos })).toBe(2);
-    expect(scopedCount(rows, { kind: "all" }, { repos: (r) => r.repos })).toBe(4);
-    expect(scopedTally(rows, repo, { repos: (r) => r.repos, key: (r) => r.state })).toEqual({
+    expect(scopedCount(rows, { kind: "all" }, { repos: (r) => r.repos })).toBe(
+      4,
+    );
+    expect(
+      scopedTally(rows, repo, { repos: (r) => r.repos, key: (r) => r.state }),
+    ).toEqual({
       LEASED: 1,
       QUEUED: 1,
     });
@@ -568,14 +823,22 @@ describe("scopedCount / scopedTally (WM-147)", () => {
 
   test("in flight keeps LEASED/RUNNING and drops QUEUED even when repos match", () => {
     expect(
-      scopedTally(rows, { kind: "inflight" }, {
-        repos: (r) => r.repos,
-        state: (r) => r.state,
-        key: (r) => r.state,
-      }),
+      scopedTally(
+        rows,
+        { kind: "inflight" },
+        {
+          repos: (r) => r.repos,
+          state: (r) => r.state,
+          key: (r) => r.state,
+        },
+      ),
     ).toEqual({ LEASED: 2, RUNNING: 1 });
     expect(
-      scopedCount(rows, { kind: "inflight" }, { repos: (r) => r.repos, state: (r) => r.state }),
+      scopedCount(
+        rows,
+        { kind: "inflight" },
+        { repos: (r) => r.repos, state: (r) => r.state },
+      ),
     ).toBe(3);
   });
 });
@@ -633,17 +896,30 @@ describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
     });
 
     try {
-      const { getByRole, queryByRole } = renderOverview({ kind: "repo", name: "bj29" });
+      const { getByRole, queryByRole } = renderOverview({
+        kind: "repo",
+        name: "bj29",
+      });
 
-      await waitFor(() => getByRole("button", { name: "events · human_needed: 1" }));
+      await waitFor(() =>
+        getByRole("button", { name: "events · human_needed: 1" }),
+      );
 
       // Negative: factory-wide totals must not appear as the clickable count.
-      expect(queryByRole("button", { name: "events · human_needed: 4" })).toBeNull();
-      expect(queryByRole("button", { name: "events · dead_lettered: 2" })).toBeNull();
-      expect(getByRole("button", { name: "events · dead_lettered: 0" })).toBeTruthy();
+      expect(
+        queryByRole("button", { name: "events · human_needed: 4" }),
+      ).toBeNull();
+      expect(
+        queryByRole("button", { name: "events · dead_lettered: 2" }),
+      ).toBeNull();
+      expect(
+        getByRole("button", { name: "events · dead_lettered: 0" }),
+      ).toBeTruthy();
       expect(getByRole("button", { name: "proposals · open: 2" })).toBeTruthy();
       expect(queryByRole("button", { name: "proposals · open: 5" })).toBeNull();
-      expect(getByRole("button", { name: "proposals · expired: 1" })).toBeTruthy();
+      expect(
+        getByRole("button", { name: "proposals · expired: 1" }),
+      ).toBeTruthy();
     } finally {
       restore();
     }
@@ -656,17 +932,28 @@ describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
         events: { admitted: 1 },
         workers: { live: 3, busy: 1, stale: 2 },
       },
-      events: [stubEvent({ eventId: "e1", status: "admitted", repos: ["bj29"] })],
+      events: [
+        stubEvent({ eventId: "e1", status: "admitted", repos: ["bj29"] }),
+      ],
     });
 
     try {
-      const { getByRole, queryByRole } = renderOverview({ kind: "repo", name: "bj29" });
+      const { getByRole, queryByRole } = renderOverview({
+        kind: "repo",
+        name: "bj29",
+      });
 
       await waitFor(() => getByRole("button", { name: /workers · live/ }));
 
-      expect(getByRole("button", { name: "workers · live · factory-wide: 3" })).toBeTruthy();
-      expect(getByRole("button", { name: "workers · busy · factory-wide: 1" })).toBeTruthy();
-      expect(getByRole("button", { name: "workers · stale · factory-wide: 2" })).toBeTruthy();
+      expect(
+        getByRole("button", { name: "workers · live · factory-wide: 3" }),
+      ).toBeTruthy();
+      expect(
+        getByRole("button", { name: "workers · busy · factory-wide: 1" }),
+      ).toBeTruthy();
+      expect(
+        getByRole("button", { name: "workers · stale · factory-wide: 2" }),
+      ).toBeTruthy();
       expect(queryByRole("button", { name: "workers · live: 3" })).toBeNull();
     } finally {
       restore();
@@ -680,16 +967,30 @@ describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
 
     try {
       const repo = renderOverview({ kind: "repo", name: "bj29" });
-      await waitFor(() => repo.getByText(/Activity · latest/));
-      expect(repo.getByText(/Activity · latest/).textContent?.toLowerCase()).toMatch(/factory-wide/);
-      expect(repo.getByText(/Outbox/).textContent?.toLowerCase()).toMatch(/factory-wide/);
-      expect(repo.container.textContent).not.toMatch(/\/journal|\/outbox|GET \//);
+      const repoActivity = await waitFor(() =>
+        repo.getByText("Activity").closest("button"),
+      );
+      const repoOutbox = repo.getByText("Outbox").closest("button");
+      expect(repoActivity?.textContent?.toLowerCase()).toMatch(
+        /latest 0.*factory-wide/,
+      );
+      expect(repoOutbox?.textContent?.toLowerCase()).toMatch(
+        /published results.*factory-wide/,
+      );
+      expect(repo.container.textContent).not.toMatch(
+        /\/journal|\/outbox|GET \//,
+      );
       repo.unmount();
 
       const all = renderOverview({ kind: "all" });
-      await waitFor(() => all.getByText(/Activity · latest/));
-      expect(all.getByText(/Activity · latest/).textContent?.toLowerCase()).not.toMatch(/factory-wide/);
-      expect(all.getByText(/Outbox/).textContent?.toLowerCase()).not.toMatch(/factory-wide/);
+      const allActivity = await waitFor(() =>
+        all.getByText("Activity").closest("button"),
+      );
+      const allOutbox = all.getByText("Outbox").closest("button");
+      expect(allActivity?.textContent?.toLowerCase()).not.toMatch(
+        /factory-wide/,
+      );
+      expect(allOutbox?.textContent?.toLowerCase()).not.toMatch(/factory-wide/);
       expect(all.queryByRole("status")).toBeNull();
     } finally {
       restore();
@@ -719,7 +1020,9 @@ describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
     });
 
     try {
-      const { getByRole, queryByRole, getAllByText } = renderOverview({ kind: "inflight" });
+      const { getByRole, queryByRole, getAllByText } = renderOverview({
+        kind: "inflight",
+      });
 
       await waitFor(() => getByRole("button", { name: "active · leased: 2" }));
 
@@ -743,12 +1046,16 @@ describe("Overview scoped tiles and factory-wide labels (WM-147)", () => {
     try {
       const repo = renderOverview({ kind: "repo", name: "bj29" });
       await waitFor(() => repo.getByText(/Anomalies ·/));
-      expect(repo.getByText(/Anomalies ·/).textContent?.toLowerCase()).toMatch(/factory-wide/);
+      expect(repo.getByText(/Anomalies ·/).textContent?.toLowerCase()).toMatch(
+        /factory-wide/,
+      );
       repo.unmount();
 
       const all = renderOverview({ kind: "all" });
       await waitFor(() => all.getByText(/Anomalies ·/));
-      expect(all.getByText(/Anomalies ·/).textContent?.toLowerCase()).not.toMatch(/factory-wide/);
+      expect(
+        all.getByText(/Anomalies ·/).textContent?.toLowerCase(),
+      ).not.toMatch(/factory-wide/);
     } finally {
       restore();
     }
@@ -814,8 +1121,17 @@ describe("buildAnomalyRows (WM-205)", () => {
       expiredOpenProposals: ["prop_1"],
       staleLeases: 2,
       unpublishedOutbox: 1,
-      deadLettered: [{ source: "github", eventId: "e99", lastError: "timeout" }],
-      stalledWorkers: [{ workerId: "w1", runId: "r1", host: "srv1", lastSeen: new Date().toISOString() }],
+      deadLettered: [
+        { source: "github", eventId: "e99", lastError: "timeout" },
+      ],
+      stalledWorkers: [
+        {
+          workerId: "w1",
+          runId: "r1",
+          host: "srv1",
+          lastSeen: new Date().toISOString(),
+        },
+      ],
       ambiguousOpenProposals: [{ runId: "r2", count: 3 }],
       noWorkers: true,
     };
@@ -871,7 +1187,10 @@ describe("buildAnomalyRows (WM-205)", () => {
       configuration: ["policyVersion is unknown"],
     };
 
-    const rows = buildAnomalyRows(anomalies, new Map(), { ...callbacks, onNavigate });
+    const rows = buildAnomalyRows(anomalies, new Map(), {
+      ...callbacks,
+      onNavigate,
+    });
 
     expect(rows.map((row) => [row.kind, row.text])).toEqual([
       ["schedule", "stopped schedule nightly: 3 intervals late"],
@@ -880,14 +1199,17 @@ describe("buildAnomalyRows (WM-205)", () => {
         "proposal",
         "proposals piling up for schedule reconcile-bj29: 4 open proposals (threshold 3)",
       ],
-      ["configuration", "configuration: policyVersion is unknown"],
+      ["configuration", "policyVersion is unknown"],
     ]);
 
     rows[0]!.links[0]!.go();
     rows[2]!.links[0]!.go();
     expect(rows[0]!.links[0]!.label).toBe("View schedules");
     expect(rows[2]!.links[0]!.label).toBe("View proposals");
-    expect(onNavigate.mock.calls.map((call) => call[0])).toEqual(["schedules", "proposals"]);
+    expect(onNavigate.mock.calls.map((call) => call[0])).toEqual([
+      "schedules",
+      "proposals",
+    ]);
   });
 
   test("returns empty array for undefined anomalies", () => {
@@ -963,25 +1285,47 @@ describe("Overview 4-Band layout & telemetry (WM-205)", () => {
     api.journal = async () => ({
       head: 3,
       entries: [
-        entry({ seq: 3, runId: "run_term_1", from: "RUNNING", to: "COMPLETED" }),
+        entry({
+          seq: 3,
+          runId: "run_term_1",
+          from: "RUNNING",
+          to: "COMPLETED",
+        }),
         entry({ seq: 2, runId: "run_term_2", from: "RUNNING", to: "FAILED" }),
         entry({ seq: 1, runId: "run_term_3", from: "LEASED", to: "RUNNING" }),
       ],
     });
 
     try {
-      const { getByText, getByTitle, getByRole } = renderOverview();
+      const onJumpRun = mock((_runId: string) => {});
+      const { getByText, getByTitle, getByRole } = renderOverview(
+        { kind: "all" },
+        { onJumpRun },
+      );
 
       await waitFor(() => getByText(/Worker Fleet Capacity/));
       expect(getByText(/3 live · 1 busy · 2 idle/)).toBeTruthy();
-      expect(getByRole("button", { name: "worker capacity: 1 running of 4, 2 queued" })).toBeTruthy();
+      expect(
+        getByRole("button", {
+          name: "worker capacity: 1 running of 4, 2 queued",
+        }),
+      ).toBeTruthy();
       expect(getByText("per-repo max_in_flight reached")).toBeTruthy();
       expect(getByText("light 1/3")).toBeTruthy();
 
-      // Recent outcomes strip displays completed & failed terminal entries (2 total)
-      expect(getByText(/Recent Outcomes · last 2/)).toBeTruthy();
-      expect(getByTitle(/run_term_1 · COMPLETED/)).toBeTruthy();
-      expect(getByTitle(/run_term_2 · FAILED/)).toBeTruthy();
+      // Recent outcomes strip exposes exact titles, a legend, and run navigation.
+      expect(getByText("Recent outcomes")).toBeTruthy();
+      expect(getByText("last 2")).toBeTruthy();
+      const completedTick = getByTitle(/^run_term_1 · COMPLETED · /);
+      expect(completedTick.getAttribute("title")).toMatch(
+        /^run_term_1 · COMPLETED · .+ ago$/,
+      );
+      expect(getByTitle(/^run_term_2 · FAILED · /)).toBeTruthy();
+      expect(
+        getByRole("generic", { name: "1 completed, 1 failed" }),
+      ).toBeTruthy();
+      fireEvent.click(completedTick);
+      expect(onJumpRun).toHaveBeenCalledWith("run_term_1");
 
       // Outbox summary preview
       expect(getByText("[PR_OPEN #42]")).toBeTruthy();
@@ -994,3 +1338,87 @@ describe("Overview 4-Band layout & telemetry (WM-205)", () => {
   });
 });
 
+describe("Overview waiting-on-you tile (WM-286)", () => {
+  function withStatus(status: StatusView) {
+    const orig = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+    };
+    api.status = async () => status;
+    api.proposals = async () => ({ proposals: [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+    return () => {
+      api.status = orig.status;
+      api.proposals = orig.proposals;
+      api.outbox = orig.outbox;
+      api.journal = orig.journal;
+    };
+  }
+
+  test("shows the open count with a by-kind caption and jumps to #/inbox", async () => {
+    const restore = withStatus({
+      ...baseStatus(),
+      inbox: { open: 3, acked: 0, byKind: { BLOCKED: 2, "CI RED": 1 } },
+    });
+    const onNavigate = mock(() => {});
+    try {
+      const view = renderOverview({ kind: "all" }, { onNavigate });
+      const tile = await waitFor(() =>
+        view.getByRole("button", {
+          name: /Waiting on you: 3 open inbox items/,
+        }),
+      );
+      expect(tile.textContent).toContain("2 BLOCKED · 1 CI RED");
+      expect(view.getByText("3 open")).toBeTruthy();
+      fireEvent.click(tile);
+      expect(onNavigate).toHaveBeenCalledWith("inbox");
+    } finally {
+      restore();
+    }
+  });
+
+  test("says when the by-kind breakdown spans acked items too, and reads calm at zero", async () => {
+    const restore = withStatus({
+      ...baseStatus(),
+      inbox: { open: 1, acked: 1, byKind: { BLOCKED: 2 } },
+    });
+    try {
+      const view = renderOverview();
+      const tile = await waitFor(() =>
+        view.getByRole("button", { name: /Waiting on you: 1 open inbox item/ }),
+      );
+      expect(tile.textContent).toContain("open + acked · 2 BLOCKED");
+      expect(view.getByText("1 open · 1 acked")).toBeTruthy();
+    } finally {
+      restore();
+    }
+    cleanup();
+    const restoreZero = withStatus({
+      ...baseStatus(),
+      inbox: { open: 0, acked: 0, byKind: {} },
+    });
+    try {
+      const view = renderOverview();
+      await waitFor(() =>
+        view.getByText("Nothing needs a decision right now."),
+      );
+      expect(view.getByText("nothing waiting")).toBeTruthy();
+    } finally {
+      restoreZero();
+    }
+  });
+
+  test("renders no tile against a pre-inbox control API", async () => {
+    const restore = withStatus(baseStatus());
+    try {
+      const view = renderOverview();
+      await waitFor(() => view.getByText("Approval Gate"));
+      expect(view.queryByText("Waiting on you")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+});

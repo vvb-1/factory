@@ -25,7 +25,14 @@
  *     bun orchestrator/reaper.mjs --any-assignee      # audit unlabeled ones too
  */
 
-import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync, statSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  mkdirSync,
+  appendFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { emitFactoryEvent } from "../lib/emit-event.mjs";
@@ -45,7 +52,9 @@ export function latestReaperRunMs(logDir = REAPER_LOG_DIR) {
       const m = statSync(path.join(logDir, f)).mtimeMs;
       if (best === null || m > best) best = m;
     }
-  } catch { /* no log dir yet */ }
+  } catch {
+    /* no log dir yet */
+  }
   return best;
 }
 
@@ -60,11 +69,21 @@ function teeToLogFile() {
   const p2 = (n) => String(n).padStart(2, "0");
   const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
   const file = path.join(REAPER_LOG_DIR, `reaper-${stamp}.log`);
-  try { mkdirSync(REAPER_LOG_DIR, { recursive: true }); } catch { return; }
-  const wrap = (orig) => (...args) => {
-    orig(...args);
-    try { appendFileSync(file, args.join(" ") + "\n"); } catch { /* keep running */ }
-  };
+  try {
+    mkdirSync(REAPER_LOG_DIR, { recursive: true });
+  } catch {
+    return;
+  }
+  const wrap =
+    (orig) =>
+    (...args) => {
+      orig(...args);
+      try {
+        appendFileSync(file, args.join(" ") + "\n");
+      } catch {
+        /* keep running */
+      }
+    };
   console.log = wrap(console.log.bind(console));
   console.error = wrap(console.error.bind(console));
 }
@@ -93,7 +112,10 @@ function loadEnv() {
           if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
             const idx = trimmed.indexOf("=");
             const key = trimmed.slice(0, idx).trim();
-            const val = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
+            const val = trimmed
+              .slice(idx + 1)
+              .trim()
+              .replace(/^['"]|['"]$/g, "");
             if (!process.env[key]) {
               process.env[key] = val;
             }
@@ -111,7 +133,9 @@ function loadEnv() {
 export function getApiKey() {
   const key = loadEnv();
   if (!key) {
-    console.error("Linear API error: LINEAR_API_KEY not found in env or ~/Develop/hdkiller/.env");
+    console.error(
+      "Linear API error: LINEAR_API_KEY not found in env or ~/Develop/hdkiller/.env",
+    );
     process.exit(1);
   }
   return key;
@@ -135,7 +159,10 @@ export async function gql(query, variables = {}, retries = 5) {
       });
 
       if (!res.ok) {
-        if ([429, 500, 502, 503, 504].includes(res.status) && attempt < retries - 1) {
+        if (
+          [429, 500, 502, 503, 504].includes(res.status) &&
+          attempt < retries - 1
+        ) {
           await new Promise((r) => setTimeout(r, delay));
           delay *= 2;
           continue;
@@ -147,7 +174,10 @@ export async function gql(query, variables = {}, retries = 5) {
       const data = await res.json();
       if (data.errors && data.errors.length > 0) {
         const msg = JSON.stringify(data.errors);
-        if (msg.toUpperCase().includes("RATELIMITED") && attempt < retries - 1) {
+        if (
+          msg.toUpperCase().includes("RATELIMITED") &&
+          attempt < retries - 1
+        ) {
           await new Promise((r) => setTimeout(r, delay));
           delay *= 2;
           continue;
@@ -157,7 +187,10 @@ export async function gql(query, variables = {}, retries = 5) {
 
       return data.data || {};
     } catch (err) {
-      if (attempt < retries - 1 && !(err.message && err.message.startsWith("HTTP 4"))) {
+      if (
+        attempt < retries - 1 &&
+        !(err.message && err.message.startsWith("HTTP 4"))
+      ) {
         await new Promise((r) => setTimeout(r, delay));
         delay *= 2;
         continue;
@@ -253,7 +286,7 @@ export function isAgentClaim(issue) {
   const labels = issue.labels?.nodes || [];
   const names = labels.map((l) => (l.name || "").toLowerCase());
   return names.some(
-    (n) => n === HEARTBEAT_LABEL || n.startsWith(AGENT_LABEL_PREFIX)
+    (n) => n === HEARTBEAT_LABEL || n.startsWith(AGENT_LABEL_PREFIX),
   );
 }
 
@@ -278,11 +311,17 @@ export function lastActivity(issue) {
 export async function fetchAgentReadyLabelId() {
   const q = `query { issueLabels(first: 250) { nodes { id name } } }`;
   const data = await gql(q);
-  const node = (data.issueLabels?.nodes || []).find((l) => (l.name || "").toLowerCase() === AGENT_READY_LABEL);
+  const node = (data.issueLabels?.nodes || []).find(
+    (l) => (l.name || "").toLowerCase() === AGENT_READY_LABEL,
+  );
   return node?.id || null;
 }
 
-export function computeReclaimLabelIds(issue, isReturningToTodo, agentReadyLabelId = null) {
+export function computeReclaimLabelIds(
+  issue,
+  isReturningToTodo,
+  agentReadyLabelId = null,
+) {
   const labels = issue.labels?.nodes || [];
   const keep = labels
     .filter((l) => {
@@ -291,22 +330,44 @@ export function computeReclaimLabelIds(issue, isReturningToTodo, agentReadyLabel
     })
     .map((l) => l.id);
 
-  if (isReturningToTodo && agentReadyLabelId && !keep.includes(agentReadyLabelId)) {
+  if (
+    isReturningToTodo &&
+    agentReadyLabelId &&
+    !keep.includes(agentReadyLabelId)
+  ) {
     keep.push(agentReadyLabelId);
   }
   return keep;
 }
 
-export async function reclaim(issue, todoStateId, minutes, apply, quiet = false, agentReadyLabelId = null) {
+export async function reclaim(
+  issue,
+  todoStateId,
+  minutes,
+  apply,
+  quiet = false,
+  agentReadyLabelId = null,
+) {
   if (todoStateId && !agentReadyLabelId && apply) {
     try {
       agentReadyLabelId = await fetchAgentReadyLabelId();
-    } catch {}
+    } catch {
+      /* intentionally ignored */
+    }
   }
 
-  const keep = computeReclaimLabelIds(issue, Boolean(todoStateId), agentReadyLabelId);
+  const keep = computeReclaimLabelIds(
+    issue,
+    Boolean(todoStateId),
+    agentReadyLabelId,
+  );
 
-  if (!apply) return { labelIds: keep, stateId: todoStateId, assigneeId: todoStateId ? null : undefined };
+  if (!apply)
+    return {
+      labelIds: keep,
+      stateId: todoStateId,
+      assigneeId: todoStateId ? null : undefined,
+    };
 
   // Two different repairs, because the two claims mean different things.
   //
@@ -320,7 +381,10 @@ export async function reclaim(issue, todoStateId, minutes, apply, quiet = false,
   // (OPS-40) the two are indistinguishable. Removing the label is unambiguous
   // and sufficient; clearing the assignee would be guessing.
   const input = { labelIds: keep };
-  if (todoStateId) { input.stateId = todoStateId; input.assigneeId = null; }
+  if (todoStateId) {
+    input.stateId = todoStateId;
+    input.assigneeId = null;
+  }
 
   await gql(
     `
@@ -328,7 +392,7 @@ export async function reclaim(issue, todoStateId, minutes, apply, quiet = false,
       issueUpdate(id: $id, input: $input) { success }
     }
     `,
-    { id: issue.id, input }
+    { id: issue.id, input },
   );
 
   // Clearing a stale marker off a finished ticket needs no audit trail — 50
@@ -358,7 +422,7 @@ export async function reclaim(issue, todoStateId, minutes, apply, quiet = false,
         issueId: issue.id,
         body,
       },
-    }
+    },
   );
 }
 
@@ -417,14 +481,18 @@ Options:
   teeToLogFile();
 
   const mode = args.apply ? "APPLY" : "DRY RUN";
-  console.log(`=== Stale-claim reaper [${mode}] threshold=${args.minutes}min${args.team ? ` team=${args.team}` : ""} ===\n`);
+  console.log(
+    `=== Stale-claim reaper [${mode}] threshold=${args.minutes}min${args.team ? ` team=${args.team}` : ""} ===\n`,
+  );
 
   const teams = await fetchTeams();
   let agentReadyLabelId = null;
   if (args.apply) {
     try {
       agentReadyLabelId = await fetchAgentReadyLabelId();
-    } catch {}
+    } catch {
+      /* intentionally ignored */
+    }
   }
   let issues = await fetchInProgress(args.team, args.anyAssignee);
   const now = new Date();
@@ -434,7 +502,9 @@ Options:
     const claims = issues.filter(isAgentClaim);
     const skipped = issues.length - claims.length;
     if (skipped > 0) {
-      console.log(`  (skipping ${skipped} In Progress ticket(s) with no agent claim labels -- not agent work)\n`);
+      console.log(
+        `  (skipping ${skipped} In Progress ticket(s) with no agent claim labels -- not agent work)\n`,
+      );
     }
     issues = claims;
   }
@@ -452,7 +522,9 @@ Options:
   }
 
   for (const { issue, seen } of live) {
-    const age = seen ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString() : "?";
+    const age = seen
+      ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString()
+      : "?";
     const who = issue.assignee?.name || "unassigned";
     const id = (issue.identifier || "").padEnd(10);
     const ageStr = age.padStart(4);
@@ -462,20 +534,28 @@ Options:
   }
 
   if (stale.length === 0) {
-    console.log(`\n=== No stale claims among ${issues.length} in progress. ===`);
+    console.log(
+      `\n=== No stale claims among ${issues.length} in progress. ===`,
+    );
     return;
   }
 
   console.log();
   const considered = args.markersOnly
-    ? stale.filter(({ issue }) => (issue.state?.name || "").toLowerCase() !== IN_PROGRESS)
+    ? stale.filter(
+        ({ issue }) => (issue.state?.name || "").toLowerCase() !== IN_PROGRESS,
+      )
     : stale;
   if (args.markersOnly && considered.length !== stale.length) {
-    console.log(`  (markers-only: leaving ${stale.length - considered.length} In Progress claim(s) alone)\n`);
+    console.log(
+      `  (markers-only: leaving ${stale.length - considered.length} In Progress claim(s) alone)\n`,
+    );
   }
 
   for (const { issue, seen } of considered) {
-    const age = seen ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString() : "?";
+    const age = seen
+      ? Math.floor((now.getTime() - seen.getTime()) / 60000).toString()
+      : "?";
     const who = issue.assignee?.name || "unassigned";
     const id = (issue.identifier || "").padEnd(10);
     const ageStr = age.padStart(4);
@@ -489,7 +569,9 @@ Options:
     // human's ticket because they didn't comment in 45 minutes would be far
     // worse than the crashed agent this reaper exists to clean up after.
     if (!isAgentClaim(issue)) {
-      console.log(`        (no agent claim label — a human's work, not touching it)`);
+      console.log(
+        `        (no agent claim label — a human's work, not touching it)`,
+      );
       continue;
     }
 
@@ -501,14 +583,24 @@ Options:
     // A triage claim (any other state) only loses its markers — moving a ticket
     // that was mid-specification into Todo would assert it is ready when it is
     // not.
-    const todoId = stateName === IN_PROGRESS ? team?.states?.[RECLAIM_TO] : null;
+    const todoId =
+      stateName === IN_PROGRESS ? team?.states?.[RECLAIM_TO] : null;
     if (stateName === IN_PROGRESS && !todoId) {
-      console.log(`        ! no '${RECLAIM_TO}' state on team ${teamKey}, skipping`);
+      console.log(
+        `        ! no '${RECLAIM_TO}' state on team ${teamKey}, skipping`,
+      );
       continue;
     }
 
     try {
-      await reclaim(issue, todoId, args.minutes, args.apply, !todoId, agentReadyLabelId);
+      await reclaim(
+        issue,
+        todoId,
+        args.minutes,
+        args.apply,
+        !todoId,
+        agentReadyLabelId,
+      );
     } catch (err) {
       console.log(`        ! failed: ${err.message || err}`);
       continue;
@@ -519,14 +611,22 @@ Options:
       // Lifecycle observation (WM-75): fire-and-forget; the last-activity
       // timestamp keys the id, so retrying the same stale claim re-admits
       // nothing while the next genuine reap is a new event.
-      await emitFactoryEvent("factory.ticket.reaped",
-        { ticket: issue.identifier, reason: todoId ? "returned_to_todo" : "marker_cleared" },
-        { eventId: `reap:${issue.identifier}:${seen?.getTime() ?? "unknown"}`, subject: issue.identifier });
+      await emitFactoryEvent(
+        "factory.ticket.reaped",
+        {
+          ticket: issue.identifier,
+          reason: todoId ? "returned_to_todo" : "marker_cleared",
+        },
+        {
+          eventId: `reap:${issue.identifier}:${seen?.getTime() ?? "unknown"}`,
+          subject: issue.identifier,
+        },
+      );
     }
   }
 
   console.log(
-    `\n=== ${args.apply ? "Reclaimed" : "Would reclaim"}: ${considered.length} | Healthy: ${live.length} ===`
+    `\n=== ${args.apply ? "Reclaimed" : "Would reclaim"}: ${considered.length} | Healthy: ${live.length} ===`,
   );
   if (!args.apply) {
     console.log("Run again with --apply to reclaim these.");

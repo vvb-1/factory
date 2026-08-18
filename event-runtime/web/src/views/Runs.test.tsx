@@ -1,6 +1,7 @@
 import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { Runs, statesForRunTab } from "./Runs";
 import {
   changeInput,
@@ -15,7 +16,12 @@ import {
   restoreApi,
   withApi,
 } from "../test-render";
-import type { LifecycleEvent, RunDetail, RunListItem, RunState } from "../types";
+import type {
+  LifecycleEvent,
+  RunDetail,
+  RunListItem,
+  RunState,
+} from "../types";
 
 afterEach(() => {
   cleanup();
@@ -27,7 +33,11 @@ const noop = () => {};
 const FAILURE_REASON = 'contract_violation: $: unknown property "captured"';
 const NOW = new Date().toISOString();
 
-function stubListItem(runId: string, state: RunState, overrides?: Partial<RunListItem>): RunListItem {
+function stubListItem(
+  runId: string,
+  state: RunState,
+  overrides?: Partial<RunListItem>,
+): RunListItem {
   return createRunListItemFixture({
     runId,
     state,
@@ -45,7 +55,12 @@ function stubListItem(runId: string, state: RunState, overrides?: Partial<RunLis
   });
 }
 
-function stubDetail(runId: string, state: RunState, lifecycle: LifecycleEvent[], overrides?: Partial<RunDetail>): RunDetail {
+function stubDetail(
+  runId: string,
+  state: RunState,
+  lifecycle: LifecycleEvent[],
+  overrides?: Partial<RunDetail>,
+): RunDetail {
   return createRunDetailFixture({
     run: {
       runId,
@@ -77,7 +92,13 @@ function stubDetail(runId: string, state: RunState, lifecycle: LifecycleEvent[],
   });
 }
 
-function transition(seq: number, runId: string, from: string | null, to: string, reason: string | null): LifecycleEvent {
+function transition(
+  seq: number,
+  runId: string,
+  from: string | null,
+  to: string,
+  reason: string | null,
+): LifecycleEvent {
   return createLifecycleEventFixture(seq, runId, from, to, reason, NOW);
 }
 
@@ -129,8 +150,20 @@ describe("Runs sortable columns (OPS-492)", () => {
         const r = renderRuns({ onSelectRun });
         await waitFor(() => r.getByRole("columnheader", { name: /Run/ }));
 
-        for (const label of ["Run", "State", "Agent", "Adapter", "Model", "Attempts", "Reason", "Origin", "Updated"]) {
-          const header = r.getByRole("columnheader", { name: new RegExp(label) });
+        for (const label of [
+          "Run",
+          "State",
+          "Agent",
+          "Adapter",
+          "Model",
+          "Attempts",
+          "Reason",
+          "Origin",
+          "Updated",
+        ]) {
+          const header = r.getByRole("columnheader", {
+            name: new RegExp(label),
+          });
           expect(header.getAttribute("aria-sort")).toBe("none");
           expect(header.querySelector("button")).toBeTruthy();
         }
@@ -138,13 +171,16 @@ describe("Runs sortable columns (OPS-492)", () => {
         const runHeader = r.getByRole("columnheader", { name: /Run/ });
         fireEvent.click(r.getByRole("button", { name: /Run/ }));
         expect(runHeader.getAttribute("aria-sort")).toBe("ascending");
-        expect(Array.from(r.container.querySelectorAll("tbody tr td:first-child")).map((cell) => cell.textContent)).toEqual([
-          "run_alpha",
-          "run_zulu",
-        ]);
+        expect(
+          Array.from(
+            r.container.querySelectorAll("tbody tr td:first-child"),
+          ).map((cell) => cell.textContent),
+        ).toEqual(["run_alpha", "run_zulu"]);
 
         act(() => {
-          document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+          document.body.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+          );
         });
         expect(onSelectRun).toHaveBeenLastCalledWith("run_alpha");
 
@@ -160,7 +196,9 @@ describe("Runs sortable columns (OPS-492)", () => {
 describe("Runs table short run ids (WM-96)", () => {
   test("run id cell displays the short form and carries the full id as title", async () => {
     const runId = "run_ec9c87f9-4c1d-4f4a-9d7e-2c2f3a1b0c9d";
-    const detail = stubDetail(runId, "COMPLETED", [transition(1, runId, null, "QUEUED", null)]);
+    const detail = stubDetail(runId, "COMPLETED", [
+      transition(1, runId, null, "QUEUED", null),
+    ]);
     await withApi(
       {
         runs: async () => ({ runs: [stubListItem(runId, "COMPLETED")] }),
@@ -211,7 +249,10 @@ describe("Runs detail failure banner (WM-93)", () => {
 
         // Before the metadata rows: the banner precedes the "Run" section in the document.
         const runSection = getByText("idempotencyKey");
-        expect(banner.compareDocumentPosition(runSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(
+          banner.compareDocumentPosition(runSection) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
       },
     );
   });
@@ -255,14 +296,22 @@ describe("Runs component harness: selection & filter retention", () => {
       },
       async () => {
         const { getByRole } = renderRuns({ focusRunId: runId });
-        const openInTab = await waitFor(() => getByRole("button", { name: /Open in tab/ }));
-        expect(openInTab.querySelector('[aria-hidden="true"]')?.textContent).toBe("p");
+        const openInTab = await waitFor(() =>
+          getByRole("button", { name: /Open in tab/ }),
+        );
+        expect(
+          openInTab.querySelector('[aria-hidden="true"]')?.textContent,
+        ).toBe("p");
 
         fireEvent.keyDown(document.body, { key: "p" });
-        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([runId]);
+        expect(
+          JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]"),
+        ).toEqual([runId]);
 
         fireEvent.keyDown(document.body, { key: "p" });
-        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([]);
+        expect(
+          JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]"),
+        ).toEqual([]);
       },
     );
   });
@@ -295,7 +344,9 @@ describe("Runs component harness: selection & filter retention", () => {
 
   test("focusRunId highlights the selected row and renders the detail pane", async () => {
     const r1 = stubListItem("run_selected_1", "RUNNING");
-    const detail = stubDetail("run_selected_1", "RUNNING", [transition(1, "run_selected_1", null, "RUNNING", null)]);
+    const detail = stubDetail("run_selected_1", "RUNNING", [
+      transition(1, "run_selected_1", null, "RUNNING", null),
+    ]);
     await withApi(
       {
         runs: async () => ({ runs: [r1] }),
@@ -303,7 +354,9 @@ describe("Runs component harness: selection & filter retention", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const { container, getByText } = renderRuns({ focusRunId: "run_selected_1" });
+        const { container, getByText } = renderRuns({
+          focusRunId: "run_selected_1",
+        });
 
         const selectedRow = await waitFor(() => {
           const el = container.querySelector("tr.row-selected");
@@ -328,7 +381,9 @@ describe("Runs component harness: selection & filter retention", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const { container, getByLabelText } = renderRuns({ focusRunId: "run_alpha" });
+        const { container, getByLabelText } = renderRuns({
+          focusRunId: "run_alpha",
+        });
 
         await waitFor(() => container.querySelector(`td[title="${r1.runId}"]`));
         expect(container.querySelector(`td[title="${r2.runId}"]`)).toBeTruthy();
@@ -339,14 +394,18 @@ describe("Runs component harness: selection & filter retention", () => {
         });
 
         await waitFor(() => {
-          expect(container.querySelector(`td[title="${r1.runId}"]`)).toBeTruthy();
+          expect(
+            container.querySelector(`td[title="${r1.runId}"]`),
+          ).toBeTruthy();
           expect(container.querySelector(`td[title="${r2.runId}"]`)).toBeNull();
         });
 
         // The selected row remains selected
         const selectedRow = container.querySelector("tr.row-selected");
         expect(selectedRow).toBeTruthy();
-        expect(selectedRow?.querySelector(`td[title="${r1.runId}"]`)).toBeTruthy();
+        expect(
+          selectedRow?.querySelector(`td[title="${r1.runId}"]`),
+        ).toBeTruthy();
       },
     );
   });
@@ -361,7 +420,10 @@ describe("Runs component harness: selection & filter retention", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const { getByRole, container } = renderRuns({ focusRunId: "run_tab_1", onSelectRun });
+        const { getByRole, container } = renderRuns({
+          focusRunId: "run_tab_1",
+          onSelectRun,
+        });
 
         await waitFor(() => container.querySelector("tr.row-selected"));
 
@@ -386,7 +448,10 @@ describe("Runs component harness: cross-tab reveal", () => {
     await withApi(
       {
         runs: async (state?: string) => ({
-          runs: state && state !== "ALL" ? allRuns.filter((r) => r.state === state) : allRuns,
+          runs:
+            state && state !== "ALL"
+              ? allRuns.filter((r) => r.state === state)
+              : allRuns,
         }),
         run: async () => detailFailed,
         status: async () => createStatusFixture(),
@@ -423,7 +488,9 @@ describe("Runs component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const allTab = getByRole("tab", { name: /^All/i });
           expect(allTab.getAttribute("aria-selected")).toBe("true");
-          const targetCell = container.querySelector(`td[title="run_failed_target"]`);
+          const targetCell = container.querySelector(
+            `td[title="run_failed_target"]`,
+          );
           expect(targetCell).toBeTruthy();
         });
       },
@@ -501,7 +568,9 @@ describe("Runs component harness: cross-tab reveal", () => {
         });
 
         await waitFor(() => {
-          expect(container.querySelector(`td[title="${r1.runId}"]`)).toBeTruthy();
+          expect(
+            container.querySelector(`td[title="${r1.runId}"]`),
+          ).toBeTruthy();
         });
 
         // Now focus run_alpha (which is already visible)
@@ -555,9 +624,21 @@ describe("Runs component harness: cross-tab reveal", () => {
 describe("Runs Model column (WM-221)", () => {
   test("renders the pinned model per row, with the sentinel and n/a spelled out", async () => {
     const modelRows = [
-      stubListItem("run_pinned", "COMPLETED", { adapter: "claude", modelTier: "standard", model: "sonnet" }),
-      stubListItem("run_sentinel", "COMPLETED", { adapter: "claude", modelTier: "strong", model: "default" }),
-      stubListItem("run_command", "COMPLETED", { adapter: "command", modelTier: null, model: null }),
+      stubListItem("run_pinned", "COMPLETED", {
+        adapter: "claude",
+        modelTier: "standard",
+        model: "sonnet",
+      }),
+      stubListItem("run_sentinel", "COMPLETED", {
+        adapter: "claude",
+        modelTier: "strong",
+        model: "default",
+      }),
+      stubListItem("run_command", "COMPLETED", {
+        adapter: "command",
+        modelTier: null,
+        model: null,
+      }),
     ];
     await withApi(
       {
@@ -578,8 +659,16 @@ describe("Runs Model column (WM-221)", () => {
   });
 
   test("the column can be hidden through Display Options like any other", async () => {
-    localStorage.setItem("evrt-display-runs", JSON.stringify({ hiddenColumns: ["model"] }));
-    const modelRows = [stubListItem("run_pinned", "COMPLETED", { adapter: "claude", model: "sonnet" })];
+    localStorage.setItem(
+      "evrt-display-runs",
+      JSON.stringify({ hiddenColumns: ["model"] }),
+    );
+    const modelRows = [
+      stubListItem("run_pinned", "COMPLETED", {
+        adapter: "claude",
+        model: "sonnet",
+      }),
+    ];
     await withApi(
       {
         runs: async () => ({ runs: modelRows }),
@@ -630,8 +719,12 @@ describe("Runs copy chords and hints (WM-233)", () => {
 
         // Verify icon-action tooltips preserve shortcut discoverability.
         expect(idBtn.getAttribute("title")).toBe("Copy run id · c");
-        const cliBtn = r.getByRole("button", { name: "Copy CLI inspect command (c i)" });
-        expect(cliBtn.getAttribute("title")).toBe("Copy CLI inspect command · c i");
+        const cliBtn = r.getByRole("button", {
+          name: "Copy CLI inspect command (c i)",
+        });
+        expect(cliBtn.getAttribute("title")).toBe(
+          "Copy CLI inspect command · c i",
+        );
         const linkBtn = r.getByRole("button", { name: "Copy link (c l)" });
         expect(linkBtn.getAttribute("title")).toBe("Copy link · c l");
 
@@ -734,7 +827,9 @@ describe("Runs copy chords and hints (WM-233)", () => {
         // Verify detail pane shows "Awaiting Proposal Approval" section and "Approve…" button
         await waitFor(() => {
           expect(r.getByText("Awaiting Proposal Approval")).toBeTruthy();
-          expect(r.getAllByRole("button", { name: /Approve…/i }).length).toBeGreaterThan(0);
+          expect(
+            r.getAllByRole("button", { name: /Approve…/i }).length,
+          ).toBeGreaterThan(0);
         });
 
         // Click "Approve…" button in the detail pane
@@ -748,7 +843,9 @@ describe("Runs copy chords and hints (WM-233)", () => {
         });
 
         // Click "Approve and queue" in the dialog
-        const confirmBtn = r.getByRole("button", { name: /Approve and queue/i });
+        const confirmBtn = r.getByRole("button", {
+          name: /Approve and queue/i,
+        });
         fireEvent.click(confirmBtn);
 
         await waitFor(() => {
@@ -783,7 +880,9 @@ describe("Runs copy chords and hints (WM-233)", () => {
 
     await withApi(
       {
-        runs: mock(async () => ({ runs: [stubListItem(runId, "PROPOSED", { agent: "shipper" })] })),
+        runs: mock(async () => ({
+          runs: [stubListItem(runId, "PROPOSED", { agent: "shipper" })],
+        })),
         run: mock(async () => stubDetail(runId, "PROPOSED", [])),
         proposals: mock(async () => ({ proposals: [proposal] })),
         agents: mock(async () =>
@@ -795,7 +894,10 @@ describe("Runs copy chords and hints (WM-233)", () => {
                 version: 1,
                 outputContract: "factory.agent-result/v1",
                 workspace: { type: "ephemeral" },
-                capabilities: { filesystem: "workspace-only", services: ["github"] },
+                capabilities: {
+                  filesystem: "workspace-only",
+                  services: ["github"],
+                },
                 limits: { timeout_seconds: 900, attempts: 2 },
                 mutating: true,
                 promptFile: "agents/shipper.md",
@@ -816,13 +918,17 @@ describe("Runs copy chords and hints (WM-233)", () => {
           } as unknown as Parameters<typeof createAgentsFixture>[0]),
         ),
         approve: mock(async () => ({ approved: true as const, runId })),
-        status: mock(async () => createStatusFixture({ runs: { byState: { PROPOSED: 1 } } })),
+        status: mock(async () =>
+          createStatusFixture({ runs: { byState: { PROPOSED: 1 } } }),
+        ),
       },
       async () => {
         const r = renderRuns({ focusRunId: runId, onJumpProposal: noop });
 
         await waitFor(() => {
-          expect(r.getAllByRole("button", { name: /Approve…/i }).length).toBeGreaterThan(0);
+          expect(
+            r.getAllByRole("button", { name: /Approve…/i }).length,
+          ).toBeGreaterThan(0);
         });
         fireEvent.click(r.getAllByRole("button", { name: /Approve…/i })[0]);
 
@@ -853,19 +959,28 @@ describe("Runs copy chords and hints (WM-233)", () => {
   test("State cell does not clip the proposal jump link", async () => {
     const runId = "run-proposed-clip";
     const propId = "prop-clip-1";
-    const proposal = createProposalFixture({ id: propId, runId, status: "open", decision: "run" });
+    const proposal = createProposalFixture({
+      id: propId,
+      runId,
+      status: "open",
+      decision: "run",
+    });
 
     await withApi(
       {
         runs: mock(async () => ({ runs: [stubListItem(runId, "PROPOSED")] })),
         run: mock(async () => stubDetail(runId, "PROPOSED", [])),
         proposals: mock(async () => ({ proposals: [proposal] })),
-        status: mock(async () => createStatusFixture({ runs: { byState: { PROPOSED: 1 } } })),
+        status: mock(async () =>
+          createStatusFixture({ runs: { byState: { PROPOSED: 1 } } }),
+        ),
       },
       async () => {
         const r = renderRuns({ focusRunId: runId, onJumpProposal: noop });
 
-        const link = await waitFor(() => r.getByTitle(`Open proposal ${propId}`));
+        const link = await waitFor(() =>
+          r.getByTitle(`Open proposal ${propId}`),
+        );
         const cell = link.closest("td");
         expect(cell).toBeTruthy();
 
@@ -883,3 +998,199 @@ describe("Runs copy chords and hints (WM-233)", () => {
   });
 });
 
+describe("Runs long-list window (WM-563)", () => {
+  test("a 2,000-row fixture mounts fewer than 200 table rows and pages forward", async () => {
+    const runs = Array.from({ length: 2000 }, (_, i) =>
+      stubListItem(`run_window_${i}`, "COMPLETED"),
+    );
+    await withApi(
+      {
+        runs: async () => ({ runs }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        const next = await r.findByRole("button", { name: "Next" });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+        expect(
+          r.container.querySelector('td[title="run_window_100"]'),
+        ).toBeNull();
+        fireEvent.click(next);
+        await waitFor(() => {
+          expect(
+            r.container.querySelector('td[title="run_window_100"]'),
+          ).toBeTruthy();
+        });
+        expect(
+          r.container.querySelector("tbody tr:last-child")?.textContent,
+        ).toContain("101–200/2000");
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+      },
+    );
+  });
+
+  test("group headers share the DOM cap even when 2,000 unique groups are collapsed", async () => {
+    const runs = Array.from({ length: 2000 }, (_, i) =>
+      stubListItem(`run_group_${i}`, "COMPLETED", { agent: `agent-${i}` }),
+    );
+    localStorage.setItem(
+      "evrt-display-runs",
+      JSON.stringify({
+        groupBy: "agent",
+        subGroupBy: "none",
+        sortBy: "default",
+        sortDir: "asc",
+        showEmpty: false,
+        hiddenColumns: [],
+        collapsed: runs.map((run) => run.agent),
+        customColumns: [],
+      }),
+    );
+    await withApi(
+      {
+        runs: async () => ({ runs }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        await r.findByRole("button", { name: /agent-0/ });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+        fireEvent.click(r.getByRole("button", { name: "Next" }));
+        await waitFor(() =>
+          expect(r.getByRole("button", { name: /agent-100/ })).toBeTruthy(),
+        );
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+      },
+    );
+  });
+
+  test("a sub-grouped page repeats only its own ancestry, never earlier sub headers", async () => {
+    // 5 agents x 50 runs, all COMPLETED: token 100 (the second page's first
+    // token) lands mid-way inside the second agent's subsection, so the window
+    // has to replay exactly two headers — COMPLETED and that agent — and no
+    // sub header whose rows all live on the previous page.
+    const runs = Array.from({ length: 250 }, (_, i) =>
+      stubListItem(`run_sub_${i}`, "COMPLETED", {
+        agent: `agent-${Math.floor(i / 50)}`,
+      }),
+    );
+    localStorage.setItem(
+      "evrt-display-runs",
+      JSON.stringify({
+        groupBy: "state",
+        subGroupBy: "agent",
+        sortBy: "default",
+        sortDir: "asc",
+        showEmpty: false,
+        hiddenColumns: [],
+        collapsed: [],
+        customColumns: [],
+      }),
+    );
+    await withApi(
+      {
+        runs: async () => ({ runs }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        fireEvent.click(await r.findByRole("button", { name: "Next" }));
+        await waitFor(() => {
+          expect(
+            r.container.querySelector('td[title="run_sub_100"]'),
+          ).toBeTruthy();
+        });
+
+        // Walk the rendered body: every expanded sub header must own at least
+        // one run row before the next header. A header with a count badge and
+        // nothing under it is the phantom this guards against.
+        const rows = [...r.container.querySelectorAll("tbody tr")];
+        const phantoms: string[] = [];
+        rows.forEach((row, i) => {
+          const header = row.querySelector("button[aria-expanded]");
+          if (!header || header.getAttribute("aria-expanded") !== "true")
+            return;
+          const next = rows[i + 1];
+          if (!next || !next.querySelector('td[title^="run_sub_"]')) {
+            if (header.className.includes("pl-8"))
+              phantoms.push(header.textContent ?? "");
+          }
+        });
+        expect(phantoms).toEqual([]);
+
+        // Positively: the page's own ancestry is replayed — its state header
+        // and its own agent — and the subsection that ended on the previous
+        // page is gone entirely.
+        const headers = [
+          ...r.container.querySelectorAll("tbody tr button[aria-expanded]"),
+        ].map((el) => el.textContent ?? "");
+        expect(headers[0]).toStartWith("COMPLETED");
+        expect(headers[1]).toStartWith("agent-1");
+        expect(headers.filter((label) => label.startsWith("agent-0"))).toEqual(
+          [],
+        );
+      },
+    );
+  });
+
+  test("j crosses a page boundary, Enter opens that row, and footer Enter does not", async () => {
+    const runs = Array.from({ length: 250 }, (_, i) =>
+      stubListItem(`run_keys_${i}`, "COMPLETED"),
+    );
+    const onOpenFull = mock(() => {});
+    function Harness() {
+      const [focusRunId, setFocusRunId] = useState<string | null>(
+        "run_keys_99",
+      );
+      return (
+        <Runs
+          connected
+          context={{ kind: "all" }}
+          focusRunId={focusRunId}
+          onSelectRun={setFocusRunId}
+          onOpenFull={onOpenFull}
+          focusState={null}
+          onFocusStateConsumed={noop}
+          onJumpAgent={noop}
+          onJumpEvent={noop}
+        />
+      );
+    }
+    await withApi(
+      {
+        runs: async () => ({ runs }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderWithClient(<Harness />);
+        await waitFor(() =>
+          expect(
+            r.container.querySelector('td[title="run_keys_99"]'),
+          ).toBeTruthy(),
+        );
+        fireEvent.keyDown(document.body, { key: "j" });
+        await waitFor(() => {
+          expect(
+            r.container.querySelector('td[title="run_keys_100"]')?.closest("tr")
+              ?.className,
+          ).toContain("row-selected");
+        });
+        fireEvent.keyDown(document.body, { key: "Enter" });
+        expect(onOpenFull).toHaveBeenCalledWith("run_keys_100");
+        onOpenFull.mockClear();
+        fireEvent.keyDown(r.getByRole("button", { name: "Next" }), {
+          key: "Enter",
+        });
+        expect(onOpenFull).not.toHaveBeenCalled();
+      },
+    );
+  });
+});

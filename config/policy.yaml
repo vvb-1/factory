@@ -1,6 +1,10 @@
 # Limits the dispatcher enforces. Changing these changes how much autonomy the
 # factory has, so they live in git and move by PR — not by editing a running box.
 
+# Explicit extension allowlist (WM-470). Empty preserves the built-in registry
+# exactly; packs are never discovered by scanning the filesystem.
+packs: []
+
 chain_auto_approval:
   # Only internally admitted chain events in this closed set may be approved
   # unattended. Every other proposal remains watched by default.
@@ -19,6 +23,20 @@ chain_auto_approval:
 
 merge:
   max_fix_rounds: 2
+
+dispatch:
+  # Owned Paths collision handling at dispatch (WM-677).
+  #   strict   — any overlap with an in-flight ticket refuses dispatch. Fail-closed
+  #              default when this key is absent.
+  #   advisory — the overlap is recorded on the proposal/run as evidence and
+  #              dispatch proceeds; only an IDENTICAL concrete file claim, or a
+  #              `**` claim on either side, still refuses (owned_paths_conflict_hard).
+  # Operator decision 2026-08-18: textual overlap is what rebase and merge-fix
+  # already resolve — six overlapping PRs rebased clean that day — and refusing
+  # it at dispatch was starving the pool (2 running workers from 9 attempts).
+  # Merging stays serialized (max_concurrent_merges below), which is where real
+  # conflicts are caught.
+  owned_paths_collision: advisory
 
 concurrency:
   # Per-repo admission ceiling. Actual execution remains bounded by worker
@@ -39,12 +57,14 @@ workers:
   # costs a worktree and an LLM subprocess. The supervisor spends the cheap
   # resource (count) to manage the scarce ones, so `max` is the real ceiling on
   # concurrent agent runs on this machine and should be read that way.
-  min: 1                    # never zero: something has to notice the next
-                            # queued run and grow the pool back
-  max: 20                   # operator-selected throughput ceiling; the host
-                            # has capacity for a wider pool, while subscription
-                            # usage remains unobservable until WM-66 provides a
-                            # budget-aware ceiling
+  min:
+    1 # never zero: something has to notice the next
+    # queued run and grow the pool back
+  max:
+    20 # operator-selected throughput ceiling; the host
+    # has capacity for a wider pool, while subscription
+    # usage remains unobservable until WM-66 provides a
+    # budget-aware ceiling
 
 actions_cache:
   # GitHub's cache API reports decimal bytes. The initial 73 GB quota is
@@ -70,18 +90,21 @@ budget:
   # The real constraint on a subscription is the usage window, and nothing here
   # can see it. That is what tickets-per-tick caps are for (schedule.yaml
   # --args): they bound how much of a window one tick can consume.
-  per_ticket_usd: 15.00     # generous — a triage run that explores a codebase
-                            # legitimately passes $5 notional
-  merge_usd: 40.00          # a merge pass reviews N open PRs, not one ticket —
-                            # sized for a backlog, not a single diff. Added
-                            # 2026-08-04 after a $15 cap on legalease's opus
-                            # merge session ran out mid-review with a 13-PR
-                            # backlog still open; run-agent.sh applies this
-                            # instead of per_ticket_usd for factory-merge only.
-  per_day_usd: 2000.00      # enforced in every gate (lib/spend.mjs): today's
-                            # logs are summed per tick; at the cap it drains —
-                            # running tickets finish, nothing new starts.
-                            # Raised to 1000 on 2026-08-04, then to 2000 same day.
+  per_ticket_usd:
+    15.00 # generous — a triage run that explores a codebase
+    # legitimately passes $5 notional
+  merge_usd:
+    40.00 # a merge pass reviews N open PRs, not one ticket —
+    # sized for a backlog, not a single diff. Added
+    # 2026-08-04 after a $15 cap on legalease's opus
+    # merge session ran out mid-review with a 13-PR
+    # backlog still open; run-agent.sh applies this
+    # instead of per_ticket_usd for factory-merge only.
+  per_day_usd:
+    2000.00 # enforced in every gate (lib/spend.mjs): today's
+    # logs are summed per tick; at the cap it drains —
+    # running tickets finish, nothing new starts.
+    # Raised to 1000 on 2026-08-04, then to 2000 same day.
   on_exhausted: drain
 
 models:
@@ -94,7 +117,7 @@ models:
   # Any other value is passed verbatim as --model. A tier declared by a
   # definition with no mapping here fails closed at registry load.
   claude:
-    strong: default        # CLI default — preserves today's dispatch behavior
+    strong: default # CLI default — preserves today's dispatch behavior
     standard: sonnet
     light: haiku
   # pi (OPS-296), Codex subscription window: sol/terra/luna are the
@@ -116,6 +139,15 @@ models:
   # levels of one model, not three different models. `-high` is the variant
   # the CLI displays as plain "Cursor Grok 4.6"; `-xhigh` is available if
   # strong should reach higher.
+  # WM-585 evidence: merge-scan@2 on cursor (strong tier) timed out at 900s
+  # twice and at 1500s once on 2026.08.17 (run_f8eeb97b, run_7b29aaca,
+  # run_4c42f4ce) with 20-25 open PRs on the non-fast `-high`, and the tiers
+  # were briefly moved to `-high-fast` (same reasoning effort, faster
+  # serving). Decision (operator preference 2026-08-17, WM-603): strong and
+  # standard stay on the non-fast `-high` — the `-fast` twins drain the
+  # Cursor subscription faster; merge-scan timeouts are addressed by scoping
+  # scans per PR (WM-576) rather than by faster serving. light keeps
+  # `-low-fast`.
   cursor:
     strong: cursor-grok-4.6-high
     standard: cursor-grok-4.6-high
@@ -130,7 +162,13 @@ limits:
   # Without it, raising a harness timeout to let long work finish also raises
   # how long a stuck run holds a concurrency slot — that trade is only
   # acceptable when something else guarantees the slot eventually frees.
-  max_run_minutes: 45
+  #
+  # 90 min: raised from 45 (WM-567) after WM-470 run_5aec6675 — a large
+  # architecture ticket — hit the 45-min cap right after pushing its PR and
+  # lost the run. Must not sit below the dispatch agent's own
+  # `limits.timeout_seconds` (event-runtime/agents/dispatch.json, 5400s);
+  # a runtime "extend" for individual runs is WM-566.
+  max_run_minutes: 90
 
 circuit_breaker:
   # Two consecutive environment/build failures (not ticket-specific ones) stop

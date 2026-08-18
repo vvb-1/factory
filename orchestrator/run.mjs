@@ -33,7 +33,10 @@ import { latestReaperRunMs } from "./reaper.mjs";
  * Keep spawned processes reachable until their stdio has closed. Shutdown can
  * then signal every active child and await settlement without polling.
  */
-export function createChildTracker({ setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
+export function createChildTracker({
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+} = {}) {
   const active = new Set();
   const waiters = new Set();
 
@@ -44,7 +47,9 @@ export function createChildTracker({ setTimeoutFn = setTimeout, clearTimeoutFn =
 
   return {
     active,
-    get size() { return active.size; },
+    get size() {
+      return active.size;
+    },
 
     track(child) {
       active.add(child);
@@ -61,7 +66,11 @@ export function createChildTracker({ setTimeoutFn = setTimeout, clearTimeoutFn =
 
     terminateAll(signal = "SIGTERM") {
       for (const child of [...active]) {
-        try { child.kill(signal); } catch {}
+        try {
+          child.kill(signal);
+        } catch {
+          /* intentionally ignored */
+        }
       }
     },
 
@@ -109,7 +118,9 @@ export function createShutdownController({
     const names = getRunningNames();
     if (childTracker.size) {
       const detail = names.length ? ` (${names.join(", ")})` : "";
-      log(`\n${signal} — stopping ${childTracker.size} active child process(es)${detail}. Signal again to exit immediately.`);
+      log(
+        `\n${signal} — stopping ${childTracker.size} active child process(es)${detail}. Signal again to exit immediately.`,
+      );
     }
 
     childTracker.terminateAll("SIGTERM");
@@ -118,7 +129,10 @@ export function createShutdownController({
 
     setTitle("");
     log(`\nstopped. ${completed} run(s) ok, ${failed} failed.`);
-    if (!drained) log(`  shutdown deadline reached; exiting with child process(es) still active.`);
+    if (!drained)
+      log(
+        `  shutdown deadline reached; exiting with child process(es) still active.`,
+      );
     log("nothing is scheduled; nothing runs until you start this again.\n");
     exit(failed ? 1 : 0);
     return { forced: false, drained };
@@ -127,12 +141,18 @@ export function createShutdownController({
 
 export async function main(argv = process.argv.slice(2)) {
   const has = (flag) => argv.includes(flag);
-  const val = (flag) => { const i = argv.indexOf(flag); return i === -1 ? null : argv[i + 1]; };
+  const val = (flag) => {
+    const i = argv.indexOf(flag);
+    return i === -1 ? null : argv[i + 1];
+  };
 
   const APPLY = has("--apply");
   const ONCE = has("--once");
   const ALL = has("--all");
-  const ONLY = (val("--only") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const ONLY = (val("--only") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   // One supervisor per repo. Run two of these side by side to work two repos at
   // once — they share nothing but the machine, and either can be stopped alone.
@@ -153,15 +173,23 @@ export async function main(argv = process.argv.slice(2)) {
 
   // Terminal tab title (OSC 0) — so a wall of tabs reads "which repo, which
   // mode, what's running right now" without focusing any of them.
-  const setTitle = (s) => { if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${s}\x07`); };
+  const setTitle = (s) => {
+    if (process.stdout.isTTY) process.stdout.write(`\x1b]0;${s}\x07`);
+  };
   const baseTitle = () => `factory ${TARGET} — ${APPLY ? "APPLY" : "dry"}`;
-  const refreshTitle = () => setTitle(running.size ? `${baseTitle()} ▸ ${[...running].join(",")}` : baseTitle());
+  const refreshTitle = () =>
+    setTitle(
+      running.size ? `${baseTitle()} ▸ ${[...running].join(",")}` : baseTitle(),
+    );
 
   if (has("--list") || (!ALL && ONLY.length === 0)) {
     console.log(c.bold("\njobs in config/schedule.yaml\n"));
     for (const job of jobs) {
-      const timer = job.enabled === false ? c.dim("no timer") : c.green("timer eligible");
-      console.log(`  ${c.bold(job.name.padEnd(18))} every ${String(job.every).padEnd(5)} ${timer}`);
+      const timer =
+        job.enabled === false ? c.dim("no timer") : c.green("timer eligible");
+      console.log(
+        `  ${c.bold(job.name.padEnd(18))} every ${String(job.every).padEnd(5)} ${timer}`,
+      );
       if (job.dry_command) console.log(c.dim(`    dry:   ${job.dry_command}`));
       console.log(c.dim(`    apply: ${job.command}`));
     }
@@ -189,17 +217,34 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
 
   for (const job of selected) {
     if (!APPLY && !job.dry_command) {
-      console.error(c.red(`\n${job.name} has no dry_command, so there is no safe way to preview it.`));
-      console.error("Add one to config/schedule.yaml, or run with --apply if you mean it.\n");
+      console.error(
+        c.red(
+          `\n${job.name} has no dry_command, so there is no safe way to preview it.`,
+        ),
+      );
+      console.error(
+        "Add one to config/schedule.yaml, or run with --apply if you mean it.\n",
+      );
       return 2;
     }
   }
 
   const commandFor = (job) => (APPLY ? job.command : job.dry_command);
 
-  console.log(c.bold(`\nfactory supervisor — ${c.cyan(TARGET)} · ${c.cyan(AGENT)} — ${APPLY ? c.yellow("APPLY (changes will be made)") : c.green("DRY RUN")}`));
-  console.log(c.dim(`${selected.length} job(s); Ctrl-C to stop. Nothing runs after you exit.\n`));
-  for (const job of selected) console.log(`  ${c.cyan(job.name)}  every ${job.every}  ${c.dim(commandFor(job))}`);
+  console.log(
+    c.bold(
+      `\nfactory supervisor — ${c.cyan(TARGET)} · ${c.cyan(AGENT)} — ${APPLY ? c.yellow("APPLY (changes will be made)") : c.green("DRY RUN")}`,
+    ),
+  );
+  console.log(
+    c.dim(
+      `${selected.length} job(s); Ctrl-C to stop. Nothing runs after you exit.\n`,
+    ),
+  );
+  for (const job of selected)
+    console.log(
+      `  ${c.cyan(job.name)}  every ${job.every}  ${c.dim(commandFor(job))}`,
+    );
   console.log();
 
   const children = createChildTracker();
@@ -213,7 +258,12 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
    */
   function probe(cmd) {
     return new Promise((resolve) => {
-      const child = children.track(spawn("/bin/bash", ["-lc", cmd], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }));
+      const child = children.track(
+        spawn("/bin/bash", ["-lc", cmd], {
+          cwd: ROOT,
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+      );
       let out = "";
       child.stdout.on("data", (data) => (out += data));
       child.stderr.on("data", (data) => (out += data));
@@ -223,7 +273,9 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
 
   async function runJob(job) {
     if (running.has(job.name)) {
-      console.log(`${c.dim(clock())} ${c.yellow("skip")}  ${job.name} — previous run still going`);
+      console.log(
+        `${c.dim(clock())} ${c.yellow("skip")}  ${job.name} — previous run still going`,
+      );
       return;
     }
 
@@ -233,25 +285,38 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
     if (job.gate_command && APPLY) {
       const { code, out } = await probe(job.gate_command);
       if (code === 1) {
-        console.log(`${c.dim(clock())} ${c.dim("idle")}  ${job.name} ${c.dim(`— ${out.split("\n").pop() || "nothing to do"}`)}`);
+        console.log(
+          `${c.dim(clock())} ${c.dim("idle")}  ${job.name} ${c.dim(`— ${out.split("\n").pop() || "nothing to do"}`)}`,
+        );
         return;
       }
       if (code !== 0) {
         failed++;
-        console.log(`${c.dim(clock())} ${c.red("GATE FAIL")} ${job.name} ${c.dim(`exit ${code}: ${out.split("\n").pop()}`)}`);
+        console.log(
+          `${c.dim(clock())} ${c.red("GATE FAIL")} ${job.name} ${c.dim(`exit ${code}: ${out.split("\n").pop()}`)}`,
+        );
         return;
       }
-      console.log(`${c.dim(clock())} ${c.green("gate")}  ${job.name} ${c.dim(out.split("\n").pop() || "")}`);
+      console.log(
+        `${c.dim(clock())} ${c.green("gate")}  ${job.name} ${c.dim(out.split("\n").pop() || "")}`,
+      );
     }
 
     running.add(job.name);
     refreshTitle();
     const cmd = commandFor(job);
     const started = Date.now();
-    console.log(`${c.dim(clock())} ${c.cyan("start")} ${c.bold(job.name)} ${c.dim(cmd)}`);
+    console.log(
+      `${c.dim(clock())} ${c.cyan("start")} ${c.bold(job.name)} ${c.dim(cmd)}`,
+    );
 
     return new Promise((resolve) => {
-      const child = children.track(spawn("/bin/bash", ["-lc", cmd], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }));
+      const child = children.track(
+        spawn("/bin/bash", ["-lc", cmd], {
+          cwd: ROOT,
+          stdio: ["ignore", "pipe", "pipe"],
+        }),
+      );
       const prefix = c.dim("  │ ");
       const pipe = (stream, color) => {
         let buf = "";
@@ -259,9 +324,12 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
           buf += data.toString();
           const lines = buf.split("\n");
           buf = lines.pop();
-          for (const line of lines) console.log(prefix + (color ? color(line) : line));
+          for (const line of lines)
+            console.log(prefix + (color ? color(line) : line));
         });
-        stream.on("end", () => { if (buf.trim()) console.log(prefix + (color ? color(buf) : buf)); });
+        stream.on("end", () => {
+          if (buf.trim()) console.log(prefix + (color ? color(buf) : buf));
+        });
       };
       pipe(child.stdout);
       pipe(child.stderr, c.red);
@@ -272,10 +340,14 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
         const secs = ((Date.now() - started) / 1000).toFixed(1);
         if (code === 0) {
           completed++;
-          console.log(`${c.dim(clock())} ${c.green("done")}  ${job.name} ${c.dim(`(${secs}s)`)}`);
+          console.log(
+            `${c.dim(clock())} ${c.green("done")}  ${job.name} ${c.dim(`(${secs}s)`)}`,
+          );
         } else {
           failed++;
-          console.log(`${c.dim(clock())} ${c.red("FAIL")}  ${job.name} ${c.dim(`exit ${code}, ${secs}s`)}`);
+          console.log(
+            `${c.dim(clock())} ${c.red("FAIL")}  ${job.name} ${c.dim(`exit ${code}, ${secs}s`)}`,
+          );
         }
         resolve();
       });
@@ -285,13 +357,19 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
   const timers = [];
   const shutdown = createShutdownController({
     childTracker: children,
-    clearTimers: () => { for (const timer of timers) clearInterval(timer); },
+    clearTimers: () => {
+      for (const timer of timers) clearInterval(timer);
+    },
     setTitle,
     getCounts: () => ({ completed, failed }),
     getRunningNames: () => [...running],
   });
-  process.on("SIGINT", () => { void shutdown("SIGINT"); });
-  process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
 
   // Startup backstop: the reaper matters most at exactly the moment the factory
   // comes back up — agents crash while the supervisor is down, and their stale
@@ -306,10 +384,18 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
     const ageMin = last === null ? Infinity : (Date.now() - last) / 60_000;
     if (ageMin > REAPER_BACKSTOP_MIN) {
       const ageStr = last === null ? "never" : `${Math.round(ageMin)}m ago`;
-      console.log(`${c.dim(clock())} ${c.yellow("reaper")} last ran ${ageStr} — backstop ${APPLY ? "apply" : "dry"} pass first`);
-      const { code, out } = await probe(`bun orchestrator/reaper.mjs${APPLY ? " --apply" : ""}`);
-      for (const line of out.split("\n")) if (line.trim()) console.log(c.dim(`  │ ${line}`));
-      if (code !== 0) console.log(`${c.dim(clock())} ${c.red("reaper backstop failed")} ${c.dim(`exit ${code}`)}`);
+      console.log(
+        `${c.dim(clock())} ${c.yellow("reaper")} last ran ${ageStr} — backstop ${APPLY ? "apply" : "dry"} pass first`,
+      );
+      const { code, out } = await probe(
+        `bun orchestrator/reaper.mjs${APPLY ? " --apply" : ""}`,
+      );
+      for (const line of out.split("\n"))
+        if (line.trim()) console.log(c.dim(`  │ ${line}`));
+      if (code !== 0)
+        console.log(
+          `${c.dim(clock())} ${c.red("reaper backstop failed")} ${c.dim(`exit ${code}`)}`,
+        );
     }
   }
 
@@ -320,7 +406,9 @@ ${c.dim("not this supervisor — see deploy/gen.mjs.")}
 
   if (ONCE) {
     await firstPass;
-    console.log(`\n${c.bold("one pass complete.")} ${completed} ok, ${failed} failed.`);
+    console.log(
+      `\n${c.bold("one pass complete.")} ${completed} ok, ${failed} failed.`,
+    );
     return failed ? 1 : 0;
   }
 

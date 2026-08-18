@@ -63,9 +63,18 @@ export function resolveEscalateGlobs(repo) {
   const name = repo?.name ?? "?";
   const raw = repo?.escalate_paths;
   if (raw === undefined || raw === null)
-    return { ok: false, reason: `"${name}" has no escalate_paths key in config/repos.yaml` };
-  if (!Array.isArray(raw) || raw.some((g) => typeof g !== "string" || !g.trim()))
-    return { ok: false, reason: `escalate_paths for "${name}" is not a list of path globs` };
+    return {
+      ok: false,
+      reason: `"${name}" has no escalate_paths key in config/repos.yaml`,
+    };
+  if (
+    !Array.isArray(raw) ||
+    raw.some((g) => typeof g !== "string" || !g.trim())
+  )
+    return {
+      ok: false,
+      reason: `escalate_paths for "${name}" is not a list of path globs`,
+    };
   return { ok: true, globs: raw };
 }
 
@@ -81,7 +90,10 @@ export function resolveChangedFiles(raw) {
     .map((s) => s.trim())
     .filter(Boolean);
   if (!files.length)
-    return { ok: false, reason: "the changed-file list is empty — the diff was never read" };
+    return {
+      ok: false,
+      reason: "the changed-file list is empty — the diff was never read",
+    };
   return { ok: true, files };
 }
 
@@ -92,8 +104,16 @@ export function checkoutFreshness(configPath) {
     const r = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
     return r.status === 0 ? (r.stdout ?? "").trim() : null;
   };
-  const upstream = git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
-  const behindRaw = upstream === null ? null : git(["rev-list", "--count", `HEAD..${upstream}`]);
+  const upstream = git([
+    "rev-parse",
+    "--abbrev-ref",
+    "--symbolic-full-name",
+    "@{u}",
+  ]);
+  const behindRaw =
+    upstream === null
+      ? null
+      : git(["rev-list", "--count", `HEAD..${upstream}`]);
   const behind = behindRaw === null ? null : Number(behindRaw);
   // Absolute pathspec: the config need not sit at the root of its checkout.
   const status = git(["status", "--porcelain", "--", path.resolve(configPath)]);
@@ -110,7 +130,10 @@ export function checkoutFreshness(configPath) {
  * command reports "unknown", never "clean" — that is the same fail-open shape
  * this gate exists to avoid.
  */
-export function freshnessWarnings(freshness, dir = freshness.root ?? "the factory checkout") {
+export function freshnessWarnings(
+  freshness,
+  dir = freshness.root ?? "the factory checkout",
+) {
   const out = [];
   const ref = freshness.upstream ?? "origin";
   if (freshness.behind === null)
@@ -126,7 +149,9 @@ export function freshnessWarnings(freshness, dir = freshness.root ?? "the factor
         `Run \`git -C ${dir} pull --ff-only\` and re-check before trusting this result.`,
     );
   if (freshness.dirtyConfig === null)
-    out.push(`WARNING: cannot tell whether config/repos.yaml is locally modified in ${dir}`);
+    out.push(
+      `WARNING: cannot tell whether config/repos.yaml is locally modified in ${dir}`,
+    );
   else if (freshness.dirtyConfig)
     out.push(
       `WARNING: config/repos.yaml has uncommitted local changes — ` +
@@ -137,35 +162,58 @@ export function freshnessWarnings(freshness, dir = freshness.root ?? "the factor
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
+  const val = (f) => {
+    const i = argv.indexOf(f);
+    return i === -1 ? null : argv[i + 1];
+  };
 
   const pr = val("--pr");
-  if (!val("--repo") || !pr) { console.error(`usage: bun orchestrator/escalate.mjs --repo <name> --pr <number>`); process.exit(EXIT.CANNOT_EVALUATE); }
+  if (!val("--repo") || !pr) {
+    console.error(
+      `usage: bun orchestrator/escalate.mjs --repo <name> --pr <number>`,
+    );
+    process.exit(EXIT.CANNOT_EVALUATE);
+  }
 
-  const configPath = process.env.FACTORY_ESCALATE_REPOS_YAML || path.join(ROOT, "config/repos.yaml");
+  const configPath =
+    process.env.FACTORY_ESCALATE_REPOS_YAML ||
+    path.join(ROOT, "config/repos.yaml");
   let cfg;
   try {
     cfg = Bun.YAML.parse(readFileSync(configPath, "utf8"));
   } catch (err) {
-    console.error(`CANNOT EVALUATE — could not read ${configPath}: ${err.message}`);
-    console.error(`the escalation gate did not run => treat the PR as ESCALATED until it can`);
+    console.error(
+      `CANNOT EVALUATE — could not read ${configPath}: ${err.message}`,
+    );
+    console.error(
+      `the escalation gate did not run => treat the PR as ESCALATED until it can`,
+    );
     process.exit(EXIT.CANNOT_EVALUATE);
   }
   const repo = (cfg?.repos ?? []).find((r) => r.name === val("--repo"));
 
-  for (const line of freshnessWarnings(checkoutFreshness(configPath))) console.error(line);
+  for (const line of freshnessWarnings(checkoutFreshness(configPath)))
+    console.error(line);
 
   if (!repo) {
-    console.error(`CANNOT EVALUATE — no repo named "${val("--repo")}" in ${configPath}`);
-    console.error(`the escalation gate did not run => treat PR #${pr} as ESCALATED until it can`);
+    console.error(
+      `CANNOT EVALUATE — no repo named "${val("--repo")}" in ${configPath}`,
+    );
+    console.error(
+      `the escalation gate did not run => treat PR #${pr} as ESCALATED until it can`,
+    );
     process.exit(EXIT.CANNOT_EVALUATE);
   }
 
   const resolved = resolveEscalateGlobs(repo);
   if (!resolved.ok) {
     console.error(`CANNOT EVALUATE — ${resolved.reason}`);
-    console.error(`the escalation gate did not run => treat PR #${pr} as ESCALATED until it can.`);
-    console.error(`Fix: give ${repo.name} an escalate_paths list, or an explicit \`escalate_paths: []\` if there is deliberately nothing to check mechanically.`);
+    console.error(
+      `the escalation gate did not run => treat PR #${pr} as ESCALATED until it can.`,
+    );
+    console.error(
+      `Fix: give ${repo.name} an escalate_paths list, or an explicit \`escalate_paths: []\` if there is deliberately nothing to check mechanically.`,
+    );
     process.exit(EXIT.CANNOT_EVALUATE);
   }
   const globs = resolved.globs;
@@ -178,7 +226,10 @@ if (import.meta.main) {
     raw = injected;
   } else {
     const repoPath = String(repo.path).replace(/^~/, homedir());
-    const diff = spawnSync("gh", ["pr", "diff", pr, "--name-only"], { cwd: repoPath, encoding: "utf8" });
+    const diff = spawnSync("gh", ["pr", "diff", pr, "--name-only"], {
+      cwd: repoPath,
+      encoding: "utf8",
+    });
     if (diff.status !== 0) {
       console.error(`gh pr diff failed: ${(diff.stderr || "").trim()}`);
       console.error(`cannot see the diff => treat as ESCALATE, not as clean`);
@@ -190,19 +241,29 @@ if (import.meta.main) {
   const changed = resolveChangedFiles(raw);
   if (!changed.ok) {
     console.error(`CANNOT EVALUATE — PR #${pr}: ${changed.reason}`);
-    console.error(`zero files match every glob list => treat PR #${pr} as ESCALATED, not as clean`);
-    console.error(`Check: \`gh pr diff ${pr} --name-only\` in ${repo.name} — an empty result usually means the wrong PR number, a closed or cross-fork PR, or a \`gh\` auth failure.`);
+    console.error(
+      `zero files match every glob list => treat PR #${pr} as ESCALATED, not as clean`,
+    );
+    console.error(
+      `Check: \`gh pr diff ${pr} --name-only\` in ${repo.name} — an empty result usually means the wrong PR number, a closed or cross-fork PR, or a \`gh\` auth failure.`,
+    );
     process.exit(EXIT.CANNOT_EVALUATE);
   }
   const files = changed.files;
 
   const hits = matchEscalations(files, globs);
   if (hits.length) {
-    console.log(`ESCALATE — PR #${pr} touches ${hits.length} protected file(s) in ${repo.name}:`);
+    console.log(
+      `ESCALATE — PR #${pr} touches ${hits.length} protected file(s) in ${repo.name}:`,
+    );
     for (const h of hits) console.log(`  ${h.file}  (${h.globs.join(", ")})`);
     process.exit(EXIT.ESCALATE);
   }
-  const list = globs.length ? `${globs.length} escalate_paths glob(s)` : `an explicitly empty escalate_paths list`;
-  console.log(`PR #${pr}: none of ${files.length} changed file(s) hit ${list} — mechanical check clean (judgment list still applies)`);
+  const list = globs.length
+    ? `${globs.length} escalate_paths glob(s)`
+    : `an explicitly empty escalate_paths list`;
+  console.log(
+    `PR #${pr}: none of ${files.length} changed file(s) hit ${list} — mechanical check clean (judgment list still applies)`,
+  );
   process.exit(EXIT.CLEAN);
 }

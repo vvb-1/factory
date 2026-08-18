@@ -90,14 +90,20 @@ export function checkIntegrity(dbOrPath, { throwOnError = false } = {}) {
  * @param {{ overwrite?: boolean }} options
  * @returns {{ destinationPath: string, sizeBytes: number, backupTime: string, integrity: string }}
  */
-export function backupDatabase(dbOrPath, destinationPath, { overwrite = true } = {}) {
+export function backupDatabase(
+  dbOrPath,
+  destinationPath,
+  { overwrite = true } = {},
+) {
   let db = null;
   let shouldClose = false;
 
   try {
     if (typeof dbOrPath === "string") {
       if (!existsSync(dbOrPath)) {
-        throw new Error(`cannot backup database: source file does not exist: ${dbOrPath}`);
+        throw new Error(
+          `cannot backup database: source file does not exist: ${dbOrPath}`,
+        );
       }
       db = new Database(dbOrPath);
       shouldClose = true;
@@ -109,7 +115,10 @@ export function backupDatabase(dbOrPath, destinationPath, { overwrite = true } =
     mkdirSync(destDir, { recursive: true });
 
     const nonce = crypto.randomBytes(6).toString("hex");
-    const tmpDest = path.join(destDir, `.${path.basename(destinationPath)}.tmp-${Date.now()}-${nonce}`);
+    const tmpDest = path.join(
+      destDir,
+      `.${path.basename(destinationPath)}.tmp-${Date.now()}-${nonce}`,
+    );
 
     // Clean up any stale temp file with the same name
     if (existsSync(tmpDest)) unlinkSync(tmpDest);
@@ -127,7 +136,9 @@ export function backupDatabase(dbOrPath, destinationPath, { overwrite = true } =
     if (existsSync(destinationPath)) {
       if (!overwrite) {
         if (existsSync(tmpDest)) unlinkSync(tmpDest);
-        throw new Error(`destination file already exists and overwrite is false: ${destinationPath}`);
+        throw new Error(
+          `destination file already exists and overwrite is false: ${destinationPath}`,
+        );
       }
       unlinkSync(destinationPath);
     }
@@ -160,13 +171,17 @@ export function backupDatabase(dbOrPath, destinationPath, { overwrite = true } =
  */
 export function restoreDatabase(backupPath, targetDbPath = defaultDbPath()) {
   if (!existsSync(backupPath)) {
-    throw new Error(`cannot restore database: backup file not found: ${backupPath}`);
+    throw new Error(
+      `cannot restore database: backup file not found: ${backupPath}`,
+    );
   }
 
   // 1. Verify backup file integrity
   const check = checkIntegrity(backupPath);
   if (!check.ok) {
-    throw new Error(`cannot restore database: backup file is corrupt: ${check.errors.join("; ")}`);
+    throw new Error(
+      `cannot restore database: backup file is corrupt: ${check.errors.join("; ")}`,
+    );
   }
 
   const targetDir = path.dirname(targetDbPath);
@@ -186,7 +201,9 @@ export function restoreDatabase(backupPath, targetDbPath = defaultDbPath()) {
   // 4. Verify restored target database
   const restoredCheck = checkIntegrity(targetDbPath);
   if (!restoredCheck.ok) {
-    throw new Error(`restored database integrity check failed: ${restoredCheck.errors.join("; ")}`);
+    throw new Error(
+      `restored database integrity check failed: ${restoredCheck.errors.join("; ")}`,
+    );
   }
 
   const stat = statSync(targetDbPath);

@@ -5,8 +5,11 @@
  * `#/overview` `#/events` `#/events?type=` `#/events/:source/:eventId`
  * `#/proposals` `#/proposals/:id` `#/runs` `#/runs/:id` `#/run/:id` (the
  * full-page run view — distinct first segment so expand/back get push
- * semantics) `#/agents` `#/agents/:ref` `#/artifacts` `#/artifacts?kind=…`
- * `#/workers` `#/workers/:id` `#/graph` `#/graph/:nodeId`
+ * semantics) `#/tickets` `#/tickets/:id` (the ticket journey; an id-less
+ * route presents the ticket picker) `#/prs/:number` (the PR journey, WM-640 —
+ * the same layout keyed on a pull request; reached from PR chips and ⌘K, not
+ * the nav rail) `#/agents` `#/agents/:ref` `#/artifacts`
+ * `#/artifacts?kind=…` `#/workers` `#/workers/:id` `#/graph` `#/graph/:nodeId`
  * `#/chain/:correlationId` `#/chain/:correlationId/:nodeId` (the chain trace,
  * WM-527 — a drill-in like `#/run/:id`, not a nav item)
  *
@@ -46,7 +49,10 @@ export function hashView(hash: string): string {
  * replace the current history entry. Crossing views (nav rail, `g e`) must
  * push so Back returns to the previous view.
  */
-export function shouldReplaceHash(currentHash: string, nextPath: string): boolean {
+export function shouldReplaceHash(
+  currentHash: string,
+  nextPath: string,
+): boolean {
   return hashView(currentHash) === hashView(`#/${nextPath}`);
 }
 
@@ -56,7 +62,10 @@ export function hashSearch(hash: string): URLSearchParams {
 }
 
 /** Build a hash path; each id segment is encoded. */
-export function hashPath(view: string, ...ids: Array<string | null | undefined>): string {
+export function hashPath(
+  view: string,
+  ...ids: Array<string | null | undefined>
+): string {
   const parts = [view];
   for (const id of ids) {
     if (id == null || id === "") continue;
@@ -184,11 +193,13 @@ export function eventsHash(
 }
 
 /** Shareable Artifacts view filters. Project context is added by `withProject`. */
-export function artifactsHash(filters: {
-  kind?: string | null;
-  orphan?: boolean | null;
-  search?: string | null;
-} = {}): string {
+export function artifactsHash(
+  filters: {
+    kind?: string | null;
+    orphan?: boolean | null;
+    search?: string | null;
+  } = {},
+): string {
   const query = new URLSearchParams();
   if (filters.kind) query.set("kind", filters.kind);
   if (filters.orphan != null) query.set("orphan", String(filters.orphan));
@@ -206,7 +217,10 @@ export function hashProject(hash: string): string | null {
  * Set or clear `project` on a hash path, preserving other query keys (`type=`).
  * `project` null/empty strips it so All has no query of its own.
  */
-export function withProject(path: string, project: string | null | undefined): string {
+export function withProject(
+  path: string,
+  project: string | null | undefined,
+): string {
   const i = path.indexOf("?");
   const pathname = i >= 0 ? path.slice(0, i) : path;
   const query = new URLSearchParams(i >= 0 ? path.slice(i + 1) : "");

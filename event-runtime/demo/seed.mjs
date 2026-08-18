@@ -66,7 +66,8 @@ const client = new Proxy(rawClient, {
     const value = target[prop];
     if (typeof value !== "function") return value;
     if (["approve", "cancel", "reject", "replay", "retry"].includes(prop)) {
-      return (...args) => retryDatabaseLock(`${prop} ${args[0] ?? ""}`, () => value(...args));
+      return (...args) =>
+        retryDatabaseLock(`${prop} ${args[0] ?? ""}`, () => value(...args));
     }
     return value;
   },
@@ -94,7 +95,12 @@ async function projectNames() {
 /** repos[0] must stay the fake adapter's mode — the project name only trails it. */
 const tag = (mode, project) => (project ? [mode, project] : [mode]);
 
-function envelope(id, repos, type = "factory.status-report.requested", source = "demo-seed") {
+function envelope(
+  id,
+  repos,
+  type = "factory.status-report.requested",
+  source = "demo-seed",
+) {
   return {
     schemaVersion: "factory.event/v1",
     eventId: `${prefix}-${id}`,
@@ -122,7 +128,9 @@ async function retryDatabaseLock(label, operation) {
       await sleep(25 * (attempt + 1));
     }
   }
-  throw new Error(`${label}: database remained locked after 20 retries (${last?.message ?? "unknown error"})`);
+  throw new Error(
+    `${label}: database remained locked after 20 retries (${last?.message ?? "unknown error"})`,
+  );
 }
 
 async function replay(env) {
@@ -130,9 +138,9 @@ async function replay(env) {
   if (res.duplicate) {
     console.error(
       `seed: duplicate prefix "${prefix}" — event "${env.eventId}" already exists in runtime database.\n` +
-      `This runtime was already seeded under prefix "${prefix}".\n` +
-      `To re-seed under a fresh prefix: bun event-runtime/demo/seed.mjs --port ${port} --prefix demo-$(date +%s)\n` +
-      `Or use: bin/worktree-up.sh --reseed`,
+        `This runtime was already seeded under prefix "${prefix}".\n` +
+        `To re-seed under a fresh prefix: bun event-runtime/demo/seed.mjs --port ${port} --prefix demo-$(date +%s)\n` +
+        `Or use: bin/worktree-up.sh --reseed`,
     );
     process.exit(1);
   }
@@ -152,7 +160,9 @@ async function until(what, fn, { timeoutMs = 30_000, everyMs = pollMs } = {}) {
 
 async function proposalFor(eventId, { agent, status = "open" } = {}) {
   return until(`proposal for ${agent ?? eventId}`, async () => {
-    const { proposals } = await client.proposals(status === "open" ? undefined : "all");
+    const { proposals } = await client.proposals(
+      status === "open" ? undefined : "all",
+    );
     return proposals.find((p) => {
       if (status !== "all" && p.status !== status) return false;
       const eventMatches =
@@ -175,24 +185,37 @@ async function openProposalFor(eventId, options = {}) {
 
 /** human_needed proposals carry no spec — match via their admitted event. */
 async function humanNeededProposal(eventId) {
-  return until(`human_needed proposal${eventId ? ` for ${eventId}` : ""}`, async () => {
-    const { proposals } = await client.proposals();
-    return proposals.find(
-      (p) =>
-        p.status === "open" &&
-        p.decision === "human_needed" &&
-        (!eventId || p.eventId?.includes(eventId) || p.reason?.includes(eventId)),
-    );
-  });
+  return until(
+    `human_needed proposal${eventId ? ` for ${eventId}` : ""}`,
+    async () => {
+      const { proposals } = await client.proposals();
+      return proposals.find(
+        (p) =>
+          p.status === "open" &&
+          p.decision === "human_needed" &&
+          (!eventId ||
+            p.eventId?.includes(eventId) ||
+            p.reason?.includes(eventId)),
+      );
+    },
+  );
 }
 
 async function runTerminal(runId, wanted) {
   return until(`run ${runId} → ${wanted}`, async () => {
     const view = await client.run(runId);
     if (view.run.state === wanted) return view;
-    const TERMINAL = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
+    const TERMINAL = [
+      "COMPLETED",
+      "REFUSED",
+      "FAILED",
+      "TIMED_OUT",
+      "CANCELLED",
+    ];
     if (TERMINAL.includes(view.run.state)) {
-      throw new Error(`run ${runId} terminated ${view.run.state}, expected ${wanted}`);
+      throw new Error(
+        `run ${runId} terminated ${view.run.state}, expected ${wanted}`,
+      );
     }
     return null;
   });
@@ -213,7 +236,10 @@ const probeId = `${prefix}-adapter-probe`;
 await replay(envelope("adapter-probe", ["ok"]));
 const probe = await openProposalFor(probeId);
 if (probe.spec?.adapter !== "fake") {
-  await client.reject(probe.id, "seed aborted: runtime is not in fake-adapter mode");
+  await client.reject(
+    probe.id,
+    "seed aborted: runtime is not in fake-adapter mode",
+  );
   console.error(
     `seed: refusing — this runtime plans with adapter "${probe.spec?.adapter}", not "fake". ` +
       `Restart it with --adapter-override fake.`,
@@ -226,24 +252,30 @@ await client.reject(probe.id, "adapter probe — not part of the demo set");
 // so the single worker is unblocked and open proposal counts match fixture assertions.
 try {
   const { proposals: priorProposals } = await client.proposals();
-  for (const p of (priorProposals ?? [])) {
+  for (const p of priorProposals ?? []) {
     try {
       await client.reject(p.id, "cancelled by demo re-seed");
-    } catch {}
+    } catch {
+      /* intentionally ignored */
+    }
   }
   const { runs: priorRuns } = await client.runs();
-  for (const r of (priorRuns ?? [])) {
+  for (const r of priorRuns ?? []) {
     if (r.state === "RUNNING" || r.state === "QUEUED") {
       try {
         await client.cancel(r.runId, "cancelled by demo re-seed");
-      } catch {}
+      } catch {
+        /* intentionally ignored */
+      }
     }
   }
   await until(
     "worker idle after re-seed cleanup",
     async () => {
       const { runs } = await client.runs();
-      const busy = (runs ?? []).filter((r) => r.state === "RUNNING" || r.state === "QUEUED");
+      const busy = (runs ?? []).filter(
+        (r) => r.state === "RUNNING" || r.state === "QUEUED",
+      );
       return busy.length === 0;
     },
     { timeoutMs: 5_000, everyMs: 100 },
@@ -254,12 +286,20 @@ try {
 
 const [projectA, projectB = projectA] = await projectNames();
 const primaryProject = projectA || "factory";
-log(projectA ? `project tags: ${[...new Set([projectA, projectB])].join(", ")}` : "project tags: none (fallback: factory)");
+log(
+  projectA
+    ? `project tags: ${[...new Set([projectA, projectB])].join(", ")}`
+    : "project tags: none (fallback: factory)",
+);
 
 // 1. Quick terminals for status-report (ephemeral workspace)
 const terminals = [
   { id: "completed", repos: tag("ok", projectA), wanted: "COMPLETED" },
-  { id: "with-artifact", repos: tag("with-artifact", projectA), wanted: "COMPLETED" },
+  {
+    id: "with-artifact",
+    repos: tag("with-artifact", projectA),
+    wanted: "COMPLETED",
+  },
   { id: "trace-flood", repos: ["trace-flood"], wanted: "COMPLETED" },
   { id: "refused", repos: ["refuse"], wanted: "REFUSED" },
   { id: "failed-crash", repos: ["crash"], wanted: "FAILED" },
@@ -274,12 +314,17 @@ for (const t of terminals) {
 }
 
 // 2. Multi-attempt run: retry the failed-crash run (attempt: 2)
-const failedCrashProposal = await until("failed-crash run for retry", async () => {
-  const { runs } = await client.runs("FAILED");
-  return runs.find((r) => r.reasonCode === "agent_exit_1");
-});
+const failedCrashProposal = await until(
+  "failed-crash run for retry",
+  async () => {
+    const { runs } = await client.runs("FAILED");
+    return runs.find((r) => r.reasonCode === "agent_exit_1");
+  },
+);
 if (failedCrashProposal) {
-  log(`retrying ${failedCrashProposal.runId} with force=true to create attempt 2`);
+  log(
+    `retrying ${failedCrashProposal.runId} with force=true to create attempt 2`,
+  );
   await client.retry(failedCrashProposal.runId, { force: true });
   await runTerminal(failedCrashProposal.runId, "FAILED");
   log(`${failedCrashProposal.runId} → FAILED (attempt 2 completed)`);
@@ -312,19 +357,29 @@ await client.replay({
   correlationId: ciEventId,
   payload: { repo: `wm/${primaryProject}`, runId: ciRunId },
 });
-const ciCaptureProposal = await openProposalFor(ciEventId, { agent: "ci-log-capture@1" });
+const ciCaptureProposal = await openProposalFor(ciEventId, {
+  agent: "ci-log-capture@1",
+});
 await client.approve(ciCaptureProposal.id);
 await runTerminal(ciCaptureProposal.runId, "COMPLETED");
-log(`${ciCaptureProposal.runId} → COMPLETED (ci-log-capture@1, emitted ci-log artifact)`);
+log(
+  `${ciCaptureProposal.runId} → COMPLETED (ci-log-capture@1, emitted ci-log artifact)`,
+);
 
 // Hop 2: ci-doctor@2 (artifacts workspace type with $.artifactHash.ci-log)
-const ciDoctorProposal = await openProposalFor(ciEventId, { agent: "ci-doctor@2" });
+const ciDoctorProposal = await openProposalFor(ciEventId, {
+  agent: "ci-doctor@2",
+});
 await client.approve(ciDoctorProposal.id);
 await runTerminal(ciDoctorProposal.runId, "COMPLETED");
-log(`${ciDoctorProposal.runId} → COMPLETED (ci-doctor@2, verdict FLAKE, artifacts workspace)`);
+log(
+  `${ciDoctorProposal.runId} → COMPLETED (ci-doctor@2, verdict FLAKE, artifacts workspace)`,
+);
 
 // Hop 3: ci-rerun@1 (command adapter follow-up with causationId)
-const ciRerunProposal = await openProposalFor(ciEventId, { agent: "ci-rerun@1" });
+const ciRerunProposal = await openProposalFor(ciEventId, {
+  agent: "ci-rerun@1",
+});
 await client.approve(ciRerunProposal.id);
 await runTerminal(ciRerunProposal.runId, "COMPLETED");
 log(`${ciRerunProposal.runId} → COMPLETED (ci-rerun@1, command adapter)`);
@@ -341,10 +396,14 @@ await client.replay({
   correlationId: triageEventId,
   payload: { repo: primaryProject },
 });
-const triageScanProposal = await openProposalFor(triageEventId, { agent: "triage-scan@1" });
+const triageScanProposal = await openProposalFor(triageEventId, {
+  agent: "triage-scan@1",
+});
 await client.approve(triageScanProposal.id);
 await runTerminal(triageScanProposal.runId, "COMPLETED");
-log(`${triageScanProposal.runId} → COMPLETED (triage-scan@1, repository workspace)`);
+log(
+  `${triageScanProposal.runId} → COMPLETED (triage-scan@1, repository workspace)`,
+);
 
 // Follow-up triage-apply run from this scan's exact causal edge. Matching only
 // by agent can reuse a terminal proposal from a prior seed while the fresh edge
@@ -360,7 +419,9 @@ log(
 );
 
 // 7. Duplicate delivery suppression
-const dupOutcome = await client.replay(envelope("completed", tag("ok", projectA)));
+const dupOutcome = await client.replay(
+  envelope("completed", tag("ok", projectA)),
+);
 log(`duplicate admission test: duplicate=${dupOutcome.duplicate}`);
 
 // 8. Open watched proposals: direct/operator, merge/ship, human_needed, and TTL-expired
@@ -404,7 +465,9 @@ await client.replay({
     ],
   },
 });
-const mergeWatched = await openProposalFor(mergeEventId, { agent: "merge-apply@2" });
+const mergeWatched = await openProposalFor(mergeEventId, {
+  agent: "merge-apply@2",
+});
 log(`${mergeWatched.id} left open (merge-apply@2 watched)`);
 
 // A landed event is deliberately not fabricated by the demo. The executable
@@ -427,11 +490,15 @@ await client.replay({
     deployBranch: "main",
     headSha: fixtureSha,
     deployHeadSha: fixtureSha,
-    changelog: [{ sha: fixtureSha, subject: "fixture release", ticket: "WM-400" }],
+    changelog: [
+      { sha: fixtureSha, subject: "fixture release", ticket: "WM-400" },
+    ],
     plan: [{ action: "open_rc_pr" }],
   },
 });
-const shipWatched = await openProposalFor(shipEventId, { agent: "ship-apply@1" });
+const shipWatched = await openProposalFor(shipEventId, {
+  agent: "ship-apply@1",
+});
 log(`${shipWatched.id} left open (ship-apply@1 human watched)`);
 
 await replay(envelope("human-needed", []));
@@ -447,8 +514,12 @@ const home = health.env?.home || runtimeHome();
 try {
   const db = openDb(dbPath(home));
   // Set expired proposal created_at to 2 hours ago
-  db.query("UPDATE proposals SET created_at = datetime('now', '-2 hours') WHERE id = ?").run(expiredProposal.id);
-  log(`${expiredProposal.id} timestamp updated to 2h ago (TTL-expired proposal anomaly)`);
+  db.query(
+    "UPDATE proposals SET created_at = datetime('now', '-2 hours') WHERE id = ?",
+  ).run(expiredProposal.id);
+  log(
+    `${expiredProposal.id} timestamp updated to 2h ago (TTL-expired proposal anomaly)`,
+  );
 
   // Insert a dead-lettered event directly into events table
   const deadEventId = `${prefix}-dead-letter`;
@@ -462,23 +533,41 @@ try {
      ON CONFLICT(source, event_id) DO UPDATE SET
        status = 'dead_lettered', plan_failures = 3, last_plan_error = 'simulated planning failure: poison payload'`,
   ).run(
-    deadEnvelope.source, deadEventId, deadEnvelope.type, deadEnvelope.subject,
-    deadEnvelope.occurredAt, nowStr, deadEnvelope.correlationId, null,
-    JSON.stringify(deadEnvelope), "none", nowStr,
+    deadEnvelope.source,
+    deadEventId,
+    deadEnvelope.type,
+    deadEnvelope.subject,
+    deadEnvelope.occurredAt,
+    nowStr,
+    deadEnvelope.correlationId,
+    null,
+    JSON.stringify(deadEnvelope),
+    "none",
+    nowStr,
   );
   log(`${deadEventId} inserted as dead_lettered (dead-letter anomaly)`);
 
   // WM-132: Update failed-contract run spec to have maxAttempts = 2 so plain Retry is exercisable (attempts < maxAttempts)
   const contractRow = db
-    .query("SELECT p.run_id, r.spec_json FROM proposals p JOIN runs r ON r.run_id = p.run_id WHERE p.idempotency_key LIKE ?")
+    .query(
+      "SELECT p.run_id, r.spec_json FROM proposals p JOIN runs r ON r.run_id = p.run_id WHERE p.idempotency_key LIKE ?",
+    )
     .get(`%${prefix}-failed-contract%`);
   if (contractRow) {
     const spec = JSON.parse(contractRow.spec_json);
     spec.maxAttempts = 2;
     const updatedSpecJson = JSON.stringify(spec);
-    db.query("UPDATE runs SET spec_json = ? WHERE run_id = ?").run(updatedSpecJson, contractRow.run_id);
-    db.query("UPDATE proposals SET spec_json = ? WHERE run_id = ?").run(updatedSpecJson, contractRow.run_id);
-    log(`${contractRow.run_id} spec updated to maxAttempts=2 (attempts: 1/2, plain retry exercisable)`);
+    db.query("UPDATE runs SET spec_json = ? WHERE run_id = ?").run(
+      updatedSpecJson,
+      contractRow.run_id,
+    );
+    db.query("UPDATE proposals SET spec_json = ? WHERE run_id = ?").run(
+      updatedSpecJson,
+      contractRow.run_id,
+    );
+    log(
+      `${contractRow.run_id} spec updated to maxAttempts=2 (attempts: 1/2, plain retry exercisable)`,
+    );
   }
 
   // WM-133: Working PR workflow scenario (dispatch@1 run moving through RUNNING → VERIFYING → COMPLETED with PR_OPEN)
@@ -518,9 +607,17 @@ try {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "resolved", 0, null, ?)
      ON CONFLICT(source, event_id) DO UPDATE SET status = "resolved"`,
   ).run(
-    dispatchEnvelope.source, dispatchEventId, dispatchEnvelope.type, dispatchEnvelope.subject,
-    dispatchEnvelope.occurredAt, nowStr, dispatchEnvelope.correlationId, null,
-    JSON.stringify(dispatchEnvelope), hashJson(dispatchEnvelope.payload), nowStr,
+    dispatchEnvelope.source,
+    dispatchEventId,
+    dispatchEnvelope.type,
+    dispatchEnvelope.subject,
+    dispatchEnvelope.occurredAt,
+    nowStr,
+    dispatchEnvelope.correlationId,
+    null,
+    JSON.stringify(dispatchEnvelope),
+    hashJson(dispatchEnvelope.payload),
+    nowStr,
   );
 
   db.query(
@@ -530,8 +627,15 @@ try {
      VALUES (?, ?, ?, ?, "run", ?, ?, ?, "approved", null, ?, 1800, ?, "operator")
      ON CONFLICT(id) DO UPDATE SET status = "approved", run_id = excluded.run_id`,
   ).run(
-    dispatchPropId, dispatchEnvelope.source, dispatchEventId, dispatchRunId,
-    dispatchSpecJson, dispatchSpecHash, dispatchRunId, nowStr, nowStr,
+    dispatchPropId,
+    dispatchEnvelope.source,
+    dispatchEventId,
+    dispatchRunId,
+    dispatchSpecJson,
+    dispatchSpecHash,
+    dispatchRunId,
+    nowStr,
+    nowStr,
   );
 
   createRun(db, {
@@ -545,21 +649,79 @@ try {
     policyVersion: "v1",
     now: () => nowStr,
   });
-  transition(db, { runId: dispatchRunId, to: "APPROVED", expectFrom: "PROPOSED", actor: "operator", reason: "approved", policyVersion: "v1", now: () => nowStr });
-  transition(db, { runId: dispatchRunId, to: "QUEUED", expectFrom: "APPROVED", actor: "worker-demo", reason: "queued", policyVersion: "v1", now: () => nowStr });
-  transition(db, { runId: dispatchRunId, to: "LEASED", expectFrom: "QUEUED", actor: "worker-demo", reason: "leased", policyVersion: "v1", now: () => nowStr });
-  transition(db, { runId: dispatchRunId, to: "RUNNING", expectFrom: "LEASED", actor: "worker-demo", reason: "started", attempt: 1, policyVersion: "v1", now: () => nowStr });
-  transition(db, { runId: dispatchRunId, to: "VERIFYING", expectFrom: "RUNNING", actor: "worker-demo", reason: "finished", attempt: 1, policyVersion: "v1", now: () => nowStr });
-  transition(db, { runId: dispatchRunId, to: "COMPLETED", expectFrom: "VERIFYING", actor: "worker-demo", reason: "verified", attempt: 1, policyVersion: "v1", now: () => nowStr });
+  transition(db, {
+    runId: dispatchRunId,
+    to: "APPROVED",
+    expectFrom: "PROPOSED",
+    actor: "operator",
+    reason: "approved",
+    policyVersion: "v1",
+    now: () => nowStr,
+  });
+  transition(db, {
+    runId: dispatchRunId,
+    to: "QUEUED",
+    expectFrom: "APPROVED",
+    actor: "worker-demo",
+    reason: "queued",
+    policyVersion: "v1",
+    now: () => nowStr,
+  });
+  transition(db, {
+    runId: dispatchRunId,
+    to: "LEASED",
+    expectFrom: "QUEUED",
+    actor: "worker-demo",
+    reason: "leased",
+    policyVersion: "v1",
+    now: () => nowStr,
+  });
+  transition(db, {
+    runId: dispatchRunId,
+    to: "RUNNING",
+    expectFrom: "LEASED",
+    actor: "worker-demo",
+    reason: "started",
+    attempt: 1,
+    policyVersion: "v1",
+    now: () => nowStr,
+  });
+  transition(db, {
+    runId: dispatchRunId,
+    to: "VERIFYING",
+    expectFrom: "RUNNING",
+    actor: "worker-demo",
+    reason: "finished",
+    attempt: 1,
+    policyVersion: "v1",
+    now: () => nowStr,
+  });
+  transition(db, {
+    runId: dispatchRunId,
+    to: "COMPLETED",
+    expectFrom: "VERIFYING",
+    actor: "worker-demo",
+    reason: "verified",
+    attempt: 1,
+    policyVersion: "v1",
+    now: () => nowStr,
+  });
 
-  db.query("UPDATE runs SET state = \"COMPLETED\", attempts = 1, updated_at = ? WHERE run_id = ?").run(nowStr, dispatchRunId);
+  db.query(
+    'UPDATE runs SET state = "COMPLETED", attempts = 1, updated_at = ? WHERE run_id = ?',
+  ).run(nowStr, dispatchRunId);
 
   db.query(
     `INSERT INTO attempts
        (run_id, attempt, fencing_token, lease_owner, lease_expires_at, started_at, finished_at, terminal_state, reason_code, workspace_path)
      VALUES (?, 1, 1, "worker-demo", datetime("now", "+1 hour"), ?, ?, "COMPLETED", "ok", ?)
      ON CONFLICT(run_id, attempt) DO UPDATE SET terminal_state = "COMPLETED", reason_code = "ok"`,
-  ).run(dispatchRunId, nowStr, nowStr, `/tmp/worktrees/${primaryProject}/${dispatchTicket}`);
+  ).run(
+    dispatchRunId,
+    nowStr,
+    nowStr,
+    `/tmp/worktrees/${primaryProject}/${dispatchTicket}`,
+  );
 
   const prUrl = `https://github.com/watt-mind/${primaryProject}/pull/42`;
   const dispatchArtifact = {
@@ -611,9 +773,17 @@ try {
        evidence_set_hash = excluded.evidence_set_hash, verification_json = excluded.verification_json,
        receipt_json = excluded.receipt_json, accepted_at = excluded.accepted_at`,
   ).run(
-    dispatchRunId, resultJson, artifactHash, evidenceSetHash, verificationJson, receiptJson, nowStr,
+    dispatchRunId,
+    resultJson,
+    artifactHash,
+    evidenceSetHash,
+    verificationJson,
+    receiptJson,
+    nowStr,
   );
-  log(`${dispatchRunId} → COMPLETED (dispatch@1, simulated working PR workflow with PR_OPEN)`);
+  log(
+    `${dispatchRunId} → COMPLETED (dispatch@1, simulated working PR workflow with PR_OPEN)`,
+  );
 
   db.close();
 } catch (err) {
@@ -632,6 +802,12 @@ log(`${hang.runId} → RUNNING (hang mode; TIMED_OUT after 600s timeout)`);
 
 log("done — seeded comprehensive fixture across all agents & states:");
 const { runs } = await client.runs();
-for (const r of runs) log(`  ${r.runId}  ${r.state}  agent:${r.agent}  repos:[${(r.repos ?? []).join(", ")}]`);
+for (const r of runs)
+  log(
+    `  ${r.runId}  ${r.state}  agent:${r.agent}  repos:[${(r.repos ?? []).join(", ")}]`,
+  );
 const { proposals } = await client.proposals();
-for (const p of proposals) log(`  ${p.id}  ${p.decision} (open)  agent:${p.agent ?? p.spec?.agent}  expired:${p.expired}`);
+for (const p of proposals)
+  log(
+    `  ${p.id}  ${p.decision} (open)  agent:${p.agent ?? p.spec?.agent}  expired:${p.expired}`,
+  );

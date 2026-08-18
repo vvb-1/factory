@@ -40,7 +40,13 @@
  * reimplement Linear + worktree discovery. Stdout is JSON only; the colour
  * log is skipped. `--force` is still not a flag and must never become one.
  */
-import { readFileSync, existsSync, readdirSync, mkdirSync, appendFileSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  readdirSync,
+  mkdirSync,
+  appendFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { homedir } from "node:os";
@@ -49,20 +55,29 @@ import { ROOT } from "../lib/schedule.mjs";
 import { emitFactoryEvent } from "../lib/emit-event.mjs";
 
 export function parseArgs(argv) {
-  const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
+  const val = (f) => {
+    const i = argv.indexOf(f);
+    return i === -1 ? null : argv[i + 1];
+  };
   return {
     apply: argv.includes("--apply"),
     gate: argv.includes("--gate"),
     json: argv.includes("--json"),
-    only: (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean),
+    only: (val("--repo") || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }
 
 const expand = (p) => p.replace(/^~/, homedir());
 
 const c = {
-  dim: (s) => `\x1b[2m${s}\x1b[0m`, bold: (s) => `\x1b[1m${s}\x1b[0m`,
-  green: (s) => `\x1b[32m${s}\x1b[0m`, yellow: (s) => `\x1b[33m${s}\x1b[0m`, red: (s) => `\x1b[31m${s}\x1b[0m`,
+  dim: (s) => `\x1b[2m${s}\x1b[0m`,
+  bold: (s) => `\x1b[1m${s}\x1b[0m`,
+  green: (s) => `\x1b[32m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
+  red: (s) => `\x1b[31m${s}\x1b[0m`,
 };
 
 /**
@@ -74,8 +89,13 @@ export function parseWorktreeBranches(porcelain) {
   const branches = {};
   let current = null;
   for (const line of String(porcelain ?? "").split("\n")) {
-    if (line.startsWith("worktree ")) current = line.slice("worktree ".length).trim();
-    else if (line.startsWith("branch ") && current) branches[current] = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+    if (line.startsWith("worktree "))
+      current = line.slice("worktree ".length).trim();
+    else if (line.startsWith("branch ") && current)
+      branches[current] = line
+        .slice("branch ".length)
+        .trim()
+        .replace(/^refs\/heads\//, "");
     else if (!line.trim()) current = null;
   }
   return branches;
@@ -103,7 +123,20 @@ export function openPrHold(branch, openPrs) {
  * an open PR holder due to pagination limits (WM-56).
  */
 export function listOpenPrs(repoPath, run = spawnSync, limit = 200) {
-  const r = run("gh", ["pr", "list", "--state", "open", "--limit", String(limit), "--json", "number,headRefName"], { cwd: repoPath, encoding: "utf8" });
+  const r = run(
+    "gh",
+    [
+      "pr",
+      "list",
+      "--state",
+      "open",
+      "--limit",
+      String(limit),
+      "--json",
+      "number,headRefName",
+    ],
+    { cwd: repoPath, encoding: "utf8" },
+  );
   if (r.status !== 0) return null;
   try {
     const parsed = JSON.parse(r.stdout || "[]");
@@ -121,7 +154,10 @@ export function listOpenPrs(repoPath, run = spawnSync, limit = 200) {
  * shape as `listOpenPrs`: "don't know" is not "no branch, so nothing is held".
  */
 export function ticketBranches(repoPath, root, tickets, run = spawnSync) {
-  const r = run("git", ["worktree", "list", "--porcelain"], { cwd: repoPath, encoding: "utf8" });
+  const r = run("git", ["worktree", "list", "--porcelain"], {
+    cwd: repoPath,
+    encoding: "utf8",
+  });
   if (r.status !== 0) return null;
   const byPath = parseWorktreeBranches(r.stdout);
   const byTicket = {};
@@ -139,9 +175,14 @@ export function ticketBranches(repoPath, root, tickets, run = spawnSync) {
  * a real checkout: `run` is the only way this reaches the filesystem, so a test
  * that injects a recorder proves a held ticket never reaches worktree-down.sh.
  */
-export function reclaim(finished, { repoPath, down, branches = {}, openPrs, run = spawnSync } = {}) {
+export function reclaim(
+  finished,
+  { repoPath, down, branches = {}, openPrs, run = spawnSync } = {},
+) {
   if (!Array.isArray(openPrs)) {
-    throw new Error("reclaim requires openPrs array — refusing unguarded teardown (WM-56)");
+    throw new Error(
+      "reclaim requires openPrs array — refusing unguarded teardown (WM-56)",
+    );
   }
   const removed = [];
   const refused = [];
@@ -157,7 +198,9 @@ export function reclaim(finished, { repoPath, down, branches = {}, openPrs, run 
     const r = run("/bin/bash", [down, t], { cwd: repoPath, encoding: "utf8" });
     if (r.status === 0) removed.push(t);
     else {
-      const reason = (r.stderr || r.stdout || "").trim().split("\n").pop() || `exit ${r.status}`;
+      const reason =
+        (r.stderr || r.stdout || "").trim().split("\n").pop() ||
+        `exit ${r.status}`;
       refused.push({ id: t, reason });
     }
   }
@@ -180,14 +223,18 @@ function emptySurvey(repo, apply) {
   };
 }
 
-export async function survey(repo, { apply }, {
-  readdir = readdirSync,
-  exists = existsSync,
-  queryIssues,
-  getBranches = ticketBranches,
-  getOpenPrs = listOpenPrs,
-  doReclaim = reclaim,
-} = {}) {
+export async function survey(
+  repo,
+  { apply },
+  {
+    readdir = readdirSync,
+    exists = existsSync,
+    queryIssues,
+    getBranches = ticketBranches,
+    getOpenPrs = listOpenPrs,
+    doReclaim = reclaim,
+  } = {},
+) {
   const result = emptySurvey(repo, apply);
   const root = expand(repo.worktree_root ?? "");
   const repoPath = expand(repo.path);
@@ -207,30 +254,41 @@ export async function survey(repo, { apply }, {
   let states = {};
   if (tickets.length) {
     const nums = tickets.map((t) => Number(t.split("-")[1]));
-    const queryBatch = queryIssues ?? (async (team, batch) => {
-      const q = `query($n:[Float!]){ issues(first:250, filter:{ number:{in:$n}, team:{key:{eq:"${team}"}} }){ nodes{ identifier state{name type} } } }`;
-      return (await gql(q, { n: batch }))?.issues?.nodes ?? [];
-    });
+    const queryBatch =
+      queryIssues ??
+      (async (team, batch) => {
+        const q = `query($n:[Float!]){ issues(first:250, filter:{ number:{in:$n}, team:{key:{eq:"${team}"}} }){ nodes{ identifier state{name type} } } }`;
+        return (await gql(q, { n: batch }))?.issues?.nodes ?? [];
+      });
 
     // Linear caps this connection at 250 nodes. Keep each filter at or below
     // that cap and run the independent requests together so every worktree is
     // resolved without turning a large checkout into a serial API crawl.
     const batches = [];
-    for (let i = 0; i < nums.length; i += 250) batches.push(nums.slice(i, i + 250));
-    const nodes = (await Promise.all(batches.map((batch) => queryBatch(repo.team, batch)))).flat();
+    for (let i = 0; i < nums.length; i += 250)
+      batches.push(nums.slice(i, i + 250));
+    const nodes = (
+      await Promise.all(batches.map((batch) => queryBatch(repo.team, batch)))
+    ).flat();
     states = Object.fromEntries(nodes.map((n) => [n.identifier, n.state]));
   }
 
-  const allFinished = tickets.filter((t) => ["completed", "canceled"].includes(states[t]?.type));
+  const allFinished = tickets.filter((t) =>
+    ["completed", "canceled"].includes(states[t]?.type),
+  );
   result.kept = tickets
-    .filter((t) => states[t] && !["completed", "canceled"].includes(states[t].type))
+    .filter(
+      (t) => states[t] && !["completed", "canceled"].includes(states[t].type),
+    )
     .map((t) => ({ id: t, state: states[t].name }));
   result.unknown = tickets.filter((t) => !states[t]);
 
   // WM-17: the open-PR hold is evaluated in the survey, not just under --apply,
   // so a held worktree is neither reported as reclaimable nor allowed to keep
   // the --gate firing on work that every apply run will correctly decline.
-  const branches = allFinished.length ? getBranches(repoPath, root, allFinished) : {};
+  const branches = allFinished.length
+    ? getBranches(repoPath, root, allFinished)
+    : {};
   const openPrs = allFinished.length ? getOpenPrs(repoPath) : [];
   const cannotTell = openPrs === null || branches === null;
   if (cannotTell) {
@@ -247,7 +305,12 @@ export async function survey(repo, { apply }, {
   const finished = allFinished.filter((t) => !openPrHold(branches[t], openPrs));
   result.held = allFinished
     .filter((t) => !finished.includes(t))
-    .map((t) => ({ id: t, state: states[t].name, branch: branches[t], reason: openPrHold(branches[t], openPrs) }));
+    .map((t) => ({
+      id: t,
+      state: states[t].name,
+      branch: branches[t],
+      reason: openPrHold(branches[t], openPrs),
+    }));
   result.reclaimable = finished.map((t) => ({ id: t, state: states[t].name }));
 
   if (!apply || !allFinished.length) return result;
@@ -278,14 +341,31 @@ export async function survey(repo, { apply }, {
 
 function printHuman(repo, result) {
   if (result.missingRoot) return;
-  const n = result.reclaimable.length + result.kept.length + result.unknown.length;
-  console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${n} ticket worktree(s) in ${repo.worktree_root}`));
+  const n =
+    result.reclaimable.length + result.kept.length + result.unknown.length;
+  console.log(
+    c.bold(`\n${repo.name}`) +
+      c.dim(`  ${n} ticket worktree(s) in ${repo.worktree_root}`),
+  );
   if (result.kept.length) {
-    console.log(c.dim(`  keeping ${result.kept.length} live: ${result.kept.map((t) => `${t.id} (${t.state})`).join(", ")}`));
+    console.log(
+      c.dim(
+        `  keeping ${result.kept.length} live: ${result.kept.map((t) => `${t.id} (${t.state})`).join(", ")}`,
+      ),
+    );
   }
-  if (result.named.length) console.log(c.dim(`  ignoring ${result.named.length} named worktree(s): ${result.named.join(", ")}`));
+  if (result.named.length)
+    console.log(
+      c.dim(
+        `  ignoring ${result.named.length} named worktree(s): ${result.named.join(", ")}`,
+      ),
+    );
   if (result.unknown.length) {
-    console.log(c.yellow(`  ${result.unknown.length} worktree(s) with no matching ticket — left alone: ${result.unknown.join(", ")}`));
+    console.log(
+      c.yellow(
+        `  ${result.unknown.length} worktree(s) with no matching ticket — left alone: ${result.unknown.join(", ")}`,
+      ),
+    );
   }
   for (const t of result.held) {
     console.log(c.yellow(`  holding ${t.id} — ${t.reason}`));
@@ -294,8 +374,11 @@ function printHuman(repo, result) {
     console.log(c.green("  nothing to reclaim"));
     return;
   }
-  console.log(`  ${c.bold(String(result.reclaimable.length))} reclaimable (ticket finished):`);
-  for (const t of result.reclaimable) console.log(`    ${t.id}  ${c.dim(t.state)}`);
+  console.log(
+    `  ${c.bold(String(result.reclaimable.length))} reclaimable (ticket finished):`,
+  );
+  for (const t of result.reclaimable)
+    console.log(`    ${t.id}  ${c.dim(t.state)}`);
   if (!result.apply) {
     console.log(c.dim(`\n  dry run — re-run with --apply to remove them`));
     return;
@@ -303,21 +386,40 @@ function printHuman(repo, result) {
   if (result.skippedApplyReason) {
     console.log(c.yellow(`\n  ${result.skippedApplyReason}`));
     if (result.skippedApplyReason.startsWith("report-only:")) {
-      console.log(c.dim(`  Not removing anything. These need the repo's own worktree-down.sh so the`));
+      console.log(
+        c.dim(
+          `  Not removing anything. These need the repo's own worktree-down.sh so the`,
+        ),
+      );
       console.log(c.dim(`  per-ticket database goes with the checkout.`));
     }
     return;
   }
   for (const t of result.removed) console.log(`    ${c.green("removed")} ${t}`);
-  for (const t of result.refused) console.log(`    ${c.yellow("kept")}    ${t.id} — ${t.reason}`);
-  console.log(`\n  ${result.removed.length} removed, ${result.refused.length} kept (unpushed or uncommitted work).`);
+  for (const t of result.refused)
+    console.log(`    ${c.yellow("kept")}    ${t.id} — ${t.reason}`);
+  console.log(
+    `\n  ${result.removed.length} removed, ${result.refused.length} kept (unpushed or uncommitted work).`,
+  );
 }
 
 async function main() {
-  const { apply: APPLY, gate: GATE, json: JSON_OUT, only } = parseArgs(process.argv.slice(2));
-  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
-  const repos = (cfg.repos ?? []).filter((r) => !only.length || only.includes(r.name));
-  if (!repos.length) { console.error("no matching repo in config/repos.yaml"); process.exit(2); }
+  const {
+    apply: APPLY,
+    gate: GATE,
+    json: JSON_OUT,
+    only,
+  } = parseArgs(process.argv.slice(2));
+  const cfg = Bun.YAML.parse(
+    readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+  );
+  const repos = (cfg.repos ?? []).filter(
+    (r) => !only.length || only.includes(r.name),
+  );
+  if (!repos.length) {
+    console.error("no matching repo in config/repos.yaml");
+    process.exit(2);
+  }
 
   const quiet = JSON_OUT || GATE;
 
@@ -328,9 +430,19 @@ async function main() {
     try {
       const logDir = path.join(homedir(), ".factory/logs");
       mkdirSync(logDir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "").replace("T", "-");
-      for (const repo of repos) appendFileSync(path.join(logDir, `janitor-${repo.name}-${stamp}.log`), `${new Date().toISOString()} ${APPLY ? "apply" : "dry"}\n`);
-    } catch { /* observability must never block safe cleanup */ }
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[-:]/g, "")
+        .replace(/\.\d+Z$/, "")
+        .replace("T", "-");
+      for (const repo of repos)
+        appendFileSync(
+          path.join(logDir, `janitor-${repo.name}-${stamp}.log`),
+          `${new Date().toISOString()} ${APPLY ? "apply" : "dry"}\n`,
+        );
+    } catch {
+      /* observability must never block safe cleanup */
+    }
   }
 
   const surveys = [];
@@ -342,17 +454,28 @@ async function main() {
     // re-run reports the same removal once but a later worktree for the same
     // ticket is a new event.
     for (const t of result.removed) {
-      await emitFactoryEvent("factory.worktree.reclaimed",
+      await emitFactoryEvent(
+        "factory.worktree.reclaimed",
         { repo: repo.name, ticket: t },
-        { eventId: `janitor:${repo.name}:${t}:${new Date().toISOString().slice(0, 10)}`, subject: t });
+        {
+          eventId: `janitor:${repo.name}:${t}:${new Date().toISOString().slice(0, 10)}`,
+          subject: t,
+        },
+      );
     }
     if (GATE) continue;
     if (!quiet) printHuman(repo, result);
   }
 
   if (GATE) {
-    const totalReclaimable = surveys.reduce((n, s) => n + s.reclaimable.length, 0);
-    if (totalReclaimable > 0) { console.log(`${totalReclaimable} reclaimable worktree(s)`); process.exit(0); }
+    const totalReclaimable = surveys.reduce(
+      (n, s) => n + s.reclaimable.length,
+      0,
+    );
+    if (totalReclaimable > 0) {
+      console.log(`${totalReclaimable} reclaimable worktree(s)`);
+      process.exit(0);
+    }
     console.log("no worktrees to reclaim");
     process.exit(1);
   }
@@ -360,7 +483,8 @@ async function main() {
   if (JSON_OUT) {
     // One `--repo` is the API's contract (a single selected project). Several
     // names wrap in `{ results }` so a human ` --repo a,b --json` still parses.
-    const payload = surveys.length === 1 ? surveys[0] : { apply: APPLY, results: surveys };
+    const payload =
+      surveys.length === 1 ? surveys[0] : { apply: APPLY, results: surveys };
     console.log(JSON.stringify(payload));
   } else {
     console.log();

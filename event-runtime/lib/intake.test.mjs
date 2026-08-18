@@ -33,19 +33,43 @@ describe("verifyWebhook", () => {
   test("valid signature over epoch-millis timestamp passes", () => {
     const timestamp = String(NOW - 1000);
     const signature = sign(SECRET, timestamp, rawBody);
-    expect(verifyWebhook({ rawBody, signature, timestamp, secret: SECRET, now: NOW })).toEqual({ ok: true });
+    expect(
+      verifyWebhook({
+        rawBody,
+        signature,
+        timestamp,
+        secret: SECRET,
+        now: NOW,
+      }),
+    ).toEqual({ ok: true });
   });
 
   test("valid signature over ISO-8601 timestamp passes", () => {
     const timestamp = new Date(NOW - 1000).toISOString();
     const signature = sign(SECRET, timestamp, rawBody);
-    expect(verifyWebhook({ rawBody, signature, timestamp, secret: SECRET, now: NOW })).toEqual({ ok: true });
+    expect(
+      verifyWebhook({
+        rawBody,
+        signature,
+        timestamp,
+        secret: SECRET,
+        now: NOW,
+      }),
+    ).toEqual({ ok: true });
   });
 
   test("wrong secret fails as bad_signature", () => {
     const timestamp = String(NOW);
     const signature = sign("some-other-secret", timestamp, rawBody);
-    expect(verifyWebhook({ rawBody, signature, timestamp, secret: SECRET, now: NOW })).toEqual({
+    expect(
+      verifyWebhook({
+        rawBody,
+        signature,
+        timestamp,
+        secret: SECRET,
+        now: NOW,
+      }),
+    ).toEqual({
       ok: false,
       reason: "bad_signature",
     });
@@ -55,7 +79,15 @@ describe("verifyWebhook", () => {
     const timestamp = String(NOW);
     const signature = sign(SECRET, timestamp, rawBody);
     const tampered = rawBody.replace("bj29", "evil");
-    expect(verifyWebhook({ rawBody: tampered, signature, timestamp, secret: SECRET, now: NOW })).toEqual({
+    expect(
+      verifyWebhook({
+        rawBody: tampered,
+        signature,
+        timestamp,
+        secret: SECRET,
+        now: NOW,
+      }),
+    ).toEqual({
       ok: false,
       reason: "bad_signature",
     });
@@ -65,7 +97,15 @@ describe("verifyWebhook", () => {
     for (const skewMs of [-10 * 60 * 1000, 10 * 60 * 1000]) {
       const timestamp = String(NOW + skewMs);
       const signature = sign(SECRET, timestamp, rawBody);
-      expect(verifyWebhook({ rawBody, signature, timestamp, secret: SECRET, now: NOW })).toEqual({
+      expect(
+        verifyWebhook({
+          rawBody,
+          signature,
+          timestamp,
+          secret: SECRET,
+          now: NOW,
+        }),
+      ).toEqual({
         ok: false,
         reason: "stale_timestamp",
       });
@@ -75,7 +115,15 @@ describe("verifyWebhook", () => {
   test("unparseable timestamp fails closed as stale_timestamp", () => {
     const timestamp = "not-a-time";
     const signature = sign(SECRET, timestamp, rawBody);
-    expect(verifyWebhook({ rawBody, signature, timestamp, secret: SECRET, now: NOW })).toEqual({
+    expect(
+      verifyWebhook({
+        rawBody,
+        signature,
+        timestamp,
+        secret: SECRET,
+        now: NOW,
+      }),
+    ).toEqual({
       ok: false,
       reason: "stale_timestamp",
     });
@@ -84,15 +132,21 @@ describe("verifyWebhook", () => {
   test("missing secret, signature, and timestamp each fail closed", () => {
     const timestamp = String(NOW);
     const signature = sign(SECRET, timestamp, rawBody);
-    expect(verifyWebhook({ rawBody, signature, timestamp, secret: null, now: NOW })).toEqual({
+    expect(
+      verifyWebhook({ rawBody, signature, timestamp, secret: null, now: NOW }),
+    ).toEqual({
       ok: false,
       reason: "missing_secret",
     });
-    expect(verifyWebhook({ rawBody, timestamp, secret: SECRET, now: NOW })).toEqual({
+    expect(
+      verifyWebhook({ rawBody, timestamp, secret: SECRET, now: NOW }),
+    ).toEqual({
       ok: false,
       reason: "missing_signature",
     });
-    expect(verifyWebhook({ rawBody, signature, secret: SECRET, now: NOW })).toEqual({
+    expect(
+      verifyWebhook({ rawBody, signature, secret: SECRET, now: NOW }),
+    ).toEqual({
       ok: false,
       reason: "missing_timestamp",
     });
@@ -101,7 +155,15 @@ describe("verifyWebhook", () => {
   test("malformed signature never throws", () => {
     const timestamp = String(NOW);
     for (const signature of ["nonsense", "sha256=", "sha256=zzzz", "md5=abc"]) {
-      expect(verifyWebhook({ rawBody, signature, timestamp, secret: SECRET, now: NOW })).toEqual({
+      expect(
+        verifyWebhook({
+          rawBody,
+          signature,
+          timestamp,
+          secret: SECRET,
+          now: NOW,
+        }),
+      ).toEqual({
         ok: false,
         reason: "bad_signature",
       });
@@ -112,21 +174,37 @@ describe("verifyWebhook", () => {
 describe("admitEvent", () => {
   test("valid envelope is admitted once with server-set receivedAt", () => {
     const db = openDb(":memory:");
-    const result = admitEvent(db, registry, envelope({ receivedAt: "1999-01-01T00:00:00Z" }), { now: NOW });
+    const result = admitEvent(
+      db,
+      registry,
+      envelope({ receivedAt: "1999-01-01T00:00:00Z" }),
+      { now: NOW },
+    );
     expect(result.admitted).toBe(true);
     expect(result.duplicate).toBe(false);
     expect(result.event.status).toBe("admitted");
     expect(result.event.received_at).toBe(new Date(NOW).toISOString());
-    expect(JSON.parse(result.event.envelope_json).receivedAt).toBe(new Date(NOW).toISOString());
+    expect(JSON.parse(result.event.envelope_json).receivedAt).toBe(
+      new Date(NOW).toISOString(),
+    );
     expect(result.event.payload_hash.startsWith("sha256:")).toBe(true);
   });
 
   test("same (source, eventId) delivered twice yields one row and duplicate: true", () => {
     const db = openDb(":memory:");
     const first = admitEvent(db, registry, envelope(), { now: NOW });
-    const second = admitEvent(db, registry, envelope({ payload: { repos: ["different"] } }), { now: NOW + 5000 });
+    const second = admitEvent(
+      db,
+      registry,
+      envelope({ payload: { repos: ["different"] } }),
+      { now: NOW + 5000 },
+    );
     expect(first.admitted).toBe(true);
-    expect(second).toEqual({ admitted: false, duplicate: true, event: first.event });
+    expect(second).toEqual({
+      admitted: false,
+      duplicate: true,
+      event: first.event,
+    });
     const rows = db.query(`SELECT COUNT(*) AS n FROM events`).get();
     expect(rows.n).toBe(1);
   });
@@ -180,12 +258,19 @@ describe("admitEvent", () => {
       occurredAt: "9999-01-01T00:00:00.000Z",
       correlationId: "clock:reaper:9999-01-01T00:00:00.000Z",
       causationId: null,
-      payload: { loop: "reaper", slot: "9999-01-01T00:00:00.000Z", cadenceSeconds: 3600, skippedSlots: 0 },
+      payload: {
+        loop: "reaper",
+        slot: "9999-01-01T00:00:00.000Z",
+        cadenceSeconds: 3600,
+        skippedSlots: 0,
+      },
     };
     const result = admitEvent(db, registry, futureTick, { now: NOW });
     expect(result.admitted).toBe(false);
     expect(result.duplicate).toBe(false);
-    expect(result.errors).toContain("occurredAt: clock tick slot cannot be in the future");
+    expect(result.errors).toContain(
+      "occurredAt: clock tick slot cannot be in the future",
+    );
     expect(db.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(0);
   });
 });

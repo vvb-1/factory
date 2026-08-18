@@ -1,9 +1,20 @@
 import { describe, expect, test, afterAll, afterEach } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { FACTORY_ROOT } from "../config.mjs";
-import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV as CLAUDE_PUSH_CREDENTIAL_ENV } from "./claude.mjs";
+import {
+  PROMPT_SUFFIX,
+  PUSH_CREDENTIAL_ENV as CLAUDE_PUSH_CREDENTIAL_ENV,
+} from "./claude.mjs";
 import {
   buildCursorArgv,
   CliNotFoundError,
@@ -18,12 +29,24 @@ import {
   safeChildEnvironment,
   toolNameFromKey,
 } from "./cursor.mjs";
+import {
+  processOwnerWatchdogSource,
+  trackProcessGroupForPid,
+} from "../test-helpers-process.mjs";
 
 describe("isHarnessDenial (WM-127, no confirmed Cursor refusal shapes yet)", () => {
   test("nothing matches — empty until a Cursor-authored shape is observed", () => {
-    expect(isHarnessDenial("Permission to use Shell has been denied.")).toBe(false);
-    expect(isHarnessDenial("Cursor requested permissions to use write, but you haven't granted it yet.")).toBe(false);
-    expect(isHarnessDenial("EACCES: permission denied, open '/var/log/system.log'")).toBe(false);
+    expect(isHarnessDenial("Permission to use Shell has been denied.")).toBe(
+      false,
+    );
+    expect(
+      isHarnessDenial(
+        "Cursor requested permissions to use write, but you haven't granted it yet.",
+      ),
+    ).toBe(false);
+    expect(
+      isHarnessDenial("EACCES: permission denied, open '/var/log/system.log'"),
+    ).toBe(false);
     expect(isHarnessDenial(null)).toBe(false);
   });
 });
@@ -32,71 +55,106 @@ describe("mapStreamEvent (Cursor stream-json shapes from output-format.md)", () 
   test("assistant text → assistant_text", () => {
     const events = mapStreamEvent({
       type: "assistant",
-      message: { role: "assistant", content: [{ type: "text", text: "I'll read the file." }] },
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "I'll read the file." }],
+      },
       session_id: "s-1",
     });
-    expect(events).toEqual([{ kind: "assistant_text", payload: { text: "I'll read the file." } }]);
+    expect(events).toEqual([
+      { kind: "assistant_text", payload: { text: "I'll read the file." } },
+    ]);
   });
 
   test("assistant events with timestamp_ms are skipped (stream-partial deltas)", () => {
-    expect(mapStreamEvent({
-      type: "assistant",
-      timestamp_ms: 1,
-      message: { content: [{ type: "text", text: "delta" }] },
-    })).toEqual([]);
+    expect(
+      mapStreamEvent({
+        type: "assistant",
+        timestamp_ms: 1,
+        message: { content: [{ type: "text", text: "delta" }] },
+      }),
+    ).toEqual([]);
   });
 
   test("tool_call started readToolCall → tool_use", () => {
-    expect(mapStreamEvent({
-      type: "tool_call",
-      subtype: "started",
-      call_id: "toolu_1",
-      tool_call: { readToolCall: { args: { path: "README.md" } } },
-    })).toEqual([
-      { kind: "tool_use", payload: { id: "toolu_1", name: "read", input: { path: "README.md" } } },
+    expect(
+      mapStreamEvent({
+        type: "tool_call",
+        subtype: "started",
+        call_id: "toolu_1",
+        tool_call: { readToolCall: { args: { path: "README.md" } } },
+      }),
+    ).toEqual([
+      {
+        kind: "tool_use",
+        payload: { id: "toolu_1", name: "read", input: { path: "README.md" } },
+      },
     ]);
   });
 
   test("tool_call completed readToolCall → tool_result", () => {
-    expect(mapStreamEvent({
-      type: "tool_call",
-      subtype: "completed",
-      call_id: "toolu_1",
-      tool_call: {
-        readToolCall: {
-          args: { path: "README.md" },
-          result: { success: { content: "# Project\n", totalLines: 1 } },
+    expect(
+      mapStreamEvent({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "toolu_1",
+        tool_call: {
+          readToolCall: {
+            args: { path: "README.md" },
+            result: { success: { content: "# Project\n", totalLines: 1 } },
+          },
         },
+      }),
+    ).toEqual([
+      {
+        kind: "tool_result",
+        payload: { content: "# Project\n", toolUseId: "toolu_1" },
       },
-    })).toEqual([
-      { kind: "tool_result", payload: { content: "# Project\n", toolUseId: "toolu_1" } },
     ]);
   });
 
   test("tool_call completed with result.error → tool_result isError", () => {
-    expect(mapStreamEvent({
-      type: "tool_call",
-      subtype: "completed",
-      call_id: "toolu_2",
-      tool_call: { writeToolCall: { result: { error: "write failed" } } },
-    })).toEqual([
-      { kind: "tool_result", payload: { content: "write failed", toolUseId: "toolu_2", isError: true } },
+    expect(
+      mapStreamEvent({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "toolu_2",
+        tool_call: { writeToolCall: { result: { error: "write failed" } } },
+      }),
+    ).toEqual([
+      {
+        kind: "tool_result",
+        payload: {
+          content: "write failed",
+          toolUseId: "toolu_2",
+          isError: true,
+        },
+      },
     ]);
   });
 
   test("function-shaped tool_call is mapped", () => {
-    expect(mapStreamEvent({
-      type: "tool_call",
-      subtype: "started",
-      call_id: "fn_1",
-      tool_call: { function: { name: "shell", arguments: "{\"command\":\"ls\"}" } },
-    })).toEqual([
-      { kind: "tool_use", payload: { id: "fn_1", name: "shell", input: { command: "ls" } } },
+    expect(
+      mapStreamEvent({
+        type: "tool_call",
+        subtype: "started",
+        call_id: "fn_1",
+        tool_call: {
+          function: { name: "shell", arguments: '{"command":"ls"}' },
+        },
+      }),
+    ).toEqual([
+      {
+        kind: "tool_use",
+        payload: { id: "fn_1", name: "shell", input: { command: "ls" } },
+      },
     ]);
   });
 
   test("unrecognized events are ignored silently", () => {
-    expect(mapStreamEvent({ type: "user", message: { content: [] } })).toEqual([]);
+    expect(mapStreamEvent({ type: "user", message: { content: [] } })).toEqual(
+      [],
+    );
     expect(mapStreamEvent({ type: "system", subtype: "init" })).toEqual([]);
     expect(mapStreamEvent(null)).toEqual([]);
     expect(mapStreamEvent("not an object")).toEqual([]);
@@ -128,13 +186,15 @@ describe("describeToolCall / toolNameFromKey", () => {
 
 describe("extractUsage", () => {
   test("reads duration from the terminal result; tokens stay empty (not fabricated)", () => {
-    expect(extractUsage({
-      type: "result",
-      subtype: "success",
-      duration_ms: 5234,
-      is_error: false,
-      result: "done",
-    })).toEqual({ usage: {}, costUSD: null, durationMs: 5234, isError: false });
+    expect(
+      extractUsage({
+        type: "result",
+        subtype: "success",
+        duration_ms: 5234,
+        is_error: false,
+        result: "done",
+      }),
+    ).toEqual({ usage: {}, costUSD: null, durationMs: 5234, isError: false });
   });
 
   test("returns null when the message is not a result", () => {
@@ -146,7 +206,15 @@ describe("extractUsage", () => {
 describe("buildCursorArgv", () => {
   test("print + stream-json + trust + force; prompt is positional after --", () => {
     const argv = buildCursorArgv({ prompt: "Do the smoke" });
-    expect(argv).toEqual(["-p", "--output-format", "stream-json", "--trust", "--force", "--", "Do the smoke"]);
+    expect(argv).toEqual([
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--trust",
+      "--force",
+      "--",
+      "Do the smoke",
+    ]);
     expect(argv).not.toContain("--mode");
     expect(argv).not.toContain("--stream-partial-output");
     expect(argv).not.toContain("--worktree");
@@ -158,7 +226,9 @@ describe("buildCursorArgv", () => {
     expect(withModel[withModel.indexOf("--model") + 1]).toBe("composer-2.5");
 
     const unpinned = buildCursorArgv({ prompt: "x" });
-    expect(buildCursorArgv({ prompt: "x", model: "default" })).toEqual(unpinned);
+    expect(buildCursorArgv({ prompt: "x", model: "default" })).toEqual(
+      unpinned,
+    );
     expect(buildCursorArgv({ prompt: "x", model: null })).toEqual(unpinned);
     expect(buildCursorArgv({ prompt: "x", model: "" })).toEqual(unpinned);
     expect(unpinned).not.toContain("--model");
@@ -167,11 +237,22 @@ describe("buildCursorArgv", () => {
 
 describe("resolveCursorCommand", () => {
   test("agent on PATH wins; cursor-agent is the fallback; cursor editor is ignored", () => {
-    expect(resolveCursorCommand({ which: (n) => (n === "agent" ? "/usr/local/bin/agent" : null) }))
-      .toEqual({ command: "agent", args: [] });
-    expect(resolveCursorCommand({ which: (n) => (n === "cursor-agent" ? "/usr/local/bin/cursor-agent" : null) }))
-      .toEqual({ command: "cursor-agent", args: [] });
-    expect(resolveCursorCommand({ which: (n) => (n === "cursor" ? "/usr/local/bin/cursor" : null) })).toBeNull();
+    expect(
+      resolveCursorCommand({
+        which: (n) => (n === "agent" ? "/usr/local/bin/agent" : null),
+      }),
+    ).toEqual({ command: "agent", args: [] });
+    expect(
+      resolveCursorCommand({
+        which: (n) =>
+          n === "cursor-agent" ? "/usr/local/bin/cursor-agent" : null,
+      }),
+    ).toEqual({ command: "cursor-agent", args: [] });
+    expect(
+      resolveCursorCommand({
+        which: (n) => (n === "cursor" ? "/usr/local/bin/cursor" : null),
+      }),
+    ).toBeNull();
     expect(resolveCursorCommand({ which: () => null })).toBeNull();
   });
 });
@@ -205,11 +286,14 @@ describe("safeChildEnvironment", () => {
   });
 
   test("strips push credentials for non-mutating runs and still keeps CURSOR_API_KEY", () => {
-    const childEnv = safeChildEnvironment({
-      SSH_AUTH_SOCK: "/tmp/test.sock",
-      GITHUB_TOKEN: "ghp_secret",
-      CURSOR_API_KEY: "sk",
-    }, { mutating: false });
+    const childEnv = safeChildEnvironment(
+      {
+        SSH_AUTH_SOCK: "/tmp/test.sock",
+        GITHUB_TOKEN: "ghp_secret",
+        CURSOR_API_KEY: "sk",
+      },
+      { mutating: false },
+    );
     for (const key of PUSH_CREDENTIAL_ENV) {
       expect(childEnv[key]).toBeUndefined();
     }
@@ -217,11 +301,14 @@ describe("safeChildEnvironment", () => {
   });
 
   test("preserves push credentials for mutating runs and keeps CURSOR_API_KEY", () => {
-    const childEnv = safeChildEnvironment({
-      SSH_AUTH_SOCK: "/tmp/agent.sock",
-      GITHUB_TOKEN: "ghp_mutating",
-      CURSOR_API_KEY: "sk",
-    }, { mutating: true });
+    const childEnv = safeChildEnvironment(
+      {
+        SSH_AUTH_SOCK: "/tmp/agent.sock",
+        GITHUB_TOKEN: "ghp_mutating",
+        CURSOR_API_KEY: "sk",
+      },
+      { mutating: true },
+    );
     expect(childEnv.SSH_AUTH_SOCK).toBe("/tmp/agent.sock");
     expect(childEnv.GITHUB_TOKEN).toBe("ghp_mutating");
     expect(childEnv.CURSOR_API_KEY).toBe("sk");
@@ -232,12 +319,16 @@ describe("safeChildEnvironment", () => {
     expect(safeChildEnvironment({}).SSH_AUTH_SOCK).toBeUndefined();
     expect(safeChildEnvironment({}, {}).SSH_AUTH_SOCK).toBeUndefined();
     expect(safeChildEnvironment({}, false).SSH_AUTH_SOCK).toBeUndefined();
-    expect(safeChildEnvironment({}, true).SSH_AUTH_SOCK).toBe("/tmp/inherited.sock");
+    expect(safeChildEnvironment({}, true).SSH_AUTH_SOCK).toBe(
+      "/tmp/inherited.sock",
+    );
   });
 
   test("injects FACTORY_ROOT and refuses caller overrides", () => {
     expect(safeChildEnvironment({}).FACTORY_ROOT).toBe(FACTORY_ROOT);
-    expect(safeChildEnvironment({ FACTORY_ROOT: "/tmp/untrusted" }).FACTORY_ROOT).toBe(FACTORY_ROOT);
+    expect(
+      safeChildEnvironment({ FACTORY_ROOT: "/tmp/untrusted" }).FACTORY_ROOT,
+    ).toBe(FACTORY_ROOT);
   });
 
   test("shares one push-credential list with the claude adapter", () => {
@@ -246,7 +337,9 @@ describe("safeChildEnvironment", () => {
 });
 
 describe("execute conformance (WM-440, docs/event-runtime.md §6)", () => {
-  const tmpBase = realpathSync(mkdtempSync(path.join(tmpdir(), "evrt-cursor-test-")));
+  const tmpBase = realpathSync(
+    mkdtempSync(path.join(tmpdir(), "evrt-cursor-test-")),
+  );
   const stubBinDir = path.join(tmpBase, "bin");
   mkdirSync(stubBinDir, { recursive: true });
   const emptyBinDir = path.join(tmpBase, "empty-bin");
@@ -255,6 +348,8 @@ describe("execute conformance (WM-440, docs/event-runtime.md §6)", () => {
   const stubAgentPath = path.join(stubBinDir, "agent");
   const stubScript = `#!/usr/bin/env bun
 import { writeFileSync } from "node:fs";
+
+${processOwnerWatchdogSource()}
 
 if (process.env.FACTORY_TEST_RECORD_FILE) {
   writeFileSync(
@@ -356,13 +451,24 @@ if (behavior === "emit_error_tool_result") {
   });
 
   const ws = () => realpathSync(mkdtempSync(path.join(tmpBase, "ws-")));
-  const defaultDef = { ref: "test-cursor-agent@1", promptPath: promptFile, mutating: false };
-  const defaultSpec = { agent: "test-cursor-agent@1", input: { message: "hi" } };
+  const defaultDef = {
+    ref: "test-cursor-agent@1",
+    promptPath: promptFile,
+    mutating: false,
+  };
+  const defaultSpec = {
+    agent: "test-cursor-agent@1",
+    input: { message: "hi" },
+  };
   const testProcessGroup = process.platform === "win32" ? test.skip : test;
 
   async function waitForGrandchildPid(pidFile) {
     for (let attempt = 0; attempt < 500; attempt += 1) {
-      if (existsSync(pidFile)) return Number(readFileSync(pidFile, "utf8"));
+      if (existsSync(pidFile)) {
+        const pid = Number(readFileSync(pidFile, "utf8"));
+        trackProcessGroupForPid(pid);
+        return pid;
+      }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("stub did not report its grandchild PID");
@@ -414,7 +520,11 @@ if (behavior === "emit_error_tool_result") {
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
 
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
     expect(existsSync(recordFile)).toBe(true);
     const record = JSON.parse(readFileSync(recordFile, "utf8"));
     expect(record.cwd).toBe(workspaceDir);
@@ -426,15 +536,23 @@ if (behavior === "emit_error_tool_result") {
     expect(record.argv).toContain("--trust");
     expect(record.argv).toContain("--force");
     expect(record.argv).toContain("--model");
-    expect(record.argv[record.argv.indexOf("--model") + 1]).toBe("composer-2.5");
+    expect(record.argv[record.argv.indexOf("--model") + 1]).toBe(
+      "composer-2.5",
+    );
     expect(record.argv.at(-2)).toBe("--");
     expect(record.argv.at(-1)).toBe(`You are a test agent.${PROMPT_SUFFIX}`);
 
     const transcriptPath = path.join(workspaceDir, ".transcript.json");
     expect(existsSync(transcriptPath)).toBe(true);
-    expect(readFileSync(transcriptPath, "utf8")).toContain('"type":"assistant"');
+    expect(readFileSync(transcriptPath, "utf8")).toContain(
+      '"type":"assistant"',
+    );
 
-    expect(traceEvents.some((e) => e.kind === "assistant_text" && e.payload.text === "Working...")).toBe(true);
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "assistant_text" && e.payload.text === "Working...",
+      ),
+    ).toBe(true);
     const usageEvent = traceEvents.find((e) => e.kind === "usage");
     expect(usageEvent.payload.durationMs).toBe(1200);
     expect(usageEvent.payload.costUSD).toBeNull();
@@ -460,7 +578,8 @@ if (behavior === "emit_error_tool_result") {
   test("nonzero exit writes .stderr.txt and emits adapter_stderr lifecycle (WM-443)", async () => {
     const workspaceDir = ws();
     const traceEvents = [];
-    const stderr = "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.\n";
+    const stderr =
+      "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.\n";
     const outcome = await execute({
       spec: defaultSpec,
       def: defaultDef,
@@ -475,44 +594,53 @@ if (behavior === "emit_error_tool_result") {
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
     expect(outcome.exitCode).toBe(1);
-    expect(readFileSync(path.join(workspaceDir, ".stderr.txt"), "utf8")).toBe(stderr);
-    expect(traceEvents.some((e) => (
-      e.kind === "lifecycle"
-      && e.payload?.note === "adapter_stderr"
-      && String(e.payload?.text ?? "").includes("Authentication required")
-    ))).toBe(true);
+    expect(readFileSync(path.join(workspaceDir, ".stderr.txt"), "utf8")).toBe(
+      stderr,
+    );
+    expect(
+      traceEvents.some(
+        (e) =>
+          e.kind === "lifecycle" &&
+          e.payload?.note === "adapter_stderr" &&
+          String(e.payload?.text ?? "").includes("Authentication required"),
+      ),
+    ).toBe(true);
   });
 
-  testProcessGroup("timeout kills a real long-lived grandchild (WM-263)", async () => {
-    const workspaceDir = ws();
-    const pidFile = path.join(workspaceDir, "grandchild.pid");
-    const ac = new AbortController();
-    const runPromise = execute({
-      spec: defaultSpec,
-      def: defaultDef,
-      workspaceDir,
-      timeoutMs: 6_000,
-      killGraceMs: 5000,
-      abortSignal: ac.signal,
-      env: {
-        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
-        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
-      },
-    });
-    let grandchildPid;
-    try {
-      grandchildPid = await waitForGrandchildPid(pidFile);
-      expect(processExists(grandchildPid)).toBe(true);
-      const outcome = await runPromise;
-      expect(outcome.timedOut).toBe(true);
-      await expectProcessExit(grandchildPid);
-    } finally {
-      ac.abort();
-      await runPromise;
-      killIfRunning(grandchildPid);
-    }
-  }, { timeout: 12_000 });
+  testProcessGroup(
+    "timeout kills a real long-lived grandchild (WM-263)",
+    async () => {
+      const workspaceDir = ws();
+      const pidFile = path.join(workspaceDir, "grandchild.pid");
+      const ac = new AbortController();
+      const runPromise = execute({
+        spec: defaultSpec,
+        def: defaultDef,
+        workspaceDir,
+        timeoutMs: 6_000,
+        killGraceMs: 5000,
+        abortSignal: ac.signal,
+        env: {
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+          FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+          FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
+        },
+      });
+      let grandchildPid;
+      try {
+        grandchildPid = await waitForGrandchildPid(pidFile);
+        expect(processExists(grandchildPid)).toBe(true);
+        const outcome = await runPromise;
+        expect(outcome.timedOut).toBe(true);
+        await expectProcessExit(grandchildPid);
+      } finally {
+        ac.abort();
+        await runPromise;
+        killIfRunning(grandchildPid);
+      }
+    },
+    { timeout: 12_000 },
+  );
 
   test("timeout escalates to SIGKILL when child ignores SIGTERM", async () => {
     const outcome = await execute({
@@ -529,37 +657,40 @@ if (behavior === "emit_error_tool_result") {
     expect(outcome.timedOut).toBe(true);
   });
 
-  testProcessGroup("abort kills a real long-lived grandchild (WM-263)", async () => {
-    const workspaceDir = ws();
-    const pidFile = path.join(workspaceDir, "grandchild.pid");
-    const ac = new AbortController();
-    const runPromise = execute({
-      spec: defaultSpec,
-      def: defaultDef,
-      workspaceDir,
-      timeoutMs: 10_000,
-      killGraceMs: 500,
-      abortSignal: ac.signal,
-      env: {
-        PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
-        FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
-        FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
-      },
-    });
-    let grandchildPid;
-    try {
-      grandchildPid = await waitForGrandchildPid(pidFile);
-      expect(processExists(grandchildPid)).toBe(true);
-      ac.abort();
-      const outcome = await runPromise;
-      expect(outcome.timedOut).toBe(false);
-      await expectProcessExit(grandchildPid);
-    } finally {
-      ac.abort();
-      await runPromise;
-      killIfRunning(grandchildPid);
-    }
-  });
+  testProcessGroup(
+    "abort kills a real long-lived grandchild (WM-263)",
+    async () => {
+      const workspaceDir = ws();
+      const pidFile = path.join(workspaceDir, "grandchild.pid");
+      const ac = new AbortController();
+      const runPromise = execute({
+        spec: defaultSpec,
+        def: defaultDef,
+        workspaceDir,
+        timeoutMs: 10_000,
+        killGraceMs: 500,
+        abortSignal: ac.signal,
+        env: {
+          PATH: `${stubBinDir}${path.delimiter}${process.env.PATH}`,
+          FACTORY_TEST_BEHAVIOR: "spawn_long_lived_grandchild",
+          FACTORY_TEST_GRANDCHILD_PID_FILE: pidFile,
+        },
+      });
+      let grandchildPid;
+      try {
+        grandchildPid = await waitForGrandchildPid(pidFile);
+        expect(processExists(grandchildPid)).toBe(true);
+        ac.abort();
+        const outcome = await runPromise;
+        expect(outcome.timedOut).toBe(false);
+        await expectProcessExit(grandchildPid);
+      } finally {
+        ac.abort();
+        await runPromise;
+        killIfRunning(grandchildPid);
+      }
+    },
+  );
 
   test("tool_call stream maps to tool_use / tool_result and a usage event", async () => {
     const traceEvents = [];
@@ -574,10 +705,24 @@ if (behavior === "emit_error_tool_result") {
       },
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
-    expect(outcome).toEqual({ exitCode: 0, timedOut: false, policyDenials: [] });
-    expect(traceEvents.some((e) => e.kind === "tool_use" && e.payload.name === "read")).toBe(true);
-    expect(traceEvents.some((e) => e.kind === "tool_result" && e.payload.content === "hello world")).toBe(true);
-    expect(traceEvents.find((e) => e.kind === "usage")?.payload.durationMs).toBe(800);
+    expect(outcome).toEqual({
+      exitCode: 0,
+      timedOut: false,
+      policyDenials: [],
+    });
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "tool_use" && e.payload.name === "read",
+      ),
+    ).toBe(true);
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "tool_result" && e.payload.content === "hello world",
+      ),
+    ).toBe(true);
+    expect(
+      traceEvents.find((e) => e.kind === "usage")?.payload.durationMs,
+    ).toBe(800);
   });
 
   test("a tool error that reads like a permission denial is never policy_denied (WM-127)", async () => {
@@ -595,7 +740,11 @@ if (behavior === "emit_error_tool_result") {
     });
     expect(outcome.exitCode).toBe(1);
     expect(outcome.policyDenials).toEqual([]);
-    expect(traceEvents.some((e) => e.kind === "lifecycle" && e.payload.note === "policy_denial")).toBe(false);
+    expect(
+      traceEvents.some(
+        (e) => e.kind === "lifecycle" && e.payload.note === "policy_denial",
+      ),
+    ).toBe(false);
   });
 
   test("run with no output reports usage as explicit n/a, not a fabricated zero", async () => {
@@ -613,7 +762,10 @@ if (behavior === "emit_error_tool_result") {
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
     expect(traceEvents.find((e) => e.kind === "usage")?.payload).toEqual({
-      durationMs: null, numTurns: null, costUSD: null, usage: {},
+      durationMs: null,
+      numTurns: null,
+      costUSD: null,
+      usage: {},
     });
   });
 
@@ -626,7 +778,10 @@ if (behavior === "emit_error_tool_result") {
         timeoutMs: 1000,
         env: { PATH: emptyBinDir },
       }),
-    ).rejects.toMatchObject({ name: "CliNotFoundError", code: "cli_not_found" });
+    ).rejects.toMatchObject({
+      name: "CliNotFoundError",
+      code: "cli_not_found",
+    });
     expect(CliNotFoundError).toBeDefined();
     expect(KILL_GRACE_MS).toBe(30_000);
   });

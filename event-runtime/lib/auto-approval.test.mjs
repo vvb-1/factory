@@ -57,7 +57,7 @@ function seed(
     )
     .find((entry) => entry.edge.eventType === type);
   if (trustedPredecessor && seedPredecessor) {
-    if (!predecessor)
+    if (!predecessor && !predecessorAgent)
       throw new Error(`test fixture has no registered predecessor for ${type}`);
     const parentEventId = `parent-event-${id}`;
     const parentAgent = predecessorAgent ?? predecessor.agent;
@@ -66,17 +66,26 @@ function seed(
     const parentResult = {
       artifact:
         predecessorArtifact ??
-        {
-          [parentRule.recommendationField]:
-            predecessorRecommendation ?? predecessor.recommendation,
-        },
+        (parentRule
+          ? {
+              [parentRule.recommendationField]:
+                predecessorRecommendation ?? predecessor.recommendation,
+            }
+          : {}),
     };
     const at = new Date(now).toISOString();
     db.query(
       `INSERT INTO events
          (source,event_id,type,subject,occurred_at,received_at,correlation_id,envelope_json,payload_hash,status,admitted_at)
        VALUES ('operator',?,'test.parent','test',?,?,?,?,'hash','planned',?)`,
-    ).run(parentEventId, at, at, parentEventId, canonicalJson({ payload: input }), at);
+    ).run(
+      parentEventId,
+      at,
+      at,
+      parentEventId,
+      canonicalJson({ payload: input }),
+      at,
+    );
     db.query(
       `INSERT INTO runs
          (run_id,idempotency_key,spec_json,spec_hash,state,attempts,created_at,updated_at)
@@ -86,7 +95,13 @@ function seed(
       `INSERT INTO proposals
          (id,event_source,event_id,run_id,decision,spec_json,status,created_at,ttl_seconds)
        VALUES (?,'operator',?,?,'run',?,'approved',?,1800)`,
-    ).run(`parent-proposal-${id}`, parentEventId, parentRunId, canonicalJson(parentSpec), at);
+    ).run(
+      `parent-proposal-${id}`,
+      parentEventId,
+      parentRunId,
+      canonicalJson(parentSpec),
+      at,
+    );
     db.query(
       `INSERT INTO results
          (run_id,attempt,result_json,artifact_hash,verification_json,receipt_json,accepted_at)
@@ -193,7 +208,10 @@ const auto = (db, options = {}) => {
   });
 };
 
-const independentMergeRegistry = ({ independent = true, selectors = {} } = {}) => {
+const independentMergeRegistry = ({
+  independent = true,
+  selectors = {},
+} = {}) => {
   const mergeRule = registry.edges["merge-scan@2"];
   return {
     ...registry,
@@ -267,8 +285,13 @@ function seedHistoricalApply(
       summary: "historical merge fixture",
     },
   });
-  db.query(`UPDATE runs SET state = ? WHERE run_id = ?`).run(state, apply.runId);
-  db.query(`UPDATE proposals SET status = 'approved' WHERE id = ?`).run(apply.id);
+  db.query(`UPDATE runs SET state = ? WHERE run_id = ?`).run(
+    state,
+    apply.runId,
+  );
+  db.query(`UPDATE proposals SET status = 'approved' WHERE id = ?`).run(
+    apply.id,
+  );
   return apply;
 }
 
@@ -379,6 +402,74 @@ function autoMerge(db) {
   });
 }
 
+describe("declared chain command edge characterization (WM-469)", () => {
+  test.each([
+    ["factory.merge.requested", { repo: "factory" }],
+    [
+      "factory.merge-landed",
+      {
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        pr: 469,
+        ticket: "WM-469",
+        headSha: "a".repeat(40),
+        headRef: "feat/WM-469",
+        mergeCommitSha: "c".repeat(40),
+      },
+    ],
+  ])("merge-apply@2 auto-approves its %s command edge", (type, input) => {
+    const db = openDb(":memory:");
+    const predecessorInput = reviewedMergeInput({ pr: 469, ticket: "WM-469" });
+    const candidate = seed(db, {
+      id: `merge-apply-command-${type}`,
+      type,
+      input,
+      predecessorAgent: "merge-apply@2",
+      predecessorInput,
+      predecessorArtifact: { outcome: "applied" },
+    });
+
+    expect(autoMerge(db).approved).toEqual([
+      { proposalId: candidate.id, runId: candidate.runId },
+    ]);
+  });
+
+  test("merge-verify@1 auto-approves factory.merge.requested when repo matches input", () => {
+    const db = openDb(":memory:");
+    const candidate = seed(db, {
+      id: "merge-verify-command-match",
+      type: "factory.merge.requested",
+      input: { repo: "factory" },
+      predecessorAgent: "merge-verify@1",
+      predecessorInput: { repo: "factory" },
+      predecessorArtifact: { outcome: "verified" },
+    });
+
+    expect(autoMerge(db).approved).toEqual([
+      { proposalId: candidate.id, runId: candidate.runId },
+    ]);
+  });
+
+  test("merge-verify@1 repo mismatch remains chain_command_edge_payload_mismatch", () => {
+    const db = openDb(":memory:");
+    const candidate = seed(db, {
+      id: "merge-verify-command-mismatch",
+      type: "factory.merge.requested",
+      input: { repo: "other" },
+      predecessorAgent: "merge-verify@1",
+      predecessorInput: { repo: "factory" },
+      predecessorArtifact: { outcome: "verified" },
+    });
+
+    expect(autoMerge(db).approved).toEqual([]);
+    expect(runState(db, candidate.runId)).toBe("PROPOSED");
+    expect(openProposals(db, {})[0].reason).toContain(
+      "chain_command_edge_payload_mismatch",
+    );
+  });
+});
+
 describe("chain auto approval (WM-357)", () => {
   test("git-owned policy is an explicit closed allowlist", () => {
     const loaded = loadChainAutoApprovalPolicy();
@@ -419,7 +510,9 @@ describe("chain auto approval (WM-357)", () => {
     for (const id of ["env-1", "env-2"]) {
       const failed = seed(circuitDb, { id });
       circuitDb
-        .query(`UPDATE runs SET state = 'FAILED', attempts = 1 WHERE run_id = ?`)
+        .query(
+          `UPDATE runs SET state = 'FAILED', attempts = 1 WHERE run_id = ?`,
+        )
         .run(failed.runId);
       circuitDb
         .query(

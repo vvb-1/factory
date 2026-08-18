@@ -36,22 +36,54 @@
  * usage, so `execute()` accumulates `extractUsage()` across the run and emits
  * one combined `usage` trace event at process close — present fields when pi
  * reported them, explicit null/empty when it never got that far.
+ *
+ * A definition with a `sandbox` block (WM-313) runs pi INSIDE the Gondolin
+ * microVM instead of on the host: the workspace is the guest's cwd through the
+ * policy's mount, the prompt is redirected from a workspace file (the VM
+ * request has no stdin channel), egress is the definition's allowlist,
+ * credentials reach the guest only as placeholders that the host substitutes
+ * for allowlisted upstreams, and the guest environment is built from constants
+ * — the caller's `env` and the worker's credentials never cross. Everything
+ * downstream of stdout (transcript, trace, usage, exit/timeout/cancel
+ * semantics, result.json under the workspace) is the same code as the host
+ * path, so the two cannot drift. See lib/adapters/sandboxed.mjs.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, readFileSync } from "node:fs";
+import { createWriteStream, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 import { FACTORY_ROOT } from "../config.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
+import {
+  guestBinary,
+  guestEnvironment,
+  runSandboxed,
+  sandboxRequested,
+} from "./sandboxed.mjs";
 
 // PUSH_CREDENTIAL_ENV is imported, not redeclared: the WM-128 carve-out is one
 // list shared by both LLM adapters (WM-223), so it cannot drift between them.
 export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
 
+/** This adapter executes inside the VM when a definition asks (WM-313). */
+export const SANDBOX_SUPPORT = "gondolin";
+
+/**
+ * Workspace file the prompt is written to for a sandboxed run, then redirected
+ * onto pi's stdin inside the guest. Not an artifact: it is the same text the
+ * host path pipes, and it lives beside input.json under the workspace mount.
+ */
+export const SANDBOX_PROMPT_FILE = ".prompt.md";
+
 export const KILL_GRACE_MS = 30_000;
 
 /** Terminate a detached CLI and every subprocess it started (WM-263). */
-export function killProcessGroup(child, signal = "SIGTERM", kill = process.kill) {
+export function killProcessGroup(
+  child,
+  signal = "SIGTERM",
+  kill = process.kill,
+) {
   const pid = child?.pid;
   if (!pid) return;
   try {
@@ -84,7 +116,34 @@ const TEXT_PREVIEW_CHARS = 4000;
 // tool removal. Containment for mutating: false is therefore the ephemeral or
 // pinned workspace as cwd — audited, not enforced, per §14 until stage 2's
 // native capability enforcement (OPS-515).
-export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "write", "bash"];
+//   exec_command / apply_patch
+//          the third occurrence (WM-665), and the reason both name families are
+//          listed. Tool names are PER PROVIDER, not per pi version. On
+//          openai-codex models (sol/terra/luna — what `pi.*` resolves to in
+//          config/policy.yaml) there is no `read`, `write` or `bash` at all:
+//          the shell is `exec_command` and file writing is `apply_patch`.
+//          `grep`/`find`/`ls` do exist, so exactly those three survived the
+//          allowlist and the failure looked like a weak model rather than a
+//          config bug. pi drops an unrecognized name silently — no error, no
+//          warning — so a mutating: false agent kept its contract obligation
+//          and lost the only tool that could satisfy it, then failed closed
+//          with "this session exposes no shell or file-write tool"
+//          (run_b66e2338 merge-scan@2, run_06cfd301 work-scan@1, pi 0.84.2).
+// Both families are kept: an unrecognized name is inert, so listing them
+// together is what makes one allowlist correct across providers.
+// `apply_patch` conflates write and edit, so a mutating: false agent on codex
+// does get an edit-capable tool. That is deliberate and consistent with the
+// paragraph below: containment is the workspace, not the tool list.
+export const READ_ONLY_TOOLS = [
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "write",
+  "bash",
+  "exec_command",
+  "apply_patch",
+];
 
 // The mutating counterpart, and the reason it exists (WM-336): until now
 // `--tools` was passed ONLY for `mutating: false`, so a mutating agent ran on
@@ -110,7 +169,19 @@ export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "write", "bash"];
 // agent. `subagent` is deliberately included: dispatch delegates focused work —
 // notably the UX critique (WM-335) — and the alternative is one context doing
 // everything, which is what long-run degradation looks like.
-export const MUTATING_TOOLS = ["read", "grep", "find", "ls", "write", "bash", "edit", "subagent"];
+export const MUTATING_TOOLS = [
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "write",
+  "bash",
+  "edit",
+  "subagent",
+  // Codex-provider equivalents of bash/write+edit — see WM-665 above.
+  "exec_command",
+  "apply_patch",
+];
 
 export class CliNotFoundError extends Error {
   constructor(message) {
@@ -188,8 +259,18 @@ export function piExtensions(def) {
 }
 
 export const BASE_INHERITED_ENV = [
-  "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM",
-  "TMPDIR", "USER", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
 ];
 
 /**
@@ -213,9 +294,16 @@ export const BASE_INHERITED_ENV = [
  * definition — `mutating` is a JSON boolean — but this direction fails closed.
  */
 export function safeChildEnvironment(env = {}, defOrOpts = {}) {
-  const isMutating = typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
-  const inherited = isMutating ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV] : BASE_INHERITED_ENV;
-  const childEnv = Object.fromEntries(inherited.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  const isMutating =
+    typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
+  const inherited = isMutating
+    ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV]
+    : BASE_INHERITED_ENV;
+  const childEnv = Object.fromEntries(
+    inherited.flatMap((key) =>
+      process.env[key] === undefined ? [] : [[key, process.env[key]]],
+    ),
+  );
   Object.assign(childEnv, env);
   // Read-only repository workspaces contain the selected target checkout, not
   // Factory's runtime support code. Expose the running Factory checkout through
@@ -227,8 +315,14 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
   // billing (same rationale as run-agent.sh's UNSET_KEYS, all providers pi
   // itself recognizes, not just OpenAI's).
   for (const key of [
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
   ]) {
     delete childEnv[key];
   }
@@ -253,12 +347,17 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
 export const HARNESS_DENIAL_PATTERNS = [];
 
 export function isHarnessDenial(content) {
-  return typeof content === "string" && HARNESS_DENIAL_PATTERNS.some((re) => re.test(content));
+  return (
+    typeof content === "string" &&
+    HARNESS_DENIAL_PATTERNS.some((re) => re.test(content))
+  );
 }
 
 function clip(text) {
   const s = String(text ?? "");
-  return s.length > TEXT_PREVIEW_CHARS ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]` : s;
+  return s.length > TEXT_PREVIEW_CHARS
+    ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]`
+    : s;
 }
 
 /** Flatten a tool result content value (pi's shape: an array of text blocks). */
@@ -293,16 +392,29 @@ export function mapStreamEvent(msg) {
     const events = [];
     for (const block of blocks) {
       if (block?.type === "text" && block.text) {
-        events.push({ kind: "assistant_text", payload: { text: clip(block.text) } });
+        events.push({
+          kind: "assistant_text",
+          payload: { text: clip(block.text) },
+        });
       } else if (block?.type === "toolCall") {
-        events.push({ kind: "tool_use", payload: { id: block.id ?? null, name: block.name, input: block.arguments } });
+        events.push({
+          kind: "tool_use",
+          payload: {
+            id: block.id ?? null,
+            name: block.name,
+            input: block.arguments,
+          },
+        });
       }
     }
     return events;
   }
 
   if (msg.type === "tool_execution_end") {
-    const payload = { content: clip(contentText(msg.result?.content)), toolUseId: msg.toolCallId ?? null };
+    const payload = {
+      content: clip(contentText(msg.result?.content)),
+      toolUseId: msg.toolCallId ?? null,
+    };
     if (msg.isError === true) payload.isError = true;
     return [{ kind: "tool_result", payload }];
   }
@@ -316,15 +428,241 @@ export function mapStreamEvent(msg) {
  * `usage` trace event pi's protocol has no equivalent terminal message for.
  */
 export function extractUsage(msg) {
-  if (!msg || msg.type !== "message_end" || msg.message?.role !== "assistant") return null;
+  if (!msg || msg.type !== "message_end" || msg.message?.role !== "assistant")
+    return null;
   const u = msg.message?.usage;
   if (!u || typeof u !== "object") return null;
   const usage = {};
-  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens"]) {
+  for (const key of [
+    "input",
+    "output",
+    "cacheRead",
+    "cacheWrite",
+    "reasoning",
+    "totalTokens",
+  ]) {
     if (typeof u[key] === "number") usage[key] = u[key];
   }
   const costUSD = typeof u.cost?.total === "number" ? u.cost.total : null;
   return { usage, costUSD };
+}
+
+/**
+ * Everything downstream of pi's stdout, shared by the host and sandboxed
+ * paths so the transcript artifact, live trace, denial detection, and usage
+ * accounting are one implementation: pipe the stream to `.transcript.json`,
+ * map each NDJSON line to trace events, accumulate usage. `finish()` emits
+ * the combined `usage` trace event, reports usage, and returns the outcome
+ * fields the worker reads.
+ *
+ * @param {import("node:stream").Readable|null} stdout
+ */
+function attachOutput({ stdout, workspaceDir, spec, def, onTrace, onUsage }) {
+  // Capture the CLI's structured output as a runtime artifact, same
+  // contract as the claude adapter: NDJSON, one message per line.
+  const transcript = createWriteStream(
+    path.join(workspaceDir, ".transcript.json"),
+  );
+  transcript.on("error", () => {});
+  if (stdout) {
+    stdout.pipe(transcript);
+  }
+
+  // Live trace: same stdout, line by line. Observational only — a trace
+  // recorder must never race execution by terminating the child.
+  const policyDenials = [];
+  let lastTool = null;
+  const toolNames = new Map();
+  let turnCount = 0;
+  let costTotal = null;
+  const usageTotals = {};
+  let observedModel = null;
+  if (stdout) {
+    const lines = createInterface({ input: stdout });
+    lines.on("line", (line) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return; // not JSON — ignore
+      }
+      try {
+        if (
+          parsed?.type === "message_end" &&
+          typeof parsed.message?.model === "string"
+        ) {
+          observedModel = parsed.message.model;
+        } else if (typeof parsed?.model === "string") {
+          observedModel = parsed.model;
+        }
+        for (const event of mapStreamEvent(parsed)) {
+          if (event.kind === "tool_use") {
+            lastTool = event.payload?.name ?? null;
+            if (event.payload?.id) toolNames.set(event.payload.id, lastTool);
+          }
+          onTrace?.(event.kind, event.payload);
+          const content =
+            typeof event.payload?.content === "string"
+              ? event.payload.content
+              : "";
+          if (
+            event.kind === "tool_result" &&
+            event.payload?.isError &&
+            isHarnessDenial(content)
+          ) {
+            const denial = {
+              tool:
+                toolNames.get(event.payload?.toolUseId) ??
+                lastTool ??
+                "unknown",
+              rule: clip(content),
+            };
+            policyDenials.push(denial);
+            onTrace?.("lifecycle", { note: "policy_denial", ...denial });
+          }
+        }
+        const turnUsage = extractUsage(parsed);
+        if (turnUsage) {
+          turnCount += 1;
+          if (turnUsage.costUSD !== null)
+            costTotal = (costTotal ?? 0) + turnUsage.costUSD;
+          for (const [key, value] of Object.entries(turnUsage.usage)) {
+            usageTotals[key] = (usageTotals[key] ?? 0) + value;
+          }
+        }
+      } catch {
+        // a recorder failure must never fail the run
+      }
+    });
+  }
+
+  const finish = ({ exitCode, timedOut }) => {
+    // pi has no single terminal summary message; report what was actually
+    // observed — explicit null/empty when the run never produced a turn,
+    // never a fabricated zero.
+    onTrace?.("usage", {
+      durationMs: null,
+      numTurns: turnCount > 0 ? turnCount : null,
+      costUSD: costTotal,
+      usage: usageTotals,
+    });
+
+    const normalized = {
+      model: observedModel ?? spec?.model ?? def?.model ?? null,
+      inputTokens: usageTotals.input ?? 0,
+      outputTokens: usageTotals.output ?? 0,
+      cacheCreationInputTokens: usageTotals.cacheWrite ?? 0,
+      cacheReadInputTokens: usageTotals.cacheRead ?? 0,
+      costUSD: typeof costTotal === "number" ? costTotal : 0,
+    };
+
+    try {
+      onUsage?.(normalized);
+    } catch {
+      // Usage is observability: a consumer failure must not change execution.
+    }
+
+    // Same WM-127 rule as claude: a denial observed mid-run is evidence,
+    // not a verdict — only surfaced to the worker when the run also failed.
+    return {
+      exitCode,
+      timedOut,
+      policyDenials: exitCode === 0 ? [] : policyDenials,
+      usage: normalized,
+    };
+  };
+
+  return { transcript, finish };
+}
+
+/**
+ * Sandboxed execution (WM-313): pi runs inside the microVM. The guest sees
+ * the workspace at the policy's mount point as its cwd, so `./input.json` and
+ * `./result.json` in PROMPT_SUFFIX resolve to the host workspace the verifier
+ * reads — on success, failure, and timeout alike, because VFS writes land on
+ * the host as the guest makes them.
+ *
+ * What is deliberately different from the host path, and why:
+ *   - no CLI resolution on the host: the binary is a guest path
+ *     (`sandbox.guestBinaries.pi`, default /usr/local/bin/pi per the image
+ *     contract). A missing guest binary is a guest exec failure, reported
+ *     through the console artifact.
+ *   - no `safeChildEnvironment`: nothing from the worker's env is forwarded.
+ *     `PI_OFFLINE=1` keeps pi's own update/telemetry traffic from tripping the
+ *     deny-all default; the model call itself needs its host in
+ *     `sandbox.allowedHosts` and its key declared in `sandbox.secrets` (the
+ *     guest holds only the placeholder).
+ *   - no `--fork <session>`: sessions live in the guest's ephemeral home, so a
+ *     prior attempt's native session cannot exist there. The worker's resume
+ *     lookup keys on the transcript's cwd matching the host workspace, which a
+ *     guest transcript never does, so this is belt-and-braces plus a note.
+ */
+async function executeSandboxed({
+  spec,
+  def,
+  workspaceDir,
+  timeoutMs,
+  onTrace,
+  onUsage,
+  resume,
+  abortSignal,
+  runSandbox,
+}) {
+  const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
+  writeFileSync(path.join(workspaceDir, SANDBOX_PROMPT_FILE), prompt, "utf8");
+
+  if (resume?.sessionId) {
+    onTrace?.("lifecycle", {
+      note: "sandbox_resume_unavailable",
+      sessionId: resume.sessionId,
+    });
+  }
+  const bin = guestBinary(def, "pi");
+  const argv = [
+    bin,
+    ...buildPiArgv({ def, model: spec?.model, resumeSessionId: null }),
+  ];
+
+  const stdout = new PassThrough();
+  const { transcript, finish } = attachOutput({
+    stdout,
+    workspaceDir,
+    spec,
+    def,
+    onTrace,
+    onUsage,
+  });
+  const transcriptClosed = new Promise((done) => {
+    transcript.on("close", done);
+    transcript.on("finish", done);
+  });
+
+  let sandboxOutcome;
+  try {
+    sandboxOutcome = await runSandboxed({
+      adapter: "pi",
+      def,
+      workspaceDir,
+      argv,
+      stdinFile: SANDBOX_PROMPT_FILE,
+      env: guestEnvironment({ PI_OFFLINE: "1" }),
+      timeoutMs,
+      abortSignal,
+      onTrace,
+      runSandbox,
+      onStdout: (chunk) => stdout.write(chunk),
+    });
+  } finally {
+    stdout.end();
+  }
+  // The transcript must be flushed before the worker hashes it — the guest is
+  // gone, so nothing else is holding the run open.
+  await transcriptClosed;
+
+  return finish({
+    exitCode: sandboxOutcome.exitCode,
+    timedOut: sandboxOutcome.timedOut,
+  });
 }
 
 /**
@@ -342,11 +680,31 @@ export async function execute({
   resume = null,
   abortSignal,
   signal,
+  runSandbox,
 }) {
+  // The sandbox decision comes first, before the host env is assembled or a
+  // host CLI is looked for: a sandboxed definition must never reach the host
+  // spawn below, whatever else happens.
+  if (sandboxRequested(def)) {
+    return executeSandboxed({
+      spec,
+      def,
+      workspaceDir,
+      timeoutMs,
+      onTrace,
+      onUsage,
+      resume,
+      abortSignal: abortSignal ?? signal,
+      runSandbox,
+    });
+  }
+
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
   const childEnv = safeChildEnvironment(env, def);
 
-  const resolved = resolvePiCommand({ which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }) });
+  const resolved = resolvePiCommand({
+    which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }),
+  });
   if (!resolved) {
     // Preflight refusal (OPS-296 AC): missing CLI is a typed condition the
     // worker recognizes as `cli_not_found`, not an opaque `adapter_error`
@@ -357,7 +715,11 @@ export async function execute({
   }
   const argv = [
     ...resolved.args,
-    ...buildPiArgv({ def, model: spec?.model, resumeSessionId: resume?.sessionId }),
+    ...buildPiArgv({
+      def,
+      model: spec?.model,
+      resumeSessionId: resume?.sessionId,
+    }),
   ];
 
   return new Promise((resolve, reject) => {
@@ -372,78 +734,34 @@ export async function execute({
     child.stdin.write(prompt);
     child.stdin.end();
 
-    // Capture the CLI's structured output as a runtime artifact, same
-    // contract as the claude adapter: NDJSON, one message per line.
-    const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
-    transcript.on("error", () => {});
-    if (child.stdout) {
-      child.stdout.pipe(transcript);
-    }
-
-    // Live trace: same stdout, line by line. Observational only — a trace
-    // recorder must never race execution by terminating the child.
-    const policyDenials = [];
-    let lastTool = null;
-    const toolNames = new Map();
-    let turnCount = 0;
-    let costTotal = null;
-    const usageTotals = {};
-    let observedModel = null;
-    if (child.stdout) {
-      const lines = createInterface({ input: child.stdout });
-      lines.on("line", (line) => {
-        let parsed;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          return; // not JSON — ignore
-        }
-        try {
-          if (parsed?.type === "message_end" && typeof parsed.message?.model === "string") {
-            observedModel = parsed.message.model;
-          } else if (typeof parsed?.model === "string") {
-            observedModel = parsed.model;
-          }
-          for (const event of mapStreamEvent(parsed)) {
-            if (event.kind === "tool_use") {
-              lastTool = event.payload?.name ?? null;
-              if (event.payload?.id) toolNames.set(event.payload.id, lastTool);
-            }
-            onTrace?.(event.kind, event.payload);
-            const content = typeof event.payload?.content === "string" ? event.payload.content : "";
-            if (event.kind === "tool_result" && event.payload?.isError && isHarnessDenial(content)) {
-              const denial = { tool: toolNames.get(event.payload?.toolUseId) ?? lastTool ?? "unknown", rule: clip(content) };
-              policyDenials.push(denial);
-              onTrace?.("lifecycle", { note: "policy_denial", ...denial });
-            }
-          }
-          const turnUsage = extractUsage(parsed);
-          if (turnUsage) {
-            turnCount += 1;
-            if (turnUsage.costUSD !== null) costTotal = (costTotal ?? 0) + turnUsage.costUSD;
-            for (const [key, value] of Object.entries(turnUsage.usage)) {
-              usageTotals[key] = (usageTotals[key] ?? 0) + value;
-            }
-          }
-        } catch {
-          // a recorder failure must never fail the run
-        }
-      });
-    }
+    const { transcript, finish } = attachOutput({
+      stdout: child.stdout,
+      workspaceDir,
+      spec,
+      def,
+      onTrace,
+      onUsage,
+    });
 
     let timedOut = false;
     let killTimer = null;
     const termTimer = setTimeout(() => {
       timedOut = true;
       killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+      killTimer = setTimeout(
+        () => killProcessGroup(child, "SIGKILL"),
+        killGraceMs,
+      );
       killTimer.unref?.();
     }, timeoutMs);
 
     const onAbort = () => {
       killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+        killTimer = setTimeout(
+          () => killProcessGroup(child, "SIGKILL"),
+          killGraceMs,
+        );
         killTimer.unref?.();
       }
     };
@@ -467,39 +785,7 @@ export async function execute({
       clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
       if (abortSig) abortSig.removeEventListener?.("abort", onAbort);
-      // pi has no single terminal summary message; report what was actually
-      // observed — explicit null/empty when the run never produced a turn,
-      // never a fabricated zero.
-      onTrace?.("usage", {
-        durationMs: null,
-        numTurns: turnCount > 0 ? turnCount : null,
-        costUSD: costTotal,
-        usage: usageTotals,
-      });
-
-      const normalized = {
-        model: observedModel ?? spec?.model ?? def?.model ?? null,
-        inputTokens: usageTotals.input ?? 0,
-        outputTokens: usageTotals.output ?? 0,
-        cacheCreationInputTokens: usageTotals.cacheWrite ?? 0,
-        cacheReadInputTokens: usageTotals.cacheRead ?? 0,
-        costUSD: typeof costTotal === "number" ? costTotal : 0,
-      };
-
-      try {
-        onUsage?.(normalized);
-      } catch {
-        // Usage is observability: a consumer failure must not change execution.
-      }
-
-      // Same WM-127 rule as claude: a denial observed mid-run is evidence,
-      // not a verdict — only surfaced to the worker when the run also failed.
-      resolve({
-        exitCode,
-        timedOut,
-        policyDenials: exitCode === 0 ? [] : policyDenials,
-        usage: normalized,
-      });
+      resolve(finish({ exitCode, timedOut }));
     });
   });
 }

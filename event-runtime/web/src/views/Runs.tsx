@@ -1,7 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { api, ApiError } from "../api";
-import { keyGuard, useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import {
+  keyGuard,
+  refetchIntervals,
+  tableTokens,
+  useDisplayOptions,
+  useListKeys,
+  useNow,
+  useTabKeys,
+  useTableWindow,
+} from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -19,7 +34,10 @@ import { CustomCell } from "../components/CustomCell";
 import { setContextActions } from "../palette";
 import { RunTrace } from "../components/RunTrace";
 import { AgentHoverCard } from "../components/AgentHoverCard";
-import { ApprovalRiskDetails, useProposalAgent } from "../components/ApprovalRisk";
+import {
+  ApprovalRiskDetails,
+  useProposalAgent,
+} from "../components/ApprovalRisk";
 import {
   BudgetClock,
   IN_FLIGHT,
@@ -33,11 +51,15 @@ import {
 import { readPinnedRuns, savePinnedRuns } from "../components/ContextTabs";
 import type { OperatorContext } from "../context";
 import { matchesInFlight, matchesRepo } from "../context";
-import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
+import {
+  RUN_FACETS,
+  matchesFilterQuery,
+  parseFilterQuery,
+} from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import type { Proposal, RunListItem, RunState } from "../types";
+import { EMPTY, formatRelative } from "../format";
 import {
-  Ago,
   Button,
   CopyActions,
   Dialog,
@@ -46,10 +68,12 @@ import {
   DetailPane,
   JumpLink,
   ListEmpty,
+  ModelCell,
   notify,
   StateBadge,
   STATE_HUES,
   GroupHeaderRow,
+  TableWindowFooter,
   Th,
   VerbError,
   copyText,
@@ -79,7 +103,10 @@ export function toggleRunPin(id: string) {
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable=true]"))
+  );
 }
 
 export const RUN_TAB_LABELS: Record<RunTab, string> = {
@@ -100,8 +127,10 @@ export const RUN_TAB_TITLES: Record<RunTab, string> = {
 
 export function matchesRunTab(state: RunState, tab: RunTab): boolean {
   if (tab === "ALL") return true;
-  if (tab === "ACTIVE") return ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(state);
-  if (tab === "FAILED") return ["FAILED", "TIMED_OUT", "REFUSED"].includes(state);
+  if (tab === "ACTIVE")
+    return ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(state);
+  if (tab === "FAILED")
+    return ["FAILED", "TIMED_OUT", "REFUSED"].includes(state);
   if (tab === "COMPLETED") return state === "COMPLETED";
   if (tab === "CANCELLED") return state === "CANCELLED";
   return true;
@@ -110,8 +139,17 @@ export function matchesRunTab(state: RunState, tab: RunTab): boolean {
 export function statesForRunTab(tab: RunTab): readonly string[] {
   if (tab === "ALL") {
     return [
-      "PROPOSED", "APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING",
-      "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
+      "PROPOSED",
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+      "REFUSED",
+      "FAILED",
+      "TIMED_OUT",
+      "CANCELLED",
     ];
   }
   if (tab === "ACTIVE") return ["QUEUED", "LEASED", "RUNNING", "VERIFYING"];
@@ -122,7 +160,8 @@ export function statesForRunTab(tab: RunTab): readonly string[] {
 }
 
 export function tabForRunState(state: string): RunTab {
-  if (["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(state)) return "ACTIVE";
+  if (["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(state))
+    return "ACTIVE";
   if (["FAILED", "TIMED_OUT", "REFUSED"].includes(state)) return "FAILED";
   if (state === "COMPLETED") return "COMPLETED";
   if (state === "CANCELLED") return "CANCELLED";
@@ -149,8 +188,17 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
       label: "State",
       get: (r) => r.state,
       order: [
-        "PROPOSED", "APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING",
-        "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
+        "PROPOSED",
+        "APPROVED",
+        "QUEUED",
+        "LEASED",
+        "RUNNING",
+        "VERIFYING",
+        "COMPLETED",
+        "REFUSED",
+        "FAILED",
+        "TIMED_OUT",
+        "CANCELLED",
       ],
       hue: STATE_HUES,
     },
@@ -162,23 +210,57 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   sorts: [
     { key: "run", label: "Run", get: (r) => r.runId, column: "run" },
     { key: "state", label: "State", get: (r) => r.state, column: "state" },
+    {
+      key: "remaining",
+      label: "Remaining",
+      get: (r) => r.deadlineAt ?? "",
+      column: "remaining",
+    },
     { key: "agent", label: "Agent", get: (r) => r.agent, column: "agent" },
-    { key: "adapter", label: "Adapter", get: (r) => r.adapter, column: "adapter" },
+    {
+      key: "adapter",
+      label: "Adapter",
+      get: (r) => r.adapter,
+      column: "adapter",
+    },
     { key: "model", label: "Model", get: rowModel, column: "model" },
-    { key: "attempts", label: "Attempts", get: (r) => r.attempts, defaultDir: "desc", column: "attempts" },
-    { key: "reason", label: "Reason", get: (r) => r.reasonCode ?? "", column: "reason" },
+    {
+      key: "attempts",
+      label: "Attempts",
+      get: (r) => r.attempts,
+      defaultDir: "desc",
+      column: "attempts",
+    },
+    {
+      key: "reason",
+      label: "Reason",
+      get: (r) => r.reasonCode ?? "",
+      column: "reason",
+    },
     {
       key: "origin",
       label: "Origin",
       get: (r) => `${r.eventSource ?? ""}:${r.eventId ?? ""}`,
       column: "origin",
     },
-    { key: "updated", label: "Updated", get: (r) => r.updated_at, defaultDir: "desc", column: "updated" },
-    { key: "created", label: "Created", get: (r) => r.created_at, defaultDir: "desc" },
+    {
+      key: "updated",
+      label: "Updated",
+      get: (r) => r.updated_at,
+      defaultDir: "desc",
+      column: "updated",
+    },
+    {
+      key: "created",
+      label: "Created",
+      get: (r) => r.created_at,
+      defaultDir: "desc",
+    },
   ],
   columns: [
     { key: "run", label: "Run", always: true },
     { key: "state", label: "State" },
+    { key: "remaining", label: "Remaining" },
     { key: "agent", label: "Agent" },
     { key: "adapter", label: "Adapter" },
     { key: "model", label: "Model" },
@@ -189,9 +271,33 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   ],
 };
 
+function RemainingCell({
+  deadlineAt,
+  now,
+}: {
+  deadlineAt?: string | null;
+  now: number;
+}) {
+  if (!deadlineAt) return <span>—</span>;
+  const left = Math.max(0, Date.parse(deadlineAt) - now);
+  if (!Number.isFinite(left)) return <span>—</span>;
+  const minutes = Math.ceil(left / 60_000);
+  return (
+    <span title={deadlineAt}>
+      {minutes >= 60
+        ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+        : `${minutes}m`}
+    </span>
+  );
+}
+
 function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
-  const { startedAt, leaseExpiresAt, timeoutSeconds = 0 } = r as { startedAt?: string | null; leaseExpiresAt?: string | null; timeoutSeconds?: number };
-  const t = startedAt && timeoutSeconds > 0 ? clockTo(startedAt, timeoutSeconds * 1000, now) : null;
+  const { startedAt, leaseExpiresAt, deadlineAt, timeoutSeconds = 0 } = r;
+  const t = deadlineAt
+    ? clockTo(deadlineAt, 0, now)
+    : startedAt && timeoutSeconds > 0
+      ? clockTo(startedAt, timeoutSeconds * 1000, now)
+      : null;
   const l = leaseExpiresAt ? clockTo(leaseExpiresAt, 0, now) : null;
   const hasT = t && t.kind !== "off";
   const hasL = l && l.kind !== "off";
@@ -206,13 +312,22 @@ function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
 }
 
 const rowWash = (s: string) =>
-  s === "FAILED" || s === "TIMED_OUT" ? "row-wash-err" : s === "REFUSED" ? "row-wash-warn" : "";
+  s === "FAILED" || s === "TIMED_OUT"
+    ? "row-wash-err"
+    : s === "REFUSED"
+      ? "row-wash-warn"
+      : "";
 
 /** Route raw links rendered by RunDetailBlocks to the deep-linkable artifact inspector. */
 export function handleRunArtifactClick(event: ReactMouseEvent<HTMLElement>) {
-  const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
+  const target =
+    event.target instanceof Element
+      ? event.target.closest<HTMLAnchorElement>("a[href]")
+      : null;
   if (!target) return;
-  const match = (target.getAttribute("href") ?? "").match(/\/api\/artifacts\/([0-9a-f]{64})(?=[?#]|$)/);
+  const match = (target.getAttribute("href") ?? "").match(
+    /\/api\/artifacts\/([0-9a-f]{64})(?=[?#]|$)/,
+  );
   if (!match) return;
   event.preventDefault();
   event.stopPropagation();
@@ -256,7 +371,7 @@ export function Runs({
   const proposalsQ = useQuery({
     queryKey: ["proposals", "open"],
     queryFn: () => api.proposals(),
-    refetchInterval: 2000,
+    ...refetchIntervals.secondary,
   });
 
   const proposalByRunId = useMemo(() => {
@@ -273,9 +388,13 @@ export function Runs({
   const list = useQuery({
     queryKey: ["runs", fetchAll ? "ALL" : tab],
     queryFn: () => api.runs(),
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
+  const statusQ = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    ...refetchIntervals.fast,
+  });
   const rows = list.data?.runs ?? [];
   const scoped = useMemo(
     () =>
@@ -287,18 +406,27 @@ export function Runs({
     [rows, context, focusRunId],
   );
   const byTab = useMemo(
-    () => (tab === "ALL" ? scoped : scoped.filter((r) => matchesRunTab(r.state, tab))),
+    () =>
+      tab === "ALL"
+        ? scoped
+        : scoped.filter((r) => matchesRunTab(r.state, tab)),
     [scoped, tab],
   );
   // `is:stale` is the doctor's projection, not a guess this view makes: a run
   // held by a worker whose heartbeat has gone (lib/workers.mjs stalledWorkers).
   const staleRuns = useMemo(
-    () => new Set((statusQ.data?.anomalies.stalledWorkers ?? []).map((w) => w.runId)),
+    () =>
+      new Set(
+        (statusQ.data?.anomalies.stalledWorkers ?? []).map((w) => w.runId),
+      ),
     [statusQ.data],
   );
   const parsed = useMemo(() => parseFilterQuery(filter, RUN_FACETS), [filter]);
   const visible = useMemo(
-    () => byTab.filter((r) => matchesFilterQuery(r, parsed, RUN_FACETS, { staleRuns })),
+    () =>
+      byTab.filter((r) =>
+        matchesFilterQuery(r, parsed, RUN_FACETS, { staleRuns }),
+      ),
     [byTab, parsed, staleRuns],
   );
 
@@ -326,12 +454,21 @@ export function Runs({
     [sections, display.collapsed],
   );
   const cols = visibleColumns(displayConfig, display);
-  const show = useMemo(() => new Set(cols.map((c) => c.key)), [cols]);
 
   const selectedId = focusRunId;
   // Keyboard index walks the open sections; the detail pane keys off the row
   // itself so collapsing the group under a selection never closes the pane.
-  const selectedIndex = useMemo(() => flat.findIndex((r) => r.runId === selectedId), [flat, selectedId]);
+  const selectedIndex = useMemo(
+    () => flat.findIndex((r) => r.runId === selectedId),
+    [flat, selectedId],
+  );
+  const tokens = tableTokens(sections, display.collapsed, grouped(display));
+  const [windowTokens, windowStart, windowEnd, moveWindow] = useTableWindow(
+    tokens,
+    selectedId,
+    (row) => row.runId,
+    JSON.stringify([tab, filter, context, display]),
+  );
 
   // Deep link / jump: switch to ALL if the run isn't on this tab. Hash stays put.
   // Reveal (clear filter) once per focus id, after the run is on the tab so a
@@ -368,7 +505,9 @@ export function Runs({
     }
 
     const onTab = rows.some(
-      (r) => r.runId === focusRunId && (tab === "ALL" || matchesRunTab(r.state, tab)),
+      (r) =>
+        r.runId === focusRunId &&
+        (tab === "ALL" || matchesRunTab(r.state, tab)),
     );
     if (onTab) {
       const latch = pendingReveal.current;
@@ -377,7 +516,12 @@ export function Runs({
         const isVisible = visible.some((r) => r.runId === focusRunId);
         const currentFilters = { filter };
         const emptyFilters = { filter: "" };
-        const decision = decideRevealFilters(latch.snapshot, currentFilters, emptyFilters, isVisible);
+        const decision = decideRevealFilters(
+          latch.snapshot,
+          currentFilters,
+          emptyFilters,
+          isVisible,
+        );
         if (decision.cleared) {
           setFilter(decision.next.filter);
         }
@@ -417,25 +561,40 @@ export function Runs({
   }, [context.kind]);
 
   const sel = useMemo(
-    () => (selectedId ? (visible.find((r) => r.runId === selectedId) ?? null) : null),
+    () =>
+      selectedId ? (visible.find((r) => r.runId === selectedId) ?? null) : null,
     [visible, selectedId],
   );
+  // A side pane turns the list into a compact comparison rail. Keep the five
+  // decision-bearing columns instead of forcing a horizontal scrollbar; the
+  // pane and the unselected list retain every configured column.
+  const listCols = sel
+    ? cols.filter((c) =>
+        ["run", "state", "remaining", "reason", "origin", "updated"].includes(
+          c.key,
+        ),
+      )
+    : cols;
+  const show = useMemo(() => new Set(listCols.map((c) => c.key)), [listCols]);
 
   useEffect(() => {
-    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+    document
+      .querySelector("tr.row-selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex, windowStart]);
 
   const detail = useQuery({
     queryKey: ["run", selectedId],
     queryFn: () => api.run(selectedId as string),
     enabled: sel !== null,
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
 
   const invalidate = () => queryClient.invalidateQueries();
 
   const cancel = useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.cancel(id, reason),
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.cancel(id, reason),
     onSuccess: (_, { id }) => {
       invalidate();
       notify(`Cancelled run ${id}`, "info");
@@ -446,7 +605,8 @@ export function Runs({
   });
 
   const retry = useMutation({
-    mutationFn: ({ id, force }: { id: string; force: boolean }) => api.retry(id, force),
+    mutationFn: ({ id, force }: { id: string; force: boolean }) =>
+      api.retry(id, force),
     onSuccess: (_, { id, force }) => {
       invalidate();
       notify(`${force ? "Force retried" : "Retried"} run ${id}`, "ok");
@@ -455,7 +615,8 @@ export function Runs({
     onError: (err) => {
       invalidate();
       // attempts_exhausted → offer the explicit, recorded override (spec §4.3)
-      if (err instanceof ApiError && err.message === "attempts_exhausted") setConfirm("force-retry");
+      if (err instanceof ApiError && err.message === "attempts_exhausted")
+        setConfirm("force-retry");
     },
   });
 
@@ -483,12 +644,25 @@ export function Runs({
   const byState = statusQ.data?.runs.byState ?? {};
   const tabCount = (t: RunTab) => {
     if (fetchAll) {
-      return t === "ALL" ? scoped.length : scoped.filter((r) => matchesRunTab(r.state, t)).length;
+      return t === "ALL"
+        ? scoped.length
+        : scoped.filter((r) => matchesRunTab(r.state, t)).length;
     }
-    if (t === "ALL") return Object.values(byState).reduce((n, v) => n + (v ?? 0), 0);
+    if (t === "ALL")
+      return Object.values(byState).reduce((n, v) => n + (v ?? 0), 0);
     if (t === "ACTIVE")
-      return (byState.QUEUED ?? 0) + (byState.LEASED ?? 0) + (byState.RUNNING ?? 0) + (byState.VERIFYING ?? 0);
-    if (t === "FAILED") return (byState.FAILED ?? 0) + (byState.TIMED_OUT ?? 0) + (byState.REFUSED ?? 0);
+      return (
+        (byState.QUEUED ?? 0) +
+        (byState.LEASED ?? 0) +
+        (byState.RUNNING ?? 0) +
+        (byState.VERIFYING ?? 0)
+      );
+    if (t === "FAILED")
+      return (
+        (byState.FAILED ?? 0) +
+        (byState.TIMED_OUT ?? 0) +
+        (byState.REFUSED ?? 0)
+      );
     if (t === "COMPLETED") return byState.COMPLETED ?? 0;
     if (t === "CANCELLED") return byState.CANCELLED ?? 0;
     return 0;
@@ -501,11 +675,15 @@ export function Runs({
   useTabKeys(RUN_TABS, tab, selectTab);
 
   const d = detail.data;
-  const attemptsExhausted = d ? d.run.attempts >= d.run.spec.maxAttempts : false;
+  const attemptsExhausted = d
+    ? d.run.attempts >= d.run.spec.maxAttempts
+    : false;
 
   const selProposal = useMemo(() => {
-    if (sel?.runId && proposalByRunId.has(sel.runId)) return proposalByRunId.get(sel.runId)!;
-    if (d?.run.runId && proposalByRunId.has(d.run.runId)) return proposalByRunId.get(d.run.runId)!;
+    if (sel?.runId && proposalByRunId.has(sel.runId))
+      return proposalByRunId.get(sel.runId)!;
+    if (d?.run.runId && proposalByRunId.has(d.run.runId))
+      return proposalByRunId.get(d.run.runId)!;
     return null;
   }, [sel?.runId, d?.run.runId, proposalByRunId]);
 
@@ -514,9 +692,9 @@ export function Runs({
 
   const canApprove = Boolean(
     selProposal &&
-      selProposal.status === "open" &&
-      selProposal.decision === "run" &&
-      (sel?.state === "PROPOSED" || d?.run.state === "PROPOSED"),
+    selProposal.status === "open" &&
+    selProposal.decision === "run" &&
+    (sel?.state === "PROPOSED" || d?.run.state === "PROPOSED"),
   );
 
   const pendingC = useRef<number>(0);
@@ -548,14 +726,22 @@ export function Runs({
       else if (filter) setFilter("");
     },
     keys: {
-      a: () => canApprove && connected && !approve.isPending && setConfirmApprove(true),
+      a: () =>
+        canApprove &&
+        connected &&
+        !approve.isPending &&
+        setConfirmApprove(true),
       // §5 convention: `x` is the destructive verb on the selection — here, cancel.
-      x: () => sel && connected && isCancellable(sel.state) && setConfirm("cancel"),
+      x: () =>
+        sel && connected && isCancellable(sel.state) && setConfirm("cancel"),
       c: () => {
         if (!sel) return;
         const now = Date.now();
         if (pendingC.current > 0 && now - pendingC.current < 800) {
-          copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command");
+          copyText(
+            `bun event-runtime/cli.mjs inspect ${sel.runId}`,
+            "CLI inspect command",
+          );
           pendingC.current = 0;
         } else {
           copyText(sel.runId, "run id");
@@ -563,7 +749,11 @@ export function Runs({
         }
       },
       l: () => {
-        if (sel && pendingC.current > 0 && Date.now() - pendingC.current < 800) {
+        if (
+          sel &&
+          pendingC.current > 0 &&
+          Date.now() - pendingC.current < 800
+        ) {
           copyLink();
           pendingC.current = 0;
         }
@@ -582,13 +772,17 @@ export function Runs({
         if (e.key === "i" || e.key === "I") {
           e.preventDefault();
           e.stopImmediatePropagation();
-          copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command");
+          copyText(
+            `bun event-runtime/cli.mjs inspect ${sel.runId}`,
+            "CLI inspect command",
+          );
           pendingC.current = 0;
         }
       }
     }
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
   }, [sel]);
 
   // Offer the selection's verbs in the ⌘K palette (§5).
@@ -598,12 +792,24 @@ export function Runs({
     } else {
       const copy = [
         { label: "Open in tab", hint: "p", run: () => toggleRunPin(sel.runId) },
-        { label: "Open full view", hint: "o", run: () => onOpenFull(sel.runId) },
-        { label: "Copy run id", hint: "c", run: () => copyText(sel.runId, "run id") },
+        {
+          label: "Open full view",
+          hint: "o",
+          run: () => onOpenFull(sel.runId),
+        },
+        {
+          label: "Copy run id",
+          hint: "c",
+          run: () => copyText(sel.runId, "run id"),
+        },
         {
           label: "Copy CLI inspect command",
           hint: "c i",
-          run: () => copyText(`bun event-runtime/cli.mjs inspect ${sel.runId}`, "CLI inspect command"),
+          run: () =>
+            copyText(
+              `bun event-runtime/cli.mjs inspect ${sel.runId}`,
+              "CLI inspect command",
+            ),
         },
         { label: "Copy link", hint: "c l", run: copyLink },
       ];
@@ -612,19 +818,43 @@ export function Runs({
       } else {
         setContextActions([
           ...(canApprove && selProposal
-            ? [{ label: `Approve proposal ${selProposal.id}…`, hint: "a", run: () => setConfirmApprove(true) }]
+            ? [
+                {
+                  label: `Approve proposal ${selProposal.id}…`,
+                  hint: "a",
+                  run: () => setConfirmApprove(true),
+                },
+              ]
             : []),
           ...(selProposal && onJumpProposal
-            ? [{ label: `Open proposal ${selProposal.id}`, run: () => onJumpProposal(selProposal.id) }]
+            ? [
+                {
+                  label: `Open proposal ${selProposal.id}`,
+                  run: () => onJumpProposal(selProposal.id),
+                },
+              ]
             : []),
           ...(isCancellable(d.run.state)
-            ? [{ label: "Cancel run…", hint: "x", run: () => setConfirm("cancel") }]
+            ? [
+                {
+                  label: "Cancel run…",
+                  hint: "x",
+                  run: () => setConfirm("cancel"),
+                },
+              ]
             : []),
           ...(d.run.state === "FAILED"
             ? [
                 attemptsExhausted
-                  ? { label: "Force retry run…", run: () => setConfirm("force-retry") }
-                  : { label: "Retry run", run: () => retry.mutate({ id: d.run.runId, force: false }) },
+                  ? {
+                      label: "Force retry run…",
+                      run: () => setConfirm("force-retry"),
+                    }
+                  : {
+                      label: "Retry run",
+                      run: () =>
+                        retry.mutate({ id: d.run.runId, force: false }),
+                    },
               ]
             : []),
           ...copy,
@@ -633,13 +863,24 @@ export function Runs({
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.runId, d?.run.runId, d?.run.state, attemptsExhausted, connected, canApprove, selProposal]);
+  }, [
+    sel?.runId,
+    d?.run.runId,
+    d?.run.state,
+    attemptsExhausted,
+    connected,
+    canApprove,
+    selProposal,
+  ]);
 
   const handleExport = () => {
     const sorted = sortRows(visible, displayConfig, display);
     const dateStr = new Date().toISOString().slice(0, 10);
     exportJson(`runs-export-${dateStr}.json`, sorted);
-    notify(`Exported ${sorted.length} run${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+    notify(
+      `Exported ${sorted.length} run${sorted.length === 1 ? "" : "s"} to JSON`,
+      "info",
+    );
   };
 
   return (
@@ -647,74 +888,102 @@ export function Runs({
       <ListPane
         chrome={
           <>
-        <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
+            <h1 className="display mb-4 text-lg font-semibold">Runs</h1>
 
-        {/* `flex-wrap`: the token chips are a full-width item, so they take
+            {/* `flex-wrap`: the token chips are a full-width item, so they take
             their own line under the tabs and the box instead of squeezing them. */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          {/* Wrap, never scroll or clip: at 1280px the strip used to run out of
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              {/* Wrap, never scroll or clip: at 1280px the strip used to run out of
               width at CANCELLED with no scrollbar affordance (WM-96). */}
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1" role="tablist" aria-label="Run state">
-            {RUN_TABS.map((t, idx) => {
-              const count = tabCount(t);
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t}
-                  onClick={() => selectTab(t)}
-                  title={RUN_TAB_TITLES[t]}
-                  className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                    tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
-                  }`}
-                >
-                  {RUN_TAB_LABELS[t]}
-                  {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
-                  <span aria-hidden="true" className="mono ml-1 text-(--text-faint) text-[10px] opacity-70">
-                    {idx + 1}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <span className="ml-auto">
-            <DisplayOptions
-              config={displayConfig}
-              state={display}
-              onChange={setDisplay}
-              onExport={visible.length > 0 ? handleExport : undefined}
-              rows={scoped}
-            />
-          </span>
-          <FilterInput
-            value={filter}
-            onChange={setFilter}
-            placeholder="agent:… state:… is:stale"
-            label="Filter runs"
-            query={parsed}
-          />
-        </div>
+              <div
+                className="flex min-w-0 flex-1 flex-wrap gap-1"
+                role="tablist"
+                aria-label="Run state"
+              >
+                {RUN_TABS.map((t, idx) => {
+                  const count = tabCount(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === t}
+                      onClick={() => selectTab(t)}
+                      title={RUN_TAB_TITLES[t]}
+                      className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                        tab === t
+                          ? "bg-(--surface-3) text-(--text)"
+                          : "text-(--text-faint) hover:bg-(--surface-1)"
+                      }`}
+                    >
+                      {RUN_TAB_LABELS[t]}
+                      {count > 0 && (
+                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                          {count}
+                        </span>
+                      )}
+                      <span
+                        aria-hidden="true"
+                        className="mono ml-1 text-(--text-faint) text-[10px] opacity-70"
+                      >
+                        {idx + 1}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="ml-auto">
+                <DisplayOptions
+                  config={displayConfig}
+                  state={display}
+                  onChange={setDisplay}
+                  onExport={visible.length > 0 ? handleExport : undefined}
+                  rows={scoped}
+                />
+              </span>
+              <FilterInput
+                value={filter}
+                onChange={setFilter}
+                placeholder="agent:… state:… is:stale"
+                label="Filter runs"
+                query={parsed}
+              />
+            </div>
           </>
         }
       >
-
-        <table className="w-full border-separate border-spacing-0">
+        <table className="w-full table-fixed border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
-              {cols.map((c) => {
-                const sort = displayConfig.sorts.find((s) => s.column === c.key);
+              {listCols.map((c) => {
+                const sort = displayConfig.sorts.find(
+                  (s) => s.column === c.key,
+                );
                 const isCustom = c.isCustom || c.key.startsWith("custom:");
                 const customPath = c.key.replace(/^custom:/, "");
-                const isCurrentSort = isCustom ? display.sortBy === c.key : (sort && display.sortBy === sort.key);
+                const isCurrentSort = isCustom
+                  ? display.sortBy === c.key
+                  : sort && display.sortBy === sort.key;
                 return (
                   <Th
                     key={c.key}
                     label={c.label}
                     dir={isCurrentSort ? display.sortDir : null}
                     naturalDir={sort?.defaultDir ?? "asc"}
-                    onSort={sort || isCustom ? () => setDisplay((s) => cycleColumnSort(displayConfig, s, c.key)) : undefined}
-                    onRemove={isCustom ? () => setDisplay((s) => removeCustomColumn(s, customPath)) : undefined}
+                    onSort={
+                      sort || isCustom
+                        ? () =>
+                            setDisplay((s) =>
+                              cycleColumnSort(displayConfig, s, c.key),
+                            )
+                        : undefined
+                    }
+                    onRemove={
+                      isCustom
+                        ? () =>
+                            setDisplay((s) => removeCustomColumn(s, customPath))
+                        : undefined
+                    }
                   />
                 );
               })}
@@ -729,7 +998,10 @@ export function Runs({
                   aria-selected={r.runId === selectedId}
                   className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(r.state)} ${r.runId === selectedId ? "row-selected" : ""}`}
                 >
-                  <td className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap" title={r.runId}>
+                  <td
+                    className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap"
+                    title={r.runId}
+                  >
                     {shortId(r.runId)}
                   </td>
                   {/*
@@ -740,29 +1012,41 @@ export function Runs({
                     to its content instead, which keeps the link fully rendered.
                   */}
                   {show.has("state") && (
-                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <td className="overflow-hidden border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
                         <StateBadge state={r.state} />
-                        {r.state === "PROPOSED" && (() => {
-                          const prop = proposalByRunId.get(r.runId);
-                          if (prop && onJumpProposal) {
-                            return (
-                              <JumpLink
-                                onClick={(e) => {
-                                  e?.stopPropagation();
-                                  onJumpProposal(prop.id);
-                                }}
-                                title={`Open proposal ${prop.id}`}
-                                className="text-[11px]"
-                              >
-                                proposal
-                              </JumpLink>
-                            );
-                          }
-                          return null;
-                        })()}
+                        {r.state === "PROPOSED" &&
+                          (() => {
+                            const prop = proposalByRunId.get(r.runId);
+                            if (prop && onJumpProposal) {
+                              return (
+                                <JumpLink
+                                  onClick={(e) => {
+                                    e?.stopPropagation();
+                                    onJumpProposal(prop.id);
+                                  }}
+                                  title={`Open proposal ${prop.id}`}
+                                  className="text-[11px]"
+                                >
+                                  proposal
+                                </JumpLink>
+                              );
+                            }
+                            return null;
+                          })()}
                       </div>
-                      {IN_FLIGHT.includes(r.state) && <RowDeadlines r={r} now={now} />}
+                      {IN_FLIGHT.includes(r.state) && (
+                        <RowDeadlines r={r} now={now} />
+                      )}
+                    </td>
+                  )}
+                  {show.has("remaining") && (
+                    <td className="max-w-24 whitespace-nowrap border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                      {IN_FLIGHT.includes(r.state) ? (
+                        <RemainingCell deadlineAt={r.deadlineAt} now={now} />
+                      ) : (
+                        ""
+                      )}
                     </td>
                   )}
                   {show.has("agent") && (
@@ -774,22 +1058,19 @@ export function Runs({
                     </td>
                   )}
                   {show.has("adapter") && (
-                    <td className="max-w-24 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)" title={r.adapter}>
+                    <td
+                      className="max-w-24 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
+                      title={r.adapter}
+                    >
                       {r.adapter}
                     </td>
                   )}
                   {show.has("model") && (
-                    <td
-                      className="mono max-w-40 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
-                      title={
-                        rowModel(r) === "n/a"
-                          ? `The ${r.adapter} adapter runs a fixed argv, not a model.`
-                          : r.model && r.model !== "default"
-                            ? `Pinned into the RunSpec at plan time${r.modelTier ? ` from model_tier "${r.modelTier}"` : ""} — open the run for the model it was observed on.`
-                            : "This run pinned no model, so the CLI picked — open the run for the one it was observed on."
-                      }
-                    >
-                      {rowModel(r)}
+                    <td className="max-w-40 border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      <ModelCell
+                        model={rowModel(r)}
+                        className="text-(--text-faint)"
+                      />
                     </td>
                   )}
                   {show.has("attempts") && (
@@ -800,9 +1081,15 @@ export function Runs({
                   {show.has("reason") && (
                     <td
                       className="mono max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
-                      title={r.reasonCode && r.reasonCode.toLowerCase() !== "ok" ? r.reasonCode : undefined}
+                      title={
+                        r.reasonCode && r.reasonCode.toLowerCase() !== "ok"
+                          ? r.reasonCode
+                          : undefined
+                      }
                     >
-                      {r.reasonCode && r.reasonCode.toLowerCase() !== "ok" ? r.reasonCode : ""}
+                      {r.reasonCode && r.reasonCode.toLowerCase() !== "ok"
+                        ? r.reasonCode
+                        : EMPTY}
                     </td>
                   )}
                   {show.has("origin") && (
@@ -812,62 +1099,63 @@ export function Runs({
                     >
                       {r.eventId && r.eventSource ? (
                         <JumpLink
-                          onClick={() => onJumpEvent(r.eventSource!, r.eventId!)}
+                          onClick={() =>
+                            onJumpEvent(r.eventSource!, r.eventId!)
+                          }
                           title={`Open origin event ${r.eventId}`}
                         >
                           {shortId(r.eventId)}
                         </JumpLink>
+                      ) : r.eventId ? (
+                        shortId(r.eventId)
                       ) : (
-                        (r.eventId ? shortId(r.eventId) : "-")
+                        EMPTY
                       )}
                     </td>
                   )}
                   {show.has("updated") && (
                     <td className="max-w-24 whitespace-nowrap border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                      <Ago iso={r.updated_at} now={now} />
+                      <span title={r.updated_at}>
+                        {formatRelative(r.updated_at, now)}
+                      </span>
                     </td>
                   )}
-                  {cols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
-                    <CustomCell key={c.key} row={r} path={c.key.replace(/^custom:/, "")} />
-                  ))}
+                  {listCols
+                    .filter((c) => c.isCustom || c.key.startsWith("custom:"))
+                    .map((c) => (
+                      <CustomCell
+                        key={c.key}
+                        row={r}
+                        path={c.key.replace(/^custom:/, "")}
+                      />
+                    ))}
                 </tr>
               );
-              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
-              return sections.map((s) => {
-                const closed = display.collapsed.includes(s.key);
+              return windowTokens.map((token) => {
+                if (token.length === 1) return renderRow(token[0]);
+                const [s, sub] = token;
                 return (
-                  <Fragment key={s.key}>
-                    <GroupHeaderRow
-                      colSpan={cols.length}
-                      section={s}
-                      collapsed={closed}
-                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
-                    />
-                    {!closed &&
-                      (s.subsections
-                        ? s.subsections.map((child) => {
-                            const childClosed = display.collapsed.includes(child.key);
-                            return (
-                              <Fragment key={child.key}>
-                                <GroupHeaderRow
-                                  colSpan={cols.length}
-                                  section={child}
-                                  collapsed={childClosed}
-                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
-                                  sub
-                                />
-                                {!childClosed && child.rows.map(renderRow)}
-                              </Fragment>
-                            );
-                          })
-                        : s.rows.map(renderRow))}
-                  </Fragment>
+                  <GroupHeaderRow
+                    key={`group:${s.key}`}
+                    colSpan={listCols.length}
+                    section={s}
+                    collapsed={display.collapsed.includes(s.key)}
+                    onToggle={() =>
+                      setDisplay((st) => toggleCollapsed(st, s.key))
+                    }
+                    sub={sub}
+                  />
                 );
               });
             })()}
+            <TableWindowFooter
+              colSpan={listCols.length}
+              range={[windowStart, windowEnd, tokens.length]}
+              move={moveWindow}
+            />
             {visible.length === 0 && (
               <ListEmpty
-                colSpan={cols.length}
+                colSpan={listCols.length}
                 query={list}
                 filtered={byTab.length > 0}
                 onClear={filter.trim() ? () => setFilter("") : undefined}
@@ -888,7 +1176,8 @@ export function Runs({
                   context.kind === "inflight" ? (
                     <Button
                       onClick={() => {
-                        if (typeof window !== "undefined") window.location.hash = "#/runs";
+                        if (typeof window !== "undefined")
+                          window.location.hash = "#/runs";
                       }}
                     >
                       Show all runs
@@ -903,9 +1192,12 @@ export function Runs({
 
       {sel && (
         <DetailPane
-          widthClass="w-[460px]"
+          widthClass="fixed inset-0 z-20 w-full sm:static sm:z-auto sm:w-[460px]"
           title={
-            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal">
+            <nav
+              aria-label="Breadcrumb"
+              className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
+            >
               <button
                 type="button"
                 onClick={() => onSelectRun(null)}
@@ -917,7 +1209,10 @@ export function Runs({
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>
-              <span className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)" aria-current="page">
+              <span
+                className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)"
+                aria-current="page"
+              >
                 <StateBadge state={sel.state} />
                 <JumpLink
                   onClick={() => onOpenFull(sel.runId)}
@@ -937,7 +1232,13 @@ export function Runs({
                     disabled={!connected || approve.isPending}
                     onClick={() => setConfirmApprove(true)}
                   >
-                    Approve… <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">a</span>
+                    Approve…{" "}
+                    <span
+                      className="mono ml-1 text-(--text-faint)"
+                      aria-hidden="true"
+                    >
+                      a
+                    </span>
                   </Button>
                 )}
                 {selProposal && onJumpProposal && (
@@ -951,30 +1252,53 @@ export function Runs({
                     disabled={!connected || cancel.isPending}
                     onClick={() => setConfirm("cancel")}
                   >
-                    Cancel <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">x</span>
+                    Cancel{" "}
+                    <span
+                      className="mono ml-1 text-(--text-faint)"
+                      aria-hidden="true"
+                    >
+                      x
+                    </span>
                   </Button>
                 )}
-                {d && d.run.state === "FAILED" && (
-                  attemptsExhausted ? (
-                    <Button disabled={!connected} onClick={() => setConfirm("force-retry")}>
+                {d &&
+                  d.run.state === "FAILED" &&
+                  (attemptsExhausted ? (
+                    <Button
+                      disabled={!connected}
+                      onClick={() => setConfirm("force-retry")}
+                    >
                       Force retry…
                     </Button>
                   ) : (
                     <Button
                       disabled={!connected || retry.isPending}
-                      onClick={() => retry.mutate({ id: d.run.runId, force: false })}
+                      onClick={() =>
+                        retry.mutate({ id: d.run.runId, force: false })
+                      }
                     >
                       Retry
                     </Button>
-                  )
-                )}
+                  ))}
               </div>
               <div className="flex items-center gap-1.5">
                 <Button onClick={() => onOpenFull(sel.runId)}>
-                  Expand <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">o</span>
+                  Expand{" "}
+                  <span
+                    className="mono ml-1 text-(--text-faint)"
+                    aria-hidden="true"
+                  >
+                    o
+                  </span>
                 </Button>
                 <Button onClick={() => toggleRunPin(sel.runId)}>
-                  Open in tab <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">p</span>
+                  Open in tab{" "}
+                  <span
+                    className="mono ml-1 text-(--text-faint)"
+                    aria-hidden="true"
+                  >
+                    p
+                  </span>
                 </Button>
               </div>
             </>
@@ -985,71 +1309,81 @@ export function Runs({
               idLabel="run id"
               cli={`bun event-runtime/cli.mjs inspect ${sel.runId}`}
               cliLabel="CLI inspect command"
+              variant="quiet"
             />
           }
           close={<Button onClick={() => onSelectRun(null)}>Close</Button>}
         >
-
           {!d && (
-            <div className="text-(--text-faint)">{detail.isError ? "Could not load run detail." : "Loading run…"}</div>
+            <div className="text-(--text-faint)">
+              {detail.isError ? "Could not load run detail." : "Loading run…"}
+            </div>
           )}
 
           {d && (
             <>
-          <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} />
-          {d.run.state === "PROPOSED" && (
-            <div className="mb-4 rounded-md border border-(--border) bg-(--surface-1) p-3 text-[12px]">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="font-semibold text-(--text)">Awaiting Proposal Approval</div>
-                  <div className="text-[11px] text-(--text-dim) mt-0.5">
-                    {selProposal
-                      ? `Proposal ${shortId(selProposal.id)} is open and ready to approve.`
-                      : "This run was proposed and is waiting for proposal approval."}
+              <RunFailureBanner state={d.run.state} lifecycle={d.lifecycle} />
+              {d.run.state === "PROPOSED" && (
+                <div className="mb-4 rounded-md border border-(--border) bg-(--surface-1) p-3 text-[12px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-(--text)">
+                        Awaiting Proposal Approval
+                      </div>
+                      <div className="text-[11px] text-(--text-dim) mt-0.5">
+                        {selProposal
+                          ? `Proposal ${shortId(selProposal.id)} is open and ready to approve.`
+                          : "This run was proposed and is waiting for proposal approval."}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {selProposal && onJumpProposal && (
+                        <Button onClick={() => onJumpProposal(selProposal.id)}>
+                          Open proposal
+                        </Button>
+                      )}
+                      {canApprove && selProposal && (
+                        <Button
+                          disabled={!connected || approve.isPending}
+                          onClick={() => setConfirmApprove(true)}
+                        >
+                          Approve…
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {selProposal && onJumpProposal && (
-                    <Button onClick={() => onJumpProposal(selProposal.id)}>
-                      Open proposal
-                    </Button>
-                  )}
-                  {canApprove && selProposal && (
-                    <Button
-                      disabled={!connected || approve.isPending}
-                      onClick={() => setConfirmApprove(true)}
-                    >
-                      Approve…
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-          <div onClickCapture={handleRunArtifactClick}>
-            <RunDetailBlocks
-              d={d}
-              now={now}
-              connected={connected}
-              origin={sel}
-              onJumpAgent={onJumpAgent}
-              onJumpEvent={onJumpEvent}
-              onCancel={() => setConfirm("cancel")}
-              onRetry={() => retry.mutate({ id: d.run.runId, force: false })}
-              onForceRetry={() => setConfirm("force-retry")}
-              retryPending={retry.isPending}
-              verbError={cancel.error ?? (confirm === "force-retry" ? null : retry.error) ?? approve.error}
-              afterLifecycle={
-                /* key: a run switch must reset the feed's cursor and scroll state. */
-                <RunTrace
-                  key={d.run.runId}
-                  runId={d.run.runId}
-                  state={d.run.state}
-                  onExpand={() => onOpenFull(d.run.runId)}
+              )}
+              <div onClickCapture={handleRunArtifactClick}>
+                <RunDetailBlocks
+                  d={d}
+                  now={now}
+                  connected={connected}
+                  origin={sel}
+                  onJumpAgent={onJumpAgent}
+                  onJumpEvent={onJumpEvent}
+                  onCancel={() => setConfirm("cancel")}
+                  onRetry={() =>
+                    retry.mutate({ id: d.run.runId, force: false })
+                  }
+                  onForceRetry={() => setConfirm("force-retry")}
+                  retryPending={retry.isPending}
+                  verbError={
+                    cancel.error ??
+                    (confirm === "force-retry" ? null : retry.error) ??
+                    approve.error
+                  }
+                  afterLifecycle={
+                    /* key: a run switch must reset the feed's cursor and scroll state. */
+                    <RunTrace
+                      key={d.run.runId}
+                      runId={d.run.runId}
+                      state={d.run.state}
+                      onExpand={() => onOpenFull(d.run.runId)}
+                    />
+                  }
                 />
-              }
-            />
-          </div>
+              </div>
             </>
           )}
         </DetailPane>
@@ -1062,9 +1396,10 @@ export function Runs({
           wide
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
-            You are approving this exact immutable spec — the agent below runs with these
-            capabilities the moment you confirm. Approving proposal{" "}
-            <span className="mono font-semibold">{selProposal.id}</span> queues this run for execution.
+            You are approving this exact immutable spec — the agent below runs
+            with these capabilities the moment you confirm. Approving proposal{" "}
+            <span className="mono font-semibold">{selProposal.id}</span> queues
+            this run for execution.
           </div>
           <ApprovalRiskDetails proposal={selProposal} agent={approveAgent} />
           <VerbError error={approve.error} />
@@ -1077,14 +1412,20 @@ export function Runs({
                 approve.mutate(selProposal.id);
               }}
             >
-              Approve and queue <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
+              Approve and queue{" "}
+              <span className="mono ml-1 opacity-80" aria-hidden="true">
+                ↵
+              </span>
             </Button>
           </div>
         </Dialog>
       )}
 
       {confirm === "cancel" && d && (
-        <Dialog title={`Cancel ${d.run.runId}?`} onClose={() => setConfirm(null)}>
+        <Dialog
+          title={`Cancel ${d.run.runId}?`}
+          onClose={() => setConfirm(null)}
+        >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             {d.run.state === "RUNNING"
               ? "Running attempt is stopped with TERM/KILL and cancelled."
@@ -1102,7 +1443,12 @@ export function Runs({
             <Button
               variant="danger"
               disabled={cancel.isPending}
-              onClick={() => cancel.mutate({ id: d.run.runId, reason: cancelReason.trim() || undefined })}
+              onClick={() =>
+                cancel.mutate({
+                  id: d.run.runId,
+                  reason: cancelReason.trim() || undefined,
+                })
+              }
             >
               Cancel run
             </Button>
@@ -1111,9 +1457,13 @@ export function Runs({
       )}
 
       {confirm === "force-retry" && d && (
-        <Dialog title="Retry past attempt budget?" onClose={() => setConfirm(null)}>
+        <Dialog
+          title="Retry past attempt budget?"
+          onClose={() => setConfirm(null)}
+        >
           <div className="mb-3 text-[12px] text-(--text-dim)">
-            Used {d.run.attempts}/{d.run.spec.maxAttempts} attempts. Forcing retry is recorded as an operator override.
+            Used {d.run.attempts}/{d.run.spec.maxAttempts} attempts. Forcing
+            retry is recorded as an operator override.
           </div>
           <VerbError error={retry.error} />
           <div className="mt-3 flex justify-end gap-2">

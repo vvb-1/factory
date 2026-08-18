@@ -20,6 +20,8 @@
         }
       }
     },
-    "recommendedAction": { "enum": ["dispatch", "triage", "merge", "unblock", "wait"] }
+    "recommendedAction": {
+      "enum": ["dispatch", "triage", "merge", "unblock", "wait"]
+    }
   }
 }

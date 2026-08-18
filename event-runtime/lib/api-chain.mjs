@@ -13,7 +13,13 @@ import { repoNamesFromInput } from "./api-runs.mjs";
 
 /** The id that names an event's chain: its correlation id, else its own id. */
 export function chainKeyOf(event) {
-  return event?.correlationId ?? event?.correlation_id ?? event?.eventId ?? event?.event_id ?? null;
+  return (
+    event?.correlationId ??
+    event?.correlation_id ??
+    event?.eventId ??
+    event?.event_id ??
+    null
+  );
 }
 
 export function chainView(db, correlationId) {
@@ -43,7 +49,7 @@ export function chainView(db, correlationId) {
     try {
       payload = JSON.parse(row.envelope_json)?.payload ?? null;
     } catch {
-      payload = null;
+      /* malformed envelope: payload stays null from the initializer */
     }
     return {
       source: row.source,
@@ -91,7 +97,7 @@ export function chainView(db, correlationId) {
     try {
       spec = JSON.parse(row.spec_json) ?? {};
     } catch {
-      spec = {};
+      /* malformed spec_json: spec stays {} from the initializer */
     }
     runs.push({
       runId: row.run_id,

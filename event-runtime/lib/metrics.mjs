@@ -64,7 +64,12 @@ function duration(name, parameter) {
   return value;
 }
 
-function timeRange({ now, window = "24h", bucket = "1h", withBuckets = true } = {}) {
+function timeRange({
+  now,
+  window = "24h",
+  bucket = "1h",
+  withBuckets = true,
+} = {}) {
   const nowMs = nowValue(now);
   const windowMs = duration(window, "window");
   const bucketMs = withBuckets ? duration(bucket, "bucket") : null;
@@ -89,14 +94,21 @@ function timeRange({ now, window = "24h", bucket = "1h", withBuckets = true } = 
     bucketMs,
     bucketCount,
     buckets: withBuckets
-      ? Array.from({ length: bucketCount }, (_, index) => new Date(startMs + index * bucketMs).toISOString())
+      ? Array.from({ length: bucketCount }, (_, index) =>
+          new Date(startMs + index * bucketMs).toISOString(),
+        )
       : null,
   };
 }
 
 function bucketIndex(at, range) {
   const timestamp = Date.parse(at);
-  if (!Number.isFinite(timestamp) || timestamp < range.startMs || timestamp >= range.endMs) return -1;
+  if (
+    !Number.isFinite(timestamp) ||
+    timestamp < range.startMs ||
+    timestamp >= range.endMs
+  )
+    return -1;
   const index = Math.floor((timestamp - range.startMs) / range.bucketMs);
   return index >= 0 && index < range.bucketCount ? index : -1;
 }
@@ -106,10 +118,13 @@ function zeroArray(range, value = 0) {
 }
 
 function countSeries(rows, range, fixedKeys = []) {
-  const result = Object.fromEntries(fixedKeys.map((key) => [key, zeroArray(range)]));
+  const result = Object.fromEntries(
+    fixedKeys.map((key) => [key, zeroArray(range)]),
+  );
   for (const row of rows) {
     const index = Number(row.bucket_index);
-    if (!Number.isInteger(index) || index < 0 || index >= range.bucketCount) continue;
+    if (!Number.isInteger(index) || index < 0 || index >= range.bucketCount)
+      continue;
     const key = String(row.key ?? "unknown");
     if (!result[key]) result[key] = zeroArray(range);
     result[key][index] += Number(row.value ?? 0);
@@ -118,20 +133,28 @@ function countSeries(rows, range, fixedKeys = []) {
 }
 
 function sqliteMilliseconds(expression) {
-  return `(CAST(strftime('%s', ${expression}) AS INTEGER) * 1000 + ` +
-    `CAST(substr(strftime('%f', ${expression}), 4, 3) AS INTEGER))`;
+  return (
+    `(CAST(strftime('%s', ${expression}) AS INTEGER) * 1000 + ` +
+    `CAST(substr(strftime('%f', ${expression}), 4, 3) AS INTEGER))`
+  );
 }
 
-function groupedCounts(db, range, { table, time, key, where = "1 = 1", value = "COUNT(*)", joins = "" }) {
-  return db.query(
-    `SELECT CAST((${sqliteMilliseconds(time)} - ?) / ? AS INTEGER) AS bucket_index,
+function groupedCounts(
+  db,
+  range,
+  { table, time, key, where = "1 = 1", value = "COUNT(*)", joins = "" },
+) {
+  return db
+    .query(
+      `SELECT CAST((${sqliteMilliseconds(time)} - ?) / ? AS INTEGER) AS bucket_index,
             ${key} AS key,
             ${value} AS value
      FROM ${table} ${joins}
      WHERE ${time} >= ? AND ${time} < ? AND (${where})
      GROUP BY bucket_index, key
      ORDER BY bucket_index, key`,
-  ).all(range.startMs, range.bucketMs, range.startIso, range.endIso);
+    )
+    .all(range.startMs, range.bucketMs, range.startIso, range.endIso);
 }
 
 function percentile(sorted, fraction) {
@@ -145,7 +168,13 @@ function percentileSeries(rows, range) {
     const index = bucketIndex(row.bucket_at, range);
     const start = Date.parse(row.started_at);
     const finish = Date.parse(row.finished_at ?? row.bucket_at);
-    if (index < 0 || !Number.isFinite(start) || !Number.isFinite(finish) || finish < start) continue;
+    if (
+      index < 0 ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(finish) ||
+      finish < start
+    )
+      continue;
     samples[index].push(finish - start);
   }
   const p50 = zeroArray(range, null);
@@ -164,9 +193,16 @@ function outcomes(db, range) {
     table: "lifecycle_events",
     time: "at",
     key: "to_state",
-    where: "to_state IN ('COMPLETED', 'FAILED', 'REFUSED', 'TIMED_OUT', 'CANCELLED')",
+    where:
+      "to_state IN ('COMPLETED', 'FAILED', 'REFUSED', 'TIMED_OUT', 'CANCELLED')",
   });
-  return countSeries(rows, range, ["COMPLETED", "FAILED", "REFUSED", "TIMED_OUT", "CANCELLED"]);
+  return countSeries(rows, range, [
+    "COMPLETED",
+    "FAILED",
+    "REFUSED",
+    "TIMED_OUT",
+    "CANCELLED",
+  ]);
 }
 
 function started(db, range) {
@@ -180,8 +216,9 @@ function started(db, range) {
 }
 
 function queueWait(db, range) {
-  const rows = db.query(
-    `SELECT leased.at AS bucket_at,
+  const rows = db
+    .query(
+      `SELECT leased.at AS bucket_at,
             (SELECT queued.at
              FROM lifecycle_events queued
              WHERE queued.run_id = leased.run_id
@@ -197,17 +234,20 @@ function queueWait(db, range) {
             leased.at AS finished_at
      FROM lifecycle_events leased
      WHERE leased.to_state = 'LEASED' AND leased.at >= ? AND leased.at < ?`,
-  ).all(range.startIso, range.endIso);
+    )
+    .all(range.startIso, range.endIso);
   return percentileSeries(rows, range);
 }
 
 function execution(db, range) {
-  const rows = db.query(
-    `SELECT finished_at AS bucket_at, started_at, finished_at
+  const rows = db
+    .query(
+      `SELECT finished_at AS bucket_at, started_at, finished_at
      FROM attempts
      WHERE started_at IS NOT NULL AND finished_at IS NOT NULL
        AND finished_at >= ? AND finished_at < ?`,
-  ).all(range.startIso, range.endIso);
+    )
+    .all(range.startIso, range.endIso);
   return percentileSeries(rows, range);
 }
 
@@ -225,8 +265,9 @@ function spend(db, range, column) {
 function proposalDecisions(db, range) {
   const decidedMilliseconds = sqliteMilliseconds("decided_at");
   const createdMilliseconds = sqliteMilliseconds("created_at");
-  const rows = db.query(
-    `WITH decisions AS (
+  const rows = db
+    .query(
+      `WITH decisions AS (
        SELECT status AS key, ${decidedMilliseconds} AS at_ms
        FROM proposals
        WHERE status IN ('approved', 'rejected', 'superseded', 'expired')
@@ -244,16 +285,30 @@ function proposalDecisions(db, range) {
      WHERE at_ms >= ? AND at_ms < ?
      GROUP BY bucket_index, key
      ORDER BY bucket_index, key`,
-  ).all(range.endMs, range.startMs, range.bucketMs, range.startMs, range.endMs);
-  return countSeries(rows, range, ["approved", "rejected", "expired", "superseded"]);
+    )
+    .all(
+      range.endMs,
+      range.startMs,
+      range.bucketMs,
+      range.startMs,
+      range.endMs,
+    );
+  return countSeries(rows, range, [
+    "approved",
+    "rejected",
+    "expired",
+    "superseded",
+  ]);
 }
 
 function proposalDecisionTime(db, range) {
-  const rows = db.query(
-    `SELECT decided_at AS bucket_at, created_at AS started_at, decided_at AS finished_at
+  const rows = db
+    .query(
+      `SELECT decided_at AS bucket_at, created_at AS started_at, decided_at AS finished_at
      FROM proposals
      WHERE decided_at IS NOT NULL AND decided_at >= ? AND decided_at < ?`,
-  ).all(range.startIso, range.endIso);
+    )
+    .all(range.startIso, range.endIso);
   return percentileSeries(rows, range);
 }
 
@@ -263,7 +318,13 @@ function intake(db, range) {
     time: "admitted_at",
     key: "status",
   });
-  return countSeries(rows, range, ["admitted", "planned", "noop", "human_needed", "dead_lettered"]);
+  return countSeries(rows, range, [
+    "admitted",
+    "planned",
+    "noop",
+    "human_needed",
+    "dead_lettered",
+  ]);
 }
 
 function retries(db, range) {
@@ -282,11 +343,12 @@ const SERIES_QUERIES = {
   "latency.queue_wait": queueWait,
   "latency.execution": execution,
   "spend.cost": (db, range) => spend(db, range, "COALESCE(SUM(u.cost_usd), 0)"),
-  "spend.tokens": (db, range) => spend(
-    db,
-    range,
-    "COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens), 0)",
-  ),
+  "spend.tokens": (db, range) =>
+    spend(
+      db,
+      range,
+      "COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens), 0)",
+    ),
   "proposals.decisions": proposalDecisions,
   "proposals.time_to_decision": proposalDecisionTime,
   "events.intake": intake,
@@ -294,17 +356,27 @@ const SERIES_QUERIES = {
 };
 
 /** Aligned, zero-filled time-series query used by GET /metrics. */
-export function metricsView(db, { now, window = "24h", bucket = "1h", series } = {}) {
-  const names = series == null || series === ""
-    ? [...VALID_METRIC_SERIES]
-    : (Array.isArray(series) ? series : String(series).split(",")).map((name) => name.trim()).filter(Boolean);
+export function metricsView(
+  db,
+  { now, window = "24h", bucket = "1h", series } = {},
+) {
+  const names =
+    series == null || series === ""
+      ? [...VALID_METRIC_SERIES]
+      : (Array.isArray(series) ? series : String(series).split(","))
+          .map((name) => name.trim())
+          .filter(Boolean);
   const unknown = names.filter((name) => !VALID_METRIC_SERIES.includes(name));
   if (unknown.length > 0) {
-    throw new MetricsQueryError("unknown_series", { unknown, validSeries: VALID_METRIC_SERIES });
+    throw new MetricsQueryError("unknown_series", {
+      unknown,
+      validSeries: VALID_METRIC_SERIES,
+    });
   }
   const range = timeRange({ now, window, bucket });
   const output = {};
-  for (const name of [...new Set(names)]) output[name] = SERIES_QUERIES[name](db, range);
+  for (const name of [...new Set(names)])
+    output[name] = SERIES_QUERIES[name](db, range);
   return { window, bucket, buckets: range.buckets, series: output };
 }
 
@@ -312,11 +384,13 @@ function repoNames(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return [];
   const names = [];
   const add = (value) => {
-    if (typeof value === "string" && value !== "" && !names.includes(value)) names.push(value);
+    if (typeof value === "string" && value !== "" && !names.includes(value))
+      names.push(value);
   };
   add(input.repoPin?.repo);
   add(input.repo);
-  for (const entry of input.repos ?? []) add(typeof entry === "string" ? entry : entry?.name);
+  for (const entry of input.repos ?? [])
+    add(typeof entry === "string" ? entry : entry?.name);
   return names;
 }
 
@@ -336,9 +410,14 @@ const RUN_FACTS_JOINS = `
 function factKeys(row, dimension) {
   const spec = JSON.parse(row.spec_json || "{}");
   if (dimension === "agent") return [spec.agent ?? "unknown"];
-  if (dimension === "adapter") return [spec.adapter ?? row.usage_adapter ?? "unknown"];
-  if (dimension === "model") return [row.usage_model ?? spec.model ?? "unknown"];
-  if (dimension === "repo") return repoNames(spec.input).length > 0 ? repoNames(spec.input) : ["unknown"];
+  if (dimension === "adapter")
+    return [spec.adapter ?? row.usage_adapter ?? "unknown"];
+  if (dimension === "model")
+    return [row.usage_model ?? spec.model ?? "unknown"];
+  if (dimension === "repo")
+    return repoNames(spec.input).length > 0
+      ? repoNames(spec.input)
+      : ["unknown"];
   if (dimension === "source") return [row.event_source ?? "unknown"];
   if (dimension === "reason_code") return [row.reason_code ?? "unknown"];
   if (dimension === "event_type") return [row.event_type ?? "unknown"];
@@ -352,22 +431,27 @@ function factKeys(row, dimension) {
 
 function breakdownFacts(db, metric, range) {
   if (metric === "runs" || metric === "failures") {
-    const failures = metric === "failures"
-      ? "AND r.state IN ('FAILED', 'REFUSED', 'TIMED_OUT', 'CANCELLED')"
-      : "";
+    const failures =
+      metric === "failures"
+        ? "AND r.state IN ('FAILED', 'REFUSED', 'TIMED_OUT', 'CANCELLED')"
+        : "";
     const time = metric === "failures" ? "r.updated_at" : "r.created_at";
-    return db.query(
-      `${RUN_FACTS_SELECT}, 1 AS value
+    return db
+      .query(
+        `${RUN_FACTS_SELECT}, 1 AS value
        FROM runs r ${RUN_FACTS_JOINS}
        WHERE ${time} >= ? AND ${time} < ? ${failures}`,
-    ).all(range.startIso, range.endIso);
+      )
+      .all(range.startIso, range.endIso);
   }
   if (metric === "cost" || metric === "tokens") {
-    const value = metric === "cost"
-      ? "u.cost_usd"
-      : "u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens";
-    return db.query(
-      `${RUN_FACTS_SELECT}, u.adapter AS usage_adapter, u.model AS usage_model, ${value} AS value
+    const value =
+      metric === "cost"
+        ? "u.cost_usd"
+        : "u.input_tokens + u.output_tokens + u.cache_creation_input_tokens + u.cache_read_input_tokens";
+    return db
+      .query(
+        `${RUN_FACTS_SELECT}, u.adapter AS usage_adapter, u.model AS usage_model, ${value} AS value
        FROM run_usage u
        JOIN runs r ON r.run_id = u.run_id
        LEFT JOIN attempts a ON a.run_id = u.run_id AND a.attempt = u.attempt
@@ -378,10 +462,12 @@ function breakdownFacts(db, metric, range) {
        LEFT JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
        LEFT JOIN runs parent ON parent.run_id = e.causation_id
        WHERE u.recorded_at >= ? AND u.recorded_at < ?`,
-    ).all(range.startIso, range.endIso);
+      )
+      .all(range.startIso, range.endIso);
   }
-  return db.query(
-    `${RUN_FACTS_SELECT}, a.started_at, a.finished_at
+  return db
+    .query(
+      `${RUN_FACTS_SELECT}, a.started_at, a.finished_at
      FROM attempts a
      JOIN runs r ON r.run_id = a.run_id
      LEFT JOIN proposals p ON p.rowid = (
@@ -392,28 +478,37 @@ function breakdownFacts(db, metric, range) {
      LEFT JOIN runs parent ON parent.run_id = e.causation_id
      WHERE a.started_at IS NOT NULL AND a.finished_at IS NOT NULL
        AND a.finished_at >= ? AND a.finished_at < ?`,
-  ).all(range.startIso, range.endIso);
+    )
+    .all(range.startIso, range.endIso);
 }
 
 /** Top-N operational dimensions used by GET /metrics/breakdown. */
-export function metricsBreakdownView(db, {
-  now,
-  window = "24h",
-  by,
-  metric,
-  limit,
-} = {}) {
+export function metricsBreakdownView(
+  db,
+  { now, window = "24h", by, metric, limit } = {},
+) {
   if (!VALID_BREAKDOWN_DIMENSIONS.includes(by)) {
-    throw new MetricsQueryError("invalid_dimension", { by, validDimensions: VALID_BREAKDOWN_DIMENSIONS });
+    throw new MetricsQueryError("invalid_dimension", {
+      by,
+      validDimensions: VALID_BREAKDOWN_DIMENSIONS,
+    });
   }
   if (!VALID_BREAKDOWN_METRICS.includes(metric)) {
-    throw new MetricsQueryError("invalid_metric", { metric, validMetrics: VALID_BREAKDOWN_METRICS });
+    throw new MetricsQueryError("invalid_metric", {
+      metric,
+      validMetrics: VALID_BREAKDOWN_METRICS,
+    });
   }
   let actualLimit;
-  if (limit == null || limit === "") actualLimit = by === "event_type" || by === "edge" ? null : 10;
+  if (limit == null || limit === "")
+    actualLimit = by === "event_type" || by === "edge" ? null : 10;
   else {
     actualLimit = Number(limit);
-    if (!Number.isInteger(actualLimit) || actualLimit < 1 || actualLimit > 500) {
+    if (
+      !Number.isInteger(actualLimit) ||
+      actualLimit < 1 ||
+      actualLimit > 500
+    ) {
       throw new MetricsQueryError("invalid_limit", { limit, min: 1, max: 500 });
     }
   }
@@ -423,7 +518,8 @@ export function metricsBreakdownView(db, {
   for (const fact of facts) {
     for (const key of factKeys(fact, by)) {
       if (metric === "p95_execution") {
-        const durationMs = Date.parse(fact.finished_at) - Date.parse(fact.started_at);
+        const durationMs =
+          Date.parse(fact.finished_at) - Date.parse(fact.started_at);
         if (!Number.isFinite(durationMs) || durationMs < 0) continue;
         const samples = grouped.get(key) ?? [];
         samples.push(durationMs);

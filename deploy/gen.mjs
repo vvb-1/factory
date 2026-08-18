@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 /**
- * schedule.yaml -> launchd plists.
+ * schedule.yaml + event-runtime daemons -> launchd plists.
  *
- *   bun deploy/gen.mjs            # render to deploy/launchd/, show a diff
- *   bun deploy/gen.mjs --install  # also copy into ~/Library/LaunchAgents and load
+ *   bun deploy/gen.mjs                       # render (event workers default 1:2)
+ *   bun deploy/gen.mjs --workers 2:4         # render a different worker range
+ *   bun deploy/gen.mjs --workers 2 --install # render, copy, and bootstrap
  *
  * Generated files are committed so the diff is reviewable: a scheduling change
  * should show up in a PR like any other change.
@@ -18,18 +19,60 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { loadSchedule, toSeconds, ROOT } from "../lib/schedule.mjs";
 const OUT = path.join(ROOT, "deploy", "launchd");
-const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
-// Resolve at job runtime so committed plists are identical whether rendered from
-// the deployed checkout, a disposable ticket worktree, or a CI checkout.
+// Committed plists must be byte-identical from any checkout on any host (CI
+// regenerates them and diffs), so nothing below reads the renderer's
+// environment: PATH is this fixed macOS toolchain list, the deploy root is
+// resolved by the job's shell at runtime, and home-relative paths stay as a
+// literal `~/` until --install materialises them for the installing user
+// (launchd itself does not expand `~` or `$HOME` in plist values).
+export const DEFAULT_PATH =
+  "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+const EVENT_LABEL_PREFIX = "com.wattmind.factory.event";
+const DEFAULT_EVENT_WORKERS = "1:2";
 const DEPLOY_ROOT = '"${FACTORY_ROOT:-$HOME/Develop/factory}"';
 
-const expand = (p) => p.replace(/^~/, homedir());
+// Expand `~/` at the start of a plist string or of a PATH entry.
+export const materialize = (text, home = homedir()) =>
+  text.replace(/(<string>|:)~\//g, `$1${home}/`);
 
-const xml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const xml = (s) =>
+  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-export function launchdPath(environmentPath = process.env.PATH, home = homedir()) {
+export function eventWorkerRange(value = DEFAULT_EVENT_WORKERS) {
+  const raw = String(value).trim();
+  const match = /^(\d+)(?::(\d+))?$/.exec(raw);
+  if (!match) throw new Error(`--workers must be N or min:max (got "${raw}")`);
+  const min = Number(match[1]);
+  const max = Number(match[2] ?? match[1]);
+  if (
+    !Number.isInteger(min) ||
+    !Number.isInteger(max) ||
+    min < 1 ||
+    max < min ||
+    max > 32
+  ) {
+    throw new Error(
+      `--workers must satisfy 1 <= min <= max <= 32 (got "${raw}")`,
+    );
+  }
+  return `${min}:${max}`;
+}
+
+function optionValue(name, args = process.argv.slice(2)) {
+  const index = args.indexOf(name);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--"))
+    throw new Error(`${name} requires a value`);
+  return value;
+}
+
+export function launchdPath(environmentPath = DEFAULT_PATH, home = "~") {
   const entries = (environmentPath || DEFAULT_PATH).split(":").filter(Boolean);
-  for (const entry of [path.join(home, ".bun", "bin"), path.join(home, ".local", "bin")]) {
+  for (const entry of [
+    path.join(home, ".bun", "bin"),
+    path.join(home, ".local", "bin"),
+  ]) {
     if (!entries.includes(entry)) entries.push(entry);
   }
   return entries.join(":");
@@ -37,7 +80,7 @@ export function launchdPath(environmentPath = process.env.PATH, home = homedir()
 
 export function plist(job, defaults, environmentPath = launchdPath()) {
   const label = `${defaults.label_prefix}.${job.name}`;
-  const logDir = expand(defaults.log_dir || "~/Library/Logs");
+  const logDir = defaults.log_dir || "~/Library/Logs";
   const args = ["/bin/bash", "-lc", `cd ${DEPLOY_ROOT} && ${job.command}`];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,25 +123,121 @@ ${args.map((a) => `        <string>${xml(a)}</string>`).join("\n")}
 `;
 }
 
-export function installPlists(enabled, defaults, {
+/**
+ * Long-running event-runtime service. The committed plist contains no host
+ * checkout path, home directory, or secret: the small checked-in launcher
+ * resolves those at runtime and writes logs below the current user's home.
+ */
+export function eventRuntimePlist(
+  role,
+  { workers = DEFAULT_EVENT_WORKERS, environmentPath = DEFAULT_PATH } = {},
+) {
+  if (role !== "serve" && role !== "work")
+    throw new Error(`unknown event-runtime daemon role "${role}"`);
+  const range = eventWorkerRange(workers);
+  const label = `${EVENT_LABEL_PREFIX}-${role}`;
+  const launcher =
+    '"${FACTORY_ROOT:-$HOME/Develop/factory}/bin/event-runtime-daemon"';
+  const command = `exec ${launcher} ${role}${role === "work" ? ` ${range}` : ""}`;
+  const args = ["/bin/bash", "-lc", command];
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- GENERATED by deploy/gen.mjs. Do not edit. No secrets belong in this file. -->
+    <key>Label</key>
+    <string>${label}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+${args.map((a) => `        <string>${xml(a)}</string>`).join("\n")}
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${xml(environmentPath)}</string>
+    </dict>
+
+    <!-- Bootstrap into gui/$(id -u), not user/$(id -u): the GUI domain is
+         what supplies the full login/keychain/SSH user context. -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
+`;
+}
+
+export function renderEventRuntimePlists({
   outDir = OUT,
-  agentsDir = path.join(homedir(), "Library/LaunchAgents"),
-  run = execFileSync,
-  uid = process.getuid(),
+  workers = DEFAULT_EVENT_WORKERS,
+  environmentPath = DEFAULT_PATH,
 } = {}) {
+  mkdirSync(outDir, { recursive: true });
+  const rendered = [];
+  for (const role of ["serve", "work"]) {
+    const label = `${EVENT_LABEL_PREFIX}-${role}`;
+    const file = path.join(outDir, `${label}.plist`);
+    const next = eventRuntimePlist(role, { workers, environmentPath });
+    const prev = existsSync(file) ? readFileSync(file, "utf8") : null;
+    writeFileSync(file, next);
+    rendered.push({
+      name: `factory.event-${role}`,
+      label,
+      file,
+      changed: prev !== next,
+    });
+  }
+  return rendered;
+}
+
+export function installPlists(
+  enabled,
+  defaults,
+  {
+    outDir = OUT,
+    agentsDir = path.join(homedir(), "Library/LaunchAgents"),
+    run = execFileSync,
+    uid = process.getuid(),
+    home = homedir(),
+  } = {},
+) {
   mkdirSync(agentsDir, { recursive: true });
+  // launchd creates the log files but not their directory.
+  mkdirSync(
+    (defaults.log_dir || "~/Library/Logs").replace(/^~(?=\/|$)/, home),
+    { recursive: true },
+  );
   for (const job of enabled) {
-    const label = `${defaults.label_prefix}.${job.name}`;
-    const src = path.join(outDir, `${label}.plist`);
+    const label = job.label ?? `${defaults.label_prefix}.${job.name}`;
+    const src = job.file ?? path.join(outDir, `${label}.plist`);
     const dst = path.join(agentsDir, `${label}.plist`);
-    writeFileSync(dst, readFileSync(src));
-    try { run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch {}
+    writeFileSync(dst, materialize(readFileSync(src, "utf8"), home));
+    try {
+      run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" });
+    } catch {
+      /* intentionally ignored */
+    }
     run("launchctl", ["bootstrap", `gui/${uid}`, dst]);
     console.log(`  loaded    ${label}`);
   }
 }
 
-export function main({ install = process.argv.includes("--install") } = {}) {
+export function main({
+  install = process.argv.includes("--install"),
+  workers = optionValue("--workers") ?? DEFAULT_EVENT_WORKERS,
+  installer = installPlists,
+} = {}) {
   const { defaults, jobs } = loadSchedule();
   mkdirSync(OUT, { recursive: true });
 
@@ -110,16 +249,39 @@ export function main({ install = process.argv.includes("--install") } = {}) {
     const next = plist(job, defaults);
     const prev = existsSync(file) ? readFileSync(file, "utf8") : null;
     writeFileSync(file, next);
-    console.log(`${prev === next ? "  unchanged" : prev ? "  updated  " : "  created  "} ${path.basename(file)}  (every ${job.every})`);
+    console.log(
+      `${prev === next ? "  unchanged" : prev ? "  updated  " : "  created  "} ${path.basename(file)}  (every ${job.every})`,
+    );
   }
-  for (const job of skipped) console.log(`  disabled  ${job.name}  — ${String(job.why || "").slice(0, 60)}`);
+  for (const job of skipped)
+    console.log(
+      `  disabled  ${job.name}  — ${String(job.why || "").slice(0, 60)}`,
+    );
+
+  const range = eventWorkerRange(workers);
+  const eventDaemons = renderEventRuntimePlists({ workers: range });
+  for (const daemon of eventDaemons) {
+    console.log(
+      `${daemon.changed ? "  updated  " : "  unchanged"} ${path.basename(daemon.file)}`,
+    );
+  }
 
   if (!install) {
-    console.log(`\n${enabled.length} job(s) rendered to deploy/launchd/. Re-run with --install to load them.`);
+    console.log(
+      `\n${enabled.length} scheduled job(s) and 2 event daemon(s) rendered to deploy/launchd/ (workers ${range}).`,
+    );
+    console.log(
+      "Re-run with --install to copy and bootstrap the scheduled jobs.",
+    );
+    console.log("Event daemons are installed manually — see SETUP.md §3a.");
     return;
   }
 
-  installPlists(enabled, defaults);
+  // --install stays scheduled-jobs-only. The event daemons are always-on and
+  // order-sensitive (worker must drain before serve bounces), so their
+  // bootstrap is a manual, documented step (SETUP.md §3a), never a side effect
+  // of regenerating plists.
+  installer(enabled, defaults);
 }
 
 if (import.meta.main) main();

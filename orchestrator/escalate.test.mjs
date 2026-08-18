@@ -1,5 +1,12 @@
 import { test, expect, afterAll } from "bun:test";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -15,11 +22,21 @@ const globs = ["app/src/payment/**", "app/src/auth/**", "app/migrations/**"];
 const repos = Bun.YAML.parse(
   readFileSync(new URL("../config/repos.yaml", import.meta.url), "utf8"),
 ).repos;
-const cashsaasGlobs = repos.find((repo) => repo.name === "cashsaas")?.escalate_paths;
-const wmHomeGlobs = repos.find((repo) => repo.name === "wm-home")?.escalate_paths;
-const wattsMobileGlobs = repos.find((repo) => repo.name === "watts-mobile")?.escalate_paths;
-const coachWattzGlobs = repos.find((repo) => repo.name === "coach-wattz")?.escalate_paths;
-const legaleaseGlobs = repos.find((repo) => repo.name === "legalease")?.escalate_paths;
+const cashsaasGlobs = repos.find(
+  (repo) => repo.name === "cashsaas",
+)?.escalate_paths;
+const wmHomeGlobs = repos.find(
+  (repo) => repo.name === "wm-home",
+)?.escalate_paths;
+const wattsMobileGlobs = repos.find(
+  (repo) => repo.name === "watts-mobile",
+)?.escalate_paths;
+const coachWattzGlobs = repos.find(
+  (repo) => repo.name === "coach-wattz",
+)?.escalate_paths;
+const legaleaseGlobs = repos.find(
+  (repo) => repo.name === "legalease",
+)?.escalate_paths;
 
 test("wm-home config protects its schema, auth, admin, and deployment boundaries", () => {
   expect(wmHomeGlobs).toBeDefined();
@@ -251,15 +268,23 @@ test("flags a file under an escalate glob", () => {
 });
 
 test("clean diff passes", () => {
-  expect(matchEscalations(["app/src/pages/Home.tsx", "README.md"], globs)).toEqual([]);
+  expect(
+    matchEscalations(["app/src/pages/Home.tsx", "README.md"], globs),
+  ).toEqual([]);
 });
 
 test("a single protected file among many still escalates", () => {
   const hits = matchEscalations(
-    ["docs/notes.md", "app/migrations/0042_add_index.sql", "app/src/ui/Button.tsx"],
+    [
+      "docs/notes.md",
+      "app/migrations/0042_add_index.sql",
+      "app/src/ui/Button.tsx",
+    ],
     globs,
   );
-  expect(hits.map((h) => h.file)).toEqual(["app/migrations/0042_add_index.sql"]);
+  expect(hits.map((h) => h.file)).toEqual([
+    "app/migrations/0042_add_index.sql",
+  ]);
 });
 
 test("settings glob with wildcard filename matches", () => {
@@ -276,9 +301,15 @@ test("empty glob list never escalates", () => {
 
 test("a missing escalate_paths key is not an empty list", () => {
   expect(resolveEscalateGlobs({ name: "unguarded" }).ok).toBe(false);
-  expect(resolveEscalateGlobs({ name: "nulled", escalate_paths: null }).ok).toBe(false);
-  expect(resolveEscalateGlobs({ name: "bad", escalate_paths: "src/auth/**" }).ok).toBe(false);
-  expect(resolveEscalateGlobs({ name: "declared", escalate_paths: [] })).toEqual({ ok: true, globs: [] });
+  expect(
+    resolveEscalateGlobs({ name: "nulled", escalate_paths: null }).ok,
+  ).toBe(false);
+  expect(
+    resolveEscalateGlobs({ name: "bad", escalate_paths: "src/auth/**" }).ok,
+  ).toBe(false);
+  expect(
+    resolveEscalateGlobs({ name: "declared", escalate_paths: [] }),
+  ).toEqual({ ok: true, globs: [] });
 });
 
 test("a changed-file list only answers the question when it names a file", () => {
@@ -293,18 +324,36 @@ test("a changed-file list only answers the question when it names a file", () =>
 });
 
 test("freshness warns when behind, when dirty, and when it cannot tell", () => {
-  expect(freshnessWarnings({ upstream: "origin/main", behind: 0, dirtyConfig: false })).toEqual([]);
+  expect(
+    freshnessWarnings({
+      upstream: "origin/main",
+      behind: 0,
+      dirtyConfig: false,
+    }),
+  ).toEqual([]);
 
-  const behind = freshnessWarnings({ upstream: "origin/main", behind: 2, dirtyConfig: false });
+  const behind = freshnessWarnings({
+    upstream: "origin/main",
+    behind: 2,
+    dirtyConfig: false,
+  });
   expect(behind.length).toBe(1);
   expect(behind[0]).toContain("2 commit(s) behind origin/main");
 
-  const dirty = freshnessWarnings({ upstream: "origin/main", behind: 0, dirtyConfig: true });
+  const dirty = freshnessWarnings({
+    upstream: "origin/main",
+    behind: 0,
+    dirtyConfig: true,
+  });
   expect(dirty.length).toBe(1);
   expect(dirty[0]).toContain("config/repos.yaml has uncommitted local changes");
 
   // A failed git command must read as "unknown", never as "clean".
-  const unknown = freshnessWarnings({ upstream: null, behind: null, dirtyConfig: null });
+  const unknown = freshnessWarnings({
+    upstream: null,
+    behind: null,
+    dirtyConfig: null,
+  });
   expect(unknown.length).toBe(2);
   expect(unknown[0]).toContain("cannot tell whether");
 });
@@ -338,13 +387,22 @@ writeFileSync(
 // most here: exit 0 with no files named.
 const stubBin = path.join(tmp, "stub-bin");
 mkdirSync(stubBin, { recursive: true });
-writeFileSync(path.join(stubBin, "gh"), `#!/bin/sh\nprintf '%s' "$FACTORY_TEST_GH_FILES"\n`, {
-  mode: 0o755,
-});
+writeFileSync(
+  path.join(stubBin, "gh"),
+  `#!/bin/sh\nprintf '%s' "$FACTORY_TEST_GH_FILES"\n`,
+  {
+    mode: 0o755,
+  },
+);
 
 test("checkoutFreshness sees a locally modified config wherever it sits in the checkout", () => {
   const repo = mkdtempSync(path.join(tmp, "checkout-"));
-  const git = (...args) => Bun.spawnSync({ cmd: ["git", "-C", repo, ...args], stdout: "pipe", stderr: "pipe" });
+  const git = (...args) =>
+    Bun.spawnSync({
+      cmd: ["git", "-C", repo, ...args],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
   git("init", "-q");
   git("config", "user.email", "test@example.com");
   git("config", "user.name", "test");
@@ -357,7 +415,9 @@ test("checkoutFreshness sees a locally modified config wherever it sits in the c
   expect(checkoutFreshness(cfg).dirtyConfig).toBe(false);
   appendFileSync(cfg, "# local edit\n");
   expect(checkoutFreshness(cfg).dirtyConfig).toBe(true);
-  expect(freshnessWarnings(checkoutFreshness(cfg)).join("\n")).toContain("uncommitted local changes");
+  expect(freshnessWarnings(checkoutFreshness(cfg)).join("\n")).toContain(
+    "uncommitted local changes",
+  );
 });
 
 const CLI = path.join(import.meta.dir, "escalate.mjs");

@@ -1,7 +1,15 @@
 import "../test-dom";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  setSystemTime,
+  test,
+} from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { Proposals } from "./Proposals";
+import { filterOpenProposals, Proposals } from "./Proposals";
 import { api } from "../api";
 import {
   changeInput,
@@ -32,7 +40,11 @@ function stubStatus(): StatusView {
   });
 }
 
-function stubProposal(id: string, status = "open", overrides?: Partial<Proposal>): Proposal {
+function stubProposal(
+  id: string,
+  status = "open",
+  overrides?: Partial<Proposal>,
+): Proposal {
   return createProposalFixture({
     id,
     decision: "run",
@@ -88,7 +100,12 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     api.proposalHistory = async () => ({ proposals: [] });
     api.runs = async () => ({ runs: [] });
     api.events = async () => ({ events: [] });
-    api.agents = async () => ({ agents: [], edges: {}, eventTypes: [], contracts: {} });
+    api.agents = async () => ({
+      agents: [],
+      edges: {},
+      eventTypes: [],
+      contracts: {},
+    });
   });
 
   afterEach(() => {
@@ -109,7 +126,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     api.proposalHistory = async () => ({ proposals: [] });
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
 
     // Initially no bulk action bar
     expect(r.queryByRole("toolbar", { name: /bulk actions/i })).toBeNull();
@@ -148,9 +167,13 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     api.proposalHistory = async () => ({ proposals: [] });
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
 
-    const selectAll = r.getByLabelText("Select all proposals") as HTMLInputElement;
+    const selectAll = r.getByLabelText(
+      "Select all proposals",
+    ) as HTMLInputElement;
     expect(selectAll.checked).toBe(false);
 
     // Click select all
@@ -164,7 +187,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     expect(r.queryByRole("toolbar", { name: /bulk actions/i })).toBeNull();
 
     // Now filter by security using changeInput
-    const filterInput = r.getByLabelText("Filter proposals") as HTMLInputElement;
+    const filterInput = r.getByLabelText(
+      "Filter proposals",
+    ) as HTMLInputElement;
     await act(async () => {
       changeInput(filterInput, "security");
     });
@@ -173,7 +198,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     expect(r.getByLabelText("Select proposal prop_2")).toBeTruthy();
 
     // Click select all under filter — only 1 matching row should be selected
-    const selectAllAfter = r.getByLabelText("Select all proposals") as HTMLInputElement;
+    const selectAllAfter = r.getByLabelText(
+      "Select all proposals",
+    ) as HTMLInputElement;
     fireEvent.click(selectAllAfter);
     expect(r.getByText("Approve selected (1)")).toBeTruthy();
   });
@@ -188,11 +215,18 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     const approvedIds: string[] = [];
     api.approve = async (id: string) => {
       approvedIds.push(id);
-      return { approved: true, runId: `run_${id}`, proposal: undefined, replanned: false };
+      return {
+        approved: true,
+        runId: `run_${id}`,
+        proposal: undefined,
+        replanned: false,
+      };
     };
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
 
     // Select all 3
     const selectAll = r.getByLabelText("Select all proposals");
@@ -225,7 +259,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     };
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
 
     // Select all 2
     const selectAll = r.getByLabelText("Select all proposals");
@@ -260,12 +296,15 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
   });
 
   test("Space and Shift+Space toggle the highlighted proposal checkbox", async () => {
-    const p1 = stubProposal("prop_keyboard", "open", { agent: "keyboard-agent" });
+    const p1 = stubProposal("prop_keyboard", "open", {
+      agent: "keyboard-agent",
+    });
     api.proposals = async () => ({ proposals: [p1] });
 
     const r = renderProposals({ focusProposalId: "prop_keyboard" });
     const checkbox = await waitFor(
-      () => r.getByLabelText("Select proposal prop_keyboard") as HTMLInputElement,
+      () =>
+        r.getByLabelText("Select proposal prop_keyboard") as HTMLInputElement,
     );
 
     fireEvent.keyDown(document.body, { key: " " });
@@ -281,7 +320,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     api.proposals = async () => ({ proposals: [p1, p2] });
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
 
     fireEvent.keyDown(document.body, { key: "*" });
     fireEvent.keyDown(document.body, { key: "a" });
@@ -304,31 +345,45 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
     api.proposals = async () => ({ proposals: [p1, p2] });
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
     fireEvent.click(r.getByLabelText("Select all proposals"));
 
-    const approveButton = r.getByRole("button", { name: /Approve selected \(2\)/ });
-    const rejectButton = r.getByRole("button", { name: /Reject selected \(2\)/ });
+    const approveButton = r.getByRole("button", {
+      name: /Approve selected \(2\)/,
+    });
+    const rejectButton = r.getByRole("button", {
+      name: /Reject selected \(2\)/,
+    });
     expect(approveButton.textContent).toContain("A");
     expect(rejectButton.textContent).toContain("X");
 
     fireEvent.keyDown(document.body, { key: "A", shiftKey: true });
-    expect(r.getByRole("dialog", { name: /Approve and queue 2 runs/i })).toBeTruthy();
+    expect(
+      r.getByRole("dialog", { name: /Approve and queue 2 runs/i }),
+    ).toBeTruthy();
     fireEvent.click(r.getByRole("button", { name: "Not yet" }));
 
     await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
     fireEvent.keyDown(document.body, { key: "X", shiftKey: true });
-    expect(r.getByRole("dialog", { name: /Reject 2 selected proposals/i })).toBeTruthy();
+    expect(
+      r.getByRole("dialog", { name: /Reject 2 selected proposals/i }),
+    ).toBeTruthy();
   });
 
   test("selection clears on tab switch and history rows are not selectable", async () => {
     const pOpen = stubProposal("prop_open", "open", { agent: "open-agent" });
-    const pHist = stubProposal("prop_hist", "approved", { agent: "hist-agent" });
+    const pHist = stubProposal("prop_hist", "approved", {
+      agent: "hist-agent",
+    });
     api.proposals = async () => ({ proposals: [pOpen] });
     api.proposalHistory = async () => ({ proposals: [pHist] });
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_open")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_open")).toBeTruthy(),
+    );
 
     // Select open proposal
     const cb = r.getByLabelText("Select proposal prop_open");
@@ -358,7 +413,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
       expect(r.getByText("open-agent")).toBeTruthy();
     });
     expect(r.queryByRole("toolbar", { name: /bulk actions/i })).toBeNull();
-    const cbAfter = r.getByLabelText("Select proposal prop_open") as HTMLInputElement;
+    const cbAfter = r.getByLabelText(
+      "Select proposal prop_open",
+    ) as HTMLInputElement;
     expect(cbAfter.checked).toBe(false);
   });
 });
@@ -366,7 +423,9 @@ describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
 describe("Proposals component harness: selection & detail view", () => {
   test("clicking a row selects the proposal via onSelectProposal", async () => {
     const onSelectProposal = mock(() => {});
-    const p1 = stubProposal("prop_click_test", "open", { agent: "agent-click-test" });
+    const p1 = stubProposal("prop_click_test", "open", {
+      agent: "agent-click-test",
+    });
 
     await withApi(
       {
@@ -402,7 +461,9 @@ describe("Proposals component harness: selection & detail view", () => {
         events: async () => ({ events: [] }),
       },
       async () => {
-        const { container, getAllByText } = renderProposals({ focusProposalId: "prop_selected_1" });
+        const { container, getAllByText } = renderProposals({
+          focusProposalId: "prop_selected_1",
+        });
 
         const selectedRow = await waitFor(() => {
           const el = container.querySelector("tr.row-selected");
@@ -434,19 +495,29 @@ describe("Proposals component harness: filter retention", () => {
         events: async () => ({ events: [] }),
       },
       async () => {
-        const { getByLabelText, container } = renderProposals({ focusProposalId: "prop_alpha" });
+        const { getByLabelText, container } = renderProposals({
+          focusProposalId: "prop_alpha",
+        });
 
         await waitFor(() => container.querySelector("tr.row-selected"));
-        expect(container.querySelector("tbody")?.textContent).toContain("review-scan");
+        expect(container.querySelector("tbody")?.textContent).toContain(
+          "review-scan",
+        );
 
-        const filterInput = getByLabelText("Filter proposals") as HTMLInputElement;
+        const filterInput = getByLabelText(
+          "Filter proposals",
+        ) as HTMLInputElement;
         act(() => {
           changeInput(filterInput, "agent:triage-scan");
         });
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("triage-scan");
-          expect(container.querySelector("tbody")?.textContent).not.toContain("review-scan");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "triage-scan",
+          );
+          expect(container.querySelector("tbody")?.textContent).not.toContain(
+            "review-scan",
+          );
         });
 
         // Selected proposal remains highlighted
@@ -455,6 +526,261 @@ describe("Proposals component harness: filter retention", () => {
       },
     );
   });
+});
+
+describe("Proposals expiration and reason presentation (WM-547)", () => {
+  test("filterOpenProposals keeps TTL-expired proposals out of Open", () => {
+    const now = Date.now();
+    const expired = stubProposal("prop_expired", "open", {
+      created_at: new Date(now - 10_000).toISOString(),
+      ttl_seconds: 1,
+    });
+    const active = stubProposal("prop_active", "open", {
+      created_at: new Date(now - 1_000).toISOString(),
+      ttl_seconds: 300,
+    });
+
+    expect(
+      filterOpenProposals([expired, active], now, false).map((p) => p.id),
+    ).toEqual(["prop_active"]);
+    expect(
+      filterOpenProposals([expired, active], now, true).map((p) => p.id),
+    ).toEqual(["prop_expired"]);
+  });
+
+  test("expired detail disables approval with a reason and the Expired filter can be cleared", async () => {
+    const now = Date.now();
+    const rawReason = "auto_approval_ineligible:proposal_expired";
+    const expired = stubProposal("prop_expired", "open", {
+      agent: "expired-agent",
+      created_at: new Date(now - 10_000).toISOString(),
+      ttl_seconds: 1,
+      reason: rawReason,
+      spec: createRunSpecFixture("run_expired"),
+    });
+    const active = stubProposal("prop_active", "open", {
+      agent: "active-agent",
+      created_at: new Date(now).toISOString(),
+      ttl_seconds: 300,
+    });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [expired, active] }),
+        proposalHistory: async () => ({ proposals: [] }),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({ focusProposalId: expired.id });
+        const approve = await waitFor(
+          () =>
+            r.getByRole("button", { name: /^Approve/ }) as HTMLButtonElement,
+        );
+
+        expect(approve.disabled).toBe(true);
+        expect(approve.parentElement?.getAttribute("title")).toBe(
+          "This proposal has expired and can no longer be approved.",
+        );
+        // Rendered through the shared reason table (WM-594), not a local map.
+        expect(
+          r.getAllByText("Not eligible for auto-approval — Proposal expired")
+            .length,
+        ).toBeGreaterThan(0);
+        expect(r.getAllByTitle(rawReason).length).toBeGreaterThan(0);
+        expect(r.getByText("Safety & blast radius")).toBeTruthy();
+
+        const expiredRow = r
+          .getAllByText("expired-agent")
+          .find((node) => node.closest("tr"))
+          ?.closest("tr");
+        expect(
+          Array.from(expiredRow?.querySelectorAll("td") ?? []).some(
+            (cell) =>
+              cell.classList.contains("min-w-24") &&
+              cell.classList.contains("truncate") &&
+              cell.classList.contains("whitespace-nowrap"),
+          ),
+        ).toBe(true);
+
+        // Clearing the chip brings the live proposals back. The focused one is
+        // exempt from the chip so the operator keeps the pane they are reading.
+        act(() => {
+          fireEvent.click(r.getByRole("button", { name: /^Expired/ }));
+        });
+        await waitFor(() => {
+          expect(r.getByText("active-agent")).toBeTruthy();
+          expect(r.getAllByText("expired-agent").length).toBeGreaterThan(0);
+        });
+      },
+    );
+  });
+});
+
+describe("Proposals selection safety under focus and expiry (WM-547)", () => {
+  /** Re-render with a different focused row, the way the hash/parent does. */
+  function refocus(
+    r: ReturnType<typeof renderProposals>,
+    focusProposalId: string | null,
+  ) {
+    r.rerender(
+      <Proposals
+        connected={true}
+        context={{ kind: "all" }}
+        onRunQueued={noop}
+        focusProposalId={focusProposalId}
+        onSelectProposal={noop}
+        focusExpired={false}
+        onFocusExpiredConsumed={noop}
+        onJumpAgent={noop}
+        onJumpEvent={noop}
+      />,
+    );
+  }
+
+  test("opening a row to read it keeps the bulk selection", async () => {
+    const p1 = stubProposal("prop_bulk_1", "open", { agent: "agent-one" });
+    const p2 = stubProposal("prop_bulk_2", "open", { agent: "agent-two" });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1, p2] }),
+        proposalHistory: async () => ({ proposals: [] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({ focusProposalId: null });
+        await waitFor(() =>
+          expect(r.getByLabelText("Select proposal prop_bulk_1")).toBeTruthy(),
+        );
+
+        act(() => {
+          fireEvent.click(r.getByLabelText("Select proposal prop_bulk_1"));
+          fireEvent.click(r.getByLabelText("Select proposal prop_bulk_2"));
+        });
+        expect(r.getByText("Approve selected (2)")).toBeTruthy();
+
+        // Open one of the ticked rows to read its spec before bulk-approving.
+        act(() => refocus(r, "prop_bulk_1"));
+        await waitFor(() =>
+          expect(r.container.querySelector("tr.row-selected")).toBeTruthy(),
+        );
+
+        expect(r.getByRole("toolbar", { name: /bulk actions/i })).toBeTruthy();
+        expect(r.getByText("Approve selected (2)")).toBeTruthy();
+        expect(
+          (r.getByLabelText("Select proposal prop_bulk_2") as HTMLInputElement)
+            .checked,
+        ).toBe(true);
+
+        // And moving on to the next row keeps it too.
+        act(() => refocus(r, "prop_bulk_2"));
+        await waitFor(() =>
+          expect(r.getByText("Approve selected (2)")).toBeTruthy(),
+        );
+      },
+    );
+  });
+
+  test("losing the selection disarms the approve dialog", async () => {
+    const p1 = stubProposal("prop_armed_1", "open", {
+      agent: "armed-agent",
+      spec: createRunSpecFixture("run_armed_1"),
+    });
+    const p2 = stubProposal("prop_armed_2", "open", {
+      agent: "other-agent",
+      spec: createRunSpecFixture("run_armed_2"),
+    });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1, p2] }),
+        proposalHistory: async () => ({ proposals: [] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({ focusProposalId: "prop_armed_1" });
+        const openApprove = await waitFor(
+          () =>
+            r.getByRole("button", { name: /^Approve…/ }) as HTMLButtonElement,
+        );
+        act(() => {
+          fireEvent.click(openApprove);
+        });
+        expect(r.getByText("Approve and queue this run?")).toBeTruthy();
+
+        // The armed proposal is decided elsewhere and leaves the open list, so
+        // the dialog unmounts with the detail pane.
+        api.proposals = async () => ({ proposals: [p2] });
+        await act(async () => {
+          await r.queryClient.invalidateQueries({ queryKey: ["proposals"] });
+        });
+        await waitFor(() =>
+          expect(r.queryByText("Approve and queue this run?")).toBeNull(),
+        );
+
+        // Selecting another proposal must not re-open an approve dialog the
+        // operator never armed — Enter is bound to its confirm button.
+        act(() => refocus(r, "prop_armed_2"));
+        await waitFor(() =>
+          expect(r.getAllByText("prop_armed_2").length).toBeGreaterThan(0),
+        );
+        expect(r.queryByText("Approve and queue this run?")).toBeNull();
+      },
+    );
+  });
+
+  test("a TTL that passes while the row is selected keeps the pane and its expired banner", async () => {
+    const t0 = new Date("2026-03-01T00:00:00Z").getTime();
+    setSystemTime(new Date(t0));
+    try {
+      const live = stubProposal("prop_ticking", "open", {
+        agent: "ticking-agent",
+        created_at: new Date(t0).toISOString(),
+        ttl_seconds: 60,
+        spec: createRunSpecFixture("run_ticking"),
+      });
+
+      await withApi(
+        {
+          proposals: async () => ({ proposals: [live] }),
+          proposalHistory: async () => ({ proposals: [] }),
+          status: async () => createStatusFixture(),
+          runs: async () => ({ runs: [] }),
+          events: async () => ({ events: [] }),
+        },
+        async () => {
+          const r = renderProposals({ focusProposalId: "prop_ticking" });
+          const approve = await waitFor(
+            () =>
+              r.getByRole("button", { name: /^Approve…/ }) as HTMLButtonElement,
+          );
+          expect(approve.disabled).toBe(false);
+
+          // The TTL passes under the operator, on the next useNow tick.
+          setSystemTime(new Date(t0 + 120_000));
+          await waitFor(
+            () => {
+              const b = r.getByRole("button", {
+                name: /^Approve…/,
+              }) as HTMLButtonElement;
+              expect(b.disabled).toBe(true);
+              expect(b.parentElement?.getAttribute("title")).toBe(
+                "This proposal has expired and can no longer be approved.",
+              );
+            },
+            { timeout: 4000 },
+          );
+        },
+      );
+    } finally {
+      setSystemTime();
+    }
+  }, 15_000);
 });
 
 describe("Proposals component harness: cross-tab reveal", () => {
@@ -502,7 +828,9 @@ describe("Proposals component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const historyTab = getByRole("tab", { name: /^History/i });
           expect(historyTab.getAttribute("aria-selected")).toBe("true");
-          expect(container.querySelector("tbody")?.textContent).toContain("agent-decided");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "agent-decided",
+          );
         });
       },
     );
@@ -523,17 +851,23 @@ describe("Proposals component harness: cross-tab reveal", () => {
         const { getByLabelText, container, rerender } = renderProposals({});
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("triage-scan");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "triage-scan",
+          );
         });
 
         // Filter for agent triage, hiding prop_2
-        const filterInput = getByLabelText("Filter proposals") as HTMLInputElement;
+        const filterInput = getByLabelText(
+          "Filter proposals",
+        ) as HTMLInputElement;
         act(() => {
           changeInput(filterInput, "agent:triage-scan");
         });
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).not.toContain("review-scan");
+          expect(container.querySelector("tbody")?.textContent).not.toContain(
+            "review-scan",
+          );
         });
 
         // Focus prop_2 (which was hidden by the filter)
@@ -555,7 +889,9 @@ describe("Proposals component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const input = getByLabelText("Filter proposals") as HTMLInputElement;
           expect(input.value).toBe("");
-          expect(container.querySelector("tbody")?.textContent).toContain("review-scan");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "review-scan",
+          );
         });
       },
     );
@@ -576,16 +912,22 @@ describe("Proposals component harness: cross-tab reveal", () => {
         const { getByLabelText, container, rerender } = renderProposals({});
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("triage-scan");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "triage-scan",
+          );
         });
 
-        const filterInput = getByLabelText("Filter proposals") as HTMLInputElement;
+        const filterInput = getByLabelText(
+          "Filter proposals",
+        ) as HTMLInputElement;
         act(() => {
           changeInput(filterInput, "agent:triage-scan");
         });
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("triage-scan");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "triage-scan",
+          );
         });
 
         // Focus prop_1 (already visible under agent:triage-scan)
@@ -607,7 +949,9 @@ describe("Proposals component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const input = getByLabelText("Filter proposals") as HTMLInputElement;
           expect(input.value).toBe("agent:triage-scan");
-          expect(container.querySelector("tbody")?.textContent).toContain("triage-scan");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "triage-scan",
+          );
         });
       },
     );
@@ -615,13 +959,24 @@ describe("Proposals component harness: cross-tab reveal", () => {
 
   test("focusExpired prop sets open tab, filters to expired proposals, and calls onFocusExpiredConsumed", async () => {
     const onFocusExpiredConsumed = mock(() => {});
-    const pExpired = stubProposal("prop_exp", "open", { expired: true, agent: "agent-expired" });
-    const pActive = stubProposal("prop_act", "open", { expired: false, agent: "agent-active" });
+    const pExpired = stubProposal("prop_exp", "open", {
+      expired: true,
+      agent: "agent-expired",
+      created_at: new Date(Date.now() - 10_000).toISOString(),
+      ttl_seconds: 1,
+    });
+    const pActive = stubProposal("prop_act", "open", {
+      expired: false,
+      agent: "agent-active",
+      created_at: new Date().toISOString(),
+      ttl_seconds: 300,
+    });
 
     await withApi(
       {
         proposals: async () => ({ proposals: [pExpired, pActive] }),
-        status: async () => createStatusFixture({ proposals: { open: 2, expired: 1 } }),
+        status: async () =>
+          createStatusFixture({ proposals: { open: 2, expired: 1 } }),
         runs: async () => ({ runs: [] }),
         events: async () => ({ events: [] }),
       },
@@ -635,8 +990,12 @@ describe("Proposals component harness: cross-tab reveal", () => {
           const openTab = getByRole("tab", { name: /^Open/i });
           expect(openTab.getAttribute("aria-selected")).toBe("true");
           expect(onFocusExpiredConsumed).toHaveBeenCalled();
-          expect(container.querySelector("tbody")?.textContent).toContain("agent-expired");
-          expect(container.querySelector("tbody")?.textContent).not.toContain("agent-active");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "agent-expired",
+          );
+          expect(container.querySelector("tbody")?.textContent).not.toContain(
+            "agent-active",
+          );
         });
       },
     );
@@ -667,7 +1026,12 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     api.proposals = async () => ({ proposals: [] });
     api.runs = async () => ({ runs: [] });
     api.events = async () => ({ events: [] });
-    api.agents = async () => ({ agents: [], edges: {}, eventTypes: [], contracts: {} });
+    api.agents = async () => ({
+      agents: [],
+      edges: {},
+      eventTypes: [],
+      contracts: {},
+    });
     api.proposalHistory = async () => ({ proposals: [] });
   });
 
@@ -710,17 +1074,30 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     });
     api.proposals = async () => ({ proposals: [p1, p2, stale] });
     api.runs = async () => ({
-      runs: [createRunListItemFixture({ runId: "run_stale", state: "CANCELLED", agent: "stale-agent" })],
+      runs: [
+        createRunListItemFixture({
+          runId: "run_stale",
+          state: "CANCELLED",
+          agent: "stale-agent",
+        }),
+      ],
     });
 
     const approvedIds: string[] = [];
     api.approve = async (id: string) => {
       approvedIds.push(id);
-      return { approved: true, runId: `run_${id}`, proposal: undefined, replanned: false };
+      return {
+        approved: true,
+        runId: `run_${id}`,
+        proposal: undefined,
+        replanned: false,
+      };
     };
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
 
     fireEvent.click(r.getByLabelText("Select all proposals"));
     fireEvent.click(r.getByText("Approve selected (2)"));
@@ -758,20 +1135,29 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     };
 
     const r = renderProposals({ focusProposalId: "prop_1" });
-    await waitFor(() => expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
+    );
 
     expect(r.queryByRole("button", { name: /^Dismiss$/ })).toBeNull();
     expect(rejectedCalls).toEqual([]);
 
     fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const confirm = await waitFor(() => r.getByRole("button", { name: "Confirm" }) as HTMLButtonElement);
+    const confirm = await waitFor(
+      () => r.getByRole("button", { name: "Confirm" }) as HTMLButtonElement,
+    );
     expect(confirm.disabled).toBe(true);
 
-    const reasonInput = r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement;
+    const reasonInput = r.getByPlaceholderText(
+      /Reason \(required/i,
+    ) as HTMLInputElement;
     await act(async () => {
       changeInput(reasonInput, "   ");
     });
-    expect((r.getByRole("button", { name: "Confirm" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (r.getByRole("button", { name: "Confirm" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     fireEvent.keyDown(reasonInput, { key: "Enter" });
     expect(rejectedCalls).toEqual([]);
 
@@ -792,7 +1178,12 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     const p2 = stubProposal("prop_2", "open", { agent: "security-scan" });
     const replacement = stubProposal("prop_1b", "open", {
       agent: "triage-scan",
-      spec: createRunSpecFixture("run_prop_1b", { timeoutSeconds: 900, agent: "triage-scan" }),
+      created_at: new Date(Date.now() - 10_000).toISOString(),
+      ttl_seconds: 1,
+      spec: createRunSpecFixture("run_prop_1b", {
+        timeoutSeconds: 900,
+        agent: "triage-scan",
+      }),
     });
     api.proposals = async () => ({ proposals: [p1, p2] });
 
@@ -800,13 +1191,25 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     api.approve = async (id: string) => {
       approveCalls.push(id);
       if (id === "prop_1") {
-        return { approved: false, runId: undefined, replanned: true, proposal: replacement };
+        return {
+          approved: false,
+          runId: undefined,
+          replanned: true,
+          proposal: replacement,
+        };
       }
-      return { approved: true, runId: `run_${id}`, proposal: undefined, replanned: false };
+      return {
+        approved: true,
+        runId: `run_${id}`,
+        proposal: undefined,
+        replanned: false,
+      };
     };
 
     const r = renderProposals();
-    await waitFor(() => expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy());
+    await waitFor(() =>
+      expect(r.getByLabelText("Select proposal prop_1")).toBeTruthy(),
+    );
     fireEvent.click(r.getByLabelText("Select all proposals"));
     fireEvent.click(r.getByText("Approve selected (2)"));
 
@@ -822,11 +1225,25 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     await waitFor(() => expect(approveCalls.length).toBeGreaterThan(0));
     expect(approveCalls).toEqual(["prop_1"]);
     expect(r.getByText(/re-planned against current state/i)).toBeTruthy();
-    expect(r.getByText(/nothing runs until you approve the new proposal explicitly/i)).toBeTruthy();
+    expect(
+      r.getByText(
+        /nothing runs until you approve the new proposal explicitly/i,
+      ),
+    ).toBeTruthy();
+    const approveReplacement = r.getByRole("button", {
+      name: /Approve new proposal/i,
+    }) as HTMLButtonElement;
+    expect(approveReplacement.disabled).toBe(true);
+    expect(approveReplacement.parentElement?.getAttribute("title")).toBe(
+      "This replacement proposal has expired and can no longer be approved.",
+    );
   });
 
   test("repo context shows a persistent caption that the list is scoped to that repo", async () => {
-    const p1 = stubProposal("prop_1", "open", { repos: ["repo-test"], agent: "triage-scan" });
+    const p1 = stubProposal("prop_1", "open", {
+      repos: ["repo-test"],
+      agent: "triage-scan",
+    });
     api.proposals = async () => ({ proposals: [p1] });
 
     const r = renderProposals({ context: { kind: "repo", name: "repo-test" } });
@@ -847,14 +1264,18 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
       repos: ["another-repo"],
       agent: "review-scan",
     });
-    api.proposals = async () => ({ proposals: [matching, unscoped, otherRepo] });
+    api.proposals = async () => ({
+      proposals: [matching, unscoped, otherRepo],
+    });
 
     const r = renderProposals({ context: { kind: "repo", name: "repo-test" } });
     await waitFor(() => expect(r.getByText("triage-scan")).toBeTruthy());
     expect(r.queryByText("human-needed")).toBeNull();
     expect(r.queryByText("review-scan")).toBeNull();
     expect(
-      r.getByText("Showing proposals that name repo-test. 2 open proposals do not name this repo and are hidden."),
+      r.getByText(
+        "Showing proposals that name repo-test. 2 open proposals do not name this repo and are hidden.",
+      ),
     ).toBeTruthy();
   });
 
@@ -869,7 +1290,13 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     });
     api.proposals = async () => ({ proposals: [p1] });
     api.events = async () => ({
-      events: [createEventFixture({ eventId, source: "github", type: "pull_request.opened" })],
+      events: [
+        createEventFixture({
+          eventId,
+          source: "github",
+          type: "pull_request.opened",
+        }),
+      ],
     });
 
     const r = renderProposals();
@@ -910,7 +1337,9 @@ describe("Proposals copy chords and hints (WM-233)", () => {
       },
       async () => {
         const r = renderProposals({ focusProposalId: proposalId });
-        const idBtn = await r.findByRole("button", { name: "Copy proposal id (c)" });
+        const idBtn = await r.findByRole("button", {
+          name: "Copy proposal id (c)",
+        });
 
         // Verify icon-action tooltips preserve shortcut discoverability.
         expect(idBtn.getAttribute("title")).toBe("Copy proposal id · c");
@@ -944,7 +1373,9 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
   });
 
   test("Cmd+Enter and Ctrl+Enter submit reject dialog when valid and connected", async () => {
-    const p1 = stubProposal("prop_reject_hotkey", "open", { agent: "triage-scan" });
+    const p1 = stubProposal("prop_reject_hotkey", "open", {
+      agent: "triage-scan",
+    });
     const rejectedCalls: { id: string; why?: string }[] = [];
     api.proposals = async () => ({ proposals: [p1] });
     api.reject = async (id: string, why?: string) => {
@@ -952,11 +1383,18 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
       return { rejected: true };
     };
 
-    const r = renderProposals({ focusProposalId: "prop_reject_hotkey", connected: true });
-    await waitFor(() => expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy());
+    const r = renderProposals({
+      focusProposalId: "prop_reject_hotkey",
+      connected: true,
+    });
+    await waitFor(() =>
+      expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
+    );
 
     fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const reasonInput = await waitFor(() => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement);
+    const reasonInput = await waitFor(
+      () => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
+    );
 
     // Enter with metaKey (Cmd+Enter)
     await act(async () => {
@@ -964,11 +1402,17 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
     });
     fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
 
-    await waitFor(() => expect(rejectedCalls).toEqual([{ id: "prop_reject_hotkey", why: "Not needed right now" }]));
+    await waitFor(() =>
+      expect(rejectedCalls).toEqual([
+        { id: "prop_reject_hotkey", why: "Not needed right now" },
+      ]),
+    );
 
     // Ctrl+Enter also works on reopened dialog
     fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const reasonInput2 = await waitFor(() => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement);
+    const reasonInput2 = await waitFor(
+      () => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
+    );
 
     await act(async () => {
       changeInput(reasonInput2, "Second rejection reason");
@@ -984,7 +1428,9 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
   });
 
   test("Cmd+Enter does not submit when reason is empty or when disconnected", async () => {
-    const p1 = stubProposal("prop_reject_disconn", "open", { agent: "triage-scan" });
+    const p1 = stubProposal("prop_reject_disconn", "open", {
+      agent: "triage-scan",
+    });
     const rejectedCalls: { id: string; why?: string }[] = [];
     api.proposals = async () => ({ proposals: [p1] });
     api.reject = async (id: string, why?: string) => {
@@ -992,11 +1438,18 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
       return { rejected: true };
     };
 
-    const r = renderProposals({ focusProposalId: "prop_reject_disconn", connected: true });
-    await waitFor(() => expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy());
+    const r = renderProposals({
+      focusProposalId: "prop_reject_disconn",
+      connected: true,
+    });
+    await waitFor(() =>
+      expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
+    );
 
     fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const reasonInput = await waitFor(() => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement);
+    const reasonInput = await waitFor(
+      () => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
+    );
 
     // Empty / whitespace reason does not submit on Cmd+Enter
     await act(async () => {
@@ -1030,7 +1483,10 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
   });
 
   test("Enter key submits single-proposal approve dialog when connected", async () => {
-    const p1 = stubProposal("prop_approve_hotkey", "open", { agent: "triage-scan", decision: "run" });
+    const p1 = stubProposal("prop_approve_hotkey", "open", {
+      agent: "triage-scan",
+      decision: "run",
+    });
     const approvedCalls: string[] = [];
     api.proposals = async () => ({ proposals: [p1] });
     api.approve = async (id: string) => {
@@ -1038,8 +1494,13 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
       return { approved: true, runId: "run_approved_1" };
     };
 
-    const r = renderProposals({ focusProposalId: "prop_approve_hotkey", connected: true });
-    const approveBtn = await waitFor(() => r.getByRole("button", { name: /^Approve/ }));
+    const r = renderProposals({
+      focusProposalId: "prop_approve_hotkey",
+      connected: true,
+    });
+    const approveBtn = await waitFor(() =>
+      r.getByRole("button", { name: /^Approve/ }),
+    );
     expect(approveBtn.textContent).toContain("a");
 
     // Open confirmation dialog
@@ -1052,3 +1513,35 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
   });
 });
 
+describe("Proposals long-list window (WM-563)", () => {
+  test("a 2,000-row fixture mounts fewer than 200 table rows and pages forward", async () => {
+    const proposals = Array.from({ length: 2000 }, (_, i) =>
+      stubProposal(`prop_window_${i}`),
+    );
+    await withApi(
+      {
+        proposals: async () => ({ proposals }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderProposals();
+        const next = await r.findByRole("button", { name: "Next" });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+        expect(
+          r.queryByLabelText("Select proposal prop_window_100"),
+        ).toBeNull();
+        fireEvent.click(next);
+        await waitFor(() => {
+          expect(
+            r.getByLabelText("Select proposal prop_window_100"),
+          ).toBeTruthy();
+        });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+      },
+    );
+  });
+});

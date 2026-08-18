@@ -23,11 +23,14 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
-      json = null;
+      /* malformed response body: json stays null from the initializer */
     }
     if (!res.ok) {
       const message =
-        json?.error ?? (Array.isArray(json?.errors) ? json.errors.join("; ") : `HTTP ${res.status}`);
+        json?.error ??
+        (Array.isArray(json?.errors)
+          ? json.errors.join("; ")
+          : `HTTP ${res.status}`);
       const err = new Error(message);
       err.status = res.status;
       err.body = json;
@@ -44,22 +47,39 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     postEvent: (rawBody, { signature, timestamp } = {}) => {
       const headers = {};
       if (signature !== undefined) headers["x-factory-signature"] = signature;
-      if (timestamp !== undefined) headers["x-factory-timestamp"] = String(timestamp);
+      if (timestamp !== undefined)
+        headers["x-factory-timestamp"] = String(timestamp);
       return call("POST", "/events", { body: rawBody, headers });
     },
     /** Replay/inject: same admission path, no signature (loopback only, §13). */
-    replay: (envelope) => call("POST", "/replay", { body: JSON.stringify(envelope) }),
+    replay: (envelope) =>
+      call("POST", "/replay", { body: JSON.stringify(envelope) }),
     status: () => call("GET", "/status"),
-    events: (status) => call("GET", `/events${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-    proposals: (status) => call("GET", `/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-    journal: ({ since = 0, limit = 100 } = {}) => call("GET", `/journal?since=${since}&limit=${limit}`),
+    events: (status) =>
+      call(
+        "GET",
+        `/events${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+      ),
+    proposals: (status) =>
+      call(
+        "GET",
+        `/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+      ),
+    journal: ({ since = 0, limit = 100 } = {}) =>
+      call("GET", `/journal?since=${since}&limit=${limit}`),
     outbox: ({ limit = 50 } = {}) => call("GET", `/outbox?limit=${limit}`),
     requeue: (source, eventId) =>
-      call("POST", "/events/requeue", { body: JSON.stringify({ source, eventId }) }),
+      call("POST", "/events/requeue", {
+        body: JSON.stringify({ source, eventId }),
+      }),
     archive: (source, eventId) =>
-      call("POST", "/events/archive", { body: JSON.stringify({ source, eventId }) }),
+      call("POST", "/events/archive", {
+        body: JSON.stringify({ source, eventId }),
+      }),
     releaseWorker: (workerId, runId) =>
-      call("POST", `/workers/${encodeURIComponent(workerId)}/release`, { body: JSON.stringify({ runId }) }),
+      call("POST", `/workers/${encodeURIComponent(workerId)}/release`, {
+        body: JSON.stringify({ runId }),
+      }),
     agents: () => call("GET", "/agents"),
     workers: () => call("GET", "/workers"),
     schedules: () => call("GET", "/schedules"),
@@ -74,19 +94,34 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
       call("POST", `/repos/${encodeURIComponent(name)}/janitor`, {
         body: JSON.stringify({ apply: apply === true }),
       }),
-    approve: (id) => call("POST", `/proposals/${encodeURIComponent(id)}/approve`, { body: "{}" }),
+    approve: (id) =>
+      call("POST", `/proposals/${encodeURIComponent(id)}/approve`, {
+        body: "{}",
+      }),
     reject: (id, reason) =>
-      call("POST", `/proposals/${encodeURIComponent(id)}/reject`, { body: JSON.stringify({ reason }) }),
-    runs: (state) => call("GET", `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`),
+      call("POST", `/proposals/${encodeURIComponent(id)}/reject`, {
+        body: JSON.stringify({ reason }),
+      }),
+    runs: (state) =>
+      call("GET", `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`),
     run: (id) => call("GET", `/runs/${encodeURIComponent(id)}`),
     /** Live agent trace (factory.trace/v1): pass head back as since to poll. */
     trace: (id, { since = 0, limit = 100 } = {}) =>
-      call("GET", `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`),
+      call(
+        "GET",
+        `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`,
+      ),
     cancel: (id, reason) =>
       call("POST", `/runs/${encodeURIComponent(id)}/cancel`, {
         body: JSON.stringify(reason ? { reason } : {}),
       }),
     retry: (id, { force = false } = {}) =>
-      call("POST", `/runs/${encodeURIComponent(id)}/retry`, { body: JSON.stringify({ force }) }),
+      call("POST", `/runs/${encodeURIComponent(id)}/retry`, {
+        body: JSON.stringify({ force }),
+      }),
+    extend: (id, seconds, { override = false } = {}) =>
+      call("POST", `/runs/${encodeURIComponent(id)}/extend`, {
+        body: JSON.stringify({ seconds, override }),
+      }),
   };
 }

@@ -34,8 +34,116 @@ import {
   utimesSync,
   writeFileSync,
 } from "./api-test-helpers.mjs";
+import { cpSync } from "node:fs";
 import { emitDueTicks } from "./schedules.mjs";
+import { createInboxItem } from "./inbox.mjs";
+import { decisionRequestHash } from "./decision.mjs";
+import { spawnTracked } from "./test-helpers-process.mjs";
 
+describe("inbox decision API (WM-390)", () => {
+  const request = {
+    schemaVersion: "factory.decision-request/v1",
+    question: "Dismiss this item?",
+    options: [{ id: "dismiss", label: "Dismiss", effect: "dismiss" }],
+  };
+
+  test("detail, decide, conflicts, and retry use typed statuses", async () => {
+    const s = await makeServer({ now: () => 1000 });
+    try {
+      createInboxItem(
+        s.db,
+        {
+          kind: "BLOCKED",
+          title: "decision",
+          decision: request,
+        },
+        { id: "api_decision" },
+      );
+
+      const detail = await fetch(s.url("/inbox/api_decision"));
+      expect(detail.status).toBe(200);
+      expect((await detail.json()).item.decision).toEqual(request);
+      expect((await fetch(s.url("/inbox/missing"))).status).toBe(404);
+
+      const stale = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: "sha256:" + "0".repeat(64),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(stale.status).toBe(409);
+      expect((await stale.json()).error).toBe("stale_request");
+
+      const malformed = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestHash: decisionRequestHash(request),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(malformed.status).toBe(400);
+      expect((await malformed.json()).error).toBe("invalid_response");
+
+      const decided = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(request),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(decided.status).toBe(200);
+      expect(await decided.json()).toMatchObject({
+        item: { resolvedBy: "operator:dismiss", decidedBy: "operator" },
+        effect: { kind: "dismiss", outcome: "applied" },
+      });
+
+      const appliedRetry = await fetch(
+        s.url("/inbox/api_decision/decide/retry"),
+        { method: "POST" },
+      );
+      expect(appliedRetry.status).toBe(409);
+      expect((await appliedRetry.json()).error).toBe("already_applied");
+
+      const again = await fetch(s.url("/inbox/api_decision/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestHash: decisionRequestHash(request),
+          optionId: "dismiss",
+          fields: {},
+        }),
+      });
+      expect(again.status).toBe(409);
+      expect((await again.json()).error).toBe("already_decided");
+
+      const undecided = createInboxItem(
+        s.db,
+        {
+          kind: "BLOCKED",
+          title: "not answered",
+          decision: request,
+        },
+        { id: "not_decided" },
+      );
+      const retry = await fetch(s.url(`/inbox/${undecided.id}/decide/retry`), {
+        method: "POST",
+      });
+      expect(retry.status).toBe(409);
+      expect((await retry.json()).error).toBe("not_decided");
+    } finally {
+      s.close();
+    }
+  });
+});
 describe("schedule trigger metadata (WM-259)", () => {
   test("run and trigger return the unchanged next scheduled tick", async () => {
     const nowMs = Date.parse("2026-08-17T11:35:00.000Z");
@@ -50,7 +158,10 @@ describe("schedule trigger metadata (WM-259)", () => {
         },
       },
     };
-    const s = await makeServer({ registry: scheduleRegistry, now: () => nowMs });
+    const s = await makeServer({
+      registry: scheduleRegistry,
+      now: () => nowMs,
+    });
     try {
       emitDueTicks(s.db, scheduleRegistry, {
         now: Date.parse("2026-08-17T11:00:00.000Z"),
@@ -72,11 +183,15 @@ describe("schedule trigger metadata (WM-259)", () => {
       }
 
       const operatorEvents = s.db
-        .query(`SELECT envelope_json FROM events WHERE source = 'operator' ORDER BY event_id`)
+        .query(
+          `SELECT envelope_json FROM events WHERE source = 'operator' ORDER BY event_id`,
+        )
         .all()
         .map((row) => JSON.parse(row.envelope_json));
       expect(operatorEvents).toHaveLength(2);
-      expect(operatorEvents.every((event) => event.payload.repo === "factory")).toBe(true);
+      expect(
+        operatorEvents.every((event) => event.payload.repo === "factory"),
+      ).toBe(true);
 
       const schedules = await (await fetch(s.url("/schedules"))).json();
       expect(schedules.schedules[0]).toMatchObject({
@@ -86,6 +201,80 @@ describe("schedule trigger metadata (WM-259)", () => {
       });
     } finally {
       s.close();
+    }
+  });
+});
+
+describe("artifact-view sidecar on GET /agents (WM-454)", () => {
+  test("every agent item carries outputView/outputViewFile; views are objects where a sidecar exists, null elsewhere", async () => {
+    const { server, port } = await makeServer();
+    const client = apiClient({ port });
+    try {
+      const { agents: defs } = await client.agents();
+      for (const def of defs) {
+        expect(def).toHaveProperty("outputView");
+        expect(def).toHaveProperty("outputViewFile");
+      }
+      const merge = defs.find((d) => d.ref === "merge-scan@2");
+      expect(merge.outputViewFile).toBe("agents/merge-scan.view.json");
+      expect(merge.outputView.schemaVersion).toBe("factory.artifact-view/v1");
+      expect(merge.outputView.status.path).toBe("/recommendation");
+      const triage = defs.find((d) => d.ref === "triage-scan@1");
+      expect(triage.outputView.summary).toBe("/summary");
+      const bare = defs.find((d) => d.ref === "reconcile@1");
+      expect(bare.outputView).toBeNull();
+      expect(bare.outputViewFile).toBeNull();
+      // Not part of the pinned identity.
+      expect(Object.keys(merge.pins)).not.toContain(
+        "agents/merge-scan.view.json",
+      );
+      // web/src/types.ts AgentDef names both fields (kept in step by hand;
+      // AgentDef is not pinned by the OPS-284 parity test).
+      const typesSrc = readFileSync(
+        path.resolve(import.meta.dir, "../web/src/types.ts"),
+        "utf8",
+      );
+      const agentDef = typesSrc.slice(
+        typesSrc.indexOf("export interface AgentDef {"),
+      );
+      expect(agentDef).toContain("outputViewFile?");
+      expect(agentDef).toContain("outputView?");
+    } finally {
+      server.close();
+    }
+  });
+
+  test("a drifted view is served as null and named in /status.anomalies.configuration", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "evrt-view-"));
+    for (const dir of ["agents", "schemas"]) {
+      cpSync(path.join(registry.root, dir), path.join(root, dir), {
+        recursive: true,
+      });
+    }
+    cpSync(
+      path.join(registry.root, "event-types.json"),
+      path.join(root, "event-types.json"),
+    );
+    const viewFile = path.join(root, "agents", "triage-scan.view.json");
+    const view = JSON.parse(readFileSync(viewFile, "utf8"));
+    view.summary = "/tldr";
+    writeFileSync(viewFile, JSON.stringify(view));
+    const drifted = loadRegistry({ root, modelTiers: registry.modelTiers });
+    const { server, port } = await makeServer({ registry: drifted });
+    const client = apiClient({ port });
+    try {
+      const { agents: defs } = await client.agents();
+      const triage = defs.find((d) => d.ref === "triage-scan@1");
+      expect(triage.outputView).toBeNull();
+      expect(triage.outputViewFile).toBe("agents/triage-scan.view.json");
+      const status = await client.status();
+      const anomaly = status.anomalies.configuration.find((a) =>
+        a.includes("triage-scan@1"),
+      );
+      expect(anomaly).toContain("agents/triage-scan.view.json");
+      expect(anomaly).toMatch(/"\/tldr" does not resolve/);
+    } finally {
+      server.close();
     }
   });
 });
@@ -189,13 +378,12 @@ describe("serve PID lock (OPS-458)", () => {
   });
 
   test("concurrent duplicate serve on same home fails second instance and releasing first allows next", async () => {
-    const { spawn } = await import("node:child_process");
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-lock-cli-"));
     const port1 = String(59500 + (process.pid % 200));
     const port2 = String(59700 + (process.pid % 200));
     const CLI = path.resolve(import.meta.dir, "../cli.mjs");
 
-    const serve1 = spawn("bun", [CLI, "serve", "--port", port1], {
+    const serve1 = spawnTracked("bun", [CLI, "serve", "--port", port1], {
       env: { ...process.env, FACTORY_EVENT_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -215,7 +403,7 @@ describe("serve PID lock (OPS-458)", () => {
     expect(out1).toContain("control API on");
 
     // Second serve targeting same home should fail immediately
-    const serve2 = spawn("bun", [CLI, "serve", "--port", port2], {
+    const serve2 = spawnTracked("bun", [CLI, "serve", "--port", port2], {
       env: { ...process.env, FACTORY_EVENT_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -237,7 +425,7 @@ describe("serve PID lock (OPS-458)", () => {
     await new Promise((resolve) => serve1.on("exit", resolve));
 
     // Now a third serve should succeed
-    const serve3 = spawn("bun", [CLI, "serve", "--port", port2], {
+    const serve3 = spawnTracked("bun", [CLI, "serve", "--port", port2], {
       env: { ...process.env, FACTORY_EVENT_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });

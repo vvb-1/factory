@@ -28,7 +28,9 @@ describe("matchesRepo / matchesInFlight", () => {
     expect(matchesRepo([], { kind: "all" })).toBe(true);
     expect(matchesRepo([], { kind: "inflight" })).toBe(true);
     expect(matchesRepo([], { kind: "repo", name: "bj29" })).toBe(false);
-    expect(matchesRepo(["ok", "bj29"], { kind: "repo", name: "bj29" })).toBe(true);
+    expect(matchesRepo(["ok", "bj29"], { kind: "repo", name: "bj29" })).toBe(
+      true,
+    );
     expect(matchesRepo(undefined, { kind: "repo", name: "bj29" })).toBe(false);
   });
 
@@ -37,7 +39,9 @@ describe("matchesRepo / matchesInFlight", () => {
     expect(matchesInFlight("LEASED", { kind: "inflight" })).toBe(true);
     expect(matchesInFlight("RUNNING", { kind: "inflight" })).toBe(true);
     expect(matchesInFlight("QUEUED", { kind: "inflight" })).toBe(false);
-    expect(matchesInFlight("LEASED", { kind: "repo", name: "bj29" })).toBe(true);
+    expect(matchesInFlight("LEASED", { kind: "repo", name: "bj29" })).toBe(
+      true,
+    );
   });
 });
 
@@ -45,11 +49,20 @@ describe("readContextTabs", () => {
   test("empty, invalid, and reserved names", () => {
     expect(readContextTabs(null)).toEqual({ openRepos: [], active: "all" });
     expect(readContextTabs("{")).toEqual({ openRepos: [], active: "all" });
-    expect(readContextTabs(JSON.stringify({ openRepos: ["bj29", "all", INFLIGHT, ""], active: "bj29" }))).toEqual({
+    expect(
+      readContextTabs(
+        JSON.stringify({
+          openRepos: ["bj29", "all", INFLIGHT, ""],
+          active: "bj29",
+        }),
+      ),
+    ).toEqual({
       openRepos: ["bj29"],
       active: "bj29",
     });
-    expect(readContextTabs(JSON.stringify({ openRepos: ["ok"], active: "gone" }))).toEqual({
+    expect(
+      readContextTabs(JSON.stringify({ openRepos: ["ok"], active: "gone" })),
+    ).toEqual({
       openRepos: ["ok"],
       active: "all",
     });
@@ -60,7 +73,9 @@ describe("readContextTabs", () => {
 describe("toggleInflight", () => {
   test("In flight from any other context; All when already in flight", () => {
     expect(toggleInflight({ kind: "all" })).toEqual({ kind: "inflight" });
-    expect(toggleInflight({ kind: "repo", name: "bj29" })).toEqual({ kind: "inflight" });
+    expect(toggleInflight({ kind: "repo", name: "bj29" })).toEqual({
+      kind: "inflight",
+    });
     expect(toggleInflight({ kind: "inflight" })).toEqual({ kind: "all" });
   });
 });

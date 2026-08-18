@@ -7,6 +7,7 @@ You are the **Master Orchestrator** for the factory. The human operator observes
 ## 1. Operating Philosophy & Core Goal
 
 ### The Goal: Self-Sustaining Autonomous Loops
+
 Keep the factory operating at peak throughput (~10 concurrent worker runs):
 
 ```
@@ -26,7 +27,7 @@ When something blocks throughput — a red gate, a wedged run, a stale hold, a P
 missing evidence, a schema that cannot represent a case — **fix it, then report
 what you did**. Filing the ticket is the record, not the job.
 
-The failure mode to avoid is *diagnose, then wait*: presenting a correct analysis
+The failure mode to avoid is _diagnose, then wait_: presenting a correct analysis
 as a menu of options and stopping for a pick. That converts a self-sustaining
 loop back into a human-paced one and makes the operator the bottleneck for work
 they already delegated. If you find yourself writing "want me to…?" about
@@ -64,27 +65,33 @@ factory watchdog --once
 ```
 
 Alternatively, inspect individual components:
+
 - **Stack & Workers**: `curl -sf http://127.0.0.1:7381/health && bun event-runtime/cli.mjs status`
 - **Supply Queue**: `factory linear queue --team WM`
 - **Open PRs**: `gh pr list --state open`
 - **Git Freshness**: `git status --porcelain && git rev-list --count HEAD..origin/develop`
 
 ### Step 2: Check Linear Supply & Queues
+
 ```bash
 # Check dispatchable queue for target teams (e.g. WM, CLNT, OPS)
 factory linear queue --team WM
 factory linear queue --team CLNT
 ```
+
 - **Healthy Supply**: 10–20+ tickets in `Todo` + `ai:agent-ready` + unassigned.
 - **Low Supply (<5 tickets)**: Immediately prioritize a Triage scan and detail-authoring sweep.
 
 ### Step 3: Inspect Open PRs & In-Flight Branches
+
 ```bash
 gh pr list --state open --json number,title,headRefName,statusCheckRollup,reviews
 ```
+
 - Identify PRs ready for merge review vs PRs blocked on CI or critique revisions.
 
 ### Step 4: Check Workspace Freshness
+
 ```bash
 git fetch --quiet
 git rev-list --count HEAD..origin/develop     # >0 means behind
@@ -128,6 +135,7 @@ flowchart TD
 ---
 
 ### Loop 1: Supply & Triage Engine
+
 Workers idle if supply dries up. Ensure a continuous pipeline of dispatchable work:
 
 1. **Trigger Triage Scans**: Convert raw `Triage` issues into actionable candidates.
@@ -147,16 +155,21 @@ Workers idle if supply dries up. Ensure a continuous pipeline of dispatchable wo
 
 1. **Capacity vs Collision Sets**:
    - **Capacity**: Active `RUNNING` or `VERIFYING` runs occupy physical worker slots (up to max workers, e.g. 10).
-   - **Collision Matrix**: All in-flight runs *plus* pending `PROPOSED` runs claim their `Owned Paths`.
-   - A new ticket can ONLY be dispatched if its `Owned Paths` are strictly disjoint from all in-flight and proposed tickets.
-2. **Dispatching**:
-   - Dispatch via event-runtime proposal approval or CLI injection:
-     ```bash
-     bun event-runtime/cli.mjs propose dispatch.requested --payload '{"ticketId":"WM-123"}'
-     ```
+   - **Owned Paths overlap is advisory** (`config/policy.yaml` `dispatch.owned_paths_collision: advisory`, WM-677). The gate records the overlapping claims on the proposal as evidence and dispatches anyway; only a `**` claim on either side still refuses (`owned_paths_conflict_hard`). Textual overlap — same directory, same file, different lines — is a rebase job that `merge-fix` already does; refusing it at dispatch was starving the pool (9 attempts → 2 workers under `strict`). Merging stays serialized (`max_concurrent_merges: 1`), which is where real conflicts are caught. `strict` is the fail-closed default if the key is absent.
+2. **Dispatching** — inject a `factory.dispatch.requested` envelope; the payload field is `ticket` (not `ticketId`) and `repo` is the `config/repos.yaml` short name:
+   ```bash
+   bun event-runtime/cli.mjs inject - <<'EOF'
+   {"schemaVersion":"factory.event/v1","eventId":"dispatch:factory:WM-123:1",
+    "type":"factory.dispatch.requested","source":"operator","subject":"WM-123",
+    "occurredAt":"2026-01-01T00:00:00Z","payload":{"repo":"factory","ticket":"WM-123"}}
+   EOF
+   ```
+   - An `operator`-sourced event is **not** auto-approvable (chain auto-approval requires `source: "chain"`), so it lands as an open proposal: `cli.mjs proposals` then `cli.mjs approve <proposal-id>`. Space approvals a few seconds apart — a burst of ~10 hits `claim_lock_starvation` (WM-682).
+   - Bump the `eventId` suffix to re-inject after a refused or failed attempt; intake dedups on `(source, eventId)`.
 3. **Idempotency Pin Trap**:
-   - A `FAILED` or `BLOCKED` run pins its ticket's idempotency key. A duplicate `dispatch.requested` will be ignored as `noop`.
-   - To re-run: `bun event-runtime/cli.mjs retry <runId> --force`.
+   - A `FAILED` or `BLOCKED` run pins its ticket's idempotency key. A duplicate `dispatch.requested` will be ignored as `noop` (`ticket_dispatch_already_live`).
+   - To re-run a pinned run **of the current `policyVersion`**: `bun event-runtime/cli.mjs retry <runId> --force`. A run planned before a stack restart is pinned to the old `policyVersion` and no worker will ever claim it (`registry_stale` spin) — `cancel` it and inject fresh instead.
+   - Every terminal failure strips `ai:agent-ready` from the ticket, even for harness-side causes (WM-682); relabel with `factory linear labels <T> --add ai:agent-ready` before re-injecting.
 
 ---
 
@@ -236,7 +249,7 @@ The factory automatically merges PRs targeting `develop` once all gates pass.
    **Restart is required — not optional — when `develop` changed** any of
    `event-runtime/agents/**`, `event-runtime/schemas/**`,
    `event-runtime/event-types.json`, `event-runtime/schedules.json`, or
-   `config/**`. Model-tier and routing changes resolve at *plan* time inside
+   `config/**`. Model-tier and routing changes resolve at _plan_ time inside
    `serve`, so a `serve`-only restart is enough for those and leaves running
    workers untouched; a definition change needs the workers restarted too.
    Drain first — `bin/live-stack.sh down` finishes in-flight runs — and prefer
@@ -249,21 +262,23 @@ The factory automatically merges PRs targeting `develop` once all gates pass.
 Use the interrupt channel strictly for critical events requiring human operator action.
 
 #### Approved Telegram Notify Events
+
 Execute:
+
 ```bash
 factory notify "<EVENT> <TICKET/PR>: <one answerable sentence>"
 ```
 
-| Event Prefix | When to Use |
-| :--- | :--- |
-| `BLOCKED` | A ticket is blocked on missing credentials, contradictory specs, or unresolvable environment issues. |
-| `ESCALATED` | Security, auth, money movement, or destructive migration PR requires human review and merge approval. |
-| `CI RED` | `develop` trunk CI broken by an unexpected regression. All dispatch paused until trunk is green. |
-| `SMOKE RED` | Post-deploy smoke test failure on staging/production. |
-| `CIRCUIT BREAKER` | Repeated cascade failures across worker nodes (e.g. 5+ consecutive runner crashes). |
-| `RC READY` | Release candidate PR (`develop -> master`) prepared, green, and awaiting human sign-off. |
+| Event Prefix      | When to Use                                                                                           |
+| :---------------- | :---------------------------------------------------------------------------------------------------- |
+| `BLOCKED`         | A ticket is blocked on missing credentials, contradictory specs, or unresolvable environment issues.  |
+| `ESCALATED`       | Security, auth, money movement, or destructive migration PR requires human review and merge approval. |
+| `CI RED`          | `develop` trunk CI broken by an unexpected regression. All dispatch paused until trunk is green.      |
+| `SMOKE RED`       | Post-deploy smoke test failure on staging/production.                                                 |
+| `CIRCUIT BREAKER` | Repeated cascade failures across worker nodes (e.g. 5+ consecutive runner crashes).                   |
+| `RC READY`        | Release candidate PR (`develop -> master`) prepared, green, and awaiting human sign-off.              |
 
-*Routine updates (claims, routine merges, spec completions) belong in Linear comments and session summaries, never notify.*
+_Routine updates (claims, routine merges, spec completions) belong in Linear comments and session summaries, never notify._
 
 ---
 
@@ -283,15 +298,35 @@ rejecting proposals, judging escalations, and deciding what to fix are cheap and
 are exactly what the operator is steering. This rule is "delegate the waiting",
 not "delegate everything".
 
+**The hard rule: no inline call may block for more than ~30 seconds.** That is
+the concrete test, not "long-running" — a CI wait, a `sleep`-and-recheck loop, a
+`gh run watch`, a `bun test`, a `bun install`, a `worktree-up`, a rebase, all
+routinely exceed it and all belong in a subagent. Two shapes to recognise and
+delegate on sight, because both were run inline during real shifts and each one
+made the operator wait 10 minutes to be heard:
+
+- **"wait for CI, then merge if green"** — spawn one subagent that polls the
+  check-runs on the current `headRefOid`, verifies the diff-stat against
+  `origin/develop` shows no unexplained deletions, merges on green, and reruns
+  once on a known flake. It returns a verdict; the session moves on.
+- **"poll until this run settles"** — same: a subagent watches the run and
+  reports its terminal state. If the wait is on the factory's own runs, arm the
+  scheduled wakeup and let the completion notification wake you instead of
+  polling at all.
+
+Reads that answer in one shot (`factory pulse`, `cli.mjs runs`, `gh pr view`)
+stay inline. If a command needs a `sleep` in front of a recheck, it has already
+crossed the line.
+
 Reach for the specialised agent before a general one — each exists so its raw
 output stays out of the caller's context:
 
-| Agent | Use for |
-| :--- | :--- |
-| `factory-ci-doctor` | one red GitHub Actions run — after it fails, never to wait for it |
-| `factory-merge-reviewer` | a PR diff, so the diff never enters the orchestrator |
-| `factory-infra-scout` | anything needing SSH or container output |
-| `factory-ux-critic` | user-facing flows, after verification and before the PR |
+| Agent                    | Use for                                                           |
+| :----------------------- | :---------------------------------------------------------------- |
+| `factory-ci-doctor`      | one red GitHub Actions run — after it fails, never to wait for it |
+| `factory-merge-reviewer` | a PR diff, so the diff never enters the orchestrator              |
+| `factory-infra-scout`    | anything needing SSH or container output                          |
+| `factory-ux-critic`      | user-facing flows, after verification and before the PR           |
 
 The secondary reason is cost: a tool result is re-sent on every later turn, so a
 test log read inline is charged for the rest of the shift — see **Context
@@ -336,23 +371,31 @@ factory linear detail WM-123 "..."       # Append criteria / verification block
 factory linear file --team WM --title "..." --body "..." --type bug # File new issue
 
 # --- CI & GitHub Checks ---
-gh pr checks <PR> --watch --fail-fast    # Wait for checks to settle
-gh run watch <run-id> --exit-status      # Watch GitHub actions run without polling loops
+# One-shot reads — fine inline:
+gh pr view <PR> --json headRefOid,mergeable,mergeStateStatus
+gh api repos/<owner>/<repo>/commits/<sha>/check-runs --jq '.check_runs[] | "\(.name)=\(.conclusion // .status)"'
+# Blocking waits — NEVER inline (Loop 6 hard rule); give these to a subagent:
+gh pr checks <PR> --watch --fail-fast    # blocks until checks settle
+gh run watch <run-id> --exit-status      # blocks until the run ends
 ```
 
 ---
 
 ## 5. Catalog of Known Traps & Non-Negotiables
 
-| Trap | Mechanism | Hard-Won Rule |
-| :--- | :--- | :--- |
-| **CI Rerun Cache** | `gh run rerun` on a green run is refused; on a failed run, it reuses the run ID attempt. | Observe the CI run in an active/non-completed state before trusting a green verdict. |
-| **`GET /runs` No `spec`** | `GET /runs` lacks the `spec` field (WM-303). Reading `row.spec` yields empty. | Read run metadata and ticket identity from `eventId` or `cli.mjs inspect <runId>`. |
-| **Idempotency Pinning** | `FAILED`/`BLOCKED` runs pin their input hash key; re-injected `dispatch.requested` no-ops. | Always use `cli.mjs retry <runId> --force` to unstick a failed run. |
-| **`git stash` in Worktrees** | The stash stack (`.git/refs/stash`) is repo-global, not isolated per worktree. | **NEVER use `git stash` or `git rebase --autostash`** in agent worktrees. Use temporary patches or WIP commits. |
-| **macOS Bash 3.2** | Default macOS bash lacks `mapfile` / `readarray` and modern expansions. | Use POSIX `while IFS= read -r line` loops in all shell scripts. |
-| **Prettier Scope** | Running prettier across whole repo reformats hundreds of `.mjs` files unnecessarily. | Prettier is configured ONLY for `shared/**/*.md` (`bun run format:check`). |
-| **Label Replacement** | Direct GraphQL label mutations replace the whole array, wiping `type:*` and `area:*`. | Always use `--add` / `--remove` flags via `factory linear state` or `factory linear labels`. |
+| Trap                                       | Mechanism                                                                                                                                                                                                                        | Hard-Won Rule                                                                                                                                                                                                           |
+| :----------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CI Rerun Cache**                         | `gh run rerun` on a green run is refused; on a failed run, it reuses the run ID attempt.                                                                                                                                         | Observe the CI run in an active/non-completed state before trusting a green verdict.                                                                                                                                    |
+| **`GET /runs` No `spec`**                  | `GET /runs` lacks the `spec` field (WM-303). Reading `row.spec` yields empty.                                                                                                                                                    | Read run metadata and ticket identity from `eventId` or `cli.mjs inspect <runId>`.                                                                                                                                      |
+| **Idempotency Pinning**                    | `FAILED`/`BLOCKED` runs pin their input hash key; re-injected `dispatch.requested` no-ops.                                                                                                                                       | Always use `cli.mjs retry <runId> --force` to unstick a failed run.                                                                                                                                                     |
+| **`git stash` in Worktrees**               | The stash stack (`.git/refs/stash`) is repo-global, not isolated per worktree.                                                                                                                                                   | **NEVER use `git stash` or `git rebase --autostash`** in agent worktrees. Use temporary patches or WIP commits.                                                                                                         |
+| **macOS Bash 3.2**                         | Default macOS bash lacks `mapfile` / `readarray` and modern expansions.                                                                                                                                                          | Use POSIX `while IFS= read -r line` loops in all shell scripts.                                                                                                                                                         |
+| **Prettier Scope**                         | Running prettier across whole repo reformats hundreds of `.mjs` files unnecessarily.                                                                                                                                             | Prettier is configured ONLY for `shared/**/*.md` (`bun run format:check`).                                                                                                                                              |
+| **Label Replacement**                      | Direct GraphQL label mutations replace the whole array, wiping `type:*` and `area:*`.                                                                                                                                            | Always use `--add` / `--remove` flags via `factory linear state` or `factory linear labels`.                                                                                                                            |
+| **Restart Orphans In-Flight Runs**         | `bin/live-stack.sh down` does not actually wait for in-flight dispatches; their leaseholder dies, the run stays `RUNNING` forever, and the `reaper` loop that would reclaim it is disabled (WM-657).                             | Restart only when no `dispatch@1` run is `RUNNING`/`LEASED`. After any restart, compare `attempts.lease_owner` against `cli.mjs workers` and `cancel` orphans — preserving+pushing any uncommitted worktree work first. |
+| **Stale Rebase Reverts Trunk**             | A fixer that rebases onto an `origin/develop` fetched minutes earlier silently drops PRs merged in between and still passes CI. Nearly reverted #582 via #583.                                                                   | Before merging any rebased PR: `git diff --stat origin/develop origin/<branch>` must show no unexplained deletions of develop-side files. Tell fixers to `git fetch` immediately before `rebase`.                       |
+| **Blocking Waits Inline**                  | A `sleep`-and-recheck loop or `gh run watch` in the session queues the operator's steering behind it for the whole wait.                                                                                                         | Loop 6 hard rule: nothing inline may block >~30s. CI waits, merges-on-green, reruns, test runs, rebases go to a subagent; the session keeps only decisions.                                                             |
+| **A Hold Only In Your Head Is Not A Hold** | The autonomous `merge-scan`/`merge-apply` loop does not read the orchestrator's intentions. A PR held by verdict but left MERGEABLE and non-draft was auto-merged (#552, a known safety regression) while the session "held" it. | Make holds structural the moment a review returns FIX/ESCALATE: convert to draft (`gh pr ready --undo`) or add `ai:escalated` on the ticket. The scan honours drafts and escalation labels; it cannot honour a note.    |
 
 ---
 

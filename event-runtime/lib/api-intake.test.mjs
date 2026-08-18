@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
+import { spawnTracked } from "./test-helpers-process.mjs";
 import {
   GH_SECRET,
   PV,
@@ -229,6 +231,105 @@ describe("webhook intake (§14)", () => {
   });
 });
 
+describe("GitHub workflow_run merge trigger (WM-576)", () => {
+  const ghSign = (body) =>
+    `sha256=${createHmac("sha256", GH_SECRET).update(body).digest("hex")}`;
+
+  async function postWorkflow(s, payload, deliveryId) {
+    const body = JSON.stringify(payload);
+    return fetch(s.url("/github"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "workflow_run",
+        "x-github-delivery": deliveryId,
+        "x-hub-signature-256": ghSign(body),
+      },
+      body,
+    });
+  }
+
+  test("successful pull-request workflow admits one scoped merge request per PR head SHA", async () => {
+    const s = await makeServer();
+    const headSha = "a".repeat(40);
+    const payload = {
+      action: "completed",
+      workflow_run: {
+        id: 57601,
+        event: "pull_request",
+        conclusion: "success",
+        head_sha: headSha,
+        pull_requests: [
+          { number: 576, head: { sha: headSha }, base: { ref: "develop" } },
+        ],
+      },
+      repository: { full_name: "watt-mind/factory" },
+    };
+
+    try {
+      const first = await postWorkflow(s, payload, "delivery-green-1");
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({
+        admitted: true,
+        duplicate: false,
+        eventId: `merge-pr:factory:576:${headSha}`,
+      });
+
+      const redelivery = await postWorkflow(s, payload, "delivery-green-2");
+      expect(redelivery.status).toBe(200);
+      expect(await redelivery.json()).toEqual({
+        admitted: false,
+        duplicate: true,
+        eventId: `merge-pr:factory:576:${headSha}`,
+      });
+
+      const event = s.db
+        .query(
+          `SELECT type,correlation_id,envelope_json FROM events WHERE source = 'github'`,
+        )
+        .get();
+      expect(event.type).toBe("factory.merge.requested");
+      expect(event.correlation_id).toBe(`merge-pr:factory:576:${headSha}`);
+      expect(JSON.parse(event.envelope_json).payload).toEqual({
+        repo: "factory",
+        prNumbers: [576],
+      });
+      expect(
+        registry.eventTypes["factory.merge.requested"].idempotencyScope,
+      ).toEqual(["correlationId", "inputHash"]);
+    } finally {
+      s.close();
+    }
+  });
+
+  test("failed workflow runs retain the ci-log-capture event mapping", async () => {
+    const s = await makeServer();
+    try {
+      const response = await postWorkflow(
+        s,
+        {
+          action: "completed",
+          workflow_run: { id: 57602, conclusion: "failure" },
+          repository: { full_name: "watt-mind/factory" },
+        },
+        "delivery-failed-1",
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()).admitted).toBe(true);
+      const event = s.db
+        .query(`SELECT type,envelope_json FROM events WHERE source = 'github'`)
+        .get();
+      expect(event.type).toBe("github.workflow-run.failed");
+      expect(JSON.parse(event.envelope_json).payload).toEqual({
+        repo: "watt-mind/factory",
+        runId: 57602,
+      });
+    } finally {
+      s.close();
+    }
+  });
+});
+
 describe("missing configured secret fails closed (§14)", () => {
   test("POST /events → 401 missing_secret; /replay still works", async () => {
     const s = await makeServer({ secret: null });
@@ -395,11 +496,10 @@ describe("missing FACTORY_EVENT_SECRET and FACTORY_GITHUB_WEBHOOK_SECRET visibil
   });
 
   test("serve with invalid non-numeric FACTORY_EVENT_PORT fails loudly", async () => {
-    const { spawn } = await import("node:child_process");
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-port-err-"));
     const CLI = path.resolve(import.meta.dir, "../cli.mjs");
 
-    const child = spawn("bun", [CLI, "serve"], {
+    const child = spawnTracked("bun", [CLI, "serve"], {
       env: {
         ...process.env,
         FACTORY_EVENT_HOME: home,
@@ -418,7 +518,6 @@ describe("missing FACTORY_EVENT_SECRET and FACTORY_GITHUB_WEBHOOK_SECRET visibil
   });
 
   test("serve startup banner warns when FACTORY_EVENT_SECRET is unset", async () => {
-    const { spawn } = await import("node:child_process");
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-banner-"));
     const port = String(59600 + (process.pid % 200));
     const CLI = path.resolve(import.meta.dir, "../cli.mjs");
@@ -426,7 +525,7 @@ describe("missing FACTORY_EVENT_SECRET and FACTORY_GITHUB_WEBHOOK_SECRET visibil
     const env = { ...process.env, FACTORY_EVENT_HOME: home };
     delete env.FACTORY_EVENT_SECRET;
 
-    const child = spawn("bun", [CLI, "serve", "--port", port], {
+    const child = spawnTracked("bun", [CLI, "serve", "--port", port], {
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });

@@ -41,24 +41,28 @@
 **Status**: RFC / Architectural Evaluation — superseded in part, see correction notice above  
 **Author**: Engineering (Event Runtime & Worker Subsystem)  
 **Date**: 2026-08-14  
-**Companion to**: `docs/event-runtime.md` (§7, §10, §14), `docs/event-runtime-workers.md` (§3, §4, §5a), `docs/architecture.md`  
+**Companion to**: `docs/event-runtime.md` (§7, §10, §14), `docs/event-runtime-workers.md` (§3, §4, §5a), `docs/architecture.md`
 
 ---
 
 ## 1. Executive Summary & Verdict
 
 ### 1.1 Problem Statement
+
 The event runtime worker subsystem (`docs/event-runtime-workers.md`) currently executes agent tasks and deterministic actions as host OS child processes via the `cli.mjs work` claim loop. While the runtime enforces strict working-directory boundaries, content-hashed definition verification (`defHash`), and adapter-level permission policies (such as Claude Code's settings policy restricting filesystem mutations), **process-level isolation on the host OS is not a security sandbox**.
 
 As the event runtime expands from read-only diagnostics (Tier 1) to autonomous code mutation, full worktree generation, arbitrary package installation (`npm install`, `cargo build`), and external webhook-driven tasks (Tier 2 / WM-107), executing untrusted code directly on host runners introduces severe security vectors:
+
 1. **Host breakout and lateral movement**: Malicious or hallucinated code executed within a worktree can access the host filesystem, inspect adjacent processes, probe the local network (LAN/Tailscale), and persist rogue artifacts.
 2. **Credential exfiltration via prompt injection or SSRF**: Environment variables (`LINEAR_API_KEY`, `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) passed into worker processes can be exfiltrated if an agent is tricked into emitting network requests or writing memory/environment dumps into logs.
 3. **Unbounded network egress**: Free-form outbound internet access enables data exfiltration and unauthorized external API mutations.
 
 ### 1.2 Architectural Recommendation: `ADOPT` (Phased)
+
 We recommend **ADOPTING** Gondolin microVMs as the foundational sandbox provider for event-runtime worker execution.
 
 **Key Findings**:
+
 - **Hardware-Enforced Isolation**: Gondolin leverages hardware virtualization (KVM on Linux, Hypervisor.framework / Virtualization.framework on macOS Apple Silicon), eliminating shared kernel vulnerabilities inherent to standard container runtimes (`runc`/Docker).
 - **Sub-Second Cold Start Latency**: Gondolin achieves cold boot times of **180ms–320ms** (and **<60ms** with pre-forked memory snapshots), well below the 1,000ms threshold, making ephemeral per-task VM lifecycles practical without degrading event responsiveness.
 - **Granular Egress Control via Host Proxy**: Network egress is default-deny. All outbound traffic routes through a host-controlled proxy performing SNI/TLS validation against an explicit domain allowlist (`api.github.com`, `api.linear.app`, LLM provider endpoints).
@@ -94,15 +98,17 @@ We recommend **ADOPTING** Gondolin microVMs as the foundational sandbox provider
 ```
 
 ### 2.1 Threat Categories
-| Threat Vector | Process-Only Runner (Current) | Gondolin MicroVM Sandbox (Target) |
-| :--- | :--- | :--- |
-| **Host FS Escape** | High risk (Process has host user FS permissions; path traversal breaks out of worktree) | Mitigated (Guest kernel isolated; Virtio-FS exposes only the target worktree path) |
-| **Credential Theft** | High risk (Raw tokens in `process.env` readable via prompt injection or `printenv`) | Eliminated (Guest only possesses opaque placeholders; real secrets stay on host) |
-| **Lateral Movement** | High risk (Can probe Tailnet, Docker daemon sockets, local metadata services) | Eliminated (No host bridge; virtio-net routes strictly through host proxy) |
-| **Host Kernel Exploit** | Medium risk (Shared host kernel syscall surface) | Mitigated (Hardware virtualization boundary; isolated guest Linux kernel) |
-| **Resource Starvation**| Partial (Process nice levels and timeouts; unbounded memory/CPU spikes possible) | Enforced (Hypervisor-level vCPU, memory, and disk IOPS hard capping) |
+
+| Threat Vector           | Process-Only Runner (Current)                                                           | Gondolin MicroVM Sandbox (Target)                                                  |
+| :---------------------- | :-------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------- |
+| **Host FS Escape**      | High risk (Process has host user FS permissions; path traversal breaks out of worktree) | Mitigated (Guest kernel isolated; Virtio-FS exposes only the target worktree path) |
+| **Credential Theft**    | High risk (Raw tokens in `process.env` readable via prompt injection or `printenv`)     | Eliminated (Guest only possesses opaque placeholders; real secrets stay on host)   |
+| **Lateral Movement**    | High risk (Can probe Tailnet, Docker daemon sockets, local metadata services)           | Eliminated (No host bridge; virtio-net routes strictly through host proxy)         |
+| **Host Kernel Exploit** | Medium risk (Shared host kernel syscall surface)                                        | Mitigated (Hardware virtualization boundary; isolated guest Linux kernel)          |
+| **Resource Starvation** | Partial (Process nice levels and timeouts; unbounded memory/CPU spikes possible)        | Enforced (Hypervisor-level vCPU, memory, and disk IOPS hard capping)               |
 
 ### 2.2 Functional Sandboxing Requirements
+
 1. **Ephemeral Lifecycles**: A clean, reproducible microVM instance per execution attempt, torn down immediately upon attempt resolution or timeout.
 2. **Bidirectional Filesystem Sync**: Low-latency, POSIX-compliant host worktree mounting with accurate file permissions and modification tracking (`git status` integrity).
 3. **Deterministic Network Policy**: Per-agent declarative network egress rules configured directly in agent definitions or RunSpecs.
@@ -141,6 +147,7 @@ Gondolin is a specialized, high-performance microVM hypervisor designed specific
 ```
 
 ### 3.1 Hypervisor Backends
+
 1. **Linux (KVM)**:
    - Uses `/dev/kvm` ioctls for vCPU scheduling, guest memory mapping (`KVM_SET_USER_MEMORY_REGION`), and interrupt delivery.
    - Leverages `vhost-vsock` for high-throughput host-guest IPC and `vhost-net` for kernel-accelerated TAP packet processing.
@@ -150,6 +157,7 @@ Gondolin is a specialized, high-performance microVM hypervisor designed specific
    - Built-in support for directory sharing via `VZVirtioFileSystemDeviceConfiguration` (VirtioFS).
 
 ### 3.2 Guest OS Environment
+
 - **Micro-Kernel**: Minimalist customized Linux 6.x kernel stripped of unnecessary device drivers, ACPI tables, and legacy hardware buses.
 - **Root Filesystem**: Read-only, content-addressed initramfs (~25MB uncompressed) containing:
   - Static `musl`-based coreutils (`busybox` / `toybox`).
@@ -157,7 +165,9 @@ Gondolin is a specialized, high-performance microVM hypervisor designed specific
   - Gondolin Guest Agent: Lightweight daemon listening on `vsock:52000` to receive execution commands, pipe streams, and report lifecycle state.
 
 ### 3.3 Host-Guest VFS Bridge (Virtio-FS)
+
 To allow the agent to execute inside a repository worktree while preserving host-side receipt verification and `git status` checks:
+
 - **Virtio-FS with DAX (Direct Access)**: Guest memory maps file pages directly from the host page cache, avoiding double-caching and reducing memory overhead.
 - **Path Confinement**: Only the specific worktree directory allocated for the run (e.g. `/home/user/.factory/worktrees/WM-130`) is shared into the guest at `/workspace`. Host root and metadata paths (`~/.factory/db`, `~/.config`) are completely invisible.
 - **UID/GID Mapping**: Host user IDs are dynamically mapped to guest `root` or `agent` user (UID 1000) ensuring that files created inside the microVM retain correct ownership on the host.
@@ -169,14 +179,15 @@ To allow the agent to execute inside a repository worktree while preserving host
 To evaluate whether microVM sandboxes meet the responsiveness demands of event-driven automation, we evaluated Gondolin against process spawn and Docker container runtimes on Apple Silicon (M3 Max, 64GB) and Linux (AMD EPYC 7763, 32 vCPU).
 
 ### 4.1 Cold-Start & Teardown Latency
+
 All benchmarks represent mean wall-clock times across 1,000 warm-up runs:
 
-| Sandbox Technology | Cold Start Latency | Snapshot Resume | Clean Teardown | Base RSS Overhead |
-| :--- | :--- | :--- | :--- | :--- |
-| **Host Process Spawn** (`child_process.spawn`) | 12 ms | N/A | 4 ms | ~15 MB |
-| **Docker Container** (`runc` / bridge network) | 680 ms | N/A | 140 ms | ~120 MB |
-| **Gondolin MicroVM** (Direct kernel boot) | **240 ms** | N/A | **18 ms** | **38 MB** |
-| **Gondolin MicroVM** (Snapshot Resume via `madvise`) | **42 ms** | **38 ms** | **18 ms** | **45 MB** |
+| Sandbox Technology                                   | Cold Start Latency | Snapshot Resume | Clean Teardown | Base RSS Overhead |
+| :--------------------------------------------------- | :----------------- | :-------------- | :------------- | :---------------- |
+| **Host Process Spawn** (`child_process.spawn`)       | 12 ms              | N/A             | 4 ms           | ~15 MB            |
+| **Docker Container** (`runc` / bridge network)       | 680 ms             | N/A             | 140 ms         | ~120 MB           |
+| **Gondolin MicroVM** (Direct kernel boot)            | **240 ms**         | N/A             | **18 ms**      | **38 MB**         |
+| **Gondolin MicroVM** (Snapshot Resume via `madvise`) | **42 ms**          | **38 ms**       | **18 ms**      | **45 MB**         |
 
 ```
 Startup Latency Comparison (Lower is Better)
@@ -188,7 +199,9 @@ Docker (runc)      [==================================================] 680ms
 ```
 
 ### 4.2 I/O Throughput (Virtio-FS vs Native Host)
+
 Evaluating build and Git operations inside the `/workspace` mount:
+
 - `git status` on 50,000-file repository:
   - Native Host SSD: **48 ms**
   - Gondolin Virtio-FS (DAX enabled): **56 ms** (~86% native speed)
@@ -199,6 +212,7 @@ Evaluating build and Git operations inside the `/workspace` mount:
   - Standard Network NFS/9P: **28.4 s**
 
 ### 4.3 Conclusion on Performance
+
 Gondolin cold boot overhead (~240ms) represents less than 2.5% of an average 10-second agent run and less than 0.1% of a multi-minute Tier 2 build/verify cycle. With memory snapshot resuming, latency drops to ~42ms, rivaling native process execution while providing true hardware-level isolation.
 
 ---
@@ -206,6 +220,7 @@ Gondolin cold boot overhead (~240ms) represents less than 2.5% of an average 10-
 ## 5. Network Egress Filtering & DNS/TLS Interception
 
 ### 5.1 Architecture: Default-Deny Isolated Network
+
 1. **Network Interface**: Guest microVM is attached to a virtual point-to-point TAP device (`vm-tap0`) on the host.
 2. **Routing Isolation**: No default NAT or routing to host public interfaces is configured in host `iptables`/`pf`. All guest TCP/UDP traffic is forwarded to a local host-side proxy port (`127.0.0.1:8443`).
 3. **DNS Enforcement**: Guest `/etc/resolv.conf` points strictly to the host proxy DNS resolver.
@@ -240,6 +255,7 @@ Gondolin cold boot overhead (~240ms) represents less than 2.5% of an average 10-
 ```
 
 ### 5.2 Declarative Egress Policy Specification
+
 Every agent RunSpec can declare an egress profile:
 
 ```json
@@ -273,15 +289,17 @@ A primary vulnerability in traditional agent worker architectures is injecting r
 Gondolin implements a **Zero-Knowledge Secret Placeholder Architecture**.
 
 ### 6.1 Synthetic Secret Placeholders
+
 When preparing the execution environment for a microVM run, the worker assigns high-entropy, opaque synthetic placeholder tokens instead of real secrets:
 
-| Secret Name | Real Host Value (Host Vault Only) | Guest Environment Variable Value |
-| :--- | :--- | :--- |
-| `LINEAR_API_KEY` | `lin_api_a87f0b2c149d...` | `ph_secret_linear_run_01j5m_9fa810e2` |
-| `GITHUB_TOKEN` | `ghp_Z8b0K2x91aQw...` | `ph_secret_github_run_01j5m_3b71c409` |
-| `ANTHROPIC_API_KEY`| `sk-ant-api03-d92A...` | `ph_secret_anthropic_run_01j5m_e5d16a80` |
+| Secret Name         | Real Host Value (Host Vault Only) | Guest Environment Variable Value         |
+| :------------------ | :-------------------------------- | :--------------------------------------- |
+| `LINEAR_API_KEY`    | `lin_api_a87f0b2c149d...`         | `ph_secret_linear_run_01j5m_9fa810e2`    |
+| `GITHUB_TOKEN`      | `ghp_Z8b0K2x91aQw...`             | `ph_secret_github_run_01j5m_3b71c409`    |
+| `ANTHROPIC_API_KEY` | `sk-ant-api03-d92A...`            | `ph_secret_anthropic_run_01j5m_e5d16a80` |
 
 ### 6.2 Host Proxy Interception Workflow
+
 1. **Binding Context**: The host worker registers the run's placeholder-to-secret mapping in the local memory-locked table of the Host Egress Proxy, bound specifically to the guest's TAP IP and authorized hostnames:
    ```json
    {
@@ -318,20 +336,24 @@ When preparing the execution environment for a microVM run, the worker assigns h
 
 The factory event runtime operates across multiple runner architectures. Below is the compatibility matrix for Gondolin:
 
-| Platform / Environment | Virtualization Technology | Status | Implementation Details & Constraints |
-| :--- | :--- | :--- | :--- |
-| **macOS Apple Silicon** (M1/M2/M3/M4) | `Virtualization.framework` / HVF | **Fully Supported** | Native ARM64 Linux VM execution. Fast boot (<200ms). Requires `com.apple.security.hypervisor` entitlement for development binaries. |
-| **macOS Intel (x86_64)** | `Hypervisor.framework` (HVF) | **Supported** | Functional, but not primary target due to Apple Silicon fleet transition. |
-| **Linux Bare Metal** (x86_64 / arm64) | Linux KVM (`/dev/kvm`) | **Tier-1 Native** | Peak performance. Direct `vhost-vsock` and `virtio-fs` kernel drivers. Fully supported in Hetzner/custom lab nodes. |
-| **Linux Cloud VM** (AWS / GCP / Azure) | Nested KVM (`/dev/kvm`) | **Supported** | Requires instance types with nested virtualization enabled (e.g. AWS `c6i.metal`, GCP `n2-standard` with nested virt). |
-| **GitHub Actions Linux Runners** | Standard KVM | **Restricted / Fallback** | GitHub-hosted standard runners lack `/dev/kvm` access. Must fall back to process-level isolation or self-hosted lab runners. |
+| Platform / Environment                 | Virtualization Technology        | Status                    | Implementation Details & Constraints                                                                                                |
+| :------------------------------------- | :------------------------------- | :------------------------ | :---------------------------------------------------------------------------------------------------------------------------------- |
+| **macOS Apple Silicon** (M1/M2/M3/M4)  | `Virtualization.framework` / HVF | **Fully Supported**       | Native ARM64 Linux VM execution. Fast boot (<200ms). Requires `com.apple.security.hypervisor` entitlement for development binaries. |
+| **macOS Intel (x86_64)**               | `Hypervisor.framework` (HVF)     | **Supported**             | Functional, but not primary target due to Apple Silicon fleet transition.                                                           |
+| **Linux Bare Metal** (x86_64 / arm64)  | Linux KVM (`/dev/kvm`)           | **Tier-1 Native**         | Peak performance. Direct `vhost-vsock` and `virtio-fs` kernel drivers. Fully supported in Hetzner/custom lab nodes.                 |
+| **Linux Cloud VM** (AWS / GCP / Azure) | Nested KVM (`/dev/kvm`)          | **Supported**             | Requires instance types with nested virtualization enabled (e.g. AWS `c6i.metal`, GCP `n2-standard` with nested virt).              |
+| **GitHub Actions Linux Runners**       | Standard KVM                     | **Restricted / Fallback** | GitHub-hosted standard runners lack `/dev/kvm` access. Must fall back to process-level isolation or self-hosted lab runners.        |
 
 ### 7.1 Integration with Worker Placement
+
 Using the existing worker label placement model (`docs/event-runtime-workers.md` §4), workers declare their virtualization capabilities upon startup:
+
 ```bash
 factory work --label node=lab-01 --label arch=arm64 --label sandbox=gondolin --label hypervisor=kvm
 ```
+
 Runs requiring strong isolation specify placement requirements in their agent definition:
+
 ```yaml
 placement:
   sandbox: gondolin
@@ -341,13 +363,13 @@ placement:
 
 ## 8. Architectural Trade-offs & Operational Considerations
 
-| Dimension | Process Runner (Current) | Gondolin MicroVM (Target) | Trade-off Mitigation |
-| :--- | :--- | :--- | :--- |
-| **Startup Overhead** | ~12ms | ~240ms cold / ~42ms warm | Negligible in context of agent LLM inference time; use warm snapshot pool for high-frequency tasks. |
-| **Host Resource Usage** | Base Node RSS (~30MB) | VM Memory Overhead (~40MB RSS) | MicroVM memory is ballooned and released immediately on teardown. |
-| **Tooling & Dependency Distribution** | Inherits host tools (`git`, `node`, `bun`, `gh`) | Must be baked into guest rootfs or mounted via Virtio-FS | Standardize minimal guest image; mount large toolchains (`node_modules`) via Virtio-FS. |
-| **Debugging / Inspectability** | Direct `ps`, `lsof`, `gdb` on host | MicroVM console logs, vsock stream, guest crash dumps | Worker captures vsock console buffer directly into attempt log artifacts (`<home>/artifacts/<sha256>/console.log`). |
-| **Development Ergonomics** | Run immediately on any dev laptop | Requires hypervisor permissions on host OS | Provide automatic fallback to process runner on unprivileged dev environments (`--sandbox=auto`). |
+| Dimension                             | Process Runner (Current)                         | Gondolin MicroVM (Target)                                | Trade-off Mitigation                                                                                                |
+| :------------------------------------ | :----------------------------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| **Startup Overhead**                  | ~12ms                                            | ~240ms cold / ~42ms warm                                 | Negligible in context of agent LLM inference time; use warm snapshot pool for high-frequency tasks.                 |
+| **Host Resource Usage**               | Base Node RSS (~30MB)                            | VM Memory Overhead (~40MB RSS)                           | MicroVM memory is ballooned and released immediately on teardown.                                                   |
+| **Tooling & Dependency Distribution** | Inherits host tools (`git`, `node`, `bun`, `gh`) | Must be baked into guest rootfs or mounted via Virtio-FS | Standardize minimal guest image; mount large toolchains (`node_modules`) via Virtio-FS.                             |
+| **Debugging / Inspectability**        | Direct `ps`, `lsof`, `gdb` on host               | MicroVM console logs, vsock stream, guest crash dumps    | Worker captures vsock console buffer directly into attempt log artifacts (`<home>/artifacts/<sha256>/console.log`). |
+| **Development Ergonomics**            | Run immediately on any dev laptop                | Requires hypervisor permissions on host OS               | Provide automatic fallback to process runner on unprivileged dev environments (`--sandbox=auto`).                   |
 
 ---
 
@@ -393,6 +415,7 @@ We propose a four-phase rollout strategy that delivers immediate security enhanc
 ### Detailed Milestone Breakdown
 
 #### Milestone 1: Host Egress Interceptor & Secret Proxy (WM-131)
+
 - **Goal**: Implement the host-side proxy independent of the hypervisor.
 - **Deliverables**:
   - `lib/sandbox/proxy.mjs`: Lightweight HTTP/CONNECT proxy with SNI inspection.
@@ -400,6 +423,7 @@ We propose a four-phase rollout strategy that delivers immediate security enhanc
   - Unit tests verifying allowlist enforcement and response secret redaction.
 
 #### Milestone 2: Linux KVM Gondolin Worker Runtime (WM-132)
+
 - **Goal**: Functional microVM execution on Linux lab runners.
 - **Deliverables**:
   - `lib/sandbox/gondolin-kvm.mjs`: Process manager launching Gondolin microVMs with KVM flags.
@@ -407,12 +431,14 @@ We propose a four-phase rollout strategy that delivers immediate security enhanc
   - Virtio-FS mount integration linking host worktrees to guest `/workspace`.
 
 #### Milestone 3: Apple Silicon macOS Virtualization Driver (WM-133)
+
 - **Goal**: Native microVM sandboxing on macOS development machines.
 - **Deliverables**:
   - `lib/sandbox/gondolin-vz.mjs`: macOS `Virtualization.framework` wrapper via native helper binary.
   - Local setup documentation and entitlement provisioning.
 
 #### Milestone 4: Placement, Hardening & Production Rollout (WM-134)
+
 - **Goal**: End-to-end integration with the factory worker subsystem.
 - **Deliverables**:
   - `placement` schema updates in `lib/planner.mjs` and worker registration in `lib/workers.mjs`.
@@ -424,6 +450,7 @@ We propose a four-phase rollout strategy that delivers immediate security enhanc
 ## 10. Verification & Quality Gates
 
 The architectural adoption of Gondolin sandboxing will be governed by the following strict quality gates:
+
 1. **Security Invariant**: Zero raw secret strings may appear in guest memory dumps or process tables.
 2. **Latency Invariant**: MicroVM launch to guest command execution start must remain strictly `<500ms` for cold starts and `<100ms` for snapshot restores.
 3. **Filing & Integrity Invariant**: All filesystem mutations produced within guest `/workspace` must be 100% bit-for-bit identical on the host upon attempt completion, passing `git status --porcelain` validation.

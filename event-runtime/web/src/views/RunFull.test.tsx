@@ -4,6 +4,7 @@ import { cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { ApiError } from "../api";
 import { RunFull } from "./RunFull";
 import {
+  changeInput,
   createEventFixture,
   createRunDetailFixture,
   createRunListItemFixture,
@@ -22,11 +23,11 @@ afterEach(() => {
 const noop = () => {};
 const CANCEL_409 = "illegal transition CANCELLED → CANCELLED";
 
-function renderRunFull(runId: string) {
+function renderRunFull(runId: string, connected = true) {
   return renderWithClient(
     <RunFull
       runId={runId}
-      connected={true}
+      connected={connected}
       onBack={noop}
       onJumpAgent={noop}
       onJumpEvent={noop}
@@ -59,6 +60,209 @@ describe("RunFull layout (WM-194)", () => {
           );
           expect(traceContainer!.classList.contains("p-6")).toBe(true);
         });
+      },
+    );
+  });
+});
+
+describe("RunFull header (WM-193)", () => {
+  test("keeps run identity and actions without duplicating sidebar metadata", async () => {
+    const runId = "run_clean_header";
+    const detail = createRunDetailFixture({
+      run: {
+        runId,
+        state: "RUNNING",
+        attempts: 2,
+        spec: {
+          agent: "header-agent@1",
+          adapter: "header-adapter",
+          maxAttempts: 5,
+        },
+      } as RunDetail["run"],
+    });
+
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [createRunListItemFixture({ runId, state: "RUNNING" })],
+        }),
+      },
+      async () => {
+        const { container, getByRole } = renderRunFull(runId);
+
+        await waitFor(() => {
+          expect(container.querySelector("aside")?.textContent).toContain(
+            "header-agent@1",
+          );
+        });
+
+        const header = container.querySelector("header");
+        expect(header?.textContent).toContain("← Runs");
+        expect(header?.textContent).toContain(runId);
+        expect(header?.textContent).toContain("RUNNING");
+        expect(getByRole("button", { name: /Open in tab/ })).toBeTruthy();
+        expect(getByRole("button", { name: /Cancel/ })).toBeTruthy();
+        expect(header?.textContent).not.toContain("header-agent@1");
+        expect(header?.textContent).not.toContain("header-adapter");
+        expect(header?.textContent).not.toContain("2/5 attempts");
+
+        const sidebar = container.querySelector("aside");
+        expect(sidebar?.textContent).toContain("header-agent@1");
+        expect(sidebar?.textContent).toContain("header-adapter");
+        expect(sidebar?.textContent).toContain("2/5");
+      },
+    );
+  });
+});
+
+describe("RunFull deadline extension (WM-566)", () => {
+  test("shows remaining time and extends by preset or custom increments", async () => {
+    const runId = "run_extend_controls";
+    const deadlineAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const detail = createRunDetailFixture({
+      run: { runId, state: "RUNNING" } as RunDetail["run"],
+    });
+    detail.deadlineAt = deadlineAt;
+    const calls: number[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      calls.push(body.seconds);
+      return new Response(
+        JSON.stringify({
+          extended: true,
+          runId,
+          seconds: body.seconds,
+          deadlineAt: new Date(
+            Date.parse(deadlineAt) + body.seconds * 1000,
+          ).toISOString(),
+          leaseExpiresAt: new Date(
+            Date.parse(deadlineAt) + (body.seconds + 120) * 1000,
+          ).toISOString(),
+          override: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+    try {
+      await withApi(
+        {
+          run: async () => detail,
+          runs: async () => ({
+            runs: [
+              createRunListItemFixture({ runId, state: "RUNNING", deadlineAt }),
+            ],
+          }),
+        },
+        async () => {
+          const { getByRole, getByText, getByLabelText } = renderRunFull(runId);
+          await waitFor(() => getByText(/Remaining/));
+          expect(getByText(/Remaining/).textContent).toContain("30m");
+
+          fireEvent.click(getByRole("button", { name: "+15m" }));
+          await waitFor(() => expect(calls).toEqual([900]));
+          expect(getByText(/Run extended by 15 minutes/)).toBeTruthy();
+
+          fireEvent.click(getByRole("button", { name: "Custom…" }));
+          const input = getByLabelText("Extension minutes");
+          changeInput(input as HTMLInputElement, "0");
+          expect(input.getAttribute("aria-invalid")).toBe("true");
+          expect(getByText("Enter a whole number from 1 to 60.")).toBeTruthy();
+          expect(
+            within(getByRole("dialog"))
+              .getByRole("button", { name: "Extend run" })
+              .hasAttribute("disabled"),
+          ).toBe(true);
+          changeInput(input as HTMLInputElement, "20");
+          expect(input.getAttribute("aria-invalid")).toBe("false");
+          fireEvent.click(
+            within(getByRole("dialog")).getByRole("button", {
+              name: "Extend run",
+            }),
+          );
+          await waitFor(() => expect(calls).toEqual([900, 1200]));
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("preset refusal is visible without opening the custom dialog", async () => {
+    const runId = "run_extend_refused";
+    const detail = createRunDetailFixture({
+      run: { runId, state: "RUNNING" } as RunDetail["run"],
+    });
+    detail.deadlineAt = new Date(Date.now() + 60_000).toISOString();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error: "deadline_already_expired",
+          extended: false,
+          refusal: { code: "deadline_already_expired", retryable: false },
+        }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      )) as unknown as typeof fetch;
+    try {
+      await withApi(
+        {
+          run: async () => detail,
+          runs: async () => ({
+            runs: [
+              createRunListItemFixture({
+                runId,
+                state: "RUNNING",
+                deadlineAt: detail.deadlineAt,
+              }),
+            ],
+          }),
+        },
+        async () => {
+          const { getByRole, getByText, queryByRole } = renderRunFull(runId);
+          await waitFor(() => getByRole("button", { name: "+30m" }));
+          fireEvent.click(getByRole("button", { name: "+30m" }));
+          await waitFor(() => getByText("deadline_already_expired"));
+          expect(queryByRole("dialog")).toBeNull();
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("custom extension submit is disabled while disconnected", async () => {
+    const runId = "run_extend_disconnected";
+    const detail = createRunDetailFixture({
+      run: { runId, state: "RUNNING" } as RunDetail["run"],
+    });
+    detail.deadlineAt = new Date(Date.now() + 60_000).toISOString();
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [
+            createRunListItemFixture({
+              runId,
+              state: "RUNNING",
+              deadlineAt: detail.deadlineAt,
+            }),
+          ],
+        }),
+      },
+      async () => {
+        const { getByRole } = renderRunFull(runId, false);
+        const custom = await waitFor(() =>
+          getByRole("button", { name: "Custom…" }),
+        );
+        expect(custom.hasAttribute("disabled")).toBe(false);
+        fireEvent.click(custom);
+        expect(
+          within(getByRole("dialog"))
+            .getByRole("button", { name: "Extend run" })
+            .hasAttribute("disabled"),
+        ).toBe(true);
       },
     );
   });
@@ -120,14 +324,22 @@ describe("RunFull header copy verbs and hints (WM-218)", () => {
       },
       async () => {
         const { getByRole } = renderRunFull(runId);
-        const openInTab = await waitFor(() => getByRole("button", { name: /Open in tab/ }));
-        expect(openInTab.querySelector('[aria-hidden="true"]')?.textContent).toBe("p");
+        const openInTab = await waitFor(() =>
+          getByRole("button", { name: /Open in tab/ }),
+        );
+        expect(
+          openInTab.querySelector('[aria-hidden="true"]')?.textContent,
+        ).toBe("p");
 
         fireEvent.keyDown(document.body, { key: "p" });
-        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([runId]);
+        expect(
+          JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]"),
+        ).toEqual([runId]);
 
         fireEvent.keyDown(document.body, { key: "p" });
-        expect(JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]")).toEqual([]);
+        expect(
+          JSON.parse(sessionStorage.getItem("factory.pinnedRuns") ?? "[]"),
+        ).toEqual([]);
       },
     );
   });
@@ -151,15 +363,21 @@ describe("RunFull header copy verbs and hints (WM-218)", () => {
         expect(getByRole("button", { name: /← Runs/ }).textContent).toContain(
           "Esc",
         );
-        expect(getByRole("button", { name: "Copy run id (c)" }).getAttribute("title")).toBe(
-          "Copy run id · c",
-        );
-        expect(getByRole("button", { name: "Copy CLI inspect command (c i)" }).getAttribute("title")).toBe(
-          "Copy CLI inspect command · c i",
-        );
-        expect(getByRole("button", { name: "Copy link (c l)" }).getAttribute("title")).toBe(
-          "Copy link · c l",
-        );
+        expect(
+          getByRole("button", { name: "Copy run id (c)" }).getAttribute(
+            "title",
+          ),
+        ).toBe("Copy run id · c");
+        expect(
+          getByRole("button", {
+            name: "Copy CLI inspect command (c i)",
+          }).getAttribute("title"),
+        ).toBe("Copy CLI inspect command · c i");
+        expect(
+          getByRole("button", { name: "Copy link (c l)" }).getAttribute(
+            "title",
+          ),
+        ).toBe("Copy link · c l");
       },
     );
   });
@@ -243,7 +461,7 @@ describe("RunFull model rows (WM-221)", () => {
       async () => {
         const { getByText } = renderRunFull(runId);
         await waitFor(() => getByText("model (observed)"));
-        // The header already names the adapter; the sidebar now names the model.
+        // The sidebar keeps the harness and model details together.
         expect(getByText("model tier")).toBeTruthy();
         expect(getByText("strong")).toBeTruthy();
         expect(getByText("default (CLI)")).toBeTruthy();
@@ -328,7 +546,10 @@ describe("RunFull causal follow-up events and chained runs (WM-420)", () => {
         run: async () => detail,
         runs: async () => ({
           runs: [
-            createRunListItemFixture({ runId: parentRunId, state: "COMPLETED" }),
+            createRunListItemFixture({
+              runId: parentRunId,
+              state: "COMPLETED",
+            }),
             childRun,
           ],
         }),

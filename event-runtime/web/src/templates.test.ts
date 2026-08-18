@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { buildSkeleton, buildTemplates, retriggerEnvelope, summarize, triggerId } from "./templates";
+import {
+  buildSkeleton,
+  buildTemplates,
+  groupTemplates,
+  retriggerEnvelope,
+  summarize,
+  triggerId,
+} from "./templates";
 import type { AgentsView } from "./types";
 
 const NOW = Date.parse("2026-08-13T09:15:00.000Z");
@@ -35,7 +42,11 @@ describe("buildSkeleton", () => {
     expect(
       buildSkeleton({
         required: ["host", "mount"],
-        properties: { host: { type: "string" }, mount: { type: "string" }, note: { type: "string" } },
+        properties: {
+          host: { type: "string" },
+          mount: { type: "string" },
+          note: { type: "string" },
+        },
       }),
     ).toEqual({ host: "", mount: "" });
   });
@@ -63,7 +74,11 @@ describe("buildSkeleton", () => {
           plan: {
             type: "array",
             minItems: 1,
-            items: { type: "object", required: ["action"], properties: { action: { type: "string" } } },
+            items: {
+              type: "object",
+              required: ["action"],
+              properties: { action: { type: "string" } },
+            },
           },
         },
       }),
@@ -87,7 +102,11 @@ describe("buildSkeleton", () => {
       buildSkeleton({
         required: ["outer"],
         properties: {
-          outer: { type: "object", required: ["inner"], properties: { inner: { type: "integer", minimum: 3 } } },
+          outer: {
+            type: "object",
+            required: ["inner"],
+            properties: { inner: { type: "integer", minimum: 3 } },
+          },
         },
       }),
     ).toEqual({ outer: { inner: 3 } });
@@ -97,7 +116,17 @@ describe("buildSkeleton", () => {
     expect(
       buildSkeleton(
         {
-          required: ["id", "ID", "eventId", "correlationId", "alertId", "user_id", "task-id", "customRef", "grid"],
+          required: [
+            "id",
+            "ID",
+            "eventId",
+            "correlationId",
+            "alertId",
+            "user_id",
+            "task-id",
+            "customRef",
+            "grid",
+          ],
           properties: {
             id: { type: "string" },
             ID: { type: "string" },
@@ -129,7 +158,16 @@ describe("buildSkeleton", () => {
     expect(
       buildSkeleton(
         {
-          required: ["occurredAt", "createdAt", "updated_at", "started-at", "at", "timeField", "dateOnly", "plain"],
+          required: [
+            "occurredAt",
+            "createdAt",
+            "updated_at",
+            "started-at",
+            "at",
+            "timeField",
+            "dateOnly",
+            "plain",
+          ],
           properties: {
             occurredAt: { type: "string" },
             createdAt: { type: "string" },
@@ -214,20 +252,63 @@ describe("buildTemplates", () => {
   test.each([
     ["an array", []],
     ["an object missing agents", { eventTypes: view.eventTypes }],
-  ])("returns no templates when the registry response is %s", (_label, response) => {
-    expect(buildTemplates(response as unknown as AgentsView, NOW)).toEqual([]);
-  });
+  ])(
+    "returns no templates when the registry response is %s",
+    (_label, response) => {
+      expect(buildTemplates(response as unknown as AgentsView, NOW)).toEqual(
+        [],
+      );
+    },
+  );
 
   test("handles unrouted event types without agent or adapter (WM-475)", () => {
     const unroutedView = {
       agents: [],
-      eventTypes: [{ type: "factory.ticket.dispatched", proposalTtlSeconds: null }],
+      eventTypes: [
+        { type: "factory.ticket.dispatched", proposalTtlSeconds: null },
+      ],
     };
-    const templates = buildTemplates(unroutedView as unknown as AgentsView, NOW);
+    const templates = buildTemplates(
+      unroutedView as unknown as AgentsView,
+      NOW,
+    );
     expect(templates).toHaveLength(1);
     expect(templates[0]?.eventType).toBe("factory.ticket.dispatched");
     expect(templates[0]?.agent).toBe("");
     expect(templates[0]?.adapter).toBe("");
+  });
+
+  test("groups domain prefixes deterministically and sorts event types inside each group (WM-555)", () => {
+    const unorderedView = {
+      agents: [],
+      eventTypes: [
+        { type: "keephq.disk-alert.raised" },
+        { type: "factory.triage.requested" },
+        { type: "github.workflow-run.failed" },
+        { type: "factory.ci-rerun.requested" },
+        { type: "clock.daily.tick" },
+        { type: "factory.status-report.requested" },
+      ],
+    };
+    const groups = groupTemplates(
+      buildTemplates(unorderedView as unknown as AgentsView, NOW),
+    );
+
+    expect(groups.map((group) => group.domain)).toEqual([
+      "clock.",
+      "factory.",
+      "github.",
+      "keephq.",
+    ]);
+    expect(
+      groups
+        .find((group) => group.domain === "factory.")
+        ?.templates.map((t) => t.eventType),
+    ).toEqual([
+      "factory.ci-rerun.requested",
+      "factory.status-report.requested",
+      "factory.triage.requested",
+    ]);
   });
 });
 

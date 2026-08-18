@@ -1,6 +1,16 @@
-import { createContext, type ReactNode, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { attrIcon } from "./attrIcons";
 import { createPortal } from "react-dom";
+import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { modal, useFocusReturn, useNow } from "../hooks";
 import type { Section, SortDir } from "../displayOptions";
 import { tokenizeJson, TOKEN_CLASSES } from "../highlight";
@@ -68,7 +78,10 @@ export const WORKER_HUES: Record<string, string> = {
 /**
  * Returns the matching theme hue for a facet value (states, statuses, decisions).
  */
-export const getValueHue = (_field: string, value: string): string | undefined => {
+export const getValueHue = (
+  _field: string,
+  value: string,
+): string | undefined => {
   const norm = value.trim();
   return (
     STATE_HUES[norm.toUpperCase()] ??
@@ -93,6 +106,51 @@ export function shortId(id: string): string {
   return body.length <= 8 ? id : id.slice(0, sep + 1) + body.slice(0, 8);
 }
 
+/**
+ * A model id that keeps its distinguishing name visible in narrow columns.
+ * The provider prefix is allowed to shrink away first; the full id remains in
+ * the tooltip. Sentinel values such as `n/a` and `-` render unchanged.
+ */
+export function ModelCell({
+  model,
+  className = "",
+  title = model,
+}: {
+  model: string;
+  className?: string;
+  title?: string;
+}) {
+  const slash = model.indexOf("/");
+  if (slash <= 0 || slash === model.length - 1) {
+    return (
+      <span
+        className={`mono block max-w-full truncate ${className}`}
+        title={title}
+      >
+        {model}
+      </span>
+    );
+  }
+
+  const provider = model.slice(0, slash + 1);
+  const name = model.slice(slash + 1);
+  return (
+    <span
+      className={`mono block min-w-0 max-w-full ${className}`}
+      title={title}
+    >
+      <span className="sr-only">{model}</span>
+      <span
+        aria-hidden="true"
+        className="flex min-w-0 max-w-full items-baseline"
+      >
+        <span className="min-w-0 truncate text-(--text-faint)">{provider}</span>
+        <span className="max-w-full shrink-0 truncate">{name}</span>
+      </span>
+    </span>
+  );
+}
+
 export function copyText(text: string, label: string) {
   navigator.clipboard.writeText(text);
   notify(`Copied ${label}`, "info");
@@ -108,17 +166,28 @@ type CopyActionButtonProps = {
   label: string;
   chord: string;
   onClick: () => void;
+  quiet?: boolean;
   children: ReactNode;
 };
 
-function CopyActionButton({ label, chord, onClick, children }: CopyActionButtonProps) {
+function CopyActionButton({
+  label,
+  chord,
+  onClick,
+  quiet = false,
+  children,
+}: CopyActionButtonProps) {
   return (
     <button
       type="button"
       title={`${label} · ${chord}`}
       aria-label={`${label} (${chord})`}
       onClick={onClick}
-      className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-(--text-faint) transition-colors hover:text-(--text) focus-visible:text-(--text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent) focus-visible:ring-offset-1 focus-visible:ring-offset-(--surface-1)"
+      className={
+        quiet
+          ? "mono cursor-pointer rounded-sm text-(--text-faint) transition-colors hover:text-(--text) focus-visible:text-(--text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
+          : "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-(--text-faint) transition-colors hover:text-(--text) focus-visible:text-(--text) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--accent) focus-visible:ring-offset-1 focus-visible:ring-offset-(--surface-1)"
+      }
     >
       {children}
     </button>
@@ -132,16 +201,70 @@ export function CopyActions({
   idChord = "c",
   cli,
   cliLabel = "CLI command",
+  variant = "icons",
 }: {
   id: string;
   idLabel: string;
   idChord?: string;
   cli?: string;
   cliLabel?: string;
+  /** Quiet text links suit the utility row below a detail header; icons remain
+   *  the compact default for inline use on other surfaces. */
+  variant?: "icons" | "quiet";
 }) {
+  if (variant === "quiet") {
+    return (
+      <div
+        className="inline-flex items-center gap-1.5"
+        role="group"
+        aria-label="Copy actions"
+      >
+        <span>copy:</span>
+        <CopyActionButton
+          label={`Copy ${idLabel}`}
+          chord={idChord}
+          onClick={() => copyText(id, idLabel)}
+          quiet
+        >
+          id
+        </CopyActionButton>
+        <span aria-hidden="true">·</span>
+        {cli !== undefined && (
+          <>
+            <CopyActionButton
+              label={`Copy ${cliLabel}`}
+              chord="c i"
+              onClick={() => copyText(cli, cliLabel)}
+              quiet
+            >
+              CLI
+            </CopyActionButton>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
+        <CopyActionButton
+          label="Copy link"
+          chord="c l"
+          onClick={copyLink}
+          quiet
+        >
+          link
+        </CopyActionButton>
+      </div>
+    );
+  }
+
   return (
-    <div className="inline-flex items-center gap-1" role="group" aria-label="Copy actions">
-      <CopyActionButton label={`Copy ${idLabel}`} chord={idChord} onClick={() => copyText(id, idLabel)}>
+    <div
+      className="inline-flex items-center gap-1"
+      role="group"
+      aria-label="Copy actions"
+    >
+      <CopyActionButton
+        label={`Copy ${idLabel}`}
+        chord={idChord}
+        onClick={() => copyText(id, idLabel)}
+      >
         <svg
           viewBox="0 0 14 14"
           fill="none"
@@ -155,7 +278,11 @@ export function CopyActions({
         </svg>
       </CopyActionButton>
       {cli !== undefined && (
-        <CopyActionButton label={`Copy ${cliLabel}`} chord="c i" onClick={() => copyText(cli, cliLabel)}>
+        <CopyActionButton
+          label={`Copy ${cliLabel}`}
+          chord="c i"
+          onClick={() => copyText(cli, cliLabel)}
+        >
           <svg
             viewBox="0 0 14 14"
             fill="none"
@@ -220,8 +347,13 @@ function FilterToken({
           : "border-dashed text-(--hue-warn)"
       }`}
     >
-      <span className={`mono ${token.supported ? "" : "line-through"}`}>{label}</span>
-      <span aria-hidden className="text-(--text-faint) group-hover:text-(--text)">
+      <span className={`mono ${token.supported ? "" : "line-through"}`}>
+        {label}
+      </span>
+      <span
+        aria-hidden
+        className="text-(--text-faint) group-hover:text-(--text)"
+      >
         ×
       </span>
     </button>
@@ -270,7 +402,11 @@ export function FilterInput<T = unknown, C = unknown>({
     return getFilterSuggestions(activeToken.raw, facets, query, getValueHue);
   }, [activeToken.raw, facets, query]);
 
-  const showPopover = isFocused && !isDismissed && (facets != null || query != null) && suggestions.length > 0;
+  const showPopover =
+    isFocused &&
+    !isDismissed &&
+    (facets != null || query != null) &&
+    suggestions.length > 0;
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -278,7 +414,9 @@ export function FilterInput<T = unknown, C = unknown>({
 
   useEffect(() => {
     if (showPopover && listRef.current) {
-      const activeEl = listRef.current.querySelector<HTMLElement>(`[aria-selected="true"]`);
+      const activeEl = listRef.current.querySelector<HTMLElement>(
+        `[aria-selected="true"]`,
+      );
       activeEl?.scrollIntoView({ block: "nearest" });
     }
   }, [selectedIndex, showPopover]);
@@ -324,7 +462,11 @@ export function FilterInput<T = unknown, C = unknown>({
           aria-expanded={showPopover}
           aria-autocomplete="list"
           aria-controls={showPopover ? listboxId : undefined}
-          aria-activedescendant={showPopover && suggestions[selectedIndex] ? `${listboxId}-opt-${selectedIndex}` : undefined}
+          aria-activedescendant={
+            showPopover && suggestions[selectedIndex]
+              ? `${listboxId}-opt-${selectedIndex}`
+              : undefined
+          }
           aria-describedby={query ? hintId : undefined}
           value={value}
           onChange={(e) => {
@@ -354,7 +496,10 @@ export function FilterInput<T = unknown, C = unknown>({
               }
               if (e.key === "ArrowUp") {
                 e.preventDefault();
-                setSelectedIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+                setSelectedIndex(
+                  (prev) =>
+                    (prev - 1 + suggestions.length) % suggestions.length,
+                );
                 return;
               }
               if (e.key === "Enter" || e.key === "Tab") {
@@ -371,7 +516,11 @@ export function FilterInput<T = unknown, C = unknown>({
                 setIsDismissed(true);
                 return;
               }
-            } else if (e.key === "ArrowDown" && suggestions.length > 0 && isDismissed) {
+            } else if (
+              e.key === "ArrowDown" &&
+              suggestions.length > 0 &&
+              isDismissed
+            ) {
               e.preventDefault();
               setIsDismissed(false);
               return;
@@ -500,7 +649,13 @@ export function FilterInput<T = unknown, C = unknown>({
 }
 
 /** Pinned title/tabs/filter; only the table (and anything below it) scrolls. */
-export function ListPane({ chrome, children }: { chrome: ReactNode; children: ReactNode }) {
+export function ListPane({
+  chrome,
+  children,
+}: {
+  chrome: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="shrink-0 px-5 pt-5 pb-3">{chrome}</div>
@@ -529,16 +684,22 @@ export function DetailPane({
   children: ReactNode;
 }) {
   return (
-    <aside className={`${widthClass} flex min-h-0 shrink-0 flex-col border-l border-(--border) bg-(--surface-1)`}>
+    <aside
+      className={`${widthClass} flex min-h-0 shrink-0 flex-col border-l border-(--border) bg-(--surface-1)`}
+    >
       <div className="shrink-0 border-b border-(--border) px-4 py-3">
         {/* Row 1: Title & Close */}
         <div className="flex items-center justify-between gap-2">
-          <div className="display min-w-0 flex-1 truncate text-[14px] font-semibold">{title}</div>
+          <div className="display min-w-0 flex-1 truncate text-[14px] font-semibold">
+            {title}
+          </div>
           {close != null && <div className="shrink-0">{close}</div>}
         </div>
         {/* Row 2: Verb Row (≤ 3 bordered buttons) */}
         {actions != null && (
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5">{actions}</div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5">
+            {actions}
+          </div>
         )}
         {/* Row 3: Utility Row (copy/share quiet text line) */}
         {utility != null && (
@@ -553,6 +714,39 @@ export function DetailPane({
 }
 
 export const ESC_CLEARS_FILTER = "Esc clears the filter";
+
+/** Previous/next controls for a 100-row table window. */
+export function TableWindowFooter({
+  colSpan,
+  range,
+  move,
+}: {
+  colSpan: number;
+  range: readonly [number, number, number];
+  move: (direction: number) => void;
+}) {
+  const [start, end, total] = range;
+  if (total <= 100) return null;
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        onKeyDown={(e) =>
+          (e.key === "Enter" || e.key === " ") && e.stopPropagation()
+        }
+        align="right"
+      >
+        {start + 1}–{end}/{total}{" "}
+        <Button disabled={!start} onClick={() => move(-1)}>
+          Prev
+        </Button>{" "}
+        <Button disabled={end === total} onClick={() => move(1)}>
+          Next
+        </Button>
+      </td>
+    </tr>
+  );
+}
 
 /** Empty / loading / error row for the dense lists. Never say "none" while pending. */
 export function ListEmpty({
@@ -579,10 +773,14 @@ export function ListEmpty({
   else if (query.isError && !query.data) {
     msg = `Cannot reach the control API — ${noun} will appear when it is up.`;
   } else if (filtered) msg = `No ${noun} match this filter.`;
-  const showEscHint = (filtered || escHint) && !query.isPending && !query.isError;
+  const showEscHint =
+    (filtered || escHint) && !query.isPending && !query.isError;
   return (
     <tr>
-      <td colSpan={colSpan} className="px-3 py-8 text-center text-(--text-faint)">
+      <td
+        colSpan={colSpan}
+        className="px-3 py-8 text-center text-(--text-faint)"
+      >
         <div>{msg}</div>
         {showEscHint && (
           <div className="mt-2 text-[11px]">{ESC_CLEARS_FILTER}</div>
@@ -592,7 +790,9 @@ export function ListEmpty({
             <Button onClick={onClear}>Clear filter</Button>
           </div>
         )}
-        {action && !query.isPending && !query.isError && !filtered && <div className="mt-3">{action}</div>}
+        {action && !query.isPending && !query.isError && !filtered && (
+          <div className="mt-3">{action}</div>
+        )}
       </td>
     </tr>
   );
@@ -624,15 +824,29 @@ export function Th({
 }) {
   const alignCls = align === "right" ? "text-right" : "text-left";
   const base = `sticky top-0 z-10 h-7 bg-(--surface-0) px-3 font-medium whitespace-nowrap shadow-[inset_0_-1px_0_var(--border)] ${alignCls}`;
-  if (!onSort && !onRemove) return <th className={base} title={title}>{label}</th>;
+  if (!onSort && !onRemove)
+    return (
+      <th className={base} title={title}>
+        {label}
+      </th>
+    );
   return (
-    <th aria-sort={dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"} className={`${base} p-0`}>
-      <div className={`group/th flex h-7 w-full items-center justify-between gap-1 px-3 ${align === "right" ? "justify-end" : ""}`}>
+    <th
+      aria-sort={
+        dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"
+      }
+      className={`${base} p-0`}
+    >
+      <div
+        className={`group/th flex h-7 w-full items-center justify-between gap-1 px-3 ${align === "right" ? "justify-end" : ""}`}
+      >
         {onSort ? (
           <button
             type="button"
             onClick={onSort}
-            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.stopPropagation()}
+            onKeyDown={(e) =>
+              (e.key === "Enter" || e.key === " ") && e.stopPropagation()
+            }
             title={title ?? `Sort by ${label.toLowerCase()}`}
             className={`inline-flex h-7 items-center gap-1 cursor-pointer font-medium transition-colors hover:text-(--text) ${dir ? "text-(--text)" : ""}`}
           >
@@ -666,6 +880,22 @@ export function Th({
   );
 }
 
+/** One disclosure marker everywhere: Radix weight, aligned box, 150ms rotation. */
+export function DisclosureChevron({
+  open,
+  className = "",
+}: {
+  open: boolean;
+  className?: string;
+}) {
+  return (
+    <ChevronRightIcon
+      aria-hidden="true"
+      className={`size-3 shrink-0 text-(--text-faint) transition-transform duration-150 ${open ? "rotate-90" : ""} ${className}`}
+    />
+  );
+}
+
 /**
  * A Linear-style section header row: chevron, state dot, label, count. The
  * whole band is one button (Enter/Space toggle for free, `aria-expanded` for
@@ -688,35 +918,44 @@ export function GroupHeaderRow({
   const hue = section.hue ?? "var(--text-faint)";
   return (
     <tr>
-      <td colSpan={colSpan} className={`p-0 ${sub ? "" : "sticky top-7 z-[5]"}`}>
+      <td
+        colSpan={colSpan}
+        className={`p-0 ${sub ? "" : "sticky top-7 z-[5]"}`}
+      >
         <button
           type="button"
           aria-expanded={!collapsed}
           onClick={onToggle}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.stopPropagation()}
+          onKeyDown={(e) =>
+            (e.key === "Enter" || e.key === " ") && e.stopPropagation()
+          }
           className={`flex w-full cursor-pointer items-center gap-2 border-b border-(--border) bg-(--surface-1) px-3 text-left transition-colors hover:bg-(--surface-2) ${
             sub ? "h-7 pl-8" : "h-8"
           }`}
         >
-          <span
-            aria-hidden
-            className={`text-[9px] text-(--text-faint) transition-transform duration-150 ${collapsed ? "" : "rotate-90"}`}
-          >
-            ▶
-          </span>
+          <DisclosureChevron open={!collapsed} />
           {!sub && (
             <span
               aria-hidden
               className="size-2 rounded-full"
-              style={{ background: hue, boxShadow: `0 0 0 3px color-mix(in oklch, ${hue} 18%, transparent)` }}
+              style={{
+                background: hue,
+                boxShadow: `0 0 0 3px color-mix(in oklch, ${hue} 18%, transparent)`,
+              }}
             />
           )}
-          <span className={`font-medium ${sub ? "text-[11.5px] text-(--text-dim)" : "text-[12px] text-(--text)"}`}>
+          <span
+            className={`font-medium ${sub ? "text-[11.5px] text-(--text-dim)" : "text-[12px] text-(--text)"}`}
+          >
             {section.label}
           </span>
-          <span className="tabular-nums text-[11px] text-(--text-faint)">{section.count}</span>
+          <span className="tabular-nums text-[11px] text-(--text-faint)">
+            {section.count}
+          </span>
           {collapsed && section.count > 0 && (
-            <span className="ml-auto pr-1 text-[10px] text-(--text-faint)">collapsed</span>
+            <span className="ml-auto pr-1 text-[10px] text-(--text-faint)">
+              collapsed
+            </span>
           )}
         </button>
       </td>
@@ -739,110 +978,258 @@ export function StateIcon({
   switch (norm) {
     case "admitted":
       return (
-        <svg viewBox="0 0 14 14" fill="currentColor" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="currentColor"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="3" />
         </svg>
       );
     case "planned":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className={className} aria-hidden="true">
-          <polygon points="5,3.5 10.5,7 5,10.5" fill="currentColor" fillOpacity="0.2" />
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={className}
+          aria-hidden="true"
+        >
+          <polygon
+            points="5,3.5 10.5,7 5,10.5"
+            fill="currentColor"
+            fillOpacity="0.2"
+          />
         </svg>
       );
     case "noop":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
           <line x1="4" y1="7" x2="10" y2="7" />
         </svg>
       );
     case "human_needed":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-          <path d="M7 2.5 L12 11.5 L2 11.5 Z" fill="currentColor" fillOpacity="0.18" />
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+          aria-hidden="true"
+        >
+          <path
+            d="M7 2.5 L12 11.5 L2 11.5 Z"
+            fill="currentColor"
+            fillOpacity="0.18"
+          />
           <line x1="7" y1="5.5" x2="7" y2="8" />
           <circle cx="7" cy="9.8" r="0.5" fill="currentColor" />
         </svg>
       );
     case "dead_lettered":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <line x1="3.8" y1="10.2" x2="10.2" y2="3.8" />
         </svg>
       );
     case "queued":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 2" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeDasharray="2 2"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
         </svg>
       );
     case "leased":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <circle cx="7" cy="7" r="1.8" fill="currentColor" />
         </svg>
       );
     case "running":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <path d="M7 2.5 A4.5 4.5 0 0 1 7 11.5 Z" fill="currentColor" />
         </svg>
       );
     case "verifying":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="6" cy="6" r="3.5" />
           <line x1="8.5" y1="8.5" x2="11.5" y2="11.5" />
         </svg>
       );
     case "completed":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-          <circle cx="7" cy="7" r="4.5" fill="currentColor" fillOpacity="0.18" />
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+          aria-hidden="true"
+        >
+          <circle
+            cx="7"
+            cy="7"
+            r="4.5"
+            fill="currentColor"
+            fillOpacity="0.18"
+          />
           <polyline points="4.8,7.2 6.3,8.7 9.3,5.3" />
         </svg>
       );
     case "failed":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
-          <circle cx="7" cy="7" r="4.5" fill="currentColor" fillOpacity="0.18" />
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
+          <circle
+            cx="7"
+            cy="7"
+            r="4.5"
+            fill="currentColor"
+            fillOpacity="0.18"
+          />
           <line x1="5" y1="5" x2="9" y2="9" />
           <line x1="9" y1="5" x2="5" y2="9" />
         </svg>
       );
     case "timed_out":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <polyline points="7,4.5 7,7 9,7" />
         </svg>
       );
     case "cancelled":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <line x1="4" y1="7" x2="10" y2="7" />
         </svg>
       );
     case "refused":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <line x1="10" y1="4" x2="4" y2="10" />
         </svg>
       );
     case "open":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" strokeDasharray="3 2" />
         </svg>
       );
     case "expired":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
-          <circle cx="7" cy="7" r="4.5" fill="currentColor" fillOpacity="0.18" />
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
+          <circle
+            cx="7"
+            cy="7"
+            r="4.5"
+            fill="currentColor"
+            fillOpacity="0.18"
+          />
           <line x1="7" y1="4" x2="7" y2="7.5" />
           <circle cx="7" cy="9.5" r="0.5" fill="currentColor" />
         </svg>
@@ -850,28 +1237,59 @@ export function StateIcon({
     case "live":
     case "idle":
       return (
-        <svg viewBox="0 0 14 14" fill="currentColor" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="currentColor"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="3.5" />
         </svg>
       );
     case "busy":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="4.5" />
           <path d="M7 2.5 A4.5 4.5 0 0 1 7 11.5 Z" fill="currentColor" />
         </svg>
       );
     case "stale":
       return (
-        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
-          <circle cx="7" cy="7" r="4.5" fill="currentColor" fillOpacity="0.18" />
+        <svg
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          className={className}
+          aria-hidden="true"
+        >
+          <circle
+            cx="7"
+            cy="7"
+            r="4.5"
+            fill="currentColor"
+            fillOpacity="0.18"
+          />
           <line x1="7" y1="4" x2="7" y2="7.5" />
           <circle cx="7" cy="9.5" r="0.5" fill="currentColor" />
         </svg>
       );
     default:
       return (
-        <svg viewBox="0 0 14 14" fill="currentColor" className={className} aria-hidden="true">
+        <svg
+          viewBox="0 0 14 14"
+          fill="currentColor"
+          className={className}
+          aria-hidden="true"
+        >
           <circle cx="7" cy="7" r="2.5" />
         </svg>
       );
@@ -894,11 +1312,56 @@ export function StateBadge({
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium"
-      style={{ color: hue, background: `color-mix(in oklch, ${hue} 12%, transparent)` }}
+      style={{
+        color: hue,
+        background: `color-mix(in oklch, ${hue} 12%, transparent)`,
+      }}
     >
       {dot && <StateIcon state={state} className="size-3 shrink-0" />}
       {state}
     </span>
+  );
+}
+
+export function StatCard({
+  label,
+  value,
+  suffix,
+  caption,
+  hue,
+  compact = false,
+}: {
+  label: string;
+  value: ReactNode;
+  suffix?: ReactNode;
+  caption?: ReactNode;
+  hue?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      data-stat-card
+      className={`${compact ? "min-w-0 rounded-md px-3 py-2" : "min-w-36 rounded-lg px-3.5 py-3"} border border-(--border) bg-(--surface-1)`}
+    >
+      <div className="text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+        {label}
+      </div>
+      <div
+        className={`display font-semibold tabular-nums ${compact ? "mt-0.5 text-lg" : "mt-1 text-xl"}`}
+      >
+        <span data-stat-value style={hue ? { color: hue } : undefined}>
+          {value}
+        </span>
+        {suffix}
+      </div>
+      {caption != null && (
+        <div
+          className={`${compact ? "text-[10px]" : "text-[11px]"} mt-0.5 text-(--text-faint)`}
+        >
+          {caption}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -916,12 +1379,16 @@ export function StatTile({
   const inner = (
     <>
       <div className="text-[11px] text-(--text-faint)">{label}</div>
-      <div className="display text-xl tabular-nums" style={hue ? { color: hue } : undefined}>
+      <div
+        className="display text-xl tabular-nums"
+        style={hue ? { color: hue } : undefined}
+      >
         {value}
       </div>
     </>
   );
-  const cls = "rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left";
+  const cls =
+    "rounded-md border border-(--border) bg-(--surface-1) px-3 py-2 text-left";
   if (!onClick) return <div className={cls}>{inner}</div>;
   return (
     <button
@@ -988,14 +1455,24 @@ export function JumpLink({
  * an expired badge elsewhere (e.g. the Proposals Decision column) should not
  * also repeat the word "expired" next to this.
  */
-export function Countdown({ createdAt, ttlSeconds }: { createdAt: string; ttlSeconds: number }) {
+export function Countdown({
+  createdAt,
+  ttlSeconds,
+}: {
+  createdAt: string;
+  ttlSeconds: number;
+}) {
   const now = useNow();
   const expiryMs = new Date(createdAt).getTime() + ttlSeconds * 1000;
   const expiryIso = new Date(expiryMs).toISOString();
   const left = Math.floor((expiryMs - now) / 1000);
   if (left <= 0) {
     return (
-      <span className="tabular-nums" style={{ color: "var(--hue-err)" }} title={expiryIso}>
+      <span
+        className="tabular-nums"
+        style={{ color: "var(--hue-err)" }}
+        title={expiryIso}
+      >
         expired {ago(expiryIso, now)}
       </span>
     );
@@ -1004,7 +1481,11 @@ export function Countdown({ createdAt, ttlSeconds }: { createdAt: string; ttlSec
   const s = left % 60;
   const low = left < 300;
   return (
-    <span className="tabular-nums" style={low ? { color: "var(--hue-warn)" } : undefined} title={expiryIso}>
+    <span
+      className="tabular-nums"
+      style={low ? { color: "var(--hue-warn)" } : undefined}
+      title={expiryIso}
+    >
       {m}:{String(s).padStart(2, "0")} left
     </span>
   );
@@ -1093,7 +1574,9 @@ export function ToastContainer() {
   const gap = polite.length > 0 && assertive.length > 0 ? "gap-2" : "";
 
   return (
-    <div className={`fixed bottom-4 right-4 z-50 flex flex-col pointer-events-none ${gap}`}>
+    <div
+      className={`fixed bottom-4 right-4 z-50 flex flex-col pointer-events-none ${gap}`}
+    >
       <ToastRegion role="status" live="polite" toasts={polite} />
       <ToastRegion role="alert" live="assertive" toasts={assertive} />
     </div>
@@ -1112,7 +1595,12 @@ function ToastRegion({
   return (
     // aria-atomic="false" — both roles default to atomic, which re-reads every
     // surviving toast whenever one is added or dismissed.
-    <div role={role} aria-live={live} aria-atomic="false" className="flex flex-col gap-2">
+    <div
+      role={role}
+      aria-live={live}
+      aria-atomic="false"
+      className="flex flex-col gap-2"
+    >
       {toasts.map((t) => (
         <button
           key={t.id}
@@ -1121,13 +1609,23 @@ function ToastRegion({
           onClick={() => dismissToast(t.id)}
           className="pointer-events-auto flex cursor-pointer items-center gap-2 rounded-md border bg-(--surface-1) px-3 py-2 text-left text-[12px] shadow-xl transition-all hover:bg-(--surface-2) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
           style={{
-            borderColor: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
+            borderColor:
+              t.type === "err"
+                ? "var(--hue-err)"
+                : t.type === "ok"
+                  ? "var(--hue-ok)"
+                  : "var(--accent)",
           }}
         >
           <span
             className="size-2 shrink-0 rounded-full"
             style={{
-              background: t.type === "err" ? "var(--hue-err)" : t.type === "ok" ? "var(--hue-ok)" : "var(--accent)",
+              background:
+                t.type === "err"
+                  ? "var(--hue-err)"
+                  : t.type === "ok"
+                    ? "var(--hue-ok)"
+                    : "var(--accent)",
             }}
           />
           <span className="text-(--text) font-medium">{t.message}</span>
@@ -1200,13 +1698,11 @@ export function Disclosure({
       onToggle={(e) => setOpen(e.currentTarget.open)}
       className="group mb-1.5 list-none"
     >
-      <summary className="flex cursor-pointer items-center gap-1.5 text-[11px] text-(--text-faint) select-none hover:text-(--text-dim) [&::-webkit-details-marker]:hidden list-none">
-        <span
-          aria-hidden
-          className={`inline-block text-[9px] text-(--text-faint) transition-transform duration-150 ${open ? "rotate-90" : ""}`}
-        >
-          ▶
-        </span>
+      <summary
+        aria-expanded={open}
+        className="flex cursor-pointer items-center gap-1.5 text-[11px] text-(--text-faint) select-none hover:text-(--text-dim) [&::-webkit-details-marker]:hidden list-none"
+      >
+        <DisclosureChevron open={open} />
         <span>{label}</span>
       </summary>
       <div className="mt-1.5">{children}</div>
@@ -1219,8 +1715,12 @@ const SECTIONS_KEY = "evrt-sections-collapsed";
 /** Collapsed section ids, shared by every Section on the page (WM-136). */
 function loadCollapsedSections(): string[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem(SECTIONS_KEY) ?? "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((s): s is string => typeof s === "string")
+      : [];
   } catch {
     // Private mode / stale value: sections simply start expanded.
     return [];
@@ -1278,7 +1778,9 @@ export function Section({
   icons?: boolean;
 }) {
   const key = id ?? title;
-  const [collapsed, setCollapsed] = useState(() => collapsible && loadCollapsedSections().includes(key));
+  const [collapsed, setCollapsed] = useState(
+    () => collapsible && loadCollapsedSections().includes(key),
+  );
   const toggle = () =>
     setCollapsed((prev) => {
       const next = !prev;
@@ -1287,37 +1789,36 @@ export function Section({
     });
 
   const heading = (
-    <span className="text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">{title}</span>
+    <span className="text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+      {title}
+    </span>
   );
 
   return (
     <KVIconsContext.Provider value={icons}>
-    <div className="mb-5">
-      {collapsible ? (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={!collapsed}
-          className="mb-1.5 flex w-full cursor-pointer items-center gap-1.5 text-left hover:text-(--text-dim)"
-        >
-          <span
-            aria-hidden="true"
-            className={`text-[9px] text-(--text-faint) transition-transform ${collapsed ? "" : "rotate-90"}`}
+      <div className="mb-5">
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={!collapsed}
+            className="mb-1.5 flex w-full cursor-pointer items-center gap-1.5 text-left hover:text-(--text-dim)"
           >
-            ▶
-          </span>
-          {heading}
-        </button>
-      ) : (
-        <div className="mb-1.5">{heading}</div>
-      )}
-      {!collapsed &&
-        (card ? (
-          <div className="rounded-md border border-(--border) bg-(--surface-0) px-3 py-1.5">{children}</div>
+            <DisclosureChevron open={!collapsed} />
+            {heading}
+          </button>
         ) : (
-          children
-        ))}
-    </div>
+          <div className="mb-1.5">{heading}</div>
+        )}
+        {!collapsed &&
+          (card ? (
+            <div className="rounded-md border border-(--border) bg-(--surface-0) px-3 py-1.5">
+              {children}
+            </div>
+          ) : (
+            children
+          ))}
+      </div>
     </KVIconsContext.Provider>
   );
 }
@@ -1356,7 +1857,8 @@ export function KV({
   icon?: ReactNode;
 }) {
   const autoIcons = useContext(KVIconsContext);
-  const resolvedIcon = icon !== undefined ? icon : autoIcons ? attrIcon(k) : undefined;
+  const resolvedIcon =
+    icon !== undefined ? icon : autoIcons ? attrIcon(k) : undefined;
   const text = typeof v === "string" ? v : null;
   const copyable = !!text && text !== "-";
   const isMono = mono ?? (text !== null && looksLikeIdentifier(text));
@@ -1366,9 +1868,15 @@ export function KV({
   // eye had to re-find on every row (WM-136).
   return (
     <div className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] items-baseline gap-3 py-[3px]">
-      <div className="flex min-w-0 items-center gap-1.5 text-(--text-faint)" title={k}>
+      <div
+        className="flex min-w-0 items-center gap-1.5 text-(--text-faint)"
+        title={k}
+      >
         {resolvedIcon !== undefined && (
-          <i className="inline-flex size-3.5 shrink-0 items-center justify-center not-italic [&>svg]:size-3.5" aria-hidden="true">
+          <i
+            className="inline-flex size-3.5 shrink-0 items-center justify-center not-italic [&>svg]:size-3.5"
+            aria-hidden="true"
+          >
             {resolvedIcon}
           </i>
         )}
@@ -1402,10 +1910,18 @@ export function KV({
  * fifteen rows has no landmarks; a faint title plus a hairline every four or
  * five rows gives the eye somewhere to land without adding a second card.
  */
-export function KVGroup({ title, children }: { title: string; children: ReactNode }) {
+export function KVGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
   return (
     <div className="not-first:mt-2 not-first:border-t not-first:border-(--border) not-first:pt-2">
-      <div className="pb-0.5 text-[11px] font-medium text-(--text-faint)">{title}</div>
+      <div className="pb-0.5 text-[11px] font-medium text-(--text-faint)">
+        {title}
+      </div>
       {children}
     </div>
   );
@@ -1425,8 +1941,10 @@ export function Button({
   autoFocus?: boolean;
 }) {
   const styles = {
-    default: "border-(--border-strong) bg-(--surface-2) text-(--text) hover:bg-(--surface-3)",
-    primary: "border-transparent bg-(--accent) text-(--on-accent) hover:opacity-90",
+    default:
+      "border-(--border-strong) bg-(--surface-2) text-(--text) hover:bg-(--surface-3)",
+    primary:
+      "border-transparent bg-(--accent) text-(--on-accent) hover:opacity-90",
     danger:
       "border-(--border-strong) bg-(--surface-2) hover:bg-(--surface-3) text-(--hue-err)",
   }[variant];
@@ -1463,14 +1981,15 @@ function isTabCycleNodeVisible(el: HTMLElement, root: HTMLElement): boolean {
     current = current.parentElement;
   }
 
-  const visibility = el.ownerDocument.defaultView?.getComputedStyle(el).visibility;
+  const visibility =
+    el.ownerDocument.defaultView?.getComputedStyle(el).visibility;
   return visibility !== "hidden" && visibility !== "collapse";
 }
 
 /** Keep Tab focus inside a modal while ignoring controls hidden by layout. */
 export function tabCycle(root: HTMLElement, e: KeyboardEvent) {
-  const nodes = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) =>
-    isTabCycleNodeVisible(el, root),
+  const nodes = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => isTabCycleNodeVisible(el, root),
   );
   if (nodes.length === 0) {
     e.preventDefault();
@@ -1514,7 +2033,8 @@ export function Dialog({
     const depth = modal.depth;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && depth === modal.depth) onCloseRef.current();
-      else if (e.key === "Tab" && panelRef.current) tabCycle(panelRef.current, e);
+      else if (e.key === "Tab" && panelRef.current)
+        tabCycle(panelRef.current, e);
     };
     window.addEventListener("keydown", onKey);
     const root = panelRef.current;
@@ -1561,7 +2081,11 @@ export function Tabs({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="inline-flex gap-0.5 rounded-md border border-(--border) bg-(--surface-0) p-0.5">
+    <div
+      role="tablist"
+      aria-label={label}
+      className="inline-flex gap-0.5 rounded-md border border-(--border) bg-(--surface-0) p-0.5"
+    >
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -1587,7 +2111,13 @@ export function Tabs({
 }
 
 /** Read-only value badge (schema `const` fields). */
-export function Pill({ children, title }: { children: ReactNode; title?: string }) {
+export function Pill({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title?: string;
+}) {
   return (
     <span
       title={title}
@@ -1635,7 +2165,9 @@ export function SuggestInput({
 
   useEffect(() => {
     if (!show || !listRef.current) return;
-    listRef.current.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    listRef.current
+      .querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
   }, [highlight, show]);
 
   const pick = (s: string) => {
@@ -1652,7 +2184,9 @@ export function SuggestInput({
         aria-expanded={show}
         aria-autocomplete="list"
         aria-controls={show ? listId : undefined}
-        aria-activedescendant={show && items[highlight] ? `${listId}-opt-${highlight}` : undefined}
+        aria-activedescendant={
+          show && items[highlight] ? `${listId}-opt-${highlight}` : undefined
+        }
         value={value}
         onChange={(e) => {
           onChange(e.target.value);
@@ -1741,7 +2275,11 @@ export function ChipInput({
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  const [popoverRect, setPopoverRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [popoverRect, setPopoverRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const listId = useId();
   const anchorRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -1749,7 +2287,9 @@ export function ChipInput({
   const items = useMemo(() => {
     if (!suggestions || suggestions.length === 0) return [];
     const q = draft.trim().toLowerCase();
-    return suggestions.filter((s) => !values.includes(s) && (!q || s.toLowerCase().includes(q)));
+    return suggestions.filter(
+      (s) => !values.includes(s) && (!q || s.toLowerCase().includes(q)),
+    );
   }, [draft, suggestions, values]);
   const show = open && items.length > 0;
 
@@ -1760,7 +2300,12 @@ export function ChipInput({
     }
     const position = () => {
       const rect = anchorRef.current?.getBoundingClientRect();
-      if (rect) setPopoverRect({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+      if (rect)
+        setPopoverRect({
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+        });
     };
     position();
     window.addEventListener("resize", position);
@@ -1773,7 +2318,9 @@ export function ChipInput({
 
   useEffect(() => {
     if (!show || !listRef.current) return;
-    listRef.current.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    listRef.current
+      .querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
   }, [highlight, show]);
 
   const add = (raw: string) => {
@@ -1797,7 +2344,10 @@ export function ChipInput({
               className="group inline-flex cursor-pointer items-center gap-1 rounded-md border border-(--border) bg-(--surface-2) px-1.5 py-0.5 text-[11px] hover:border-(--border-strong) hover:bg-(--surface-3)"
             >
               <span className="mono">{v}</span>
-              <span aria-hidden className="text-(--text-faint) group-hover:text-(--text)">
+              <span
+                aria-hidden
+                className="text-(--text-faint) group-hover:text-(--text)"
+              >
                 ×
               </span>
             </button>
@@ -1812,7 +2362,9 @@ export function ChipInput({
           aria-expanded={show}
           aria-autocomplete="list"
           aria-controls={show ? listId : undefined}
-          aria-activedescendant={show && items[highlight] ? `${listId}-opt-${highlight}` : undefined}
+          aria-activedescendant={
+            show && items[highlight] ? `${listId}-opt-${highlight}` : undefined
+          }
           value={draft}
           onChange={(e) => {
             setDraft(e.target.value);
@@ -1949,4 +2501,3 @@ export function BulkActionBar({
     </div>
   );
 }
-

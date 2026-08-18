@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adapterExecuteTimeoutMs,
+  DYNAMIC_DEADLINE_ADAPTERS,
+  LEASE_GRACE_SECONDS,
+} from "../worker.mjs";
+import {
+  KILL_GRACE_MS,
   MIN_NODE_MAJOR,
   nodeVersionSatisfies,
   parseEvents,
@@ -21,7 +27,12 @@ const healthy = {
 describe("preflight", () => {
   test("reports available when qemu, node, and the sdk are all present", () => {
     const report = preflight(healthy);
-    expect(report).toMatchObject({ available: true, reason: null, sdk: true, nodeVersion: "24.18" });
+    expect(report).toMatchObject({
+      available: true,
+      reason: null,
+      sdk: true,
+      nodeVersion: "24.18",
+    });
   });
 
   test("a healthy host reports no cause — cause is set only when unavailable", () => {
@@ -34,7 +45,10 @@ describe("preflight", () => {
     // installed" means a checkout never ran `bun install` after a pull. Both
     // rendered as `available: false`, which is how the sandbox stayed switched
     // off fleet-wide for a day with nothing to signal it.
-    const noQemu = preflight({ ...healthy, which: (n) => (n.startsWith("qemu") ? null : `/usr/bin/${n}`) });
+    const noQemu = preflight({
+      ...healthy,
+      which: (n) => (n.startsWith("qemu") ? null : `/usr/bin/${n}`),
+    });
     const oldNode = preflight({ ...healthy, runNode: () => "v22.14.0" });
     const noNode = preflight({ ...healthy, which: () => null });
     const noSdk = preflight({ ...healthy, sdkExists: () => false });
@@ -46,7 +60,10 @@ describe("preflight", () => {
   });
 
   test("missing qemu is a named reason, not a crash", () => {
-    const report = preflight({ ...healthy, which: (n) => (n.startsWith("qemu") ? null : `/usr/bin/${n}`) });
+    const report = preflight({
+      ...healthy,
+      which: (n) => (n.startsWith("qemu") ? null : `/usr/bin/${n}`),
+    });
     expect(report.available).toBe(false);
     expect(report.reason).toMatch(/is not on PATH — install QEMU/);
   });
@@ -58,7 +75,10 @@ describe("preflight", () => {
   });
 
   test("FACTORY_SANDBOX_NODE overrides PATH, since the worker runs under Bun", () => {
-    const report = preflight({ ...healthy, env: { FACTORY_SANDBOX_NODE: "/opt/node23/bin/node" } });
+    const report = preflight({
+      ...healthy,
+      env: { FACTORY_SANDBOX_NODE: "/opt/node23/bin/node" },
+    });
     expect(report.node).toBe("/opt/node23/bin/node");
   });
 
@@ -83,20 +103,30 @@ describe("node version parsing", () => {
   });
 
   test("the floor is inclusive at the SDK's declared minimum", () => {
-    expect(nodeVersionSatisfies({ major: MIN_NODE_MAJOR, minor: 6 })).toBe(true);
-    expect(nodeVersionSatisfies({ major: MIN_NODE_MAJOR, minor: 5 })).toBe(false);
-    expect(nodeVersionSatisfies({ major: MIN_NODE_MAJOR + 1, minor: 0 })).toBe(true);
+    expect(nodeVersionSatisfies({ major: MIN_NODE_MAJOR, minor: 6 })).toBe(
+      true,
+    );
+    expect(nodeVersionSatisfies({ major: MIN_NODE_MAJOR, minor: 5 })).toBe(
+      false,
+    );
+    expect(nodeVersionSatisfies({ major: MIN_NODE_MAJOR + 1, minor: 0 })).toBe(
+      true,
+    );
     expect(nodeVersionSatisfies(null)).toBe(false);
   });
 });
 
 describe("NDJSON protocol", () => {
   test("parses whole lines and keeps the partial remainder for the next chunk", () => {
-    const first = parseEvents('{"type":"ready","bootMs":62}\n{"type":"stdout","data":"hel');
+    const first = parseEvents(
+      '{"type":"ready","bootMs":62}\n{"type":"stdout","data":"hel',
+    );
     expect(first.events).toEqual([{ type: "ready", bootMs: 62 }]);
     expect(first.rest).toBe('{"type":"stdout","data":"hel');
 
-    const second = parseEvents(`${first.rest}lo"}\n{"type":"exit","exitCode":0}\n`);
+    const second = parseEvents(
+      `${first.rest}lo"}\n{"type":"exit","exitCode":0}\n`,
+    );
     expect(second.events).toEqual([
       { type: "stdout", data: "hello" },
       { type: "exit", exitCode: 0 },
@@ -110,10 +140,38 @@ describe("NDJSON protocol", () => {
   });
 });
 
+describe("guest timeout under a dynamic-deadline run (WM-692)", () => {
+  test("the guest request timeout and the runner kill timer are bounded by policy", () => {
+    // `pi` and sandboxed `command` forward the worker's `timeoutMs` into the
+    // guest request and arm `setTimeout(kill, timeoutMs + KILL_GRACE_MS)`;
+    // that timer is what stops a wedged runner from pinning the run slot.
+    for (const adapterKey of ["pi", "command"]) {
+      expect(DYNAMIC_DEADLINE_ADAPTERS.has(adapterKey)).toBe(true);
+      const maxRunMinutes = 90;
+      const timeoutMs = adapterExecuteTimeoutMs({
+        adapterKey,
+        spec: { timeoutSeconds: 1_800 },
+        maxRunMinutes,
+      });
+      const ceilingMs = maxRunMinutes * 60_000 + LEASE_GRACE_SECONDS * 1000;
+      expect(timeoutMs).toBeGreaterThanOrEqual(1_800_000);
+      expect(timeoutMs).toBeLessThanOrEqual(ceilingMs);
+      expect(timeoutMs + KILL_GRACE_MS).toBeLessThanOrEqual(
+        ceilingMs + KILL_GRACE_MS,
+      );
+      expect(timeoutMs + KILL_GRACE_MS).toBeLessThan(2 ** 31 - 1);
+      expect(timeoutMs).toBeLessThan(24 * 60 * 60_000);
+    }
+  });
+});
+
 describe("runInSandbox refusals", () => {
   // FACTORY_SANDBOX_NODE points at a path that cannot exist, so preflight
   // fails on any machine, with or without QEMU installed.
-  const unavailableHost = { FACTORY_SANDBOX_NODE: "/nonexistent/node", PATH: "" };
+  const unavailableHost = {
+    FACTORY_SANDBOX_NODE: "/nonexistent/node",
+    PATH: "",
+  };
 
   test("an unavailable host refuses with a typed error before spawning anything", async () => {
     await expect(

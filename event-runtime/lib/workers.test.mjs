@@ -22,7 +22,13 @@ import {
 } from "./workers.mjs";
 
 const PV = "git:test-pv";
-const db = () => openDb(path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-workers-")), "runtime.db"));
+const db = () =>
+  openDb(
+    path.join(
+      mkdtempSync(path.join(os.tmpdir(), "evrt-workers-")),
+      "runtime.db",
+    ),
+  );
 
 /** A QUEUED run, straight through the real lifecycle. */
 function queueRun(database, { runId, placement, adapter = "fake" }) {
@@ -45,7 +51,9 @@ function queueRun(database, { runId, placement, adapter = "fake" }) {
     actor: "planner",
     policyVersion: PV,
   });
-  database.query(`UPDATE runs SET state = 'QUEUED' WHERE run_id = ?`).run(runId);
+  database
+    .query(`UPDATE runs SET state = 'QUEUED' WHERE run_id = ?`)
+    .run(runId);
   return spec;
 }
 
@@ -59,8 +67,15 @@ describe("cross-process claiming (OPS-233)", () => {
 
     expect(first?.runId).toBe("run_contended");
     expect(second).toBeNull(); // no double-claim, no second attempt row
-    expect(d.query(`SELECT COUNT(*) AS n FROM attempts WHERE run_id = ?`).get("run_contended").n).toBe(1);
-    expect(d.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_contended").state).toBe("LEASED");
+    expect(
+      d
+        .query(`SELECT COUNT(*) AS n FROM attempts WHERE run_id = ?`)
+        .get("run_contended").n,
+    ).toBe(1);
+    expect(
+      d.query(`SELECT state FROM runs WHERE run_id = ?`).get("run_contended")
+        .state,
+    ).toBe("LEASED");
   });
 
   test("each worker takes a different run, oldest first", () => {
@@ -89,37 +104,66 @@ describe("placement (OPS-233, workers doc §4)", () => {
     const d = db();
     queueRun(d, { runId: "run_lab", placement: { node: "lab" } });
 
-    expect(claimNext(d, { owner: "web-worker", policyVersion: PV, labels: { node: "web" } })).toBeNull();
-    const claimed = claimNext(d, { owner: "lab-worker", policyVersion: PV, labels: { node: "lab" } });
+    expect(
+      claimNext(d, {
+        owner: "web-worker",
+        policyVersion: PV,
+        labels: { node: "web" },
+      }),
+    ).toBeNull();
+    const claimed = claimNext(d, {
+      owner: "lab-worker",
+      policyVersion: PV,
+      labels: { node: "lab" },
+    });
     expect(claimed?.runId).toBe("run_lab");
   });
 
   test("an unplaced run is claimable by any worker", () => {
     const d = db();
     queueRun(d, { runId: "run_any" });
-    expect(claimNext(d, { owner: "w", policyVersion: PV, labels: { node: "anywhere" } })?.runId).toBe("run_any");
+    expect(
+      claimNext(d, {
+        owner: "w",
+        policyVersion: PV,
+        labels: { node: "anywhere" },
+      })?.runId,
+    ).toBe("run_any");
   });
 
   test("a placed run is skipped, not blocking: the next eligible run is claimed", () => {
     const d = db();
     queueRun(d, { runId: "run_lab_first", placement: { node: "lab" } });
     queueRun(d, { runId: "run_unplaced" });
-    const claimed = claimNext(d, { owner: "web-worker", policyVersion: PV, labels: { node: "web" } });
+    const claimed = claimNext(d, {
+      owner: "web-worker",
+      policyVersion: PV,
+      labels: { node: "web" },
+    });
     expect(claimed?.runId).toBe("run_unplaced");
   });
 
   test("a worker skips adapters it does not have", () => {
     const d = db();
     queueRun(d, { runId: "run_claude", adapter: "claude" });
-    expect(claimNext(d, { owner: "w", policyVersion: PV, adapters: ["command"] })).toBeNull();
-    expect(claimNext(d, { owner: "w", policyVersion: PV, adapters: ["claude"] })?.runId).toBe("run_claude");
+    expect(
+      claimNext(d, { owner: "w", policyVersion: PV, adapters: ["command"] }),
+    ).toBeNull();
+    expect(
+      claimNext(d, { owner: "w", policyVersion: PV, adapters: ["claude"] })
+        ?.runId,
+    ).toBe("run_claude");
   });
 
   test("satisfiesPlacement: every declared key must match; no requirement means anywhere", () => {
     expect(satisfiesPlacement({ node: "lab" }, undefined)).toBe(true);
     expect(satisfiesPlacement({ node: "lab" }, {})).toBe(true);
-    expect(satisfiesPlacement({ node: "lab", can: "infra-exec" }, { node: "lab" })).toBe(true);
-    expect(satisfiesPlacement({ node: "lab" }, { node: "lab", can: "infra-exec" })).toBe(false);
+    expect(
+      satisfiesPlacement({ node: "lab", can: "infra-exec" }, { node: "lab" }),
+    ).toBe(true);
+    expect(
+      satisfiesPlacement({ node: "lab" }, { node: "lab", can: "infra-exec" }),
+    ).toBe(false);
     expect(satisfiesPlacement({}, { node: "lab" })).toBe(false);
   });
 });
@@ -127,9 +171,18 @@ describe("placement (OPS-233, workers doc §4)", () => {
 describe("worker registry and heartbeats (OPS-233)", () => {
   test("registers, heartbeats with its current run, and deregisters cleanly", () => {
     const d = db();
-    registerWorker(d, { workerId: "w1", labels: { node: "lab" }, adapters: ["fake"] });
+    registerWorker(d, {
+      workerId: "w1",
+      labels: { node: "lab" },
+      adapters: ["fake"],
+    });
     let [w] = listWorkers(d);
-    expect(w).toMatchObject({ workerId: "w1", state: "idle", labels: { node: "lab" }, adapters: ["fake"] });
+    expect(w).toMatchObject({
+      workerId: "w1",
+      state: "idle",
+      labels: { node: "lab" },
+      adapters: ["fake"],
+    });
     expect(w.stale).toBe(false);
 
     heartbeat(d, "w1", { state: "busy", runId: "run_1" });
@@ -165,7 +218,11 @@ describe("worker registry and heartbeats (OPS-233)", () => {
     registerWorker(d, { workerId: "w1", labels: { node: "web" } });
     const rows = listWorkers(d);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ state: "idle", labels: { node: "web" }, stoppedAt: null });
+    expect(rows[0]).toMatchObject({
+      state: "idle",
+      labels: { node: "web" },
+      stoppedAt: null,
+    });
   });
 
   test("pruning drops long-stopped workers only", () => {
@@ -187,28 +244,49 @@ describe("worker pool policy (WM-226)", () => {
   const configRoot = (yaml) => {
     const root = mkdtempSync(path.join(os.tmpdir(), "evrt-pool-cfg-"));
     mkdirSync(path.join(root, "config"), { recursive: true });
-    if (yaml !== null) writeFileSync(path.join(root, "config", "policy.yaml"), yaml, "utf8");
+    if (yaml !== null)
+      writeFileSync(path.join(root, "config", "policy.yaml"), yaml, "utf8");
     return root;
   };
 
   test("an absent workers: block is null, not a default — that absence keeps the single-worker stack", () => {
     expect(loadWorkerPolicy({ root: configRoot(null) })).toBeNull();
-    expect(loadWorkerPolicy({ root: configRoot("concurrency:\n  max_in_flight_per_repo: 3\n") })).toBeNull();
+    expect(
+      loadWorkerPolicy({
+        root: configRoot("concurrency:\n  max_in_flight_per_repo: 3\n"),
+      }),
+    ).toBeNull();
   });
 
   test("a workers: block is read, and a partial one falls back per bound", () => {
-    expect(loadWorkerPolicy({ root: configRoot("workers:\n  min: 2\n  max: 5\n") })).toEqual({ min: 2, max: 5 });
-    expect(loadWorkerPolicy({ root: configRoot("workers:\n  max: 4\n") })).toEqual({ min: DEFAULT_POOL.min, max: 4 });
+    expect(
+      loadWorkerPolicy({ root: configRoot("workers:\n  min: 2\n  max: 5\n") }),
+    ).toEqual({ min: 2, max: 5 });
+    expect(
+      loadWorkerPolicy({ root: configRoot("workers:\n  max: 4\n") }),
+    ).toEqual({ min: DEFAULT_POOL.min, max: 4 });
     // An empty block is still a block: it selects the pool at its defaults.
-    expect(loadWorkerPolicy({ root: configRoot("workers: {}\n") })).toEqual(DEFAULT_POOL);
+    expect(loadWorkerPolicy({ root: configRoot("workers: {}\n") })).toEqual(
+      DEFAULT_POOL,
+    );
   });
 
   test("nonsense bounds fail closed, naming the key — an unbounded pool is the expensive mistake", () => {
-    expect(() => loadWorkerPolicy({ root: configRoot("workers:\n  min: 4\n  max: 2\n") })).toThrow(/min \(4\) cannot exceed max \(2\)/);
-    expect(() => loadWorkerPolicy({ root: configRoot("workers:\n  max: 0\n") })).toThrow(/max must be at least 1/);
-    expect(() => loadWorkerPolicy({ root: configRoot("workers:\n  min: -1\n") })).toThrow(/min must be a non-negative integer/);
-    expect(() => loadWorkerPolicy({ root: configRoot("workers:\n  max: two\n") })).toThrow(/max must be a non-negative integer/);
-    expect(() => loadWorkerPolicy({ root: configRoot("workers: [1, 3]\n") })).toThrow(/must be a map with min\/max/);
+    expect(() =>
+      loadWorkerPolicy({ root: configRoot("workers:\n  min: 4\n  max: 2\n") }),
+    ).toThrow(/min \(4\) cannot exceed max \(2\)/);
+    expect(() =>
+      loadWorkerPolicy({ root: configRoot("workers:\n  max: 0\n") }),
+    ).toThrow(/max must be at least 1/);
+    expect(() =>
+      loadWorkerPolicy({ root: configRoot("workers:\n  min: -1\n") }),
+    ).toThrow(/min must be a non-negative integer/);
+    expect(() =>
+      loadWorkerPolicy({ root: configRoot("workers:\n  max: two\n") }),
+    ).toThrow(/max must be a non-negative integer/);
+    expect(() =>
+      loadWorkerPolicy({ root: configRoot("workers: [1, 3]\n") }),
+    ).toThrow(/must be a map with min\/max/);
   });
 
   test("--workers min:max parses; a bare N pins the pool", () => {
@@ -244,7 +322,10 @@ describe("pool scaling decisions (WM-226)", () => {
   });
 
   test("below min always spawns, even while another worker is booting", () => {
-    expect(decide({ min: 2, max: 3, queued: 0, idle: 0, pool: 1, pending: 1 }).action).toBe("spawn");
+    expect(
+      decide({ min: 2, max: 3, queued: 0, idle: 0, pool: 1, pending: 1 })
+        .action,
+    ).toBe("spawn");
   });
 
   test("idle surplus above min drains, one worker per tick", () => {
@@ -260,21 +341,37 @@ describe("pool scaling decisions (WM-226)", () => {
   test("a worker already draining is not counted as staying — the pool cannot drain through its floor", () => {
     // Two workers, min 1, one already asked to leave. Counting it as present
     // would drain the second too, and the pool would respawn from empty.
-    expect(decide({ queued: 0, idle: 2, pool: 2, draining: 1 }).action).toBe("hold");
-    expect(decide({ queued: 0, idle: 3, pool: 3, draining: 1 }).action).toBe("drain");
+    expect(decide({ queued: 0, idle: 2, pool: 2, draining: 1 }).action).toBe(
+      "hold",
+    );
+    expect(decide({ queued: 0, idle: 3, pool: 3, draining: 1 }).action).toBe(
+      "drain",
+    );
     // Symmetrically, a departure that takes the pool under min is refilled now
     // rather than a tick after the floor is breached.
-    expect(decide({ queued: 0, idle: 1, pool: 1, draining: 1 }).action).toBe("spawn");
+    expect(decide({ queued: 0, idle: 1, pool: 1, draining: 1 }).action).toBe(
+      "spawn",
+    );
   });
 
   test("min 0 lets the pool reach zero and come back", () => {
-    expect(decide({ min: 0, queued: 0, idle: 1, pool: 1 }).action).toBe("drain");
-    expect(decide({ min: 0, queued: 1, idle: 0, pool: 0 }).action).toBe("spawn");
+    expect(decide({ min: 0, queued: 0, idle: 1, pool: 1 }).action).toBe(
+      "drain",
+    );
+    expect(decide({ min: 0, queued: 1, idle: 0, pool: 0 }).action).toBe(
+      "spawn",
+    );
   });
 
   test("every decision carries the counts that justified it", () => {
     expect(decide({ queued: 2, idle: 0, pool: 1, pending: 0 }).counts).toEqual({
-      queued: 2, idle: 0, pool: 1, pending: 0, draining: 0, min: 1, max: 3,
+      queued: 2,
+      idle: 0,
+      pool: 1,
+      pending: 0,
+      draining: 0,
+      min: 1,
+      max: 3,
     });
   });
 });
@@ -303,6 +400,8 @@ describe("poolCounts (WM-226)", () => {
 
     const counts = poolCounts(d, { now: started + HEARTBEAT_STALE_MS + 1000 });
     expect(counts).toMatchObject({ queued: 1, live: 0, idle: 0 });
-    expect(poolDecision({ ...counts, pool: 0, min: 1, max: 2 }).action).toBe("spawn");
+    expect(poolDecision({ ...counts, pool: 0, min: 1, max: 2 }).action).toBe(
+      "spawn",
+    );
   });
 });

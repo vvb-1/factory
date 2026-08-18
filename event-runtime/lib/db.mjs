@@ -223,13 +223,47 @@ export const MIGRATIONS = [
       // A cold start can have several processes read user_version before one
       // acquires the migration lock. Keep the additive step retry-safe when a
       // waiter enters with that stale read after the first process committed.
-      const columns = db.query(`PRAGMA table_info(events)`).all().map((row) => row.name);
+      const columns = db
+        .query(`PRAGMA table_info(events)`)
+        .all()
+        .map((row) => row.name);
       if (!columns.includes("archived_at")) {
         db.exec(`ALTER TABLE events ADD COLUMN archived_at TEXT;`);
       }
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_events_dead_letter_archive
           ON events (status, archived_at);
+      `);
+    },
+  },
+  {
+    // The inbox design originally reserved v5. The dead-letter archive
+    // migration landed while WM-390 was blocked, so this additive upgrade is
+    // v6 and its regression fixture starts from the now-real v5 schema.
+    version: 6,
+    name: "inbox_decisions",
+    up(db) {
+      const columns = new Set(
+        db
+          .query(`PRAGMA table_info(inbox_items)`)
+          .all()
+          .map((row) => row.name),
+      );
+      for (const [name, type] of [
+        ["decision_json", "TEXT"],
+        ["response_json", "TEXT"],
+        ["decided_at", "TEXT"],
+        ["decided_by", "TEXT"],
+        ["dedupe_key", "TEXT"],
+      ]) {
+        if (!columns.has(name)) {
+          db.exec(`ALTER TABLE inbox_items ADD COLUMN ${name} ${type};`);
+        }
+      }
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS inbox_items_open_dedupe
+          ON inbox_items (dedupe_key)
+          WHERE resolved_at IS NULL AND dedupe_key IS NOT NULL;
       `);
     },
   },
@@ -343,6 +377,7 @@ function enableWal(db, { attempts = 20, waitMs = 50 } = {}) {
       if (i === attempts - 1) {
         throw new Error(
           `could not switch the database to WAL after ${attempts} attempts: ${err.message}`,
+          { cause: err },
         );
       }
       Bun.sleepSync(waitMs);

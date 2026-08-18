@@ -59,7 +59,7 @@ disagree.
 
 **The claim protocol is the dispatcher's, verbatim.** `tick.mjs` claims by
 writing the assignee and reading it back — Linear has no compare-and-swap, so
-the read-back *is* the concurrency control — and serializes the
+the read-back _is_ the concurrency control — and serializes the
 read-decide-claim window through a machine-local lock file
 (`~/.factory/locks/<repo>.dispatch.lock`), because every local supervisor
 authenticates as the same Linear user (OPS-40) and the read-back cannot tell
@@ -79,7 +79,7 @@ only when the ticket still looks like our claim (In Progress, assigned to us,
 Blocked or In Review keeps that state.
 
 **A recorded asymmetry, not a contradiction.** `tick.mjs` deliberately does
-*not* treat an assignee on a Todo ticket as a gate — with one shared Linear
+_not_ treat an assignee on a Todo ticket as a gate — with one shared Linear
 identity, "has an assignee" is indistinguishable from "was claimed and never
 cleared", and skipping such tickets forever is the reaper's failure to fix,
 not dispatch's to avoid. The event run's rule is stricter: assigned →
@@ -149,6 +149,30 @@ parseable `Owned Paths` owns everything (dispatchable, but alone), and
 ambiguous glob overlap errs toward collision — a false positive serializes
 two tickets, a false negative puts two agents in one file.
 
+**Collision mode (WM-677).** `config/policy.yaml` `dispatch.owned_paths_collision`
+selects what a collision _does_:
+
+| mode                           | on overlap                                                                                                    | still refuses                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `strict` (default when absent) | refuse, `owned_paths_overlap`                                                                                 | —                                                 |
+| `advisory`                     | record on the proposal as `evidence.ownedPathsOverlap` (`{ticket, path, inFlightPath}` per pair) and dispatch | `**` on either side → `owned_paths_conflict_hard` |
+
+Advisory exists because the strict oracle refuses far more than it protects:
+tickets scope themselves with qualified claims (`views/*.tsx (formatter
+call-sites only)`) that the glob algebra cannot see, and shared-prefix
+wildcards collide by construction. On 2026-08-18 nine dispatch attempts
+became two running workers under strict, while six textually-overlapping PRs
+rebased onto develop clean the same day. Textual overlap is a rebase job and
+`merge-fix` already does it; the pool should not idle waiting for it. What
+advisory keeps hard is only the `**` sentinel, whose whole meaning is
+"alone". Two tickets naming the _same file_ is not hard: same file is not
+same lines — tickets qualify claims (`App.tsx (interval constants only)`) for
+exactly this — and an identical-file rule tried first refused four tickets in
+one batch on `App.tsx`/`hooks.ts`/`api.mjs`. Merging remains serialized (`concurrency.max_concurrent_merges`),
+which is where real conflicts are caught. Both the planner and the worker's
+execute-time re-check read the same setting, so operator approval and worker
+claim cannot disagree.
+
 **Rejected: a second overlap implementation inside the runtime.** The
 existing parser has already bitten once — architecture.md §2.3's CLNT-616,
 where a correctly specced ticket parsed as empty and dispatch refused it —
@@ -201,6 +225,9 @@ through the runtime's existing `claude` adapter
 tier-2 workspace from §5. Same registry, same conformance bar, same
 lifecycle, same receipts as every other run — repository mutation is a
 capability and a workspace type, not a parallel execution path.
+Every worktree agent passes the dispatch gate unless its definition declares
+`dispatchGateExempt: true`, which registry validation permits only on a
+`workspace.type: worktree` definition.
 
 **Rejected: a closed command template shelling to `runners/run-agent.sh`.**
 It looks like less work — the runner already spawns ticket-shaped sessions —
@@ -210,7 +237,7 @@ and it is the wrong shape three ways:
   `factory.trace/v1` events (assistant text, tool use, usage) and captures
   the transcript as a run artifact; a shelled runner collapses all of that
   into an opaque exit code. No trace, no usage, no transcript artifact, no
-  verified result contract — the run would be *less* observable than a
+  verified result contract — the run would be _less_ observable than a
   read-only status report, on the one run class that mutates code.
 - **Duplicated machinery.** The adapter already owns the timeout discipline
   (TERM, then KILL), subscription auth (strips `ANTHROPIC_API_KEY`,
@@ -264,7 +291,7 @@ event-runtime-workers.md §5), with one permanent exception:
 - **The ship chain's deploy-branch merge is PERMANENTLY `watched`.** That
   watched approval **is** the human master-merge decision — policy.yaml:
   master/main always goes through a human, on every repo. It is not an
-  approval *about* the decision; it is the decision, relocated into the
+  approval _about_ the decision; it is the decision, relocated into the
   runtime's inbox. Because §2's earned-automation ratchet only ever loosens,
   this one must be enforced **structurally (WM-111), not by convention**:
   registry validation fails closed on `approval: auto` for any agent whose
@@ -276,6 +303,10 @@ The failure this prevents: earned-automation creep quietly consuming the one
 decision the whole factory routes through a human. Every other gate here may
 someday relax on evidence; this one may not, and the place that says so is a
 validator, not a paragraph.
+
+Command-emitted chain authority is definition data: `chainCommandEdges`
+declares its registered event types, and `chainRepoMustMatchInput: true`
+requires the emitted repository to match the predecessor input.
 
 ---
 
@@ -356,10 +387,16 @@ Recorded, not silently decided:
 ## Autonomous develop merge lifecycle (WM-398)
 
 Merge control is a durable runtime chain, not an interactive-orchestrator
-procedure: an enabled singleton schedule runs an independent cold scan;
-mechanical in-scope fixes are SHA/finding-hash pinned and bounded to two rounds;
-a policy-safe plan contains exactly one PR; and deterministic apply rechecks
-head/base SHA, CI, draft, mergeability, and holds immediately before landing.
+procedure. A dispatch `PR_OPEN` completion immediately fans out a scoped
+`factory.merge.requested {repo, prNumbers: [prNumber]}`, and a successful
+pull-request `workflow_run` emits the same scoped request, idempotent per PR
+head SHA. Scoped scans resolve exactly the named PR and never enumerate the
+rest of the queue. The enabled 15-minute singleton schedule remains a full-set
+sweep for missed events and human-opened PRs. Mechanical in-scope fixes are
+SHA/finding-hash pinned and bounded to two rounds; a policy-safe plan contains
+exactly one PR; and deterministic apply rechecks head/base SHA, CI, draft,
+mergeability, and holds immediately before landing. Every stale/pending refresh
+from apply carries that same PR number, preserving O(1) review work.
 Apply never marks Done or deletes the branch. A proven landing emits an exact
 merge-commit event whose deterministic verifier waits boundedly for base CI and
 configured smoke. Only green landing evidence permits exact worktree/head

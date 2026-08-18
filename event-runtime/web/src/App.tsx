@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 import { api } from "./api";
 import { ContextTabs } from "./components/ContextTabs";
 import {
@@ -10,11 +18,29 @@ import {
   rememberOpenRepo,
   type OperatorContext,
 } from "./context";
-import { artifactsHash, eventsHash, hashPath, hashProject, hashSearch, withProject } from "./hash";
-import { keyGuard, THEMES, useHashRoute, useTheme, type Theme } from "./hooks";
+import {
+  artifactsHash,
+  eventsHash,
+  hashPath,
+  hashProject,
+  hashSearch,
+  withProject,
+} from "./hash";
+import {
+  keyGuard,
+  refetchIntervals,
+  THEMES,
+  useHashRoute,
+  useTheme,
+  type Theme,
+} from "./hooks";
 import { goPrefixActive } from "./goSequence";
 import type { EventFocus } from "./types";
-import { CommandPalette, useGoSequences, type PaletteAction } from "./components/CommandPalette";
+import {
+  CommandPalette,
+  useGoSequences,
+  type PaletteAction,
+} from "./components/CommandPalette";
 import { ToastContainer, copyLink, copyText } from "./components/ui";
 import type { ArtifactFilters } from "./views/Artifacts";
 import { Events } from "./views/Events";
@@ -23,7 +49,9 @@ import { Runs } from "./views/Runs";
 import { NAV, type NavKey } from "./nav";
 
 type WorkerHealthFilter = "live" | "busy" | "stale";
-const isWorkerHealthFilter = (value: string | null): value is WorkerHealthFilter =>
+const isWorkerHealthFilter = (
+  value: string | null,
+): value is WorkerHealthFilter =>
   value === "live" || value === "busy" || value === "stale";
 
 type NavBadge = {
@@ -33,20 +61,70 @@ type NavBadge = {
   title?: string;
 };
 
-const Artifacts = lazy(() => import("./views/Artifacts").then((m) => ({ default: m.Artifacts })));
-const Graph = lazy(() => import("./views/Graph").then((m) => ({ default: m.Graph })));
-const Chain = lazy(() => import("./views/Chain").then((m) => ({ default: m.Chain })));
-const Projects = lazy(() => import("./views/Projects").then((m) => ({ default: m.Projects })));
-const Schedules = lazy(() => import("./views/Schedules").then((m) => ({ default: m.Schedules })));
-const Proposals = lazy(() => import("./views/Proposals").then((m) => ({ default: m.Proposals })));
-const Agents = lazy(() => import("./views/Agents").then((m) => ({ default: m.Agents })));
-const RunFull = lazy(() => import("./views/RunFull").then((m) => ({ default: m.RunFull })));
-const Workers = lazy(() => import("./views/Workers").then((m) => ({ default: m.Workers })));
+function NavCount({ id, badge }: { id: string; badge: NavBadge }) {
+  return (
+    <span
+      id={id}
+      aria-hidden="true"
+      className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-medium leading-none tabular-nums"
+      title={badge.title}
+      style={{
+        color: badge.hue,
+        background: `color-mix(in oklch, ${badge.hue} 12%, transparent)`,
+      }}
+    >
+      {badge.count}
+      {badge.word && <span className="ml-1">{badge.word}</span>}
+    </span>
+  );
+}
+
+const Artifacts = lazy(() =>
+  import("./views/Artifacts").then((m) => ({ default: m.Artifacts })),
+);
+const Graph = lazy(() =>
+  import("./views/Graph").then((m) => ({ default: m.Graph })),
+);
+const Chain = lazy(() =>
+  import("./views/Chain").then((m) => ({ default: m.Chain })),
+);
+const Projects = lazy(() =>
+  import("./views/Projects").then((m) => ({ default: m.Projects })),
+);
+const Schedules = lazy(() =>
+  import("./views/Schedules").then((m) => ({ default: m.Schedules })),
+);
+const Proposals = lazy(() =>
+  import("./views/Proposals").then((m) => ({ default: m.Proposals })),
+);
+const Agents = lazy(() =>
+  import("./views/Agents").then((m) => ({ default: m.Agents })),
+);
+const RunFull = lazy(() =>
+  import("./views/RunFull").then((m) => ({ default: m.RunFull })),
+);
+const Ticket = lazy(() =>
+  import("./views/Ticket").then((m) => ({ default: m.Ticket })),
+);
+// The PR journey (WM-640) shares the ticket journey chunk — same layout, other subject.
+const PullRequest = lazy(() =>
+  import("./views/Ticket").then((m) => ({ default: m.PullRequest })),
+);
+const Workers = lazy(() =>
+  import("./views/Workers").then((m) => ({ default: m.Workers })),
+);
+const Inbox = lazy(() =>
+  import("./views/Inbox").then((m) => ({ default: m.Inbox })),
+);
 const ShortcutsDialog = lazy(() =>
-  import("./components/ShortcutsDialog").then((m) => ({ default: m.ShortcutsDialog })),
+  import("./components/ShortcutsDialog").then((m) => ({
+    default: m.ShortcutsDialog,
+  })),
 );
 const InjectDialog = lazy(() =>
-  import("./components/InjectDialog").then((m) => ({ default: m.InjectDialog })),
+  import("./components/InjectDialog").then((m) => ({
+    default: m.InjectDialog,
+  })),
 );
 
 export function App() {
@@ -56,16 +134,19 @@ export function App() {
   const context = contextFromProject(project);
   const [openRepos, setOpenRepos] = useState<string[]>(() => {
     try {
-      return readContextTabs(sessionStorage.getItem(CONTEXT_STORAGE_KEY)).openRepos;
+      return readContextTabs(sessionStorage.getItem(CONTEXT_STORAGE_KEY))
+        .openRepos;
     } catch {
       return [];
     }
   });
   const navigate = useCallback(
-    (path: string) => navigateRaw(withProject(path, hashProject(window.location.hash))),
+    (path: string) =>
+      navigateRaw(withProject(path, hashProject(window.location.hash))),
     [navigateRaw],
   );
-  const hashPathNow = () => window.location.hash.replace(/^#\/?/, "") || "overview";
+  const hashPathNow = () =>
+    window.location.hash.replace(/^#\/?/, "") || "overview";
   const selectContext = useCallback(
     (next: OperatorContext) => {
       const nextProject = projectFromContext(next);
@@ -88,7 +169,11 @@ export function App() {
     }
   };
 
-  const reposQ = useQuery({ queryKey: ["repos"], queryFn: api.repos, refetchInterval: 30_000 });
+  const reposQ = useQuery({
+    queryKey: ["repos"],
+    queryFn: api.repos,
+    ...refetchIntervals.secondary,
+  });
 
   useEffect(() => {
     if (!project || project === "all" || project === "inflight") return;
@@ -108,7 +193,9 @@ export function App() {
 
   const [theme, cycleTheme] = useTheme();
   const [injectOpen, setInjectOpen] = useState(false);
-  const [injectSeed, setInjectSeed] = useState<Record<string, unknown> | undefined>(undefined);
+  const [injectSeed, setInjectSeed] = useState<
+    Record<string, unknown> | undefined
+  >(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
   const [focusRunState, setFocusRunState] = useState<string | null>(null);
   const [focusExpired, setFocusExpired] = useState(false);
@@ -118,7 +205,24 @@ export function App() {
   const mainRef = useRef<HTMLElement>(null);
   const previousViewRef = useRef(view);
 
+  useEffect(() => {
+    const root = mainRef.current;
+    if (!root) return;
+    let disposed = false;
+    let uninstall = () => {};
+    void import("./subjectJourney").then(({ installTicketJourneyLinks }) => {
+      if (!disposed) uninstall = installTicketJourneyLinks(root, jumpToTicket);
+    });
+    return () => {
+      disposed = true;
+      uninstall();
+    };
+  }, []);
+
   const focusRunId = view === "runs" ? (route[1] ?? null) : null;
+  const focusTicketId = view === "tickets" ? (route[1] ?? null) : null;
+  // `#/prs/:number` — the PR journey (WM-640); a drill-in like `#/tickets/:id`.
+  const focusPrNumber = view === "prs" ? (route[1] ?? null) : null;
   // `#/run/:id` is the full-page run view — a distinct first segment, so
   // crossing from `#/runs/:id` pushes history and Back restores the panel.
   const fullRunId = view === "run" ? (route[1] ?? null) : null;
@@ -127,8 +231,13 @@ export function App() {
   const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
   const focusScheduleLoop = view === "schedules" ? (route[1] ?? null) : null;
   const focusWorkerId = view === "workers" ? (route[1] ?? null) : null;
-  const workerHealthFromHash = view === "workers" ? hashSearch(window.location.hash).get("health") : null;
-  const focusWorkerHealth = isWorkerHealthFilter(workerHealthFromHash) ? workerHealthFromHash : null;
+  // `#/inbox/:id` — the Telegram push deep-links here (lib/inbox.mjs telegramMessage).
+  const focusInboxId = view === "inbox" ? (route[1] ?? null) : null;
+  const workerHealthFromHash =
+    view === "workers" ? hashSearch(window.location.hash).get("health") : null;
+  const focusWorkerHealth = isWorkerHealthFilter(workerHealthFromHash)
+    ? workerHealthFromHash
+    : null;
   const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
   // `#/chain/:correlationId[/:nodeId]` — the chain trace (WM-527); node
   // selection rides the hash so a pasted link lands on the same node.
@@ -147,7 +256,8 @@ export function App() {
     view === "events" && route[1] && route[2]
       ? { source: route[1], eventId: route[2] }
       : null;
-  const typeFromHash = view === "events" ? hashSearch(window.location.hash).get("type") : null;
+  const typeFromHash =
+    view === "events" ? hashSearch(window.location.hash).get("type") : null;
   const focusEvent =
     view === "events"
       ? {
@@ -156,8 +266,13 @@ export function App() {
           ...(hashEvent ?? {}),
         }
       : null;
-  const hasEventFocus =
-    !!(focusEvent && (focusEvent.source || focusEvent.eventId || focusEvent.status || focusEvent.type));
+  const hasEventFocus = !!(
+    focusEvent &&
+    (focusEvent.source ||
+      focusEvent.eventId ||
+      focusEvent.status ||
+      focusEvent.type)
+  );
 
   const [rejumpEpoch, setRejumpEpoch] = useState(0);
 
@@ -166,6 +281,10 @@ export function App() {
     navigate(hashPath("runs", runId));
   };
   const openRunFull = (runId: string) => navigate(hashPath("run", runId));
+  const jumpToTicket = (ticketId: string) =>
+    navigate(hashPath("tickets", ticketId));
+  const jumpToPr = (number: number) =>
+    navigate(hashPath("prs", String(number)));
   const jumpToRuns = (state?: string) => {
     if (state) setFocusRunState(state);
     setRejumpEpoch((n) => n + 1);
@@ -183,7 +302,11 @@ export function App() {
   const jumpToEvents = (focus: EventFocus) => {
     setRejumpEpoch((n) => n + 1);
     if (focus.source && focus.eventId) {
-      setEphemeralEvent(focus.status || focus.type ? { status: focus.status, type: focus.type } : null);
+      setEphemeralEvent(
+        focus.status || focus.type
+          ? { status: focus.status, type: focus.type }
+          : null,
+      );
       navigate(hashPath("events", focus.source, focus.eventId));
       return;
     }
@@ -201,7 +324,8 @@ export function App() {
     return health ? `${path}?health=${encodeURIComponent(health)}` : path;
   };
   const jumpToWorker = (id: string) => navigate(workerHash(id, null));
-  const jumpToWorkers = (health: WorkerHealthFilter) => navigate(workerHash(null, health));
+  const jumpToWorkers = (health: WorkerHealthFilter) =>
+    navigate(workerHash(null, health));
   const jumpToProject = (name: string) => navigate(hashPath("projects", name));
   const jumpToGraph = (nodeId?: string) => navigate(hashPath("graph", nodeId));
   const jumpToChain = (correlationId: string, nodeId?: string) =>
@@ -210,7 +334,7 @@ export function App() {
   const health = useQuery({
     queryKey: ["health"],
     queryFn: api.health,
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
     retry: false,
   });
   const connected = health.isSuccess;
@@ -218,13 +342,18 @@ export function App() {
   // "unreachable" over an empty factory.
   const healthFailed = !connected && !health.isPending;
 
-  const status = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
+  const status = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    ...refetchIntervals.primary,
+  });
   const openProposals = status.data?.proposals.open ?? 0;
   const activeRuns = Object.entries(status.data?.runs.byState ?? {})
     .filter(([s]) => ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(s))
     .reduce((sum, [, n]) => sum + (n ?? 0), 0);
   const eventAttention =
-    (status.data?.events.human_needed ?? 0) + (status.data?.events.dead_lettered ?? 0);
+    (status.data?.events.human_needed ?? 0) +
+    (status.data?.events.dead_lettered ?? 0);
   const scopedNav = context.kind === "repo";
   const scopedRunsNav = context.kind !== "all";
   const busyWorkers = status.data?.workers.busy ?? 0;
@@ -232,25 +361,34 @@ export function App() {
   // null until the first status lands: reading "no workers" off a pending
   // fetch is the same false alarm as flashing "unreachable" on first load.
   const liveWorkers = status.data?.workers.live ?? null;
-  const stoppedSchedulesCount =
-    ((status.data?.anomalies as any)?.stoppedSchedules ?? []).length;
+  const stoppedSchedulesCount = (
+    (status.data?.anomalies as any)?.stoppedSchedules ?? []
+  ).length;
 
   // Workers is the one badge whose meaning can flip: a stale
   // heartbeat is a worker that is gone while claiming to work, so it
   // outranks the busy count. The word carries that — reading the
   // count off the tone alone fails in the contrast theme.
+  const inboxOpen = status.data?.inbox?.open ?? 0;
   const navBadges: Record<NavKey, NavBadge> = {
     overview: { count: 0, hue: "var(--accent)" },
+    // Open = not even acked yet. Warn hue: every one of these is a human's
+    // turn, which is exactly what the amber wash means everywhere else.
+    inbox: {
+      count: inboxOpen,
+      hue: "var(--hue-warn)",
+      title: `${inboxOpen} inbox item${inboxOpen === 1 ? "" : "s"} waiting on you`,
+    },
     events: { count: scopedNav ? 0 : eventAttention, hue: "var(--accent)" },
     proposals: { count: scopedNav ? 0 : openProposals, hue: "var(--accent)" },
     runs: { count: scopedRunsNav ? 0 : activeRuns, hue: "var(--accent)" },
+    tickets: { count: 0, hue: "var(--accent)" },
     projects: { count: 0, hue: "var(--accent)" },
     agents: { count: 0, hue: "var(--accent)" },
     artifacts: {
       count: status.data?.artifacts.orphans ?? 0,
       hue: "var(--hue-warn)",
-      word: "orphan",
-      title: `${status.data?.artifacts.orphans ?? 0} unreferenced artifact${status.data?.artifacts.orphans === 1 ? "" : "s"}`,
+      title: `${status.data?.artifacts.orphans ?? 0} orphan artifact${status.data?.artifacts.orphans === 1 ? "" : "s"} (unreferenced)`,
     },
     schedules:
       stoppedSchedulesCount > 0
@@ -307,13 +445,21 @@ export function App() {
 
   const viewLabel =
     NAV.find((n) => n.key === view)?.label ??
-    (view === "run" ? "Run" : view === "chain" ? "Chain" : "Overview");
+    (view === "run"
+      ? "Run"
+      : view === "chain"
+        ? "Chain"
+        : view === "prs"
+          ? "PR"
+          : "Overview");
 
   useEffect(() => {
     const id = route.length > 1 ? route[route.length - 1] : null;
     const typeQ = hashSearch(window.location.hash).get("type");
     const detail = id ?? typeQ;
-    document.title = detail ? `factory · ${viewLabel} · ${detail}` : `factory · ${viewLabel}`;
+    document.title = detail
+      ? `factory · ${viewLabel} · ${detail}`
+      : `factory · ${viewLabel}`;
   }, [route, viewLabel]);
 
   useEffect(() => {
@@ -330,7 +476,9 @@ export function App() {
     setViewAnnouncement(`${viewLabel} view`);
     // `/` intentionally sends focus to the destination view's filter instead.
     // Fall back to main when a lazy destination has not mounted its filter yet.
-    if (!document.activeElement?.matches("[data-view-filter]")) mainRef.current?.focus();
+    if (!document.activeElement?.matches("[data-view-filter]")) {
+      mainRef.current?.focus({ preventScroll: true });
+    }
   }, [view, viewLabel]);
 
   useEffect(() => {
@@ -345,13 +493,16 @@ export function App() {
         setHelpOpen((open) => !open);
       } else if (e.key === "/") {
         e.preventDefault();
-        const traceSearch = document.querySelector<HTMLInputElement>("[data-trace-search]");
+        const traceSearch = document.querySelector<HTMLInputElement>(
+          "[data-trace-search]",
+        );
         if (traceSearch) {
           traceSearch.focus();
           traceSearch.select();
           return;
         }
-        const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+        const el =
+          document.querySelector<HTMLInputElement>("[data-view-filter]");
         if (el) el.focus();
         else {
           setFilterFocus(true);
@@ -409,13 +560,16 @@ export function App() {
       label: "Focus filter",
       hint: "/",
       run: () => {
-        const traceSearch = document.querySelector<HTMLInputElement>("[data-trace-search]");
+        const traceSearch = document.querySelector<HTMLInputElement>(
+          "[data-trace-search]",
+        );
         if (traceSearch) {
           traceSearch.focus();
           traceSearch.select();
           return;
         }
-        const el = document.querySelector<HTMLInputElement>("[data-view-filter]");
+        const el =
+          document.querySelector<HTMLInputElement>("[data-view-filter]");
         if (el) el.focus();
         else {
           setFilterFocus(true);
@@ -441,275 +595,380 @@ export function App() {
         goArmed={goArmed}
       />
       <div className="flex min-h-0 flex-1">
-      <nav
-        aria-label="Primary"
-        className="flex w-52 shrink-0 flex-col border-r border-(--border) bg-(--surface-1)"
-      >
-        <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
-          <div className="flex items-center gap-2">
-            <img src="/watt-mind-logo.svg" alt="Watt Mind" className="size-5.5 shrink-0" />
-            <span className="display text-[14px] font-semibold">factory</span>
+        <nav
+          aria-label="Primary"
+          className="flex w-52 shrink-0 flex-col border-r border-(--border) bg-(--surface-1)"
+        >
+          <div className="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+            <div className="flex items-center gap-2">
+              <img
+                src="/watt-mind-logo.svg"
+                alt="Watt Mind"
+                className="size-5.5 shrink-0"
+              />
+              <span className="display text-[14px] font-semibold">factory</span>
+            </div>
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
+              title={
+                env
+                  ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
+                  : "runtime unreachable"
+              }
+              style={{
+                color: envHue,
+                background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
+              }}
+              onClick={() => env?.home && copyText(env.home, "runtime home")}
+            >
+              {envLabel}
+            </button>
           </div>
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 text-[11px] font-semibold tracking-wide uppercase"
-            title={
-              env
-                ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
-                : "runtime unreachable"
-            }
-            style={{
-              color: envHue,
-              background: `color-mix(in oklch, ${envHue} 15%, transparent)`,
-            }}
-            onClick={() => env?.home && copyText(env.home, "runtime home")}
-          >
-            {envLabel}
-          </button>
-        </div>
-        <div className="flex-1 px-2">
-          {NAV.map((n) => {
-            const badge = navBadges[n.key];
-            return (
-              <button
-                key={n.key}
-                type="button"
-                aria-current={view === n.key || (n.key === "runs" && view === "run") ? "page" : undefined}
-                aria-describedby={badge.count > 0 ? `nav-badge-${n.key}` : undefined}
-                onClick={() => navigate(n.key)}
-                className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] ${
-                  view === n.key || (n.key === "runs" && view === "run")
-                    ? "bg-(--surface-3) font-medium text-(--text)"
-                    : "text-(--text-dim) hover:bg-(--surface-2)"
-                }`}
-              >
-                <span>{n.label}</span>
-                {badge.count > 0 && (
-                  /* aria-hidden keeps the count out of the accessible name —
+          <div className="flex-1 px-2">
+            {NAV.map((n) => {
+              const badge = navBadges[n.key];
+              return (
+                <button
+                  key={n.key}
+                  type="button"
+                  aria-current={
+                    view === n.key ||
+                    (n.key === "runs" && view === "run") ||
+                    (n.key === "tickets" && view === "prs")
+                      ? "page"
+                      : undefined
+                  }
+                  aria-describedby={
+                    badge.count > 0 ? `nav-badge-${n.key}` : undefined
+                  }
+                  onClick={() => navigate(n.key)}
+                  className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] ${
+                    view === n.key || (n.key === "runs" && view === "run")
+                      ? "bg-(--surface-3) font-medium text-(--text)"
+                      : "text-(--text-dim) hover:bg-(--surface-2)"
+                  }`}
+                >
+                  <span>{n.label}</span>
+                  {badge.count > 0 && (
+                    /* aria-hidden keeps the count out of the accessible name —
                      "Events" must not announce as "Events 6" — while the
                      aria-describedby reference above still reads it back as
                      the button's description (accname spec includes hidden
                      nodes referenced by labelledby/describedby). */
-                  <span
-                    id={`nav-badge-${n.key}`}
-                    aria-hidden="true"
-                    className="rounded px-1.5 text-[11px] tabular-nums"
-                    title={badge.title}
-                    style={{
-                      color: badge.hue,
-                      background: `color-mix(in oklch, ${badge.hue} 12%, transparent)`,
-                    }}
-                  >
-                    {badge.count}
-                    {badge.word && <span className="ml-1">{badge.word}</span>}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => setInjectOpen(true)}
-            className="mt-2 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2)"
-          >
-            Inject event… <span className="mono ml-1 text-(--text-faint)">i</span>
-          </button>
-        </div>
-      </nav>
-
-      <main
-        ref={mainRef}
-        tabIndex={-1}
-        className="flex min-w-0 flex-1 flex-col focus:outline-none"
-      >
-        <div aria-live="polite" aria-atomic="true" className="sr-only">
-          {viewAnnouncement}
-        </div>
-        {healthFailed && (
-          <div
-            role="status"
-            className="shrink-0 border-b px-4 py-2 text-[12px]"
-            style={{
-              color: "var(--hue-err)",
-              background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
-              borderColor: "color-mix(in oklch, var(--hue-err) 35%, var(--border))",
-            }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span>
-                Runtime unreachable — lists show last cached data; verbs are disabled until{" "}
-                <span className="mono">/health</span> responds. This is not an empty factory.
-              </span>
-              <button
-                type="button"
-                onClick={() => health.refetch()}
-                className="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium"
-                style={{
-                  color: "var(--hue-err)",
-                  borderColor: "color-mix(in oklch, var(--hue-err) 40%, var(--border))",
-                }}
-              >
-                Retry
-              </button>
-            </div>
+                    <NavCount id={`nav-badge-${n.key}`} badge={badge} />
+                  )}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setInjectOpen(true)}
+              className="mt-2 w-full rounded-md px-2.5 py-1.5 text-left text-[13px] text-(--text-dim) hover:bg-(--surface-2)"
+            >
+              Inject event…{" "}
+              <span className="mono ml-1 text-(--text-faint)">i</span>
+            </button>
           </div>
-        )}
-        <div className="min-h-0 flex-1">
-          {view === "proposals" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading proposals…</div>}>
-              <Proposals
-                connected={connected}
-                context={context}
-                onRunQueued={jumpToRun}
-                focusProposalId={focusProposalId}
-                onSelectProposal={(id) => navigate(hashPath("proposals", id))}
-                focusExpired={focusExpired}
-                onFocusExpiredConsumed={() => setFocusExpired(false)}
-                onJumpAgent={jumpToAgent}
-                onJumpEvent={jumpToEvent}
-                rejumpEpoch={rejumpEpoch}
-              />
-            </Suspense>
-          ) : view === "run" && fullRunId ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading run…</div>}>
-              <RunFull
-                runId={fullRunId}
-                connected={connected}
-                onBack={() => navigate(hashPath("runs", fullRunId))}
-                onJumpAgent={jumpToAgent}
-                onJumpEvent={jumpToEvent}
-                onJumpProposal={jumpToProposal}
-                onJumpChain={jumpToChain}
-              />
-            </Suspense>
-          ) : view === "runs" || view === "run" ? (
-            <Runs
-              connected={connected}
-              context={context}
-              focusRunId={focusRunId}
-              onSelectRun={(id) => navigate(hashPath("runs", id))}
-              onOpenFull={openRunFull}
-              focusState={focusRunState}
-              onFocusStateConsumed={() => setFocusRunState(null)}
-              onJumpAgent={jumpToAgent}
-              onJumpEvent={jumpToEvent}
-              onJumpProposal={jumpToProposal}
-              rejumpEpoch={rejumpEpoch}
-            />
-          ) : view === "projects" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading projects…</div>}>
-              <Projects
-                connected={connected}
-                focusRepoName={focusRepoName}
-                onSelectRepo={(name) => navigate(hashPath("projects", name))}
-              />
-            </Suspense>
-          ) : view === "chain" && chainId ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading chain…</div>}>
-              <Chain
-                correlationId={chainId}
-                focusNodeId={focusChainNode}
-                onSelectNode={(id) => navigate(hashPath("chain", chainId, id))}
-                onJumpEvent={jumpToEvent}
-                onJumpRun={jumpToRun}
-                onOpenRunFull={openRunFull}
-                onJumpProposal={jumpToProposal}
-                onJumpAgent={jumpToAgent}
-              />
-            </Suspense>
-          ) : view === "graph" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading graph…</div>}>
-              <Graph
-                context={context}
-                focusNodeId={focusGraphNode}
-                onSelectNode={(id) => navigate(hashPath("graph", id))}
-                onJumpAgent={jumpToAgent}
-                onJumpEvents={jumpToEvents}
-              />
-            </Suspense>
-          ) : view === "agents" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading agents…</div>}>
-              <Agents
-                context={context}
-                focusAgentRef={focusAgentRef}
-                onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
-              />
-            </Suspense>
-          ) : view === "schedules" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading schedules…</div>}>
-              <Schedules
-                connected={connected}
-                context={context}
-                focusScheduleLoop={focusScheduleLoop}
-                onSelectSchedule={(loop) => navigate(hashPath("schedules", loop))}
-                onJumpProposal={jumpToProposal}
-                onJumpRun={jumpToRun}
-                onJumpEvent={jumpToEvent}
-                onJumpAgent={jumpToAgent}
-                rejumpEpoch={rejumpEpoch}
-              />
-            </Suspense>
-          ) : view === "workers" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading workers…</div>}>
-              <Workers
-                context={context}
-                focusWorkerId={focusWorkerId}
-                onSelectWorker={(id) => navigate(workerHash(id, focusWorkerHealth))}
-                focusHealth={focusWorkerHealth}
-                onFocusHealthChange={(health) => navigate(workerHash(null, health))}
-              />
-            </Suspense>
-          ) : view === "artifacts" ? (
-            <Suspense fallback={<div className="p-5 text-(--text-faint)">Loading artifacts…</div>}>
-              <Artifacts
-                metrics={status.data?.artifacts}
-                filters={artifactFilters}
-                onFiltersChange={(filters) => navigate(artifactsHash(filters))}
-                onJumpRun={jumpToRun}
-              />
-            </Suspense>
-          ) : view === "events" ? (
-            <Events
-              connected={connected}
-              context={context}
-              focusEvent={hasEventFocus ? focusEvent : null}
-              onFocusConsumed={() => setEphemeralEvent(null)}
-              onSelectEvent={(source, eventId) =>
-                navigate(eventsHash(source, eventId, typeFromHash))
-              }
-              onSelectType={(type) =>
-                navigate(eventsHash(hashEvent?.source, hashEvent?.eventId, type))
-              }
-              onJumpProposal={jumpToProposal}
-              onJumpRun={jumpToRun}
-              onJumpChain={jumpToChain}
-              onTriggerAgain={(envelope) => {
-                setInjectSeed(envelope);
-                setInjectOpen(true);
+        </nav>
+
+        <main
+          ref={mainRef}
+          tabIndex={-1}
+          className="flex min-w-0 flex-1 flex-col focus:outline-none"
+        >
+          <div aria-live="polite" aria-atomic="true" className="sr-only">
+            {viewAnnouncement}
+          </div>
+          {healthFailed && (
+            <div
+              role="status"
+              className="shrink-0 border-b px-4 py-2 text-[12px]"
+              style={{
+                color: "var(--hue-err)",
+                background:
+                  "color-mix(in oklch, var(--hue-err) 10%, transparent)",
+                borderColor:
+                  "color-mix(in oklch, var(--hue-err) 35%, var(--border))",
               }}
-              onInject={() => setInjectOpen(true)}
-              rejumpEpoch={rejumpEpoch}
-            />
-          ) : (
-            <Overview
-              connected={connected}
-              context={context}
-              onJumpRun={jumpToRun}
-              onJumpProposal={jumpToProposal}
-              onJumpEvents={jumpToEvents}
-              onJumpRuns={jumpToRuns}
-              onJumpWorkers={jumpToWorkers}
-              onNavigate={navigate}
-              onJumpExpired={() => {
-                setFocusExpired(true);
-                navigate("proposals");
-              }}
-              onJumpGraph={() => jumpToGraph()}
-              onInject={() => setInjectOpen(true)}
-            />
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  Runtime unreachable — lists show last cached data; verbs are
+                  disabled until <span className="mono">/health</span> responds.
+                  This is not an empty factory.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => health.refetch()}
+                  className="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium"
+                  style={{
+                    color: "var(--hue-err)",
+                    borderColor:
+                      "color-mix(in oklch, var(--hue-err) 40%, var(--border))",
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
           )}
-        </div>
-      </main>
+          <div className="min-h-0 flex-1">
+            {view === "proposals" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading proposals…
+                  </div>
+                }
+              >
+                <Proposals
+                  connected={connected}
+                  context={context}
+                  onRunQueued={jumpToRun}
+                  focusProposalId={focusProposalId}
+                  onSelectProposal={(id) => navigate(hashPath("proposals", id))}
+                  focusExpired={focusExpired}
+                  onFocusExpiredConsumed={() => setFocusExpired(false)}
+                  onJumpAgent={jumpToAgent}
+                  onJumpEvent={jumpToEvent}
+                  rejumpEpoch={rejumpEpoch}
+                />
+              </Suspense>
+            ) : view === "run" && fullRunId ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">Loading run…</div>
+                }
+              >
+                <RunFull
+                  runId={fullRunId}
+                  connected={connected}
+                  onBack={() => navigate(hashPath("runs", fullRunId))}
+                  onJumpAgent={jumpToAgent}
+                  onJumpEvent={jumpToEvent}
+                  onJumpProposal={jumpToProposal}
+                  onJumpChain={jumpToChain}
+                />
+              </Suspense>
+            ) : view === "runs" || view === "run" ? (
+              <Runs
+                connected={connected}
+                context={context}
+                focusRunId={focusRunId}
+                onSelectRun={(id) => navigate(hashPath("runs", id))}
+                onOpenFull={openRunFull}
+                focusState={focusRunState}
+                onFocusStateConsumed={() => setFocusRunState(null)}
+                onJumpAgent={jumpToAgent}
+                onJumpEvent={jumpToEvent}
+                onJumpProposal={jumpToProposal}
+                rejumpEpoch={rejumpEpoch}
+              />
+            ) : view === "tickets" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading ticket journey…
+                  </div>
+                }
+              >
+                <Ticket
+                  ticketId={focusTicketId}
+                  onNavigate={jumpToTicket}
+                  onNavigatePr={jumpToPr}
+                />
+              </Suspense>
+            ) : view === "prs" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading PR journey…
+                  </div>
+                }
+              >
+                <PullRequest
+                  number={focusPrNumber}
+                  onNavigateTicket={jumpToTicket}
+                />
+              </Suspense>
+            ) : view === "projects" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading projects…
+                  </div>
+                }
+              >
+                <Projects
+                  connected={connected}
+                  focusRepoName={focusRepoName}
+                  onSelectRepo={(name) => navigate(hashPath("projects", name))}
+                />
+              </Suspense>
+            ) : view === "chain" && chainId ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">Loading chain…</div>
+                }
+              >
+                <Chain
+                  correlationId={chainId}
+                  focusNodeId={focusChainNode}
+                  onSelectNode={(id) =>
+                    navigate(hashPath("chain", chainId, id))
+                  }
+                  onJumpEvent={jumpToEvent}
+                  onJumpRun={jumpToRun}
+                  onOpenRunFull={openRunFull}
+                  onJumpProposal={jumpToProposal}
+                  onJumpAgent={jumpToAgent}
+                />
+              </Suspense>
+            ) : view === "graph" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">Loading graph…</div>
+                }
+              >
+                <Graph
+                  context={context}
+                  focusNodeId={focusGraphNode}
+                  onSelectNode={(id) => navigate(hashPath("graph", id))}
+                  onJumpAgent={jumpToAgent}
+                  onJumpEvents={jumpToEvents}
+                />
+              </Suspense>
+            ) : view === "agents" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">Loading agents…</div>
+                }
+              >
+                <Agents
+                  context={context}
+                  focusAgentRef={focusAgentRef}
+                  onSelectAgent={(ref) => navigate(hashPath("agents", ref))}
+                />
+              </Suspense>
+            ) : view === "schedules" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading schedules…
+                  </div>
+                }
+              >
+                <Schedules
+                  connected={connected}
+                  context={context}
+                  focusScheduleLoop={focusScheduleLoop}
+                  onSelectSchedule={(loop) =>
+                    navigate(hashPath("schedules", loop))
+                  }
+                  onJumpProposal={jumpToProposal}
+                  onJumpRun={jumpToRun}
+                  onJumpEvent={jumpToEvent}
+                  onJumpAgent={jumpToAgent}
+                  rejumpEpoch={rejumpEpoch}
+                />
+              </Suspense>
+            ) : view === "inbox" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">Loading inbox…</div>
+                }
+              >
+                <Inbox
+                  connected={connected}
+                  focusItemId={focusInboxId}
+                  onSelectItem={(id) => navigate(hashPath("inbox", id))}
+                  onJumpRun={jumpToRun}
+                  onJumpProposal={jumpToProposal}
+                  onJumpEvent={jumpToEvent}
+                />
+              </Suspense>
+            ) : view === "workers" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading workers…
+                  </div>
+                }
+              >
+                <Workers
+                  context={context}
+                  focusWorkerId={focusWorkerId}
+                  onSelectWorker={(id) =>
+                    navigate(workerHash(id, focusWorkerHealth))
+                  }
+                  focusHealth={focusWorkerHealth}
+                  onFocusHealthChange={(health) =>
+                    navigate(workerHash(null, health))
+                  }
+                />
+              </Suspense>
+            ) : view === "artifacts" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading artifacts…
+                  </div>
+                }
+              >
+                <Artifacts
+                  metrics={status.data?.artifacts}
+                  filters={artifactFilters}
+                  onFiltersChange={(filters) =>
+                    navigate(artifactsHash(filters))
+                  }
+                  onJumpRun={jumpToRun}
+                />
+              </Suspense>
+            ) : view === "events" ? (
+              <Events
+                connected={connected}
+                context={context}
+                focusEvent={hasEventFocus ? focusEvent : null}
+                onFocusConsumed={() => setEphemeralEvent(null)}
+                onSelectEvent={(source, eventId) =>
+                  navigate(eventsHash(source, eventId, typeFromHash))
+                }
+                onSelectType={(type) =>
+                  navigate(
+                    eventsHash(hashEvent?.source, hashEvent?.eventId, type),
+                  )
+                }
+                onJumpProposal={jumpToProposal}
+                onJumpRun={jumpToRun}
+                onJumpChain={jumpToChain}
+                onTriggerAgain={(envelope) => {
+                  setInjectSeed(envelope);
+                  setInjectOpen(true);
+                }}
+                onInject={() => setInjectOpen(true)}
+                rejumpEpoch={rejumpEpoch}
+              />
+            ) : (
+              <Overview
+                connected={connected}
+                context={context}
+                onJumpRun={jumpToRun}
+                onJumpProposal={jumpToProposal}
+                onJumpEvents={jumpToEvents}
+                onJumpRuns={jumpToRuns}
+                onJumpWorkers={jumpToWorkers}
+                onNavigate={navigate}
+                onJumpExpired={() => {
+                  setFocusExpired(true);
+                  navigate("proposals");
+                }}
+                onJumpGraph={() => jumpToGraph()}
+                onInject={() => setInjectOpen(true)}
+              />
+            )}
+          </div>
+        </main>
       </div>
 
       <footer
@@ -721,15 +980,22 @@ export function App() {
           <div className="flex items-center gap-1.5">
             <span
               className="size-2 shrink-0 rounded-full"
-              style={{ background: connected ? "var(--hue-ok)" : "var(--hue-err)" }}
+              style={{
+                background: connected ? "var(--hue-ok)" : "var(--hue-err)",
+              }}
             />
             {connected ? (
               <span>
-                connected · <span className="mono">{health.data?.policyVersion}</span>
+                connected ·{" "}
+                <span className="mono">{health.data?.policyVersion}</span>
                 {liveWorkers !== null && (
                   <span
                     className="ml-1"
-                    style={staleWorkers > 0 ? { color: "var(--hue-warn)" } : undefined}
+                    style={
+                      staleWorkers > 0
+                        ? { color: "var(--hue-warn)" }
+                        : undefined
+                    }
                     title={
                       staleWorkers > 0
                         ? `${liveWorkers} live · ${staleWorkers} worker${staleWorkers === 1 ? "" : "s"} whose heartbeat has gone stale`
@@ -746,15 +1012,19 @@ export function App() {
                 )}
               </span>
             ) : (
-              <span style={{ color: "var(--hue-err)" }}>runtime unreachable</span>
+              <span style={{ color: "var(--hue-err)" }}>
+                runtime unreachable
+              </span>
             )}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="text-(--text-faint)">
-            <span className="mono">⌘K</span> commands · <span className="mono">i</span> inject ·{" "}
-            <span className="mono">g</span> go · <span className="mono">?</span> keys
+            <span className="mono">⌘K</span> commands ·{" "}
+            <span className="mono">i</span> inject ·{" "}
+            <span className="mono">g</span> go · <span className="mono">?</span>{" "}
+            keys
           </div>
           <button
             type="button"
@@ -776,6 +1046,8 @@ export function App() {
         onJumpAgent={jumpToAgent}
         onJumpWorker={jumpToWorker}
         onJumpProject={jumpToProject}
+        onJumpTicket={jumpToTicket}
+        onJumpPr={jumpToPr}
       />
       {injectOpen && (
         <Suspense fallback={null}>
@@ -815,7 +1087,13 @@ export function App() {
  * while empty — a screen reader only announces nodes inserted into a live
  * region that already existed (see ToastContainer).
  */
-export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentView?: string }) {
+export function GoPrefixHint({
+  armed,
+  currentView,
+}: {
+  armed: boolean;
+  currentView?: string;
+}) {
   return (
     <div
       role="status"
@@ -824,7 +1102,9 @@ export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentVi
     >
       {armed && (
         <>
-          <span className="sr-only">Navigation prefix g armed — press a second key</span>
+          <span className="sr-only">
+            Navigation prefix g armed — press a second key
+          </span>
           {/* The legend is the point for a sighted operator and noise read
               aloud: the sentence above says the same thing in one breath. */}
           <div
@@ -835,7 +1115,8 @@ export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentVi
               className="mono rounded px-1.5 font-semibold"
               style={{
                 color: "var(--accent)",
-                background: "color-mix(in oklch, var(--accent) 16%, transparent)",
+                background:
+                  "color-mix(in oklch, var(--accent) 16%, transparent)",
               }}
             >
               g
@@ -843,14 +1124,16 @@ export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentVi
             <span className="text-(--text-dim)">then</span>
             {NAV.map((n) => {
               const isCurrent =
-                n.key === currentView || (n.key === "runs" && currentView === "run");
+                n.key === currentView ||
+                (n.key === "runs" && currentView === "run");
               if (isCurrent) {
                 return (
                   <span
                     key={n.key}
                     className="whitespace-nowrap opacity-60 text-(--text-faint)"
                   >
-                    <span className="mono text-(--text-dim)">{n.go}</span> {n.label}{" "}
+                    <span className="mono text-(--text-dim)">{n.go}</span>{" "}
+                    {n.label}{" "}
                     <span className="rounded px-1 text-[10px] text-(--text-faint) ring-1 ring-inset ring-(--border)">
                       current
                     </span>
@@ -858,7 +1141,10 @@ export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentVi
                 );
               }
               return (
-                <span key={n.key} className="whitespace-nowrap text-(--text-faint)">
+                <span
+                  key={n.key}
+                  className="whitespace-nowrap text-(--text-faint)"
+                >
                   <span className="mono text-(--text)">{n.go}</span> {n.label}
                 </span>
               );
@@ -883,7 +1169,16 @@ export function GoPrefixHint({ armed, currentView }: { armed: boolean; currentVi
 function ThemeIcon({ theme }: { theme: Theme }) {
   if (theme === "light") {
     return (
-      <svg aria-hidden width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+      <svg
+        aria-hidden
+        width="13"
+        height="13"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      >
         <circle cx="8" cy="8" r="3.5" />
         <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" />
       </svg>
@@ -891,16 +1186,37 @@ function ThemeIcon({ theme }: { theme: Theme }) {
   }
   if (theme === "contrast") {
     return (
-      <svg aria-hidden width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <svg
+        aria-hidden
+        width="13"
+        height="13"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
         <circle cx="8" cy="8" r="6" />
         <path d="M8 2a6 6 0 0 1 0 12V2z" fill="currentColor" />
       </svg>
     );
   }
   return (
-    <svg aria-hidden width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M13.5 10.2A6 6 0 0 1 5.8 2.5 6 6 0 1 0 13.5 10.2z" fill="currentColor" fillOpacity="0.2" />
+    <svg
+      aria-hidden
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path
+        d="M13.5 10.2A6 6 0 0 1 5.8 2.5 6 6 0 1 0 13.5 10.2z"
+        fill="currentColor"
+        fillOpacity="0.2"
+      />
     </svg>
   );
 }
-

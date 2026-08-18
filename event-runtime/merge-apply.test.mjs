@@ -66,7 +66,7 @@ function installFakes(fixture) {
       '  *"git/ref/heads/develop"*) printf \'%s\\n\' "$FAKE_BASE_SHA" ;;',
       '  *"pr checks"*"--required --json name,bucket,state"*)',
       '    case "$FAKE_REQUIRED_MODE" in',
-      "      no-required) printf \"no required checks reported on the '%s' branch\\n\" \"$FAKE_HEAD_REF\" >&2; exit 1 ;;",
+      '      no-required) printf "no required checks reported on the \'%s\' branch\\n" "$FAKE_HEAD_REF" >&2; exit 1 ;;',
       "      error) printf 'HTTP 502: upstream unavailable\\n' >&2; exit 1 ;;",
       "      *) exit 65 ;;",
       "    esac ;;",

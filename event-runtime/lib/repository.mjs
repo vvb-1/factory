@@ -42,7 +42,9 @@ const git = (args, cwd) => {
     }).trim();
   } catch (err) {
     const detail = err.stderr?.toString().trim() || err.message;
-    throw new RepositoryWorkspaceError(`git ${args.slice(0, 2).join(" ")} failed: ${detail}`);
+    throw new RepositoryWorkspaceError(
+      `git ${args.slice(0, 2).join(" ")} failed: ${detail}`,
+    );
   }
 };
 
@@ -65,7 +67,9 @@ function githubRemote(github) {
 export function syncMirror(repo, { root = mirrorsRoot() } = {}) {
   const mirror = mirrorPath(repo.name, root);
   if (!existsSync(mirror)) {
-    const source = existsSync(repo.path) ? repo.path : githubRemote(repo.github);
+    const source = existsSync(repo.path)
+      ? repo.path
+      : githubRemote(repo.github);
     if (!source) {
       throw new RepositoryWorkspaceError(
         `repo ${repo.name}: no checkout at ${repo.path} and no github remote configured to mirror from`,
@@ -83,21 +87,37 @@ export function syncMirror(repo, { root = mirrorsRoot() } = {}) {
  * Resolve a ref to an immutable SHA in the mirror. Called at plan time so the
  * SHA lands in the RunSpec input (and therefore the inputHash and receipt).
  */
-export function resolveRef(repo, ref = repo.base, { root = mirrorsRoot() } = {}) {
+export function resolveRef(
+  repo,
+  ref = repo.base,
+  { root = mirrorsRoot() } = {},
+) {
   const mirror = syncMirror(repo, { root });
   const sha = git(["rev-parse", `${ref}^{commit}`], mirror);
   return { mirror, sha };
 }
 
 /** Plan-time helper: repo name + optional ref → the facts a spec should pin. */
-export function pinRepo(repoName, ref, { reposRoot, mirrors = mirrorsRoot() } = {}) {
-  const repo = getRepo(loadRepos(reposRoot ? { root: reposRoot } : {}), repoName);
+export function pinRepo(
+  repoName,
+  ref,
+  { reposRoot, mirrors = mirrorsRoot() } = {},
+) {
+  const repo = getRepo(
+    loadRepos(reposRoot ? { root: reposRoot } : {}),
+    repoName,
+  );
   try {
     const { sha } = resolveRef(repo, ref ?? repo.base, { root: mirrors });
     return { repo: repo.name, ref: ref ?? repo.base, sha, github: repo.github };
   } catch (err) {
     if (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors))) {
-      return { repo: repo.name, ref: ref ?? repo.base, sha: "0".repeat(40), github: repo.github };
+      return {
+        repo: repo.name,
+        ref: ref ?? repo.base,
+        sha: "0".repeat(40),
+        github: repo.github,
+      };
     }
     throw err;
   }
@@ -109,14 +129,32 @@ export function pinRepo(repoName, ref, { reposRoot, mirrors = mirrorsRoot() } = 
  *
  * @returns {{ path: string, sha: string }} absolute checkout path
  */
-export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "repo", mirrors = mirrorsRoot(), reposRoot }) {
-  if (!sha) throw new RepositoryWorkspaceError(`repo ${repoName}: no pinned sha in the run input`);
-  const repo = getRepo(loadRepos(reposRoot ? { root: reposRoot } : {}), repoName);
+export function materializeCheckout({
+  workspaceDir,
+  repoName,
+  sha,
+  subdir = "repo",
+  mirrors = mirrorsRoot(),
+  reposRoot,
+}) {
+  if (!sha)
+    throw new RepositoryWorkspaceError(
+      `repo ${repoName}: no pinned sha in the run input`,
+    );
+  const repo = getRepo(
+    loadRepos(reposRoot ? { root: reposRoot } : {}),
+    repoName,
+  );
   const target = path.resolve(workspaceDir, subdir);
   if (!target.startsWith(path.resolve(workspaceDir) + path.sep)) {
-    throw new RepositoryWorkspaceError(`checkout subdir "${subdir}" escapes the workspace`);
+    throw new RepositoryWorkspaceError(
+      `checkout subdir "${subdir}" escapes the workspace`,
+    );
   }
-  if (sha === "0".repeat(40) || (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors)))) {
+  if (
+    sha === "0".repeat(40) ||
+    (!existsSync(repo.path) && !existsSync(mirrorPath(repo.name, mirrors)))
+  ) {
     mkdirSync(target, { recursive: true });
     // The worker's integrity gate must be able to inspect every repository
     // workspace, including a CI/demo fallback with no local source checkout.
@@ -133,12 +171,21 @@ export function materializeCheckout({ workspaceDir, repoName, sha, subdir = "rep
  * Remove a materialized checkout and deregister it from the mirror. The
  * mirror itself persists as cache — that is the point of the tier.
  */
-export function releaseCheckout({ checkoutPath, repoName, mirrors = mirrorsRoot(), reposRoot }) {
+export function releaseCheckout({
+  checkoutPath,
+  repoName,
+  mirrors = mirrorsRoot(),
+  reposRoot,
+}) {
   if (!checkoutPath || !existsSync(checkoutPath)) return false;
   try {
-    const repo = getRepo(loadRepos(reposRoot ? { root: reposRoot } : {}), repoName);
+    const repo = getRepo(
+      loadRepos(reposRoot ? { root: reposRoot } : {}),
+      repoName,
+    );
     const mirror = mirrorPath(repo.name, mirrors);
-    if (existsSync(mirror)) git(["worktree", "remove", "--force", checkoutPath], mirror);
+    if (existsSync(mirror))
+      git(["worktree", "remove", "--force", checkoutPath], mirror);
     else rmSync(checkoutPath, { recursive: true, force: true });
   } catch {
     // Never let cleanup mask a run's real outcome; the directory goes either way.

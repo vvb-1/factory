@@ -105,8 +105,8 @@ export function proveMergeCiFallback({
     throw new Error("configured workflow run is not completed successfully");
   }
   if (
-    (!Number.isInteger(run.databaseId) &&
-      (typeof run.databaseId !== "string" || run.databaseId.length === 0))
+    !Number.isInteger(run.databaseId) &&
+    (typeof run.databaseId !== "string" || run.databaseId.length === 0)
   ) {
     throw new Error("configured workflow run has no valid database ID");
   }
@@ -120,11 +120,17 @@ export function proveMergeCiFallback({
       matches[0].status !== "completed" ||
       matches[0].conclusion !== "success"
     ) {
-      throw new Error(`required job ${requiredName} is not completed successfully`);
+      throw new Error(
+        `required job ${requiredName} is not completed successfully`,
+      );
     }
   }
 
-  return { runId: run.databaseId, workflow, requiredChecks: [...requiredChecks] };
+  return {
+    runId: run.databaseId,
+    workflow,
+    requiredChecks: [...requiredChecks],
+  };
 }
 
 async function main() {

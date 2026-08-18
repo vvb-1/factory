@@ -1,9 +1,7 @@
 {
   "title": "unblock-scan input — one repo; repoPin is resolved by the planner (OPS-228)",
   "type": "object",
-  "required": [
-    "repo"
-  ],
+  "required": ["repo"],
   "additionalProperties": false,
   "properties": {
     "repo": {
@@ -15,10 +13,7 @@
     },
     "repoPin": {
       "type": "object",
-      "required": [
-        "repo",
-        "sha"
-      ],
+      "required": ["repo", "sha"],
       "additionalProperties": false,
       "properties": {
         "repo": {
@@ -33,10 +28,7 @@
           "pattern": "^[0-9a-f]{40}$"
         },
         "github": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       }
     }

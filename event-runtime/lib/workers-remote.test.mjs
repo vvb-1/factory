@@ -92,11 +92,17 @@ describe("ssh argv builder", () => {
       user: "worker",
       port: 2200,
     };
-    const argv = buildSshArgv(node, "echo hello", { batchMode: true, connectTimeout: 3 });
+    const argv = buildSshArgv(node, "echo hello", {
+      batchMode: true,
+      connectTimeout: 3,
+    });
     expect(argv).toEqual([
-      "-p", "2200",
-      "-o", "BatchMode=yes",
-      "-o", "ConnectTimeout=3",
+      "-p",
+      "2200",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=3",
       "worker@192.168.1.50",
       "echo hello",
     ]);
@@ -111,8 +117,10 @@ describe("ssh argv builder", () => {
     };
     const argv = buildSshArgv(node, ["git", "status"]);
     expect(argv).toEqual([
-      "-o", "BatchMode=yes",
-      "-o", "ConnectTimeout=5",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=5",
       "box.internal",
       "git status",
     ]);
@@ -155,7 +163,9 @@ describe("remote probe and version skew", () => {
     expect(result.skewStatus).toBe("synced");
     expect(result.workerActive).toBe(true);
     expect(result.workerPids).toEqual([501, 777]);
-    expect(result.details.headSha).toBe("0123456789abcdef0123456789abcdef01234567");
+    expect(result.details.headSha).toBe(
+      "0123456789abcdef0123456789abcdef01234567",
+    );
     expect(result.details.branch).toBe("feat/remote-probe");
     expect(result.details.dirtyCount).toBe(2);
   });
@@ -213,7 +223,8 @@ describe("remote lifecycle operations", () => {
   test("deployRemoteWorker executes deploy script successfully", () => {
     const mockSpawn = () => ({
       exitCode: 0,
-      stdout: "Updating branch develop...\nInstalling dependencies...\nDEPLOY_SUCCESS\n",
+      stdout:
+        "Updating branch develop...\nInstalling dependencies...\nDEPLOY_SUCCESS\n",
       stderr: "",
     });
 
@@ -249,9 +260,12 @@ describe("remote lifecycle operations", () => {
     let callCount = 0;
     const mockSpawn = () => {
       callCount += 1;
-      if (callCount === 1) return { exitCode: 0, stdout: "STOP_SUCCESS:1", stderr: "" };
-      if (callCount === 2) return { exitCode: 0, stdout: "DEPLOY_SUCCESS", stderr: "" };
-      if (callCount === 3) return { exitCode: 0, stdout: "START_SUCCESS:99201", stderr: "" };
+      if (callCount === 1)
+        return { exitCode: 0, stdout: "STOP_SUCCESS:1", stderr: "" };
+      if (callCount === 2)
+        return { exitCode: 0, stdout: "DEPLOY_SUCCESS", stderr: "" };
+      if (callCount === 3)
+        return { exitCode: 0, stdout: "START_SUCCESS:99201", stderr: "" };
       return { exitCode: 0, stdout: "", stderr: "" };
     };
 

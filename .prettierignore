@@ -1,8 +1,9 @@
+# Dependencies and builds
 node_modules/
-.factory/
 dist/
 event-runtime/web/dist/
 graphify-out/
 bun.lock
-*.log
-desc-*.md
+event-runtime/web/bun.lock
+deploy/launchd/
+.factory/

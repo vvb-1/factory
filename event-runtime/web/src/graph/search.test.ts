@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { largestComponentIds, matchNodes, missingFocusNode, searchEnter } from "./search";
+import {
+  largestComponentIds,
+  matchNodes,
+  missingFocusNode,
+  searchEnter,
+} from "./search";
 import type { CapabilityGraph, GraphNode } from "./model";
 
 const event = (type: string): GraphNode => ({
@@ -25,7 +30,11 @@ const agent = (ref: string): GraphNode => ({
 });
 
 describe("matchNodes", () => {
-  const nodes = [event("gh.run.failed"), agent("ci-doctor@1"), agent("rerun@2")];
+  const nodes = [
+    event("gh.run.failed"),
+    agent("ci-doctor@1"),
+    agent("rerun@2"),
+  ];
 
   test("case-insensitive substring on label", () => {
     expect(matchNodes(nodes, "DOCTOR")).toEqual(["agent:ci-doctor@1"]);
@@ -61,22 +70,32 @@ describe("searchEnter", () => {
   });
 
   test("first Enter selects match 1 of N, not match 2", () => {
-    expect(searchEnter(matches, 0, null)).toEqual({ selectId: "event:a", nextIdx: 0 });
+    expect(searchEnter(matches, 0, null)).toEqual({
+      selectId: "event:a",
+      nextIdx: 0,
+    });
   });
 
   test("Enter while the current match is already selected advances to the next", () => {
-    expect(searchEnter(matches, 0, "event:a")).toEqual({ selectId: "agent:b", nextIdx: 1 });
+    expect(searchEnter(matches, 0, "event:a")).toEqual({
+      selectId: "agent:b",
+      nextIdx: 1,
+    });
   });
 });
 
 describe("missingFocusNode", () => {
   test("does not report a missing node while the graph is still loading", () => {
     expect(missingFocusNode(undefined, "event:gone", false)).toBe(false);
-    expect(missingFocusNode([{ id: "event:a" }], "event:gone", false)).toBe(false);
+    expect(missingFocusNode([{ id: "event:a" }], "event:gone", false)).toBe(
+      false,
+    );
   });
 
   test("reports missing when a loaded graph has no node for the deep-link id", () => {
-    expect(missingFocusNode([{ id: "event:a" }], "event:gone", true)).toBe(true);
+    expect(missingFocusNode([{ id: "event:a" }], "event:gone", true)).toBe(
+      true,
+    );
   });
 
   test("does not report missing when the deep-link node exists", () => {
@@ -87,7 +106,12 @@ describe("missingFocusNode", () => {
 
 describe("largestComponentIds", () => {
   const edge = (id: string, source: string, target: string) =>
-    ({ id, source, target, kind: "routes" }) as CapabilityGraph["edges"][number];
+    ({
+      id,
+      source,
+      target,
+      kind: "routes",
+    }) as CapabilityGraph["edges"][number];
 
   test("picks the component with the most nodes", () => {
     const graph: CapabilityGraph = {
@@ -112,7 +136,9 @@ describe("largestComponentIds", () => {
       ],
     };
     // Both components have 2 nodes; b's has 2 edges vs a's 0... a's are isolated.
-    expect(largestComponentIds(graph).sort()).toEqual(["agent:b@1", "event:b"].sort());
+    expect(largestComponentIds(graph).sort()).toEqual(
+      ["agent:b@1", "event:b"].sort(),
+    );
   });
 
   test("empty graph yields empty", () => {

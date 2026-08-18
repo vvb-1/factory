@@ -20,7 +20,12 @@ describe("nodeStyleKey", () => {
     expect(nodeStyleKey(agent("a@1", false))).toBe("agentReadOnly");
     expect(nodeStyleKey(agent("a@1", true))).toBe("agentMutating");
     expect(
-      nodeStyleKey({ id: "terminal:a@1", kind: "terminal", label: "chain ends", reason: "done" }),
+      nodeStyleKey({
+        id: "terminal:a@1",
+        kind: "terminal",
+        label: "chain ends",
+        reason: "done",
+      }),
     ).toBe("terminal");
     expect(
       nodeStyleKey({
@@ -41,23 +46,52 @@ describe("legendEntries", () => {
   test("lists only styles the graph actually uses", () => {
     const graph: CapabilityGraph = {
       nodes: [
-        { id: "event:a", kind: "eventType", label: "a", adapter: "claude", scope: [], ttl: null },
+        {
+          id: "event:a",
+          kind: "eventType",
+          label: "a",
+          adapter: "claude",
+          scope: [],
+          ttl: null,
+        },
         agent("a@1", false),
       ],
-      edges: [{ id: "routes:a", source: "event:a", target: "agent:a@1", kind: "routes" }],
+      edges: [
+        {
+          id: "routes:a",
+          source: "event:a",
+          target: "agent:a@1",
+          kind: "routes",
+        },
+      ],
     };
     const legend = legendEntries(graph);
-    expect(legend.nodes.map((n) => n.key)).toEqual(["eventType", "agentReadOnly"]);
+    expect(legend.nodes.map((n) => n.key)).toEqual([
+      "eventType",
+      "agentReadOnly",
+    ]);
     expect(legend.edges.map((e) => e.kind)).toEqual(["routes"]);
   });
 
   test("full graph advertises every style, carrying the shared constants", () => {
     const graph: CapabilityGraph = {
       nodes: [
-        { id: "event:a", kind: "eventType", label: "a", adapter: "claude", scope: [], ttl: null },
+        {
+          id: "event:a",
+          kind: "eventType",
+          label: "a",
+          adapter: "claude",
+          scope: [],
+          ttl: null,
+        },
         agent("a@1", false),
         agent("b@1", true),
-        { id: "terminal:b@1", kind: "terminal", label: "chain ends", reason: "done" },
+        {
+          id: "terminal:b@1",
+          kind: "terminal",
+          label: "chain ends",
+          reason: "done",
+        },
         {
           id: "proposal:p1",
           kind: "proposal",
@@ -70,9 +104,24 @@ describe("legendEntries", () => {
         },
       ],
       edges: [
-        { id: "routes:a", source: "event:a", target: "agent:a@1", kind: "routes" },
-        { id: "rec:b@1:x", source: "agent:b@1", target: "event:a", kind: "recommends" },
-        { id: "prop:1", source: "event:a", target: "proposal:p1", kind: "proposal" },
+        {
+          id: "routes:a",
+          source: "event:a",
+          target: "agent:a@1",
+          kind: "routes",
+        },
+        {
+          id: "rec:b@1:x",
+          source: "agent:b@1",
+          target: "event:a",
+          kind: "recommends",
+        },
+        {
+          id: "prop:1",
+          source: "event:a",
+          target: "proposal:p1",
+          kind: "proposal",
+        },
       ],
     };
     const legend = legendEntries(graph);
@@ -91,6 +140,9 @@ describe("legendEntries", () => {
   });
 
   test("empty graph yields an empty legend", () => {
-    expect(legendEntries({ nodes: [], edges: [] })).toEqual({ nodes: [], edges: [] });
+    expect(legendEntries({ nodes: [], edges: [] })).toEqual({
+      nodes: [],
+      edges: [],
+    });
   });
 });

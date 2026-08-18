@@ -31,18 +31,31 @@ function parseTimestamp(value) {
  *
  * @returns {{ ok: true } | { ok: false, reason: string }}
  */
-export function verifyWebhook({ rawBody, signature, timestamp, secret, now = Date.now(), toleranceMs = TIMESTAMP_TOLERANCE_MS }) {
+export function verifyWebhook({
+  rawBody,
+  signature,
+  timestamp,
+  secret,
+  now = Date.now(),
+  toleranceMs = TIMESTAMP_TOLERANCE_MS,
+}) {
   if (!secret) return { ok: false, reason: "missing_secret" };
-  if (!signature || typeof signature !== "string") return { ok: false, reason: "missing_signature" };
+  if (!signature || typeof signature !== "string")
+    return { ok: false, reason: "missing_signature" };
   if (timestamp === undefined || timestamp === null || timestamp === "") {
     return { ok: false, reason: "missing_timestamp" };
   }
   const timestampString = String(timestamp);
   const ts = parseTimestamp(timestampString);
-  if (ts === null || Math.abs(now - ts) > toleranceMs) return { ok: false, reason: "stale_timestamp" };
-  if (!signature.startsWith("sha256=")) return { ok: false, reason: "bad_signature" };
+  if (ts === null || Math.abs(now - ts) > toleranceMs)
+    return { ok: false, reason: "stale_timestamp" };
+  if (!signature.startsWith("sha256="))
+    return { ok: false, reason: "bad_signature" };
   try {
-    const presented = Buffer.from(signature.slice("sha256=".length).toLowerCase(), "utf8");
+    const presented = Buffer.from(
+      signature.slice("sha256=".length).toLowerCase(),
+      "utf8",
+    );
     const expected = Buffer.from(
       createHmac("sha256", secret)
         .update(`${timestampString}.`)
@@ -50,7 +63,10 @@ export function verifyWebhook({ rawBody, signature, timestamp, secret, now = Dat
         .digest("hex"),
       "utf8",
     );
-    if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
+    if (
+      presented.length !== expected.length ||
+      !timingSafeEqual(presented, expected)
+    ) {
       return { ok: false, reason: "bad_signature" };
     }
   } catch {
@@ -80,17 +96,25 @@ export function githubWebhookSecret() {
  */
 export function verifyGitHubWebhook({ rawBody, signature, secret }) {
   if (!secret) return { ok: false, reason: "missing_secret" };
-  if (!signature || typeof signature !== "string") return { ok: false, reason: "missing_signature" };
-  if (!signature.startsWith("sha256=")) return { ok: false, reason: "bad_signature" };
+  if (!signature || typeof signature !== "string")
+    return { ok: false, reason: "missing_signature" };
+  if (!signature.startsWith("sha256="))
+    return { ok: false, reason: "bad_signature" };
   try {
-    const presented = Buffer.from(signature.slice("sha256=".length).toLowerCase(), "utf8");
+    const presented = Buffer.from(
+      signature.slice("sha256=".length).toLowerCase(),
+      "utf8",
+    );
     const expected = Buffer.from(
       createHmac("sha256", secret)
         .update(rawBody ?? "")
         .digest("hex"),
       "utf8",
     );
-    if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
+    if (
+      presented.length !== expected.length ||
+      !timingSafeEqual(presented, expected)
+    ) {
       return { ok: false, reason: "bad_signature" };
     }
   } catch {
@@ -131,14 +155,26 @@ function repoForSlug(repos, slug) {
  * @returns {{ ok: true, envelope: object }
  *         | { ok: false, ignored: boolean, reason: string }}
  */
-export function translateGitHubEvent({ event, deliveryId, payload, repos, now = Date.now() }) {
+export function translateGitHubEvent({
+  event,
+  deliveryId,
+  payload,
+  repos,
+  now = Date.now(),
+}) {
   if (!deliveryId || typeof deliveryId !== "string") {
     return { ok: false, ignored: false, reason: "missing_delivery_id" };
   }
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    Array.isArray(payload)
+  ) {
     return { ok: false, ignored: false, reason: "malformed_payload" };
   }
-  const occurredAt = new Date(typeof now === "number" ? now : Date.now()).toISOString();
+  const occurredAt = new Date(
+    typeof now === "number" ? now : Date.now(),
+  ).toISOString();
   const base = {
     schemaVersion: "factory.event/v1",
     eventId: deliveryId,
@@ -149,21 +185,30 @@ export function translateGitHubEvent({ event, deliveryId, payload, repos, now = 
   };
 
   if (event === "pull_request") {
-    if (!PR_ACTIONS.includes(payload.action)) return { ok: false, ignored: true, reason: "unhandled_action" };
+    if (!PR_ACTIONS.includes(payload.action))
+      return { ok: false, ignored: true, reason: "unhandled_action" };
     const pr = payload.pull_request;
-    if (!pr || typeof pr !== "object") return { ok: false, ignored: false, reason: "malformed_payload" };
+    if (!pr || typeof pr !== "object")
+      return { ok: false, ignored: false, reason: "malformed_payload" };
     if (payload.action !== "ready_for_review" && pr.draft === true) {
       return { ok: false, ignored: true, reason: "draft_pr" };
     }
     const repo = repoForSlug(repos, payload.repository?.full_name);
     if (!repo) return { ok: false, ignored: true, reason: "unconfigured_repo" };
-    if (pr.base?.ref !== repo.base) return { ok: false, ignored: true, reason: "not_base_branch" };
+    if (pr.base?.ref !== repo.base)
+      return { ok: false, ignored: true, reason: "not_base_branch" };
     // A repo without industrialized worktrees has a safe concurrency of one
     // human (dispatch doc §5) — CI facts still flow, merge requests never do.
-    if (repo.reportOnly) return { ok: false, ignored: true, reason: "repo_report_only" };
+    if (repo.reportOnly)
+      return { ok: false, ignored: true, reason: "repo_report_only" };
     return {
       ok: true,
-      envelope: { ...base, type: "factory.merge.requested", subject: repo.name, payload: { repo: repo.name } },
+      envelope: {
+        ...base,
+        type: "factory.merge.requested",
+        subject: repo.name,
+        payload: { repo: repo.name },
+      },
     };
   }
 
@@ -175,12 +220,18 @@ export function translateGitHubEvent({ event, deliveryId, payload, repos, now = 
     const slug = payload.repository?.full_name;
     const repo = repoForSlug(repos, slug);
     if (!repo) return { ok: false, ignored: true, reason: "unconfigured_repo" };
-    if (run.id === undefined || run.id === null) return { ok: false, ignored: false, reason: "malformed_payload" };
+    if (run.id === undefined || run.id === null)
+      return { ok: false, ignored: false, reason: "malformed_payload" };
     return {
       ok: true,
       // The existing shape ci-log-capture@1 consumes: the GitHub slug, not the
       // short name — see schemas/ci-log-capture.input.json.
-      envelope: { ...base, type: "github.workflow-run.failed", subject: "ci", payload: { repo: slug, runId: run.id } },
+      envelope: {
+        ...base,
+        type: "github.workflow-run.failed",
+        subject: "ci",
+        payload: { repo: slug, runId: run.id },
+      },
     };
   }
 
@@ -227,20 +278,40 @@ export function admitExternalEvent(db, registry, envelope, options = {}) {
  * admitChainEvent instead of accepting a caller-selected source.
  */
 export function admitEvent(db, registry, envelope, { now = Date.now() } = {}) {
-  if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope)) {
-    return { admitted: false, duplicate: false, errors: ["$: envelope must be an object"] };
+  if (
+    envelope === null ||
+    typeof envelope !== "object" ||
+    Array.isArray(envelope)
+  ) {
+    return {
+      admitted: false,
+      duplicate: false,
+      errors: ["$: envelope must be an object"],
+    };
   }
-  const nowMs = typeof now === "number" ? now : (typeof now === "string" ? Date.parse(now) : Date.now());
+  const nowMs =
+    typeof now === "number"
+      ? now
+      : typeof now === "string"
+        ? Date.parse(now)
+        : Date.now();
   const receivedAt = new Date(nowMs).toISOString();
   const stored = { ...envelope, receivedAt };
   const { valid, errors } = validate(registry.schemas.envelope, stored);
   if (!valid) return { admitted: false, duplicate: false, errors };
 
   // Refuse clock tick events whose slot is in the future relative to now (OPS-437).
-  if (stored.source === "schedule" || (typeof stored.type === "string" && stored.type.startsWith("clock.tick."))) {
+  if (
+    stored.source === "schedule" ||
+    (typeof stored.type === "string" && stored.type.startsWith("clock.tick."))
+  ) {
     const occurredMs = Date.parse(stored.occurredAt);
     if (!Number.isNaN(occurredMs) && occurredMs > nowMs) {
-      return { admitted: false, duplicate: false, errors: ["occurredAt: clock tick slot cannot be in the future"] };
+      return {
+        admitted: false,
+        duplicate: false,
+        errors: ["occurredAt: clock tick slot cannot be in the future"],
+      };
     }
   }
 
@@ -255,9 +326,17 @@ export function admitEvent(db, registry, envelope, { now = Date.now() } = {}) {
           correlation_id, causation_id, envelope_json, payload_hash, status, admitted_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?)`,
     ).run(
-      stored.source, stored.eventId, stored.type, stored.subject ?? null,
-      stored.occurredAt, receivedAt, stored.correlationId ?? null, stored.causationId ?? null,
-      canonicalJson(stored), hashJson(stored.payload), receivedAt,
+      stored.source,
+      stored.eventId,
+      stored.type,
+      stored.subject ?? null,
+      stored.occurredAt,
+      receivedAt,
+      stored.correlationId ?? null,
+      stored.causationId ?? null,
+      canonicalJson(stored),
+      hashJson(stored.payload),
+      receivedAt,
     );
     const event = db
       .query(`SELECT * FROM events WHERE source = ? AND event_id = ?`)

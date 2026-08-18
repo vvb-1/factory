@@ -34,7 +34,13 @@ describe("GET /chain/:correlationId (WM-527)", () => {
     db.query(
       `INSERT INTO attempts (run_id, attempt, fencing_token, started_at, finished_at, terminal_state, reason_code)
        VALUES (?, 1, 1, ?, ?, ?, ?)`,
-    ).run(runId, at, state === "RUNNING" ? null : at, state === "RUNNING" ? null : state, null);
+    ).run(
+      runId,
+      at,
+      state === "RUNNING" ? null : at,
+      state === "RUNNING" ? null : state,
+      null,
+    );
     db.query(
       `INSERT INTO proposals (id, event_source, event_id, run_id, decision, status, created_at, ttl_seconds)
        VALUES (?, ?, ?, ?, 'run', 'approved', ?, 600)`,
@@ -46,13 +52,22 @@ describe("GET /chain/:correlationId (WM-527)", () => {
     // `chain` is a reserved provenance at the public intake; derived events
     // enter through the emitter's admission path like the real chain does.
     const admit = (overrides) => {
-      if (overrides.source !== "chain") return s.client.replay(envelope(overrides));
+      if (overrides.source !== "chain")
+        return s.client.replay(envelope(overrides));
       const result = admitChainEvent(s.db, registry, envelope(overrides));
       expect(result.admitted).toBe(true);
       return result;
     };
-    await admit({ eventId: "origin-1", correlationId: "corr-1", occurredAt: t(0) });
-    await admit({ eventId: "elsewhere", correlationId: "corr-other", occurredAt: t(0) });
+    await admit({
+      eventId: "origin-1",
+      correlationId: "corr-1",
+      occurredAt: t(0),
+    });
+    await admit({
+      eventId: "elsewhere",
+      correlationId: "corr-other",
+      occurredAt: t(0),
+    });
     insertRun(s.db, "run-1", "work-scan@1", "COMPLETED", t(1), {
       eventSource: "test",
       eventId: "origin-1",
@@ -90,7 +105,9 @@ describe("GET /chain/:correlationId (WM-527)", () => {
       eventId: "chain-run-2",
     });
     s.db
-      .query(`UPDATE events SET status = 'dead_lettered' WHERE event_id = 'chain-run-1-B'`)
+      .query(
+        `UPDATE events SET status = 'dead_lettered' WHERE event_id = 'chain-run-1-B'`,
+      )
       .run();
   });
   afterAll(() => s.close());
@@ -138,7 +155,11 @@ describe("GET /chain/:correlationId (WM-527)", () => {
 
   test("falls back to the origin's own eventId when it carried no correlation id", async () => {
     await s.client.replay(
-      envelope({ eventId: "bare-origin", correlationId: null, occurredAt: t(6) }),
+      envelope({
+        eventId: "bare-origin",
+        correlationId: null,
+        occurredAt: t(6),
+      }),
     );
     insertRun(s.db, "run-bare", "triage-scan@1", "COMPLETED", t(7), {
       eventSource: "test",
@@ -158,10 +179,17 @@ describe("GET /chain/:correlationId (WM-527)", () => {
       ).admitted,
     ).toBe(true);
     const body = await (await fetch(s.url("/chain/bare-origin"))).json();
-    expect(body.events.map((e) => e.eventId).sort()).toEqual(["bare-origin", "chain-run-bare"]);
+    expect(body.events.map((e) => e.eventId).sort()).toEqual([
+      "bare-origin",
+      "chain-run-bare",
+    ]);
     expect(body.runs.map((r) => r.runId)).toEqual(["run-bare"]);
-    expect(chainKeyOf({ correlationId: null, eventId: "bare-origin" })).toBe("bare-origin");
-    expect(chainKeyOf({ correlationId: "corr-1", eventId: "x" })).toBe("corr-1");
+    expect(chainKeyOf({ correlationId: null, eventId: "bare-origin" })).toBe(
+      "bare-origin",
+    );
+    expect(chainKeyOf({ correlationId: "corr-1", eventId: "x" })).toBe(
+      "corr-1",
+    );
   });
 
   test("includes a causation parent run that lives outside the correlation, as a root", () => {
@@ -177,14 +205,18 @@ describe("GET /chain/:correlationId (WM-527)", () => {
       expect(view.runs.map((r) => r.runId)).toEqual(["run-2", "run-3"]);
     } finally {
       s.db
-        .query(`UPDATE events SET correlation_id = 'corr-1' WHERE event_id = 'chain-run-2'`)
+        .query(
+          `UPDATE events SET correlation_id = 'corr-1' WHERE event_id = 'chain-run-2'`,
+        )
         .run();
     }
   });
 
   test("unknown correlation → 404; id is URL-decoded", async () => {
     expect((await fetch(s.url("/chain/nope"))).status).toBe(404);
-    expect((await fetch(s.url("/chain/" + encodeURIComponent("corr-1")))).status).toBe(200);
+    expect(
+      (await fetch(s.url("/chain/" + encodeURIComponent("corr-1")))).status,
+    ).toBe(200);
     expect((await fetch(s.url("/chain/"))).status).not.toBe(200);
   });
 });

@@ -18,7 +18,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+const cfg = Bun.YAML.parse(
+  readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+);
 
 const target = realpathSync(process.argv[2] || process.cwd());
 const expand = (p) => realpathSync(p.replace(/^~(?=\/|$)/, homedir()));
@@ -28,7 +30,10 @@ const expand = (p) => realpathSync(p.replace(/^~(?=\/|$)/, homedir()));
 const remote = (() => {
   const r = Bun.spawnSync(["git", "-C", target, "remote", "get-url", "origin"]);
   if (r.exitCode !== 0) return null;
-  const m = r.stdout.toString().trim().match(/[:/]([^/:]+\/[^/:]+?)(?:\.git)?$/);
+  const m = r.stdout
+    .toString()
+    .trim()
+    .match(/[:/]([^/:]+\/[^/:]+?)(?:\.git)?$/);
   return m ? m[1] : null;
 })();
 
@@ -37,11 +42,18 @@ for (const repo of cfg.repos || []) {
   try {
     const repoPath = expand(repo.path);
     byPath = target === repoPath || target.startsWith(repoPath + path.sep);
-  } catch {}
+  } catch {
+    /* intentionally ignored */
+  }
   if (!byPath && !(remote && repo.github === remote)) continue;
   const sec = repo.security || {};
-  if (sec.semgrep_args) console.log(`export SEMGREP_ARGS=${JSON.stringify(sec.semgrep_args)}`);
-  if (sec.gitleaks_args) console.log(`export GITLEAKS_ARGS=${JSON.stringify(sec.gitleaks_args)}`);
-  if (sec.python_version) console.log(`export PYTHON_VERSION=${JSON.stringify(String(sec.python_version))}`);
+  if (sec.semgrep_args)
+    console.log(`export SEMGREP_ARGS=${JSON.stringify(sec.semgrep_args)}`);
+  if (sec.gitleaks_args)
+    console.log(`export GITLEAKS_ARGS=${JSON.stringify(sec.gitleaks_args)}`);
+  if (sec.python_version)
+    console.log(
+      `export PYTHON_VERSION=${JSON.stringify(String(sec.python_version))}`,
+    );
   break;
 }

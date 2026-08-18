@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { openDb } from "./db.mjs";
-import { IllegalTransition, TERMINAL_STATES, createRun, lifecycleOf, resolveIdempotency, runState, transition } from "./lifecycle.mjs";
+import {
+  IllegalTransition,
+  TERMINAL_STATES,
+  createRun,
+  lifecycleOf,
+  resolveIdempotency,
+  runState,
+  transition,
+} from "./lifecycle.mjs";
 
 function freshRun(db, key = `key-${Math.random()}`) {
   const runId = `run_test_${Math.random().toString(36).slice(2)}`;
@@ -20,21 +28,38 @@ describe("lifecycle", () => {
   test("happy path PROPOSED → … → COMPLETED, journaled with hashes", () => {
     const db = openDb(":memory:");
     const runId = freshRun(db);
-    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+    for (const to of [
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+    ]) {
       transition(db, { runId, to, actor: "test" });
     }
     expect(runState(db, runId)).toBe("COMPLETED");
     const journal = lifecycleOf(db, runId);
     expect(journal.map((e) => e.to_state)).toEqual([
-      "PROPOSED", "APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED",
+      "PROPOSED",
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
     ]);
-    expect(journal.every((e) => e.record_hash.startsWith("sha256:"))).toBe(true);
+    expect(journal.every((e) => e.record_hash.startsWith("sha256:"))).toBe(
+      true,
+    );
   });
 
   test("illegal transitions are rejected, not repaired", () => {
     const db = openDb(":memory:");
     const runId = freshRun(db);
-    expect(() => transition(db, { runId, to: "RUNNING", actor: "test" })).toThrow(IllegalTransition);
+    expect(() =>
+      transition(db, { runId, to: "RUNNING", actor: "test" }),
+    ).toThrow(IllegalTransition);
     expect(runState(db, runId)).toBe("PROPOSED");
     expect(lifecycleOf(db, runId)).toHaveLength(1);
   });
@@ -44,7 +69,9 @@ describe("lifecycle", () => {
     const runId = freshRun(db);
     transition(db, { runId, to: "CANCELLED", actor: "operator" });
     expect(TERMINAL_STATES.has(runState(db, runId))).toBe(true);
-    expect(() => transition(db, { runId, to: "APPROVED", actor: "test" })).toThrow(IllegalTransition);
+    expect(() =>
+      transition(db, { runId, to: "APPROVED", actor: "test" }),
+    ).toThrow(IllegalTransition);
   });
 
   test("expectFrom guards racing movers", () => {
@@ -52,7 +79,12 @@ describe("lifecycle", () => {
     const runId = freshRun(db);
     transition(db, { runId, to: "APPROVED", actor: "test" });
     expect(() =>
-      transition(db, { runId, to: "CANCELLED", expectFrom: "PROPOSED", actor: "operator" }),
+      transition(db, {
+        runId,
+        to: "CANCELLED",
+        expectFrom: "PROPOSED",
+        actor: "operator",
+      }),
     ).toThrow(IllegalTransition);
   });
 
@@ -129,7 +161,14 @@ describe("lifecycle", () => {
       policyVersion: "test",
       now: clock,
     });
-    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+    for (const to of [
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+    ]) {
       transition(db, { runId, to, actor: "test", now: clock });
     }
     const journal = lifecycleOf(db, runId);

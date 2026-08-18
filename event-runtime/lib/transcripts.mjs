@@ -11,7 +11,15 @@
  * the computed hash and the agent's full output.
  */
 import {
-  closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, statSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
 } from "node:fs";
 import { createWriteStream } from "node:fs";
 import path from "node:path";
@@ -25,9 +33,12 @@ export const TRANSCRIPT_FILENAME = ".transcript.json";
 export const MAX_RESUME_SCAN_BYTES = 1024 * 1024;
 
 function validSessionId(value, adapter) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 256) return false;
+  if (typeof value !== "string" || value.length === 0 || value.length > 256)
+    return false;
   if (adapter === "claude") {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    );
   }
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
 }
@@ -55,23 +66,28 @@ export function transcriptSessionId(transcriptPath, adapter) {
         continue;
       }
       const priorWorkspace = path.dirname(transcriptPath);
-      const candidate = adapter === "claude"
-        && event?.type === "system"
-        && event?.subtype === "init"
-        && event?.cwd === priorWorkspace
-        ? event.session_id
-        : adapter === "pi"
-          && event?.type === "session"
-          && event?.cwd === priorWorkspace
-          ? event.id
-          : null;
+      const candidate =
+        adapter === "claude" &&
+        event?.type === "system" &&
+        event?.subtype === "init" &&
+        event?.cwd === priorWorkspace
+          ? event.session_id
+          : adapter === "pi" &&
+              event?.type === "session" &&
+              event?.cwd === priorWorkspace
+            ? event.id
+            : null;
       if (validSessionId(candidate, adapter)) return candidate;
     }
   } catch {
     return null;
   } finally {
     if (fd !== undefined) {
-      try { closeSync(fd); } catch {}
+      try {
+        closeSync(fd);
+      } catch {
+        /* intentionally ignored */
+      }
     }
   }
   return null;
@@ -85,7 +101,11 @@ export function transcriptSessionId(transcriptPath, adapter) {
 export function findPriorResumeContext({ root, runId, attempt, adapter }) {
   if (!Number.isInteger(attempt) || attempt <= 1) return null;
   for (let priorAttempt = attempt - 1; priorAttempt >= 1; priorAttempt -= 1) {
-    const transcriptPath = path.join(root, `${runId}-a${priorAttempt}`, TRANSCRIPT_FILENAME);
+    const transcriptPath = path.join(
+      root,
+      `${runId}-a${priorAttempt}`,
+      TRANSCRIPT_FILENAME,
+    );
     if (!existsSync(transcriptPath)) continue;
     const sessionId = transcriptSessionId(transcriptPath, adapter);
     if (sessionId) return { attempt: priorAttempt, sessionId, transcriptPath };
@@ -161,7 +181,10 @@ export function waitForStreamFlush(stream) {
  *   endAndFlush: () => Promise<void>
  * }}
  */
-export function createTranscriptCapture(workspaceDir, { filename = TRANSCRIPT_FILENAME, flags = "w" } = {}) {
+export function createTranscriptCapture(
+  workspaceDir,
+  { filename = TRANSCRIPT_FILENAME, flags = "w" } = {},
+) {
   const filePath = path.join(workspaceDir, filename);
   const stream = createWriteStream(filePath, { flags });
 

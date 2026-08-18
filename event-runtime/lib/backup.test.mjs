@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -12,7 +20,8 @@ import {
 } from "./backup.mjs";
 import { openDb } from "./db.mjs";
 
-const freshDir = (prefix = "evrt-backup-") => mkdtempSync(path.join(os.tmpdir(), prefix));
+const freshDir = (prefix = "evrt-backup-") =>
+  mkdtempSync(path.join(os.tmpdir(), prefix));
 
 describe("WAL-safe backup and integrity check (OPS-414)", () => {
   test("checkIntegrity reports ok on a valid database", () => {
@@ -34,7 +43,10 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
   test("checkIntegrity detects corruption in a broken database file", () => {
     const dir = freshDir();
     const corruptFile = path.join(dir, "corrupt.db");
-    writeFileSync(corruptFile, "SQLite format 3\0" + "garbage bytes everywhere".repeat(50));
+    writeFileSync(
+      corruptFile,
+      "SQLite format 3\0" + "garbage bytes everywhere".repeat(50),
+    );
 
     const res = checkIntegrity(corruptFile);
     expect(res.ok).toBe(false);
@@ -55,10 +67,12 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
     liveDb.exec("PRAGMA wal_autocheckpoint = 0;");
 
     for (let i = 0; i < 200; i++) {
-      liveDb.query(
-        `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
+      liveDb
+        .query(
+          `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
          VALUES ('src', ?, 'test.event', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', '{}', 'hash', '2026-08-14T00:00:00Z')`,
-      ).run(`evt-${i}`);
+        )
+        .run(`evt-${i}`);
     }
 
     // Live db has 200 events
@@ -68,9 +82,10 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
     copyFileSync(liveDbFile, naiveDbFile);
     const naiveDb = new Database(naiveDbFile);
     // Naive copy cannot see uncheckpointed table/data or has 0 rows
-    let naiveCount = 0;
+    let naiveCount;
     try {
-      naiveCount = naiveDb.query("SELECT COUNT(*) AS n FROM events").get()?.n ?? 0;
+      naiveCount =
+        naiveDb.query("SELECT COUNT(*) AS n FROM events").get()?.n ?? 0;
     } catch {
       naiveCount = -1; // table did not even exist in main db file
     }
@@ -83,7 +98,9 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
     expect(backupRes.sizeBytes).toBeGreaterThan(0);
 
     const backupDb = openDb(backupDbFile);
-    expect(backupDb.query("SELECT COUNT(*) AS n FROM events").get().n).toBe(200);
+    expect(backupDb.query("SELECT COUNT(*) AS n FROM events").get().n).toBe(
+      200,
+    );
     backupDb.close();
 
     liveDb.close();
@@ -97,22 +114,29 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
 
     const liveDb = openDb(liveDbFile);
     for (let i = 0; i < 150; i++) {
-      liveDb.query(
-        `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
+      liveDb
+        .query(
+          `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
          VALUES ('webhook', ?, 'push', '2026-08-14T12:00:00Z', '2026-08-14T12:00:01Z', '{"ref":"main"}', 'hash', '2026-08-14T12:00:01Z')`,
-      ).run(`webhook-${i}`);
+        )
+        .run(`webhook-${i}`);
     }
-    liveDb.query(
-      `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+    liveDb
+      .query(
+        `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
        VALUES ('run-1', 'idem-1', '{}', 'hash', 'COMPLETED', 1, '2026-08-14T12:00:00Z', '2026-08-14T12:05:00Z')`,
-    ).run();
+      )
+      .run();
 
     // 1. Perform backup
     backupDatabase(liveDb, backupDbFile);
     liveDb.close();
 
     // 2. Corrupt live database and its companion files
-    writeFileSync(liveDbFile, "CORRUPTED DATA BY POWER FAILURE OR ACCIDENTAL TRUNCATION");
+    writeFileSync(
+      liveDbFile,
+      "CORRUPTED DATA BY POWER FAILURE OR ACCIDENTAL TRUNCATION",
+    );
     writeFileSync(`${liveDbFile}-wal`, "STALE TRASH");
     writeFileSync(`${liveDbFile}-shm`, "STALE TRASH");
 
@@ -125,9 +149,14 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
 
     // 4. Verify restored runtime database works seamlessly
     const restoredDb = openDb(liveDbFile);
-    expect(restoredDb.query("SELECT COUNT(*) AS n FROM events").get().n).toBe(150);
+    expect(restoredDb.query("SELECT COUNT(*) AS n FROM events").get().n).toBe(
+      150,
+    );
     expect(restoredDb.query("SELECT COUNT(*) AS n FROM runs").get().n).toBe(1);
-    expect(restoredDb.query("SELECT state FROM runs WHERE run_id = 'run-1'").get().state).toBe("COMPLETED");
+    expect(
+      restoredDb.query("SELECT state FROM runs WHERE run_id = 'run-1'").get()
+        .state,
+    ).toBe("COMPLETED");
     expect(checkIntegrity(restoredDb).ok).toBe(true);
 
     restoredDb.close();
@@ -140,7 +169,9 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
     const targetDb = path.join(dir, "target.db");
     writeFileSync(corruptBackup, "garbage bytes not a sqlite db");
 
-    expect(() => restoreDatabase(corruptBackup, targetDb)).toThrow(/backup file is corrupt/);
+    expect(() => restoreDatabase(corruptBackup, targetDb)).toThrow(
+      /backup file is corrupt/,
+    );
     expect(existsSync(targetDb)).toBe(false);
 
     rmSync(dir, { recursive: true, force: true });
@@ -154,14 +185,18 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
 
     mkdirSync(artifactsDir, { recursive: true });
     const liveDb = openDb(liveDbFile);
-    liveDb.query(
-      `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
+    liveDb
+      .query(
+        `INSERT INTO events (source, event_id, type, occurred_at, received_at, envelope_json, payload_hash, admitted_at)
        VALUES ('source', 'evt-1', 'build', '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z', '{}', 'h1', '2026-08-14T00:00:00Z')`,
-    ).run();
+      )
+      .run();
 
     // Create some artifacts
-    const sha1 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    const sha2 = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
+    const sha1 =
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const sha2 =
+      "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb";
     writeFileSync(path.join(artifactsDir, sha1), "artifact data 1");
     writeFileSync(path.join(artifactsDir, sha2), "artifact data 2");
 
@@ -173,9 +208,15 @@ describe("WAL-safe backup and integrity check (OPS-414)", () => {
     });
 
     expect(snapshot.snapshotPath).toBe(path.join(backupDir, "snap-1"));
-    expect(existsSync(path.join(snapshot.snapshotPath, "runtime.db"))).toBe(true);
-    expect(existsSync(path.join(snapshot.snapshotPath, "artifacts", sha1))).toBe(true);
-    expect(existsSync(path.join(snapshot.snapshotPath, "artifacts", sha2))).toBe(true);
+    expect(existsSync(path.join(snapshot.snapshotPath, "runtime.db"))).toBe(
+      true,
+    );
+    expect(
+      existsSync(path.join(snapshot.snapshotPath, "artifacts", sha1)),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(snapshot.snapshotPath, "artifacts", sha2)),
+    ).toBe(true);
     expect(snapshot.artifactsBackup.copiedFiles).toBe(2);
 
     liveDb.close();

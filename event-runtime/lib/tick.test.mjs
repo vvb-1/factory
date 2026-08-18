@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PRUNE_INTERVAL_MS, TICK_SUBSYSTEMS, tick } from "../cli.mjs";
@@ -35,7 +41,9 @@ describe("tick (OPS-412)", () => {
        VALUES (?, 1, ?, 'sha256:x', '{}', '{}', ?)`,
     ).run(
       "run_kept",
-      JSON.stringify({ artifacts: [{ kind: "ci-log", sha256: kept.hash, uri: "file:///x" }] }),
+      JSON.stringify({
+        artifacts: [{ kind: "ci-log", sha256: kept.hash, uri: "file:///x" }],
+      }),
       new Date().toISOString(),
     );
 
@@ -58,7 +66,9 @@ describe("tick (OPS-412)", () => {
     expect(existsSync(orphan.file)).toBe(false);
     expect(existsSync(kept.file)).toBe(true);
     expect(result.lastPrune).toBe(now);
-    expect(logs.some((l) => l.startsWith("artifacts: pruned 1 orphan"))).toBe(true);
+    expect(logs.some((l) => l.startsWith("artifacts: pruned 1 orphan"))).toBe(
+      true,
+    );
   });
 
   test("a thrown exception in the GC subsystem still advances result.lastPrune to now (OPS-468)", async () => {

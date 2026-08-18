@@ -31,7 +31,11 @@ describe("parseHash", () => {
 
   test("strips a query so ?type= cannot become a path segment", () => {
     expect(parseHash("#/events?type=factory.ticket.ready")).toEqual(["events"]);
-    expect(parseHash("#/events/web/evt_1?type=x")).toEqual(["events", "web", "evt_1"]);
+    expect(parseHash("#/events/web/evt_1?type=x")).toEqual([
+      "events",
+      "web",
+      "evt_1",
+    ]);
   });
 
   test("decodes encoded segments so agent refs round-trip", () => {
@@ -67,16 +71,24 @@ describe("shouldReplaceHash", () => {
     expect(shouldReplaceHash("#/runs", "runs/run_01")).toBe(true);
     expect(shouldReplaceHash("#/runs/run_01", "runs/run_02")).toBe(true);
     expect(shouldReplaceHash("#/runs/run_02", "runs")).toBe(true);
-    expect(shouldReplaceHash("#/events/web/evt_1", "events/web/evt_2")).toBe(true);
-    expect(shouldReplaceHash("#/agents", "agents/factory-status-report%401")).toBe(true);
-    expect(shouldReplaceHash("#/graph", "graph/event%3Afactory.ticket.ready")).toBe(true);
+    expect(shouldReplaceHash("#/events/web/evt_1", "events/web/evt_2")).toBe(
+      true,
+    );
+    expect(
+      shouldReplaceHash("#/agents", "agents/factory-status-report%401"),
+    ).toBe(true);
+    expect(
+      shouldReplaceHash("#/graph", "graph/event%3Afactory.ticket.ready"),
+    ).toBe(true);
     expect(shouldReplaceHash("#/workers", "workers/wkr_01")).toBe(true);
     expect(shouldReplaceHash("#/workers/wkr_01", "workers/wkr_02")).toBe(true);
     expect(shouldReplaceHash("#/workers/wkr_01", "workers")).toBe(true);
   });
 
   test("query-only changes on the same view replace", () => {
-    expect(shouldReplaceHash("#/events", "events?type=factory.ticket.ready")).toBe(true);
+    expect(
+      shouldReplaceHash("#/events", "events?type=factory.ticket.ready"),
+    ).toBe(true);
     expect(shouldReplaceHash("#/events?type=a", "events?type=b")).toBe(true);
     expect(shouldReplaceHash("#/events?type=a", "events/web/evt_1")).toBe(true);
   });
@@ -128,7 +140,9 @@ describe("withProject / hashProject", () => {
     expect(withProject("events?type=factory.ticket.ready", "bj29")).toBe(
       "events?type=factory.ticket.ready&project=bj29",
     );
-    expect(withProject("events?type=x&project=bj29", null)).toBe("events?type=x");
+    expect(withProject("events?type=x&project=bj29", null)).toBe(
+      "events?type=x",
+    );
     expect(withProject("runs/run_01", undefined)).toBe("runs/run_01");
   });
 
@@ -141,7 +155,9 @@ describe("withProject / hashProject", () => {
   test("same-view project query still replaces", () => {
     expect(shouldReplaceHash("#/runs", "runs?project=bj29")).toBe(true);
     expect(shouldReplaceHash("#/runs?project=bj29", "runs")).toBe(true);
-    expect(shouldReplaceHash("#/events?project=bj29", "runs?project=bj29")).toBe(false);
+    expect(
+      shouldReplaceHash("#/events?project=bj29", "runs?project=bj29"),
+    ).toBe(false);
   });
 });
 
@@ -310,7 +326,10 @@ describe("hashPath", () => {
 
   test("round-trips through parseHash", () => {
     const path = hashPath("agents", "factory-status-report@1");
-    expect(parseHash(`#/${path}`)).toEqual(["agents", "factory-status-report@1"]);
+    expect(parseHash(`#/${path}`)).toEqual([
+      "agents",
+      "factory-status-report@1",
+    ]);
     const worker = hashPath("workers", "wkr_lab_4821");
     expect(parseHash(`#/${worker}`)).toEqual(["workers", "wkr_lab_4821"]);
   });

@@ -1,10 +1,7 @@
 {
   "title": "dispatch input — one repo, one already-queued ticket (WM-108)",
   "type": "object",
-  "required": [
-    "repo",
-    "ticket"
-  ],
+  "required": ["repo", "ticket"],
   "additionalProperties": false,
   "properties": {
     "repo": {
@@ -19,10 +16,7 @@
     },
     "repoPin": {
       "type": "object",
-      "required": [
-        "repo",
-        "sha"
-      ],
+      "required": ["repo", "sha"],
       "additionalProperties": false,
       "description": "Optional provenance pin recording the base-branch SHA the request was made against; the worktree itself branches from the repo's live base via its own worktree_up, so this is a record, not a checkout instruction",
       "properties": {
@@ -41,10 +35,7 @@
           "description": "Commit SHA of the repo's base branch at request time"
         },
         "github": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "GitHub owner/name slug of the repo, or null when it has no GitHub remote"
         }
       }

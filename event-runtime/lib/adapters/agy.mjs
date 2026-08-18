@@ -16,8 +16,17 @@ import { createWriteStream, readFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
+import { refuseSandbox } from "./sandboxed.mjs";
 
 export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
+
+/**
+ * No guest execution path exists for this adapter (WM-313): a sandboxed
+ * definition is refused, not run on the host. See lib/adapters/sandboxed.mjs.
+ */
+export const SANDBOX_SUPPORT = "unsupported";
+const SANDBOX_REFUSAL_REASON =
+  "the agy CLI has no guest execution path yet — its binary, Google Cloud/Antigravity auth, and prompt transport have not been translated to the microVM";
 
 export const KILL_GRACE_MS = 30_000;
 const TEXT_PREVIEW_CHARS = 4000;
@@ -53,9 +62,17 @@ export function resolveAgyCommand({ which = Bun.which } = {}) {
  * Build argv for spawning agy.
  * The prompt itself travels on stdin via `-p -`.
  */
-export function buildAgyArgv({ prompt, def, model, effort, workspaceDir, timeoutMs }) {
+export function buildAgyArgv({
+  prompt,
+  def,
+  model,
+  effort,
+  workspaceDir,
+  timeoutMs,
+}) {
   const args = [
-    "--output-format", "stream-json",
+    "--output-format",
+    "stream-json",
     "--dangerously-skip-permissions",
   ];
 
@@ -67,7 +84,10 @@ export function buildAgyArgv({ prompt, def, model, effort, workspaceDir, timeout
     // Seconds, not rounded minutes: `--print-timeout` takes Go duration syntax,
     // and minute granularity used to floor every sub-three-minute budget to 1m
     // (a 120s run gave agy 60s, so it quit while the worker still waited).
-    const printSeconds = Math.max(1, Math.round((timeoutMs - PRINT_TIMEOUT_GRACE_MS) / 1000));
+    const printSeconds = Math.max(
+      1,
+      Math.round((timeoutMs - PRINT_TIMEOUT_GRACE_MS) / 1000),
+    );
     args.push("--print-timeout", `${printSeconds}s`);
   }
 
@@ -75,9 +95,19 @@ export function buildAgyArgv({ prompt, def, model, effort, workspaceDir, timeout
     args.push("--model", model);
   }
 
-  const tierEffort = def?.model_tier === "light" ? "low" : (def?.model_tier === "strong" ? "high" : (def?.model_tier === "standard" ? "medium" : null));
+  const tierEffort =
+    def?.model_tier === "light"
+      ? "low"
+      : def?.model_tier === "strong"
+        ? "high"
+        : def?.model_tier === "standard"
+          ? "medium"
+          : null;
   const effectiveEffort = effort ?? def?.effort ?? tierEffort;
-  if (typeof effectiveEffort === "string" && ["low", "medium", "high"].includes(effectiveEffort.toLowerCase())) {
+  if (
+    typeof effectiveEffort === "string" &&
+    ["low", "medium", "high"].includes(effectiveEffort.toLowerCase())
+  ) {
     args.push("--effort", effectiveEffort.toLowerCase());
   }
 
@@ -89,8 +119,18 @@ export function buildAgyArgv({ prompt, def, model, effort, workspaceDir, timeout
 }
 
 export const BASE_INHERITED_ENV = [
-  "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM",
-  "TMPDIR", "USER", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
 ];
 
 /**
@@ -98,17 +138,29 @@ export const BASE_INHERITED_ENV = [
  * Strips provider API keys to force subscription/login authentication.
  */
 export function safeChildEnvironment(env = {}, defOrOpts = {}) {
-  const isMutating = typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
-  const inherited = isMutating ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV] : BASE_INHERITED_ENV;
+  const isMutating =
+    typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
+  const inherited = isMutating
+    ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV]
+    : BASE_INHERITED_ENV;
   const childEnv = Object.fromEntries(
-    inherited.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
+    inherited.flatMap((key) =>
+      process.env[key] === undefined ? [] : [[key, process.env[key]]],
+    ),
   );
   Object.assign(childEnv, env);
 
   for (const key of [
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
-    "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
   ]) {
     delete childEnv[key];
   }
@@ -130,7 +182,9 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
 
 function clip(text) {
   const s = String(text ?? "");
-  return s.length > TEXT_PREVIEW_CHARS ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]` : s;
+  return s.length > TEXT_PREVIEW_CHARS
+    ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]`
+    : s;
 }
 
 /** agy's token counters, renamed to the trace's shape. Absent fields stay absent. */
@@ -166,7 +220,8 @@ function mapResultEvent(result) {
   if (!result || typeof result !== "object") return [];
   const events = [];
 
-  const response = typeof result.response === "string" ? result.response.trim() : "";
+  const response =
+    typeof result.response === "string" ? result.response.trim() : "";
   if (response) {
     events.push({ kind: "assistant_text", payload: { text: clip(response) } });
   }
@@ -219,54 +274,65 @@ export function mapStreamEvent(msg) {
   if (msg.event !== "step_update") return [];
 
   const s = msg.step_update ?? {};
-  const stepIndex = s.step_index === undefined || s.step_index === null ? null : String(s.step_index);
+  const stepIndex =
+    s.step_index === undefined || s.step_index === null
+      ? null
+      : String(s.step_index);
   const durationMs = durationMsOf(s.duration_seconds);
 
   if (s.step_type === "tool") {
     const info = s.tool_info ?? {};
     const name = s.tool_name ?? info.name ?? "tool";
     if (s.state === "ACTIVE") {
-      return [{
-        kind: "tool_use",
-        payload: { id: stepIndex, name, input: info.parameters ?? {} },
-      }];
+      return [
+        {
+          kind: "tool_use",
+          payload: { id: stepIndex, name, input: info.parameters ?? {} },
+        },
+      ];
     }
     if (s.state === "DONE" || s.state === "ERROR") {
       const isError = s.state === "ERROR";
-      return [{
-        kind: "tool_result",
-        payload: {
-          toolUseId: stepIndex,
-          name,
-          content: isError
-            ? clip(info.error?.message ?? `${name} failed`)
-            : `${name} completed${durationMs == null ? "" : ` in ${(durationMs / 1000).toFixed(2)}s`}`,
-          isError,
-          durationMs,
+      return [
+        {
+          kind: "tool_result",
+          payload: {
+            toolUseId: stepIndex,
+            name,
+            content: isError
+              ? clip(info.error?.message ?? `${name} failed`)
+              : `${name} completed${durationMs == null ? "" : ` in ${(durationMs / 1000).toFixed(2)}s`}`,
+            isError,
+            durationMs,
+          },
         },
-      }];
+      ];
     }
     return [];
   }
 
   if (s.step_type === "error_message") {
-    return [{ kind: "lifecycle", payload: { note: "error_message", stepIndex } }];
+    return [
+      { kind: "lifecycle", payload: { note: "error_message", stepIndex } },
+    ];
   }
 
   // agent_response and checkpoint steps exist to report incremental token
   // spend; surfacing them keeps mid-run accounting available while the run
   // is still going, which the terminal result alone cannot provide.
   if (s.usage && typeof s.usage === "object") {
-    return [{
-      kind: "usage",
-      payload: {
-        durationMs,
-        numTurns: null,
-        costUSD: null,
-        usage: normalizeUsage(s.usage),
-        incremental: true,
+    return [
+      {
+        kind: "usage",
+        payload: {
+          durationMs,
+          numTurns: null,
+          costUSD: null,
+          usage: normalizeUsage(s.usage),
+          incremental: true,
+        },
       },
-    }];
+    ];
   }
 
   return [];
@@ -282,13 +348,15 @@ export function extractUsage(msg) {
   const usage = {};
   if (typeof u.input_tokens === "number") usage.input = u.input_tokens;
   if (typeof u.output_tokens === "number") usage.output = u.output_tokens;
-  if (typeof u.cache_read_tokens === "number") usage.cacheRead = u.cache_read_tokens;
+  if (typeof u.cache_read_tokens === "number")
+    usage.cacheRead = u.cache_read_tokens;
   if (typeof r.num_turns === "number") usage.turns = r.num_turns;
 
   return {
     usage,
     costUSD: null,
-    durationMs: typeof r.duration_seconds === "number" ? r.duration_seconds * 1000 : null,
+    durationMs:
+      typeof r.duration_seconds === "number" ? r.duration_seconds * 1000 : null,
     status: r.status ?? null,
     error: r.error ?? null,
   };
@@ -309,10 +377,13 @@ export async function execute({
   abortSignal,
   signal,
 }) {
+  refuseSandbox("agy", def, SANDBOX_REFUSAL_REASON);
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
   const childEnv = safeChildEnvironment(env, def);
 
-  const resolved = resolveAgyCommand({ which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }) });
+  const resolved = resolveAgyCommand({
+    which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }),
+  });
   if (!resolved) {
     throw new CliNotFoundError(
       "agy CLI is not on PATH — install the Antigravity CLI (docs/event-runtime.md §6)",
@@ -338,7 +409,9 @@ export async function execute({
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
+    const transcript = createWriteStream(
+      path.join(workspaceDir, ".transcript.json"),
+    );
     transcript.on("error", () => {});
     if (child.stdout) {
       child.stdout.pipe(transcript);
@@ -371,7 +444,7 @@ export async function execute({
         try {
           events = mapStreamEvent(parsed);
         } catch {
-          events = [];
+          /* malformed event: events stays [] from the initializer */
         }
         for (const event of events) {
           try {

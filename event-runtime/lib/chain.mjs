@@ -26,14 +26,20 @@ export const CHAIN_SOURCE = "chain";
  * select it through the public API.
  */
 export function admitChainEvent(db, registry, envelope, options = {}) {
-  return admitEvent(db, registry, { ...envelope, source: CHAIN_SOURCE }, options);
+  return admitEvent(
+    db,
+    registry,
+    { ...envelope, source: CHAIN_SOURCE },
+    options,
+  );
 }
 
 /** Resolve a "$.input.x" / "$.artifact.x.y" path against the chain context. */
 function resolvePath(expr, context) {
   if (typeof expr !== "string" || !expr.startsWith("$.")) return expr; // literal
   const [root, ...segments] = expr.slice(2).split(".");
-  if (!(root in context)) throw new Error(`chain input path "${expr}": unknown root "${root}"`);
+  if (!(root in context))
+    throw new Error(`chain input path "${expr}": unknown root "${root}"`);
   let value = context[root];
   for (const segment of segments) {
     if (value === null || typeof value !== "object" || !(segment in value)) {
@@ -41,14 +47,17 @@ function resolvePath(expr, context) {
     }
     value = value[segment];
   }
-  if (value === undefined) throw new Error(`chain input path "${expr}" resolves to nothing`);
+  if (value === undefined)
+    throw new Error(`chain input path "${expr}" resolves to nothing`);
   return value;
 }
 
 export function buildChainInput(mapping, context) {
   const input = {};
   for (const [field, expr] of Object.entries(mapping)) {
-    input[field] = resolvePath(expr, context);
+    input[field] = Array.isArray(expr)
+      ? expr.map((item) => resolvePath(item, context))
+      : resolvePath(expr, context);
   }
   return input;
 }
@@ -112,13 +121,50 @@ export function resolveChains(db, registry, { now = Date.now() } = {}) {
       const selectionContext = { input: spec.input, artifact };
       const selectedEdges = rule.independent
         ? Object.entries(rule.edges).filter(([, candidate]) => {
-            const items = resolveItems(candidate.whenItemsField, selectionContext);
+            const items = resolveItems(
+              candidate.whenItemsField,
+              selectionContext,
+            );
             if (!Array.isArray(items)) {
-              throw new Error(`independent chain selector "${candidate.whenItemsField}" is not an array`);
+              throw new Error(
+                `independent chain selector "${candidate.whenItemsField}" is not an array`,
+              );
             }
             return items.length > 0;
           })
-        : [[recommendation, rule.edges[recommendation]]].filter(([, candidate]) => candidate !== undefined);
+        : (() => {
+            const primary = rule.edges[recommendation];
+            if (primary === undefined) return [];
+            const additionalKeys = primary.also ?? [];
+            if (
+              !Array.isArray(additionalKeys) ||
+              additionalKeys.some((key) => typeof key !== "string")
+            ) {
+              throw new Error(
+                `chain edge "${recommendation}" also must be an array of edge keys`,
+              );
+            }
+            return [recommendation, ...additionalKeys]
+              .map((key) => {
+                const candidate = rule.edges[key];
+                if (candidate === undefined) {
+                  throw new Error(
+                    `chain edge "${recommendation}" references unknown sibling "${key}"`,
+                  );
+                }
+                return [key, candidate];
+              })
+              .filter(([, candidate]) => {
+                if (candidate.whenPath === undefined) return true;
+                try {
+                  return (
+                    resolvePath(candidate.whenPath, selectionContext) !== null
+                  );
+                } catch {
+                  return false;
+                }
+              });
+          })();
       if (selectedEdges.length === 0) {
         // An unmapped value or an independent result with no actionable items
         // is a legitimate terminal — record nothing, chain nothing.
@@ -130,7 +176,11 @@ export function resolveChains(db, registry, { now = Date.now() } = {}) {
       // resolves against the accepted result's stored artifacts (OPS-372).
       const artifactHash = {};
       for (const entry of result.artifacts ?? []) {
-        if (entry.kind && entry.sha256 && artifactHash[entry.kind] === undefined) {
+        if (
+          entry.kind &&
+          entry.sha256 &&
+          artifactHash[entry.kind] === undefined
+        ) {
           artifactHash[entry.kind] = entry.sha256;
         }
       }
@@ -156,15 +206,22 @@ export function resolveChains(db, registry, { now = Date.now() } = {}) {
           }
 
           const fallbackIds = items.map((item) => {
-            if (typeof item === "object" && item !== null) return itemKey ? item[itemKey] : undefined;
-            if (typeof item === "string" || typeof item === "number") return String(item);
+            if (typeof item === "object" && item !== null)
+              return itemKey ? item[itemKey] : undefined;
+            if (typeof item === "string" || typeof item === "number")
+              return String(item);
             return undefined;
           });
-          const duplicateFallback = new Set(fallbackIds.map(String)).size !== fallbackIds.length;
+          const duplicateFallback =
+            new Set(fallbackIds.map(String)).size !== fallbackIds.length;
 
           for (const [index, item] of items.entries()) {
             const itemKeyVal = fallbackIds[index];
-            if (itemKeyVal === undefined || itemKeyVal === null || String(itemKeyVal).trim() === "") {
+            if (
+              itemKeyVal === undefined ||
+              itemKeyVal === null ||
+              String(itemKeyVal).trim() === ""
+            ) {
               throw new Error(`multi-emit chain item missing key "${itemKey}"`);
             }
             const itemContext = {
@@ -174,14 +231,25 @@ export function resolveChains(db, registry, { now = Date.now() } = {}) {
               item,
             };
             const payload = buildChainInput(edge.input ?? {}, itemContext);
-            if (itemKey && payload[itemKey] === undefined) payload[itemKey] = itemKeyVal;
-            if (edge.perItem) Object.assign(payload, buildChainInput(edge.perItem, itemContext));
+            if (itemKey && payload[itemKey] === undefined)
+              payload[itemKey] = itemKeyVal;
+            if (edge.perItem)
+              Object.assign(
+                payload,
+                buildChainInput(edge.perItem, itemContext),
+              );
 
             envelopes.push({
               schemaVersion: "factory.event/v1",
-              eventId: chainEventId(edge, row, itemContext, `chain-${row.run_id}-${itemKeyVal}`, {
-                mixed: mixed || duplicateFallback,
-              }),
+              eventId: chainEventId(
+                edge,
+                row,
+                itemContext,
+                `chain-${row.run_id}-${itemKeyVal}`,
+                {
+                  mixed: mixed || duplicateFallback,
+                },
+              ),
               type: edge.eventType,
               source: CHAIN_SOURCE,
               subject: spec.agent,
@@ -199,7 +267,13 @@ export function resolveChains(db, registry, { now = Date.now() } = {}) {
           };
           envelopes.push({
             schemaVersion: "factory.event/v1",
-            eventId: chainEventId(edge, row, eventContext, `chain-${row.run_id}`, { mixed }),
+            eventId: chainEventId(
+              edge,
+              row,
+              eventContext,
+              `chain-${row.run_id}`,
+              { mixed },
+            ),
             type: edge.eventType,
             source: CHAIN_SOURCE,
             subject: spec.agent,
@@ -222,17 +296,24 @@ export function resolveChains(db, registry, { now = Date.now() } = {}) {
       // marker, not permission to backfill stale actions under today's edges.
       const existingIds = new Set(
         db
-          .query(`SELECT event_id FROM events WHERE source = ? AND causation_id = ?`)
+          .query(
+            `SELECT event_id FROM events WHERE source = ? AND causation_id = ?`,
+          )
           .all(CHAIN_SOURCE, row.run_id)
           .map((event) => event.event_id),
       );
       if ([...existingIds].some((eventId) => !ids.includes(eventId))) continue;
-      const pending = envelopes.filter((envelope) => !existingIds.has(envelope.eventId));
+      const pending = envelopes.filter(
+        (envelope) => !existingIds.has(envelope.eventId),
+      );
       for (const envelope of pending) {
         const admitted = admitChainEvent(db, registry, envelope, { now });
         if (admitted.admitted) outcome.emitted += 1;
         else if (admitted.duplicate) outcome.skipped += 1;
-        else outcome.errors.push(`${envelope.eventId}: ${admitted.errors.join("; ")}`);
+        else
+          outcome.errors.push(
+            `${envelope.eventId}: ${admitted.errors.join("; ")}`,
+          );
       }
     } catch (err) {
       outcome.errors.push(`chain-${row.run_id}: ${err.message}`);

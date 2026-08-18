@@ -6,11 +6,11 @@ via the deterministic actions adapter in item-list mode
 
 Registered actions — each resolves to one fixed `tools/linear.mjs` invocation:
 
-| action id | effect |
-| :--- | :--- |
-| `retire-shipped` | `state {issueId} "Canceled"` — shipped or overtaken, evidence approved by the operator |
-| `mark-duplicate` | `state {issueId} "Duplicate"` — another named ticket covers it |
-| `comment-evidence` | `comment {issueId} "sweep: <reason>"` — the citation a retirement must carry |
+| action id          | effect                                                                                 |
+| :----------------- | :------------------------------------------------------------------------------------- |
+| `retire-shipped`   | `state {issueId} "Canceled"` — shipped or overtaken, evidence approved by the operator |
+| `mark-duplicate`   | `state {issueId} "Duplicate"` — another named ticket covers it                         |
+| `comment-evidence` | `comment {issueId} "sweep: <reason>"` — the citation a retirement must carry           |
 
 Retirement is always a state transition, never a delete or archive — the
 ticket stays recoverable. An action ID outside this table refuses before

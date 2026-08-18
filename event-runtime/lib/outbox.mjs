@@ -18,13 +18,18 @@ import { tx } from "./db.mjs";
  */
 export function publishOutbox(db, { sink, now = Date.now() } = {}) {
   const rows = db
-    .query(`SELECT seq, event_json FROM outbox WHERE published_at IS NULL ORDER BY seq`)
+    .query(
+      `SELECT seq, event_json FROM outbox WHERE published_at IS NULL ORDER BY seq`,
+    )
     .all();
   let delivered = 0;
   for (const row of rows) {
     sink(JSON.parse(row.event_json), row);
     tx(db, () => {
-      db.query(`UPDATE outbox SET published_at = ? WHERE seq = ?`).run(new Date(now).toISOString(), row.seq);
+      db.query(`UPDATE outbox SET published_at = ? WHERE seq = ?`).run(
+        new Date(now).toISOString(),
+        row.seq,
+      );
     });
     delivered += 1;
   }

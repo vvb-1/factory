@@ -1,5 +1,6 @@
 /** Event, proposal, run, journal, outbox, and worker-action endpoints. */
 import { artifactHead } from "./api-artifacts.mjs";
+import { FACTORY_ROOT } from "./config.mjs";
 import { runUsage } from "./db.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { archiveDeadLetteredEvent, requeueEvent } from "./planner.mjs";
@@ -9,7 +10,26 @@ import {
   rejectProposal,
 } from "./proposals.mjs";
 import { traceOf } from "./trace.mjs";
-import { cancelRun, releaseStalledWorkerLease, retryRun } from "./worker.mjs";
+import {
+  attemptDeadline,
+  cancelRun,
+  extendRunDeadline,
+  policyMaxRunMinutes,
+  releaseStalledWorkerLease,
+  retryRun,
+} from "./worker.mjs";
+
+export const MAX_EXTENSION_SECONDS = 3600;
+
+export { policyMaxRunMinutes };
+
+function extensionRefusal(send, status, code, detail = {}) {
+  return send(status, {
+    error: code,
+    extended: false,
+    refusal: { code, retryable: false, ...detail },
+  });
+}
 
 /** Optional repository names named by a run/event input (OPS-356). */
 export function repoNamesFromInput(input) {
@@ -105,11 +125,256 @@ function eventsView(db, status) {
   });
 }
 
+const TICKET_ID = /^[A-Z][A-Z0-9]{1,9}-\d+$/;
+
+function objectNamesTicket(value, ticket) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value))
+    return value.some((entry) => objectNamesTicket(entry, ticket));
+  for (const [key, entry] of Object.entries(value)) {
+    if (
+      /^(ticket|ticketId|issue|issueId|linearId)$/i.test(key) &&
+      typeof entry === "string" &&
+      entry.toUpperCase() === ticket
+    )
+      return true;
+    if (entry && typeof entry === "object" && objectNamesTicket(entry, ticket))
+      return true;
+  }
+  return false;
+}
+
+function parseObject(json) {
+  try {
+    const value = JSON.parse(json);
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function collectPrRefs(value, refs = { numbers: new Set(), urls: new Set() }) {
+  if (!value || typeof value !== "object") return refs;
+  if (Array.isArray(value)) {
+    for (const entry of value) collectPrRefs(entry, refs);
+    return refs;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string") {
+      const match = entry.match(
+        /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:$|[/?#])/,
+      );
+      if (match) {
+        refs.urls.add(entry);
+        refs.numbers.add(Number(match[1]));
+      }
+    }
+    if (/^(pr|prNumber|pullRequest|pullRequestNumber)$/i.test(key)) {
+      const number = Number(entry);
+      if (Number.isInteger(number) && number > 0) refs.numbers.add(number);
+    }
+    if (entry && typeof entry === "object") collectPrRefs(entry, refs);
+  }
+  return refs;
+}
+
+function hasPrRef(value, refs) {
+  const own = collectPrRefs(value);
+  for (const number of own.numbers) if (refs.numbers.has(number)) return true;
+  for (const url of own.urls) if (refs.urls.has(url)) return true;
+  return false;
+}
+
+function namedString(values, names) {
+  for (const value of values) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    for (const name of names) {
+      if (typeof value[name] === "string" && value[name].trim())
+        return value[name].trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Everything the ticket journey needs in one bounded server-side join. The
+ * existing `/runs` route carries `?ticket=` so this stays inside the run API
+ * module and does not add another top-level router branch. Matching starts on
+ * explicit ticket fields (never arbitrary prose), then closes over linked
+ * event/proposal/run ids and PR references emitted by dispatch/merge results.
+ */
+export function ticketJourneyView(db, rawTicket, options = {}) {
+  const ticket = String(rawTicket ?? "")
+    .trim()
+    .toUpperCase();
+  if (!TICKET_ID.test(ticket)) return null;
+
+  const eventRows = db
+    .query(`SELECT * FROM events ORDER BY admitted_at, rowid`)
+    .all();
+  const proposalRows = db
+    .query(`SELECT * FROM proposals ORDER BY created_at, rowid`)
+    .all();
+  const runRows = db
+    .query(`SELECT * FROM runs ORDER BY created_at, rowid`)
+    .all();
+  const resultRows = db.query(`SELECT * FROM results ORDER BY rowid`).all();
+  const resultByRun = new Map();
+  for (const row of resultRows) {
+    const result = parseObject(row.result_json);
+    if (!resultByRun.has(row.run_id)) resultByRun.set(row.run_id, []);
+    resultByRun.get(row.run_id).push(result);
+  }
+
+  const events = new Set();
+  const proposals = new Set();
+  const runs = new Set();
+  for (const row of eventRows) {
+    const envelope = parseObject(row.envelope_json);
+    if (
+      String(row.subject ?? "").toUpperCase() === ticket ||
+      objectNamesTicket(envelope, ticket)
+    )
+      events.add(`${row.source}\0${row.event_id}`);
+  }
+  for (const row of proposalRows) {
+    const spec = parseObject(row.spec_json);
+    if (objectNamesTicket(spec.input, ticket)) proposals.add(row.id);
+  }
+  for (const row of runRows) {
+    const spec = parseObject(row.spec_json);
+    const results = resultByRun.get(row.run_id) ?? [];
+    if (
+      objectNamesTicket(spec.input, ticket) ||
+      results.some((result) => objectNamesTicket(result, ticket))
+    )
+      runs.add(row.run_id);
+  }
+
+  // Link closure catches runs that name only their proposal/event and events
+  // whose payload names only a PR emitted by the original dispatch attempt.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of proposalRows) {
+      const eventKey = `${row.event_source}\0${row.event_id}`;
+      if (
+        proposals.has(row.id) ||
+        events.has(eventKey) ||
+        (row.run_id && runs.has(row.run_id))
+      ) {
+        if (!proposals.has(row.id)) {
+          proposals.add(row.id);
+          changed = true;
+        }
+        if (!events.has(eventKey)) {
+          events.add(eventKey);
+          changed = true;
+        }
+        if (row.run_id && !runs.has(row.run_id)) {
+          runs.add(row.run_id);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const prRefs = { numbers: new Set(), urls: new Set() };
+  for (const runId of runs) {
+    for (const result of resultByRun.get(runId) ?? [])
+      collectPrRefs(result, prRefs);
+  }
+  if (prRefs.numbers.size || prRefs.urls.size) {
+    for (const row of runRows) {
+      const spec = parseObject(row.spec_json);
+      const results = resultByRun.get(row.run_id) ?? [];
+      if (
+        hasPrRef(spec.input, prRefs) ||
+        results.some((result) => hasPrRef(result, prRefs))
+      )
+        runs.add(row.run_id);
+    }
+    for (const row of eventRows) {
+      if (hasPrRef(parseObject(row.envelope_json), prRefs))
+        events.add(`${row.source}\0${row.event_id}`);
+    }
+  }
+
+  const matchedEvents = eventsView(db).filter((event) =>
+    events.has(`${event.source}\0${event.eventId}`),
+  );
+  const matchedProposals = proposalHistory(db).filter((proposal) =>
+    proposals.has(proposal.id),
+  );
+  const matchedRuns = [...runs]
+    .map((runId) => runView(db, runId, options))
+    .filter(Boolean)
+    .sort((a, b) => a.run.created_at.localeCompare(b.run.created_at));
+
+  const metadata = [
+    ...matchedEvents.map((event) => event.envelope?.payload),
+    ...matchedProposals.map((proposal) => proposal.spec?.input),
+    ...matchedRuns.map((run) => run.run.spec?.input),
+    ...matchedRuns.map((run) => run.result?.artifact),
+  ];
+  const title = namedString(metadata, [
+    "ticketTitle",
+    "linearTitle",
+    "issueTitle",
+  ]);
+  const recordedState = namedString(metadata, [
+    "ticketState",
+    "linearState",
+    "issueState",
+  ]);
+  const createdAt = namedString(metadata, [
+    "ticketCreatedAt",
+    "linearCreatedAt",
+    "issueCreatedAt",
+  ]);
+  const active = matchedRuns.find((run) =>
+    ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(run.run.state),
+  );
+  const merged = matchedRuns.some((run) =>
+    /merged/i.test(JSON.stringify(run.result?.artifact ?? {})),
+  );
+  const inferredState = merged
+    ? "Done"
+    : active
+      ? "In Progress"
+      : matchedProposals.some((proposal) => proposal.decision === "noop")
+        ? "Todo"
+        : matchedRuns.length
+          ? "In Review"
+          : null;
+
+  return {
+    ticket: {
+      id: ticket,
+      title,
+      state: recordedState ?? inferredState,
+      createdAt,
+      url: `https://linear.app/watt-mind/issue/${encodeURIComponent(ticket)}`,
+    },
+    activity:
+      matchedEvents.length > 0 ||
+      matchedProposals.length > 0 ||
+      matchedRuns.length > 0,
+    events: matchedEvents,
+    proposals: matchedProposals,
+    runs: matchedRuns,
+  };
+}
+
+/** States whose attempt deadline is live and render-relevant on the run list. */
+const IN_FLIGHT_STATES = new Set(["LEASED", "RUNNING", "VERIFYING"]);
+
 function runsView(db, state) {
   const where = state ? `WHERE r.state = ?` : ``;
   const rows = db
     .query(
-      `SELECT r.*, a.reason_code, a.terminal_state AS attempt_terminal, p.event_id, p.event_source
+      `SELECT r.*, a.reason_code, a.terminal_state AS attempt_terminal,
+              a.started_at, a.lease_expires_at, p.event_id, p.event_source
        FROM runs r
        LEFT JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
        LEFT JOIN proposals p ON p.run_id = r.run_id AND p.decision = 'run'
@@ -133,6 +398,25 @@ function runsView(db, state) {
       updated_at: row.updated_at,
       modelTier: spec.modelTier ?? null,
       model: spec.model ?? null,
+      startedAt: row.started_at ?? null,
+      leaseExpiresAt: row.lease_expires_at ?? null,
+      // Two extra queries per row: only worth it while the deadline can
+      // still move (WM-692). Terminal rows on this 2s-polled list get null.
+      deadlineAt:
+        row.attempts > 0 && IN_FLIGHT_STATES.has(row.state)
+          ? (() => {
+              const deadline = attemptDeadline(
+                db,
+                row.run_id,
+                row.attempts,
+                spec,
+              );
+              return Number.isFinite(deadline)
+                ? new Date(deadline).toISOString()
+                : null;
+            })()
+          : null,
+      timeoutSeconds: spec.timeoutSeconds,
       repos: repoNamesFromInput(spec.input),
     };
   });
@@ -229,6 +513,9 @@ function runView(db, runId, { artifactsDir } = {}) {
     (a) => a.kind === "transcript",
   );
   const latest = attempts[attempts.length - 1];
+  const deadline = latest
+    ? attemptDeadline(db, runId, latest.attempt, JSON.parse(row.spec_json))
+    : null;
   return {
     run: {
       runId: row.run_id,
@@ -245,6 +532,9 @@ function runView(db, runId, { artifactsDir } = {}) {
     result,
     receipt: resultRow ? JSON.parse(resultRow.receipt_json) : null,
     workspace: latest?.workspace_path ?? null,
+    deadlineAt: Number.isFinite(deadline)
+      ? new Date(deadline).toISOString()
+      : null,
     observedModel:
       artifactsDir && transcript?.sha256
         ? observedModelFromTranscript(
@@ -269,6 +559,7 @@ export async function handleRunApiRoute({
   policyVersion,
   artifactsDir,
   onEvent,
+  policyRoot = FACTORY_ROOT,
 }) {
   if (route === "GET /events") {
     return send(200, {
@@ -390,7 +681,69 @@ export async function handleRunApiRoute({
   }
 
   if (route === "GET /runs") {
+    const ticket = url.searchParams.get("ticket");
+    if (ticket) {
+      const journey = ticketJourneyView(db, ticket, { artifactsDir });
+      if (!journey) return send(422, { error: "ticket must look like WM-123" });
+      return send(200, journey);
+    }
     return send(200, { runs: runsView(db, url.searchParams.get("state")) });
+  }
+
+  const runExtend = url.pathname.match(/^\/runs\/([^/]+)\/extend$/);
+  if (req.method === "POST" && runExtend) {
+    const runId = decodeURIComponent(runExtend[1]);
+    const body = parseJson(await readBody(req)).value ?? {};
+    const seconds = Number(body.seconds);
+    if (!Number.isInteger(seconds) || seconds <= 0) {
+      return extensionRefusal(send, 422, "invalid_extension_seconds", {
+        message: "seconds must be a positive integer",
+      });
+    }
+    if (seconds > MAX_EXTENSION_SECONDS) {
+      return extensionRefusal(send, 422, "extension_too_large", {
+        message: `seconds must be <= ${MAX_EXTENSION_SECONDS}`,
+        maxSeconds: MAX_EXTENSION_SECONDS,
+      });
+    }
+
+    const row = db
+      .query(
+        `SELECT r.state, r.attempts, a.started_at
+         FROM runs r
+         LEFT JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
+        WHERE r.run_id = ?`,
+      )
+      .get(runId);
+    if (!row) return extensionRefusal(send, 404, "unknown_run", { runId });
+
+    const override = body.override === true;
+    const maxMinutes = policyMaxRunMinutes(policyRoot);
+    if (!override && !Number.isFinite(maxMinutes)) {
+      return extensionRefusal(send, 409, "run_limit_policy_unavailable");
+    }
+    const startedMs = Date.parse(row.started_at ?? "");
+    const maxDeadlineMs =
+      Number.isFinite(startedMs) && Number.isFinite(maxMinutes)
+        ? startedMs + maxMinutes * 60 * 1000
+        : null;
+    const outcome = extendRunDeadline(db, runId, {
+      seconds,
+      actor,
+      override,
+      maxDeadlineMs,
+      policyVersion,
+      now: nowMs,
+    });
+    if (outcome.refused) {
+      return extensionRefusal(send, outcome.status ?? 409, outcome.code, {
+        state: outcome.state,
+        adapter: outcome.adapter,
+        deadlineAt: outcome.deadlineAt,
+        maxDeadlineAt: outcome.maxDeadlineAt,
+      });
+    }
+    return send(200, { extended: true, ...outcome });
   }
 
   const runVerb = url.pathname.match(/^\/runs\/([^/]+)\/(cancel|retry)$/);

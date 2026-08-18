@@ -12,9 +12,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "linear:read"
-    ]
+    "services": ["linear:read"]
   },
   "limits": {
     "timeout_seconds": 600,
@@ -22,8 +20,8 @@
   },
   "mutating": false,
   "pins": {
-    "agents/factory-status-report.md": "sha256:dd0fde64a31eb88178a94e07efffa6035c8be7a90e13efe8c577d3da4dd4fda3",
+    "agents/factory-status-report.md": "sha256:8ed55ad1601b0f83f31724b111de89f9fe9e22aa55cc32712a95d46a18b7b086",
     "schemas/factory-status-report.input.json": "sha256:44036797807c8b3ead4226e84dc8c0c1c70476fc7a8cbe9250760ccfe41a4435",
-    "schemas/factory-status-report.output.json": "sha256:d837152174abfa145dae38497d651d90da1fc440ce95d71b2f2a6d01bcc4e481"
+    "schemas/factory-status-report.output.json": "sha256:8f9a9bbaf8527c35de30f599c122e598b24b9ea6708b31324d1c3a5568e084ac"
   }
 }

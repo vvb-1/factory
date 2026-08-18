@@ -5,6 +5,8 @@ import { Events } from "./Events";
 import {
   changeInput,
   createEventFixture,
+  createProposalFixture,
+  createRunListItemFixture,
   createStatusFixture,
   renderWithClient,
   restoreApi,
@@ -22,7 +24,11 @@ afterEach(() => {
 const noop = () => {};
 const NOW = new Date().toISOString();
 
-function stubEvent(eventId: string, status: string, overrides?: Partial<AdmittedEvent>): AdmittedEvent {
+function stubEvent(
+  eventId: string,
+  status: string,
+  overrides?: Partial<AdmittedEvent>,
+): AdmittedEvent {
   return createEventFixture({
     source: "github",
     eventId,
@@ -94,7 +100,10 @@ describe("Events component harness: selection & detail view", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const focusEvent: EventFocus = { source: "github", eventId: "evt_selected_1" };
+        const focusEvent: EventFocus = {
+          source: "github",
+          eventId: "evt_selected_1",
+        };
         const { container, getAllByText } = renderEvents({ focusEvent });
 
         const selectedRow = await waitFor(() => {
@@ -122,8 +131,14 @@ describe("Events component harness: selection & detail view", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const focusEvent: EventFocus = { source: "github", eventId: "evt_tab_1" };
-        const { getByRole, container } = renderEvents({ focusEvent, onSelectEvent });
+        const focusEvent: EventFocus = {
+          source: "github",
+          eventId: "evt_tab_1",
+        };
+        const { getByRole, container } = renderEvents({
+          focusEvent,
+          onSelectEvent,
+        });
 
         await waitFor(() => container.querySelector("tr.row-selected"));
 
@@ -138,8 +153,12 @@ describe("Events component harness: selection & detail view", () => {
 
 describe("Events component harness: filter retention", () => {
   test("typing in filter input restricts visible events and retains matching selection", async () => {
-    const e1 = stubEvent("evt_pr_opened", "admitted", { type: "pull_request.opened" });
-    const e2 = stubEvent("evt_pr_closed", "admitted", { type: "pull_request.closed" });
+    const e1 = stubEvent("evt_pr_opened", "admitted", {
+      type: "pull_request.opened",
+    });
+    const e2 = stubEvent("evt_pr_closed", "admitted", {
+      type: "pull_request.closed",
+    });
 
     await withApi(
       {
@@ -147,11 +166,16 @@ describe("Events component harness: filter retention", () => {
         status: async () => createStatusFixture(),
       },
       async () => {
-        const focusEvent: EventFocus = { source: "github", eventId: "evt_pr_opened" };
+        const focusEvent: EventFocus = {
+          source: "github",
+          eventId: "evt_pr_opened",
+        };
         const { getByLabelText, container } = renderEvents({ focusEvent });
 
         await waitFor(() => container.querySelector("tr.row-selected"));
-        expect(container.querySelector('td[title="evt_pr_closed"]')).toBeTruthy();
+        expect(
+          container.querySelector('td[title="evt_pr_closed"]'),
+        ).toBeTruthy();
 
         const filterInput = getByLabelText("Filter events") as HTMLInputElement;
         act(() => {
@@ -159,14 +183,20 @@ describe("Events component harness: filter retention", () => {
         });
 
         await waitFor(() => {
-          expect(container.querySelector('td[title="evt_pr_opened"]')).toBeTruthy();
-          expect(container.querySelector('td[title="evt_pr_closed"]')).toBeNull();
+          expect(
+            container.querySelector('td[title="evt_pr_opened"]'),
+          ).toBeTruthy();
+          expect(
+            container.querySelector('td[title="evt_pr_closed"]'),
+          ).toBeNull();
         });
 
         // Selected event remains highlighted
         const selectedRow = container.querySelector("tr.row-selected");
         expect(selectedRow).toBeTruthy();
-        expect(selectedRow?.querySelector('td[title="evt_pr_opened"]')).toBeTruthy();
+        expect(
+          selectedRow?.querySelector('td[title="evt_pr_opened"]'),
+        ).toBeTruthy();
       },
     );
   });
@@ -181,7 +211,10 @@ describe("Events component harness: cross-tab reveal", () => {
     await withApi(
       {
         events: async (status?: string) => ({
-          events: status && status !== "all" ? allEvents.filter((e) => e.status === status) : allEvents,
+          events:
+            status && status !== "all"
+              ? allEvents.filter((e) => e.status === status)
+              : allEvents,
         }),
         status: async () => createStatusFixture(),
       },
@@ -219,7 +252,9 @@ describe("Events component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const allTab = getByRole("tab", { name: /^All/i });
           expect(allTab.getAttribute("aria-selected")).toBe("true");
-          expect(container.querySelector('td[title="evt_dead_lettered_1"]')).toBeTruthy();
+          expect(
+            container.querySelector('td[title="evt_dead_lettered_1"]'),
+          ).toBeTruthy();
         });
       },
     );
@@ -227,7 +262,9 @@ describe("Events component harness: cross-tab reveal", () => {
 
   test("clears active text filter when focusEvent is hidden by the filter", async () => {
     const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created" });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "issue_comment.created",
+    });
 
     await withApi(
       {
@@ -238,7 +275,9 @@ describe("Events component harness: cross-tab reveal", () => {
         const { getByLabelText, container, rerender } = renderEvents({});
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_1");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_1",
+          );
         });
 
         // Filter for type pull_request, hiding evt_2
@@ -248,7 +287,9 @@ describe("Events component harness: cross-tab reveal", () => {
         });
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).not.toContain("evt_2");
+          expect(container.querySelector("tbody")?.textContent).not.toContain(
+            "evt_2",
+          );
         });
 
         // Focus evt_2 (which was hidden by the filter)
@@ -271,7 +312,9 @@ describe("Events component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const input = getByLabelText("Filter events") as HTMLInputElement;
           expect(input.value).toBe("");
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_2");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_2",
+          );
         });
       },
     );
@@ -290,7 +333,9 @@ describe("Events component harness: cross-tab reveal", () => {
         const { getByLabelText, container, rerender } = renderEvents({});
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_1");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_1",
+          );
         });
 
         const filterInput = getByLabelText("Filter events") as HTMLInputElement;
@@ -299,7 +344,9 @@ describe("Events component harness: cross-tab reveal", () => {
         });
 
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_1");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_1",
+          );
         });
 
         // Focus evt_1 (already visible under source:github)
@@ -322,7 +369,9 @@ describe("Events component harness: cross-tab reveal", () => {
         await waitFor(() => {
           const input = getByLabelText("Filter events") as HTMLInputElement;
           expect(input.value).toBe("source:github");
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_1");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_1",
+          );
         });
       },
     );
@@ -353,9 +402,18 @@ describe("Events component harness: cross-tab reveal", () => {
 
 describe("Events component harness: facet chips grouping and visual distinction", () => {
   test("renders Type and Source category groups with labels and numerical counts", async () => {
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "pull_request.opened", source: "github" });
-    const e3 = stubEvent("evt_3", "planned", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e3 = stubEvent("evt_3", "planned", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
@@ -382,26 +440,26 @@ describe("Events component harness: facet chips grouping and visual distinction"
 
         // Numerical counts match the scoped events under current tab (All: 3 events)
         const typeGroup = getByRole("group", { name: "Event types" });
-        const prButton = Array.from(typeGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("pull_request.opened"),
+        const prButton = Array.from(typeGroup.querySelectorAll("button")).find(
+          (b) => b.textContent?.includes("pull_request.opened"),
         );
         expect(prButton).toBeTruthy();
         expect(prButton?.textContent).toContain("2");
 
-        const commentButton = Array.from(typeGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("issue_comment.created"),
-        );
+        const commentButton = Array.from(
+          typeGroup.querySelectorAll("button"),
+        ).find((b) => b.textContent?.includes("issue_comment.created"));
         expect(commentButton?.textContent).toContain("1");
 
         const sourceGroup = getByRole("group", { name: "Event sources" });
-        const githubButton = Array.from(sourceGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("github"),
-        );
+        const githubButton = Array.from(
+          sourceGroup.querySelectorAll("button"),
+        ).find((b) => b.textContent?.includes("github"));
         expect(githubButton?.textContent).toContain("2");
 
-        const gitlabButton = Array.from(sourceGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("gitlab"),
-        );
+        const gitlabButton = Array.from(
+          sourceGroup.querySelectorAll("button"),
+        ).find((b) => b.textContent?.includes("gitlab"));
         expect(gitlabButton?.textContent).toContain("1");
       },
     );
@@ -409,11 +467,26 @@ describe("Events component harness: facet chips grouping and visual distinction"
 
   test("sorts Type and Source facet chips by frequency, then alphabetically", async () => {
     const events = [
-      stubEvent("evt_1", "admitted", { type: "zeta.frequent", source: "zeta-source" }),
-      stubEvent("evt_2", "admitted", { type: "zeta.frequent", source: "zeta-source" }),
-      stubEvent("evt_3", "admitted", { type: "zeta.frequent", source: "zeta-source" }),
-      stubEvent("evt_4", "admitted", { type: "alpha.rare", source: "alpha-source" }),
-      stubEvent("evt_5", "admitted", { type: "beta.rare", source: "beta-source" }),
+      stubEvent("evt_1", "admitted", {
+        type: "zeta.frequent",
+        source: "zeta-source",
+      }),
+      stubEvent("evt_2", "admitted", {
+        type: "zeta.frequent",
+        source: "zeta-source",
+      }),
+      stubEvent("evt_3", "admitted", {
+        type: "zeta.frequent",
+        source: "zeta-source",
+      }),
+      stubEvent("evt_4", "admitted", {
+        type: "alpha.rare",
+        source: "alpha-source",
+      }),
+      stubEvent("evt_5", "admitted", {
+        type: "beta.rare",
+        source: "beta-source",
+      }),
     ];
 
     await withApi(
@@ -424,30 +497,52 @@ describe("Events component harness: facet chips grouping and visual distinction"
       async () => {
         const { getByRole } = renderEvents({});
 
-        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
-        const typeLabels = Array.from(typeGroup.querySelectorAll("button > span:first-child")).map(
-          (span) => span.textContent,
+        const typeGroup = await waitFor(() =>
+          getByRole("group", { name: "Event types" }),
         );
-        expect(typeLabels).toEqual(["zeta.frequent", "alpha.rare", "beta.rare"]);
+        const typeLabels = Array.from(
+          typeGroup.querySelectorAll("button > span:first-child"),
+        ).map((span) => span.textContent);
+        expect(typeLabels).toEqual([
+          "zeta.frequent",
+          "alpha.rare",
+          "beta.rare",
+        ]);
 
         const sourceGroup = getByRole("group", { name: "Event sources" });
-        const sourceLabels = Array.from(sourceGroup.querySelectorAll("button > span:first-child")).map(
-          (span) => span.textContent,
-        );
-        expect(sourceLabels).toEqual(["zeta-source", "alpha-source", "beta-source"]);
+        const sourceLabels = Array.from(
+          sourceGroup.querySelectorAll("button > span:first-child"),
+        ).map((span) => span.textContent);
+        expect(sourceLabels).toEqual([
+          "zeta-source",
+          "alpha-source",
+          "beta-source",
+        ]);
       },
     );
   });
 
   test("facet chip counts reflect the active tab scope", async () => {
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "pull_request.opened", source: "github" });
-    const e3 = stubEvent("evt_3", "planned", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e3 = stubEvent("evt_3", "planned", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
         events: async (status?: string) => ({
-          events: status && status !== "all" ? [e1, e2, e3].filter((e) => e.status === status) : [e1, e2, e3],
+          events:
+            status && status !== "all"
+              ? [e1, e2, e3].filter((e) => e.status === status)
+              : [e1, e2, e3],
         }),
         status: async () => createStatusFixture(),
       },
@@ -473,8 +568,14 @@ describe("Events component harness: facet chips grouping and visual distinction"
 describe("Events component harness: facet chips synchronization with FilterInput", () => {
   test("clicking a Type facet chip synchronizes filter query box and token chips", async () => {
     const onSelectType = mock(() => {});
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
@@ -482,11 +583,17 @@ describe("Events component harness: facet chips synchronization with FilterInput
         status: async () => createStatusFixture(),
       },
       async () => {
-        const { getByRole, getByLabelText, container } = renderEvents({ onSelectType });
+        const { getByRole, getByLabelText, container } = renderEvents({
+          onSelectType,
+        });
 
-        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
+        const typeGroup = await waitFor(() =>
+          getByRole("group", { name: "Event types" }),
+        );
         const buttons = typeGroup.querySelectorAll("button");
-        const prButton = Array.from(buttons).find((b) => b.textContent?.includes("pull_request.opened"));
+        const prButton = Array.from(buttons).find((b) =>
+          b.textContent?.includes("pull_request.opened"),
+        );
         expect(prButton).toBeTruthy();
         expect(prButton?.getAttribute("aria-pressed")).toBe("false");
 
@@ -503,8 +610,12 @@ describe("Events component harness: facet chips synchronization with FilterInput
 
         // List is filtered to only pull_request.opened
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_1");
-          expect(container.querySelector("tbody")?.textContent).not.toContain("evt_2");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_1",
+          );
+          expect(container.querySelector("tbody")?.textContent).not.toContain(
+            "evt_2",
+          );
         });
 
         // Click again to toggle off
@@ -515,16 +626,27 @@ describe("Events component harness: facet chips synchronization with FilterInput
 
         // List returns to full
         await waitFor(() => {
-          expect(container.querySelector("tbody")?.textContent).toContain("evt_2");
+          expect(container.querySelector("tbody")?.textContent).toContain(
+            "evt_2",
+          );
         });
       },
     );
   });
 
   test("replacing multiple Type facet tokens preserves the rest of the query", async () => {
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "release.published", source: "github" });
-    const e3 = stubEvent("evt_3", "admitted", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "release.published",
+      source: "github",
+    });
+    const e3 = stubEvent("evt_3", "admitted", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
@@ -533,7 +655,9 @@ describe("Events component harness: facet chips synchronization with FilterInput
       },
       async () => {
         const { getByRole, getByLabelText } = renderEvents({});
-        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
+        const typeGroup = await waitFor(() =>
+          getByRole("group", { name: "Event types" }),
+        );
         const filterInput = getByLabelText("Filter events") as HTMLInputElement;
 
         act(() => {
@@ -543,20 +667,30 @@ describe("Events component harness: facet chips synchronization with FilterInput
           );
         });
 
-        const issueButton = Array.from(typeGroup.querySelectorAll("button")).find((button) =>
+        const issueButton = Array.from(
+          typeGroup.querySelectorAll("button"),
+        ).find((button) =>
           button.textContent?.includes("issue_comment.created"),
         );
         expect(issueButton).toBeTruthy();
         fireEvent.click(issueButton!);
 
-        expect(filterInput.value).toBe("source:github type:issue_comment.created");
+        expect(filterInput.value).toBe(
+          "source:github type:issue_comment.created",
+        );
       },
     );
   });
 
   test("removing duplicate active Type facet tokens preserves the rest of the query", async () => {
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
@@ -565,7 +699,9 @@ describe("Events component harness: facet chips synchronization with FilterInput
       },
       async () => {
         const { getByRole, getByLabelText } = renderEvents({});
-        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
+        const typeGroup = await waitFor(() =>
+          getByRole("group", { name: "Event types" }),
+        );
         const filterInput = getByLabelText("Filter events") as HTMLInputElement;
 
         act(() => {
@@ -575,9 +711,9 @@ describe("Events component harness: facet chips synchronization with FilterInput
           );
         });
 
-        const pullRequestButton = Array.from(typeGroup.querySelectorAll("button")).find((button) =>
-          button.textContent?.includes("pull_request.opened"),
-        );
+        const pullRequestButton = Array.from(
+          typeGroup.querySelectorAll("button"),
+        ).find((button) => button.textContent?.includes("pull_request.opened"));
         expect(pullRequestButton?.getAttribute("aria-pressed")).toBe("true");
         fireEvent.click(pullRequestButton!);
 
@@ -587,8 +723,14 @@ describe("Events component harness: facet chips synchronization with FilterInput
   });
 
   test("typing type:<val> or source:<val> in FilterInput updates facet chips active state", async () => {
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
@@ -598,15 +740,17 @@ describe("Events component harness: facet chips synchronization with FilterInput
       async () => {
         const { getByRole, getByLabelText } = renderEvents({});
 
-        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
+        const typeGroup = await waitFor(() =>
+          getByRole("group", { name: "Event types" }),
+        );
         const sourceGroup = getByRole("group", { name: "Event sources" });
 
-        const prButton = Array.from(typeGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("pull_request.opened"),
+        const prButton = Array.from(typeGroup.querySelectorAll("button")).find(
+          (b) => b.textContent?.includes("pull_request.opened"),
         );
-        const githubButton = Array.from(sourceGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("github"),
-        );
+        const githubButton = Array.from(
+          sourceGroup.querySelectorAll("button"),
+        ).find((b) => b.textContent?.includes("github"));
 
         expect(prButton?.getAttribute("aria-pressed")).toBe("false");
         expect(githubButton?.getAttribute("aria-pressed")).toBe("false");
@@ -646,8 +790,14 @@ describe("Events component harness: facet chips synchronization with FilterInput
   });
 
   test("Escape key or clearing filter resets active facet chip selections", async () => {
-    const e1 = stubEvent("evt_1", "admitted", { type: "pull_request.opened", source: "github" });
-    const e2 = stubEvent("evt_2", "admitted", { type: "issue_comment.created", source: "gitlab" });
+    const e1 = stubEvent("evt_1", "admitted", {
+      type: "pull_request.opened",
+      source: "github",
+    });
+    const e2 = stubEvent("evt_2", "admitted", {
+      type: "issue_comment.created",
+      source: "gitlab",
+    });
 
     await withApi(
       {
@@ -657,9 +807,11 @@ describe("Events component harness: facet chips synchronization with FilterInput
       async () => {
         const { getByRole, getByLabelText, getByTitle } = renderEvents({});
 
-        const typeGroup = await waitFor(() => getByRole("group", { name: "Event types" }));
-        const prButton = Array.from(typeGroup.querySelectorAll("button")).find((b) =>
-          b.textContent?.includes("pull_request.opened"),
+        const typeGroup = await waitFor(() =>
+          getByRole("group", { name: "Event types" }),
+        );
+        const prButton = Array.from(typeGroup.querySelectorAll("button")).find(
+          (b) => b.textContent?.includes("pull_request.opened"),
         );
 
         // Click to activate
@@ -667,12 +819,16 @@ describe("Events component harness: facet chips synchronization with FilterInput
         expect(prButton?.getAttribute("aria-pressed")).toBe("true");
 
         // Click clear in token chip bar
-        const clearButton = await waitFor(() => getByTitle("Clear query (Esc)"));
+        const clearButton = await waitFor(() =>
+          getByTitle("Clear query (Esc)"),
+        );
         fireEvent.click(clearButton);
 
         await waitFor(() => {
           expect(prButton?.getAttribute("aria-pressed")).toBe("false");
-          const filterInput = getByLabelText("Filter events") as HTMLInputElement;
+          const filterInput = getByLabelText(
+            "Filter events",
+          ) as HTMLInputElement;
           expect(filterInput.value).toBe("");
         });
 
@@ -695,8 +851,12 @@ describe("Events component harness: facet chips synchronization with FilterInput
 
 describe("Events repo scope caption (WM-142)", () => {
   test("repo context renders scope caption while rows are filtered", async () => {
-    const matching = stubEvent("evt_repo_match", "admitted", { repos: ["factory"] });
-    const other = stubEvent("evt_other_repo", "admitted", { repos: ["other-repo"] });
+    const matching = stubEvent("evt_repo_match", "admitted", {
+      repos: ["factory"],
+    });
+    const other = stubEvent("evt_other_repo", "admitted", {
+      repos: ["other-repo"],
+    });
 
     await withApi(
       {
@@ -714,8 +874,12 @@ describe("Events repo scope caption (WM-142)", () => {
           expect(getByText(/only rows naming this repo/i)).toBeTruthy();
         });
 
-        expect(container.querySelector('td[title="evt_repo_match"]')).toBeTruthy();
-        expect(container.querySelector('td[title="evt_other_repo"]')).toBeNull();
+        expect(
+          container.querySelector('td[title="evt_repo_match"]'),
+        ).toBeTruthy();
+        expect(
+          container.querySelector('td[title="evt_other_repo"]'),
+        ).toBeNull();
       },
     );
   });
@@ -738,7 +902,8 @@ describe("Events table short event ids (WM-142)", () => {
 
         const cell = await waitFor(() => {
           const el = container.querySelector(`td[title="${eventId}"]`);
-          if (!el) throw new Error("event id cell with full-id title is missing");
+          if (!el)
+            throw new Error("event id cell with full-id title is missing");
           return el;
         });
         expect(cell.textContent).toBe(shortId(eventId));
@@ -775,7 +940,9 @@ describe("Events copy chords and hints (WM-233)", () => {
       },
       async () => {
         const r = renderEvents({ focusEvent: { source: "github", eventId } });
-        const idBtn = await r.findByRole("button", { name: "Copy event id (c)" });
+        const idBtn = await r.findByRole("button", {
+          name: "Copy event id (c)",
+        });
 
         // Verify icon-action tooltips preserve shortcut discoverability.
         expect(idBtn.getAttribute("title")).toBe("Copy event id · c");
@@ -789,6 +956,212 @@ describe("Events copy chords and hints (WM-233)", () => {
         // 2. Press 'l' immediately after 'c' -> 'c l' copies link
         fireEvent.keyDown(document.body, { key: "l" });
         expect(written).toBe(window.location.href);
+      },
+    );
+  });
+});
+
+describe("Planner decisions explain themselves (WM-594)", () => {
+  const noopEvent = stubEvent("evt_noop_1", "noop", {
+    source: "linear",
+    subject: "WM-542",
+    proposalId: "prop_noop_1",
+    envelope: {
+      schemaVersion: "factory.event/v1",
+      eventId: "evt_noop_1",
+      type: "dispatch.requested",
+      source: "linear",
+      payload: { ticket: "WM-542" },
+    },
+  });
+  const liveEvent = stubEvent("evt_noop_2", "noop", {
+    source: "linear",
+    subject: "WM-543",
+    proposalId: "prop_noop_2",
+    envelope: {
+      schemaVersion: "factory.event/v1",
+      eventId: "evt_noop_2",
+      type: "dispatch.requested",
+      source: "linear",
+      payload: { ticket: "WM-543" },
+    },
+  });
+  const refusedEvent = stubEvent("evt_planned_1", "planned", {
+    source: "linear",
+    subject: "WM-544",
+    proposalId: "prop_run_1",
+    runId: "run_refused_1",
+  });
+  const plainEvent = stubEvent("evt_admitted_1", "admitted");
+  const proposals = [
+    createProposalFixture({
+      id: "prop_noop_1",
+      decision: "noop",
+      status: "resolved",
+      reason: "owned_paths_overlap",
+      eventId: "evt_noop_1",
+      eventSource: "linear",
+      runId: null,
+    }),
+    createProposalFixture({
+      id: "prop_noop_2",
+      decision: "noop",
+      status: "resolved",
+      reason:
+        "ticket_dispatch_already_live:run_held-99:same_ticket_worktree_held",
+      eventId: "evt_noop_2",
+      eventSource: "linear",
+      runId: null,
+    }),
+    createProposalFixture({
+      id: "prop_run_1",
+      decision: "run",
+      status: "approved",
+      eventId: "evt_planned_1",
+      eventSource: "linear",
+      runId: "run_refused_1",
+    }),
+  ];
+  const runs = [
+    createRunListItemFixture({
+      runId: "run_refused_1",
+      state: "REFUSED",
+      reasonCode: "needs_human",
+      eventId: "evt_planned_1",
+      eventSource: "linear",
+    }),
+  ];
+  const apiWith = () => ({
+    events: async () => ({
+      events: [noopEvent, liveEvent, refusedEvent, plainEvent],
+    }),
+    proposalHistory: async () => ({ proposals }),
+    runs: async () => ({ runs }),
+    status: async () => createStatusFixture(),
+  });
+
+  test("the event pane shows a decision row under status, humanized with the raw code in title", async () => {
+    await withApi(apiWith(), async () => {
+      const onJumpRun = mock(() => {});
+      const r = renderEvents({
+        focusEvent: { source: "linear", eventId: "evt_noop_2" },
+        onJumpRun,
+      });
+      const row = await waitFor(() => {
+        const el = r.container.querySelector('[data-testid="event-decision"]');
+        if (!el) throw new Error("decision row not rendered");
+        return el as HTMLElement;
+      });
+      expect(row.textContent).toContain("noop");
+      expect(row.textContent).toContain(
+        "A dispatch for this ticket is already live",
+      );
+      expect(row.getAttribute("title")).toBe(
+        "ticket_dispatch_already_live:run_held-99:same_ticket_worktree_held",
+      );
+      // The run reference in the reason is a jump link.
+      // Once on the decision row, once in the Decisions block headline.
+      fireEvent.click(r.getAllByTitle("Open run run_held-99")[0]);
+      expect(onJumpRun).toHaveBeenCalledWith("run_held-99");
+      // And the ticket's Decisions block is on the pane (lazy chunk — await it).
+      expect(await r.findByText("Decisions")).toBeTruthy();
+    });
+  });
+
+  test("a planned event whose run was refused reads `refused · Needs human`", async () => {
+    await withApi(apiWith(), async () => {
+      const r = renderEvents({
+        focusEvent: { source: "linear", eventId: "evt_planned_1" },
+      });
+      const row = await waitFor(() => {
+        const el = r.container.querySelector('[data-testid="event-decision"]');
+        if (!el) throw new Error("decision row not rendered");
+        return el as HTMLElement;
+      });
+      expect(row.textContent).toContain("refused");
+      expect(row.textContent).toContain("Needs human");
+      // The list badge for that row carries the same answer as its tooltip.
+      const cell = r.container
+        .querySelector('td[title="evt_planned_1"]')!
+        .closest("tr")!;
+      expect(
+        cell.querySelector('[data-decision="refused"]')?.getAttribute("title"),
+      ).toBe("refused · Needs human\nneeds_human");
+    });
+  });
+
+  test("noop badges carry the humanized reason as tooltip; reason:<code> filters the list", async () => {
+    await withApi(apiWith(), async () => {
+      const r = renderEvents();
+      await waitFor(() => {
+        const badge = r.container
+          .querySelector('td[title="evt_noop_1"]')
+          ?.closest("tr")
+          ?.querySelector('[data-decision="noop"]');
+        if (!badge?.getAttribute("title"))
+          throw new Error("tooltip not joined yet");
+        expect(badge.getAttribute("title")).toBe(
+          "noop · Owned paths overlap\nowned_paths_overlap",
+        );
+      });
+      expect(
+        r.container.querySelector('td[title="evt_admitted_1"]'),
+      ).toBeTruthy();
+
+      const filterInput = r.getByLabelText("Filter events") as HTMLInputElement;
+      act(() => {
+        changeInput(filterInput, "reason:owned_paths_overlap");
+      });
+      await waitFor(() => {
+        expect(
+          r.container.querySelector('td[title="evt_noop_1"]'),
+        ).toBeTruthy();
+        expect(r.container.querySelector('td[title="evt_noop_2"]')).toBeNull();
+        expect(
+          r.container.querySelector('td[title="evt_admitted_1"]'),
+        ).toBeNull();
+      });
+      // The refused run's reason code is a reason too.
+      act(() => {
+        changeInput(filterInput, "reason:needs_human");
+      });
+      await waitFor(() => {
+        expect(
+          r.container.querySelector('td[title="evt_planned_1"]'),
+        ).toBeTruthy();
+        expect(r.container.querySelector('td[title="evt_noop_1"]')).toBeNull();
+      });
+    });
+  });
+});
+
+describe("Events long-list window (WM-563)", () => {
+  test("a 2,000-row deep link mounts fewer than 200 table rows and reveals its selection", async () => {
+    const events = Array.from({ length: 2000 }, (_, i) =>
+      stubEvent(`evt_window_${i}`, "admitted"),
+    );
+    await withApi(
+      {
+        events: async () => ({ events }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderEvents({
+          focusEvent: { source: "github", eventId: "evt_window_1999" },
+        });
+        await waitFor(() => {
+          expect(
+            r.container.querySelector('td[title="evt_window_1999"]'),
+          ).toBeTruthy();
+        });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(
+          200,
+        );
+        expect(
+          r.container
+            .querySelector('td[title="evt_window_1999"]')
+            ?.closest("tr")?.className,
+        ).toContain("row-selected");
       },
     );
   });

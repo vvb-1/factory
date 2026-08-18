@@ -40,8 +40,12 @@ describe("artifactPath", () => {
   });
 
   test("rejects malformed hashes", () => {
-    expect(() => artifactPath("/store", "../etc/passwd")).toThrow(/invalid artifact hash/);
-    expect(() => artifactPath("/store", "abc")).toThrow(/invalid artifact hash/);
+    expect(() => artifactPath("/store", "../etc/passwd")).toThrow(
+      /invalid artifact hash/,
+    );
+    expect(() => artifactPath("/store", "abc")).toThrow(
+      /invalid artifact hash/,
+    );
     expect(() => artifactPath("/store", null)).toThrow(/invalid artifact hash/);
   });
 });
@@ -71,7 +75,9 @@ describe("storeCollected (OPS-406)", () => {
     const stored = storeCollected({ entries, storeRoot });
     expect(stored[0].uri).toBe(`file://${path.join(storeRoot, hash)}`);
     expect(stored[0].sizeBytes).toBe(11);
-    expect(readFileSync(path.join(storeRoot, hash), "utf8")).toBe("hello world");
+    expect(readFileSync(path.join(storeRoot, hash), "utf8")).toBe(
+      "hello world",
+    );
   });
 
   test("rejects symlinked artifact source file", () => {
@@ -85,9 +91,13 @@ describe("storeCollected (OPS-406)", () => {
     symlinkSync(secretFile, symlinkFile);
 
     const hash = sha256Hex(Buffer.from("secret-data"));
-    const entries = [{ kind: "key", uri: `file://${symlinkFile}`, sha256: hash }];
+    const entries = [
+      { kind: "key", uri: `file://${symlinkFile}`, sha256: hash },
+    ];
 
-    expect(() => storeCollected({ entries, storeRoot })).toThrow(/cannot store symlinked artifact/);
+    expect(() => storeCollected({ entries, storeRoot })).toThrow(
+      /cannot store symlinked artifact/,
+    );
   });
 
   test("rejects non-existent source file", () => {
@@ -95,8 +105,12 @@ describe("storeCollected (OPS-406)", () => {
     const workspaceDir = tmp("evrt-ws-");
     const missingFile = path.join(workspaceDir, "missing.log");
     const hash = "c".repeat(64);
-    const entries = [{ kind: "log", uri: `file://${missingFile}`, sha256: hash }];
-    expect(() => storeCollected({ entries, storeRoot })).toThrow(/does not exist/);
+    const entries = [
+      { kind: "log", uri: `file://${missingFile}`, sha256: hash },
+    ];
+    expect(() => storeCollected({ entries, storeRoot })).toThrow(
+      /does not exist/,
+    );
   });
 
   test("rejects source file when content hash does not match declared sha256 (OPS-439)", () => {
@@ -107,7 +121,9 @@ describe("storeCollected (OPS-406)", () => {
     const wrongHash = sha256Hex(Buffer.from("expected different content"));
 
     const entries = [{ kind: "log", uri: `file://${file}`, sha256: wrongHash }];
-    expect(() => storeCollected({ entries, storeRoot })).toThrow(/hash mismatch/);
+    expect(() => storeCollected({ entries, storeRoot })).toThrow(
+      /hash mismatch/,
+    );
     expect(existsSync(path.join(storeRoot, wrongHash))).toBe(false);
   });
 
@@ -126,7 +142,9 @@ describe("storeCollected (OPS-406)", () => {
     const entries = [{ kind: "log", uri: `file://${file}`, sha256: hash }];
     const stored = storeCollected({ entries, storeRoot });
     expect(stored[0].uri).toBe(`file://${dest}`);
-    expect(stored[0].sizeBytes).toBe(Buffer.byteLength("complete valid content"));
+    expect(stored[0].sizeBytes).toBe(
+      Buffer.byteLength("complete valid content"),
+    );
     expect(readFileSync(dest, "utf8")).toBe("complete valid content");
   });
 
@@ -155,7 +173,9 @@ describe("storeCollected (OPS-406)", () => {
     const hash = sha256Hex(Buffer.from("some data"));
 
     // Cause a failure by passing an invalid declared sha256
-    const entries = [{ kind: "bin", uri: `file://${file}`, sha256: "0".repeat(64) }];
+    const entries = [
+      { kind: "bin", uri: `file://${file}`, sha256: "0".repeat(64) },
+    ];
     expect(() => storeCollected({ entries, storeRoot })).toThrow();
 
     // Verify store directory has neither destination nor tmp files
@@ -179,16 +199,37 @@ describe("materializeArtifact (OPS-406)", () => {
   test("writes stored bytes into workspace under relative path", () => {
     const { storeRoot, hash } = makeStore("test data");
     const workspaceDir = tmp("evrt-ws-");
-    const res = materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "subdir/file.txt" });
+    const res = materializeArtifact({
+      storeRoot,
+      sha256hex: hash,
+      workspaceDir,
+      as: "subdir/file.txt",
+    });
     expect(res.sha256).toBe(hash);
-    expect(readFileSync(path.join(workspaceDir, "subdir/file.txt"), "utf8")).toBe("test data");
+    expect(
+      readFileSync(path.join(workspaceDir, "subdir/file.txt"), "utf8"),
+    ).toBe("test data");
   });
 
   test("rejects absolute paths and path escapes", () => {
     const { storeRoot, hash } = makeStore("test data");
     const workspaceDir = tmp("evrt-ws-");
-    expect(() => materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "/abs/path" })).toThrow();
-    expect(() => materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "../outside" })).toThrow();
+    expect(() =>
+      materializeArtifact({
+        storeRoot,
+        sha256hex: hash,
+        workspaceDir,
+        as: "/abs/path",
+      }),
+    ).toThrow();
+    expect(() =>
+      materializeArtifact({
+        storeRoot,
+        sha256hex: hash,
+        workspaceDir,
+        as: "../outside",
+      }),
+    ).toThrow();
   });
 
   test("rejects symlinked destination directory pointing outside workspace", () => {
@@ -200,7 +241,12 @@ describe("materializeArtifact (OPS-406)", () => {
     symlinkSync(outsideDir, symlinkDir, "dir");
 
     expect(() =>
-      materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "symdir/pwned.txt" })
+      materializeArtifact({
+        storeRoot,
+        sha256hex: hash,
+        workspaceDir,
+        as: "symdir/pwned.txt",
+      }),
     ).toThrow(/escapes the workspace/);
   });
 
@@ -215,7 +261,12 @@ describe("materializeArtifact (OPS-406)", () => {
     symlinkSync(targetFile, symlinkFile);
 
     expect(() =>
-      materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "link.txt" })
+      materializeArtifact({
+        storeRoot,
+        sha256hex: hash,
+        workspaceDir,
+        as: "link.txt",
+      }),
     ).toThrow(/symlink/);
   });
 
@@ -231,7 +282,12 @@ describe("materializeArtifact (OPS-406)", () => {
 
     const workspaceDir = tmp("evrt-ws-");
     expect(() =>
-      materializeArtifact({ storeRoot, sha256hex: hash, workspaceDir, as: "transcript.json" })
+      materializeArtifact({
+        storeRoot,
+        sha256hex: hash,
+        workspaceDir,
+        as: "transcript.json",
+      }),
     ).toThrow(/corrupt/);
 
     // Corrupt entry must be removed from store
@@ -247,11 +303,13 @@ describe("store maintenance: referencedHashes, storeStats, pruneArtifacts, pinRu
 
     db.query(
       `INSERT INTO results (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
-       VALUES (?, 1, ?, 'sha256:x', '{}', '{}', ?)`
+       VALUES (?, 1, ?, 'sha256:x', '{}', '{}', ?)`,
     ).run(
       "run_1",
-      JSON.stringify({ artifacts: [{ kind: "ci-log", sha256: hash1, uri: "file:///x" }] }),
-      new Date().toISOString()
+      JSON.stringify({
+        artifacts: [{ kind: "ci-log", sha256: hash1, uri: "file:///x" }],
+      }),
+      new Date().toISOString(),
     );
 
     const referenced = referencedHashes(db);
@@ -273,16 +331,25 @@ describe("store maintenance: referencedHashes, storeStats, pruneArtifacts, pinRu
     const hash = "d".repeat(64);
     db.query(
       `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'COMPLETED', ?, ?)`
-    ).run("run_100", "idem_100", JSON.stringify({ agent: "test-agent" }), "hash_100", new Date().toISOString(), new Date().toISOString());
+       VALUES (?, ?, ?, ?, 'COMPLETED', ?, ?)`,
+    ).run(
+      "run_100",
+      "idem_100",
+      JSON.stringify({ agent: "test-agent" }),
+      "hash_100",
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
 
     db.query(
       `INSERT INTO results (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
-       VALUES (?, 1, ?, 'sha256:x', '{}', '{}', ?)`
+       VALUES (?, 1, ?, 'sha256:x', '{}', '{}', ?)`,
     ).run(
       "run_100",
-      JSON.stringify({ artifacts: [{ kind: "transcript", sha256: hash, uri: "file:///x" }] }),
-      new Date().toISOString()
+      JSON.stringify({
+        artifacts: [{ kind: "transcript", sha256: hash, uri: "file:///x" }],
+      }),
+      new Date().toISOString(),
     );
 
     const pinned = pinRunArtifact(db, "run_100", { kind: "transcript" });
@@ -290,6 +357,8 @@ describe("store maintenance: referencedHashes, storeStats, pruneArtifacts, pinRu
     expect(pinned.agent).toBe("test-agent");
 
     expect(() => pinRunArtifact(db, "run_unknown")).toThrow(/unknown run/);
-    expect(() => pinRunArtifact(db, "run_100", { kind: "other" })).toThrow(/stored no "other" artifact/);
+    expect(() => pinRunArtifact(db, "run_100", { kind: "other" })).toThrow(
+      /stored no "other" artifact/,
+    );
   });
 });

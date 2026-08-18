@@ -8,7 +8,10 @@ import { createIsolatedHome, realFactorySnapshot } from "../test-helpers.mjs";
 
 const PV = "git:test-pv";
 
-function queueRun(database, { runId, placement, adapter = "fake", timeoutSeconds = 60 }) {
+function queueRun(
+  database,
+  { runId, placement, adapter = "fake", timeoutSeconds = 60 },
+) {
   const spec = {
     schemaVersion: "factory.run-spec/v1",
     runId,
@@ -28,8 +31,18 @@ function queueRun(database, { runId, placement, adapter = "fake", timeoutSeconds
     actor: "planner",
     policyVersion: PV,
   });
-  transition(database, { runId, to: "APPROVED", actor: "operator", policyVersion: PV });
-  transition(database, { runId, to: "QUEUED", actor: "operator", policyVersion: PV });
+  transition(database, {
+    runId,
+    to: "APPROVED",
+    actor: "operator",
+    policyVersion: PV,
+  });
+  transition(database, {
+    runId,
+    to: "QUEUED",
+    actor: "operator",
+    policyVersion: PV,
+  });
   return spec;
 }
 
@@ -111,7 +124,9 @@ describe("multi-process concurrency (OPS-424, OPS-233)", () => {
     const attempts = verifyDb.query("SELECT * FROM attempts").all();
     expect(attempts.length).toBe(M);
 
-    const runs = verifyDb.query("SELECT run_id, state, attempts FROM runs").all();
+    const runs = verifyDb
+      .query("SELECT run_id, state, attempts FROM runs")
+      .all();
     expect(runs.length).toBe(M);
     for (const row of runs) {
       expect(row.state).toBe("LEASED");
@@ -198,19 +213,29 @@ describe("multi-process concurrency (OPS-424, OPS-233)", () => {
     expect(allClaims.length).toBe(18);
 
     // Verify lab workers only claimed lab or unplaced
-    const labClaims = results.filter((r) => r.worker.id.startsWith("lab-")).flatMap((r) => r.claims);
+    const labClaims = results
+      .filter((r) => r.worker.id.startsWith("lab-"))
+      .flatMap((r) => r.claims);
     for (const c of labClaims) {
-      expect(c.runId.startsWith("lab_") || c.runId.startsWith("any_")).toBe(true);
+      expect(c.runId.startsWith("lab_") || c.runId.startsWith("any_")).toBe(
+        true,
+      );
     }
 
     // Verify web workers only claimed web or unplaced
-    const webClaims = results.filter((r) => r.worker.id.startsWith("web-")).flatMap((r) => r.claims);
+    const webClaims = results
+      .filter((r) => r.worker.id.startsWith("web-"))
+      .flatMap((r) => r.claims);
     for (const c of webClaims) {
-      expect(c.runId.startsWith("web_") || c.runId.startsWith("any_")).toBe(true);
+      expect(c.runId.startsWith("web_") || c.runId.startsWith("any_")).toBe(
+        true,
+      );
     }
 
     // Verify general workers only claimed unplaced
-    const genClaims = results.filter((r) => r.worker.id.startsWith("gen-")).flatMap((r) => r.claims);
+    const genClaims = results
+      .filter((r) => r.worker.id.startsWith("gen-"))
+      .flatMap((r) => r.claims);
     for (const c of genClaims) {
       expect(c.runId.startsWith("any_")).toBe(true);
     }

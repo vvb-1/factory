@@ -40,7 +40,12 @@ export function parseWarmHead(result) {
 export function parseBehindCount(fetchResult, revListResult) {
   const stdout = String(revListResult?.stdout ?? "").trim();
   const stderr = String(revListResult?.stderr ?? "").trim();
-  if (fetchResult?.status !== 0 || revListResult?.status !== 0 || stderr || !/^\d+$/.test(stdout)) {
+  if (
+    fetchResult?.status !== 0 ||
+    revListResult?.status !== 0 ||
+    stderr ||
+    !/^\d+$/.test(stdout)
+  ) {
     return Infinity;
   }
 
@@ -57,30 +62,40 @@ export function evaluateWarmCache({
   threshold = DEFAULT_THRESHOLD,
 }) {
   const warmHead = warmDirExists ? parseWarmHead(warmHeadResult) : null;
-  const behind = warmHead ? parseBehindCount(fetchResult, revListResult) : Infinity;
+  const behind = warmHead
+    ? parseBehindCount(fetchResult, revListResult)
+    : Infinity;
   const stale = !Number.isFinite(behind) || behind >= threshold;
   return { warmHead, behind, stale, gateExitCode: stale ? 0 : 1 };
 }
 
 const expand = (p) => String(p ?? "").replace(/^~/, homedir());
-const sh = (cmd, cwd) => spawnSync("/bin/bash", ["-lc", cmd], { cwd, encoding: "utf8" });
+const sh = (cmd, cwd) =>
+  spawnSync("/bin/bash", ["-lc", cmd], { cwd, encoding: "utf8" });
 
 export function runWarm({
   argv,
   cfg,
   exists = existsSync,
   shell = sh,
-  applyShell = (script, cwd) => spawnSync("/bin/bash", [script], { cwd, stdio: "inherit" }),
+  applyShell = (script, cwd) =>
+    spawnSync("/bin/bash", [script], { cwd, stdio: "inherit" }),
   log = console.log,
   error = console.error,
 }) {
-  const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
+  const val = (f) => {
+    const i = argv.indexOf(f);
+    return i === -1 ? null : argv[i + 1];
+  };
   const apply = argv.includes("--apply");
   const gate = argv.includes("--gate");
   const threshold = Number(val("--threshold") ?? DEFAULT_THRESHOLD);
 
   const repo = (cfg.repos ?? []).find((r) => r.name === val("--repo"));
-  if (!repo) { error("--repo required"); return 2; }
+  if (!repo) {
+    error("--repo required");
+    return 2;
+  }
 
   const repoPath = expand(repo.path);
   const warmDir = path.join(expand(repo.worktree_root ?? ""), ".warm");
@@ -90,7 +105,9 @@ export function runWarm({
     if (gate) return repo.worktree_warm ? 0 : 1;
   }
 
-  const warmHeadResult = warmDirExists ? shell("git rev-parse HEAD", warmDir) : null;
+  const warmHeadResult = warmDirExists
+    ? shell("git rev-parse HEAD", warmDir)
+    : null;
   const warmHead = parseWarmHead(warmHeadResult);
   const fetchResult = shell("git fetch --quiet", repoPath);
   const revListResult = warmHead
@@ -104,11 +121,15 @@ export function runWarm({
     threshold,
   });
   const behind = freshness.behind;
-  const age = warmHead ? shell(`git log -1 --format=%ar ${warmHead}`, repoPath).stdout.trim() : "n/a";
+  const age = warmHead
+    ? shell(`git log -1 --format=%ar ${warmHead}`, repoPath).stdout.trim()
+    : "n/a";
 
   if (gate) {
     if (freshness.stale) {
-      const detail = Number.isFinite(behind) ? `${behind} commits behind` : "stale — behind-count unknown";
+      const detail = Number.isFinite(behind)
+        ? `${behind} commits behind`
+        : "stale — behind-count unknown";
       log(`${repo.name}: warm cache ${detail} — refresh`);
       return freshness.gateExitCode;
     }
@@ -119,21 +140,35 @@ export function runWarm({
   log(`\n${repo.name} warm cache`);
   log(`  path:   ${repo.worktree_root}/.warm`);
   log(`  head:   ${warmHead?.slice(0, 8) ?? "-"}  (${age})`);
-  log(`  behind: ${Number.isFinite(behind) ? behind : "n/a"} commit(s) on origin/${repo.base}`);
-  log(freshness.stale
-    ? `  → stale: every new worktree pays a full compile instead of cloning a usable cache`
-    : `  → fresh enough (threshold ${threshold})`);
+  log(
+    `  behind: ${Number.isFinite(behind) ? behind : "n/a"} commit(s) on origin/${repo.base}`,
+  );
+  log(
+    freshness.stale
+      ? `  → stale: every new worktree pays a full compile instead of cloning a usable cache`
+      : `  → fresh enough (threshold ${threshold})`,
+  );
 
-  if (!apply) { log(`\n  re-run with --apply to refresh\n`); return 0; }
+  if (!apply) {
+    log(`\n  re-run with --apply to refresh\n`);
+    return 0;
+  }
 
-  if (!repo.worktree_warm) { error(`\n  ${repo.name} has no worktree_warm script in repos.yaml`); return 2; }
+  if (!repo.worktree_warm) {
+    error(`\n  ${repo.name} has no worktree_warm script in repos.yaml`);
+    return 2;
+  }
 
-  log(`\n  running ${repo.worktree_warm} — this compiles once so that N worktrees don't...\n`);
+  log(
+    `\n  running ${repo.worktree_warm} — this compiles once so that N worktrees don't...\n`,
+  );
   const result = applyShell(repo.worktree_warm, repoPath);
   return result.status ?? 1;
 }
 
 if (import.meta.main) {
-  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+  const cfg = Bun.YAML.parse(
+    readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+  );
   process.exit(runWarm({ argv: process.argv.slice(2), cfg }));
 }

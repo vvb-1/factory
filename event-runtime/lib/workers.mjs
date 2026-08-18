@@ -22,7 +22,10 @@ export const HEARTBEAT_STALE_MS = 90_000;
 
 const iso = (now) => new Date(now).toISOString();
 
-export function registerWorker(db, { workerId, labels = {}, adapters = [], now = Date.now() }) {
+export function registerWorker(
+  db,
+  { workerId, labels = {}, adapters = [], now = Date.now() },
+) {
   const at = iso(now);
   db.query(
     `INSERT INTO workers (worker_id, host, pid, labels_json, adapters, started_at, last_seen, state)
@@ -31,20 +34,34 @@ export function registerWorker(db, { workerId, labels = {}, adapters = [], now =
        host = excluded.host, pid = excluded.pid, labels_json = excluded.labels_json,
        adapters = excluded.adapters, last_seen = excluded.last_seen,
        state = 'idle', stopped_at = NULL`,
-  ).run(workerId, hostname(), process.pid, JSON.stringify(labels), adapters.join(","), at, at);
+  ).run(
+    workerId,
+    hostname(),
+    process.pid,
+    JSON.stringify(labels),
+    adapters.join(","),
+    at,
+    at,
+  );
   return { workerId, host: hostname(), pid: process.pid, labels, adapters };
 }
 
 /** Called every loop tick: proof of life, plus what the worker is doing. */
-export function heartbeat(db, workerId, { state = "idle", runId = null, now = Date.now() } = {}) {
-  db.query(`UPDATE workers SET last_seen = ?, state = ?, current_run = ? WHERE worker_id = ?`)
-    .run(iso(now), state, runId, workerId);
+export function heartbeat(
+  db,
+  workerId,
+  { state = "idle", runId = null, now = Date.now() } = {},
+) {
+  db.query(
+    `UPDATE workers SET last_seen = ?, state = ?, current_run = ? WHERE worker_id = ?`,
+  ).run(iso(now), state, runId, workerId);
 }
 
 /** Clean exit: recorded, so a stopped worker is distinguishable from a dead one. */
 export function deregisterWorker(db, workerId, { now = Date.now() } = {}) {
-  db.query(`UPDATE workers SET state = 'stopped', stopped_at = ?, current_run = NULL WHERE worker_id = ?`)
-    .run(iso(now), workerId);
+  db.query(
+    `UPDATE workers SET state = 'stopped', stopped_at = ?, current_run = NULL WHERE worker_id = ?`,
+  ).run(iso(now), workerId);
 }
 
 export function listWorkers(db, { now = Date.now() } = {}) {
@@ -62,7 +79,9 @@ export function listWorkers(db, { now = Date.now() } = {}) {
       state: row.state,
       currentRun: row.current_run,
       stoppedAt: row.stopped_at,
-      stale: row.state !== "stopped" && now - Date.parse(row.last_seen) > HEARTBEAT_STALE_MS,
+      stale:
+        row.state !== "stopped" &&
+        now - Date.parse(row.last_seen) > HEARTBEAT_STALE_MS,
     }));
 }
 
@@ -76,7 +95,10 @@ export function stalledWorkers(db, { now = Date.now() } = {}) {
 }
 
 /** Drop long-stopped workers so the registry reflects the fleet, not history. */
-export function pruneWorkers(db, { olderThanMs = 24 * 60 * 60 * 1000, now = Date.now() } = {}) {
+export function pruneWorkers(
+  db,
+  { olderThanMs = 24 * 60 * 60 * 1000, now = Date.now() } = {},
+) {
   return tx(db, () => {
     const cutoff = iso(now - olderThanMs);
     const { changes } = db
@@ -94,7 +116,9 @@ export function pruneWorkers(db, { olderThanMs = 24 * 60 * 60 * 1000, now = Date
  */
 export function satisfiesPlacement(labels, placement) {
   if (!placement || Object.keys(placement).length === 0) return true;
-  return Object.entries(placement).every(([key, value]) => String(labels?.[key]) === String(value));
+  return Object.entries(placement).every(
+    ([key, value]) => String(labels?.[key]) === String(value),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +150,9 @@ export function loadWorkerPolicy({ root = reposRoot() } = {}) {
   try {
     parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new Error(`${file}: unparseable policy.yaml — ${err.message}`);
+    throw new Error(`${file}: unparseable policy.yaml — ${err.message}`, {
+      cause: err,
+    });
   }
   const block = parsed?.workers;
   if (block === undefined || block === null) return null;
@@ -141,13 +167,17 @@ export function normalizePool({ min, max } = {}, where = "workers") {
   const value = (raw, fallback, key) => {
     if (raw === undefined || raw === null) return fallback;
     const n = typeof raw === "string" ? Number(raw) : raw;
-    if (!Number.isInteger(n) || n < 0) throw new Error(`${where}.${key} must be a non-negative integer (got ${raw})`);
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        `${where}.${key} must be a non-negative integer (got ${raw})`,
+      );
     return n;
   };
   const lo = value(min, DEFAULT_POOL.min, "min");
   const hi = value(max, DEFAULT_POOL.max, "max");
   if (hi < 1) throw new Error(`${where}.max must be at least 1 (got ${hi})`);
-  if (lo > hi) throw new Error(`${where}.min (${lo}) cannot exceed max (${hi})`);
+  if (lo > hi)
+    throw new Error(`${where}.min (${lo}) cannot exceed max (${hi})`);
   return { min: lo, max: hi };
 }
 
@@ -156,8 +186,10 @@ export function parsePoolSpec(spec) {
   const raw = String(spec ?? "").trim();
   if (raw === "") throw new Error("--workers expects min:max (e.g. 1:3)");
   const parts = raw.split(":");
-  if (parts.length === 1) return normalizePool({ min: parts[0], max: parts[0] }, "--workers");
-  if (parts.length !== 2) throw new Error(`--workers expects min:max (got "${raw}")`);
+  if (parts.length === 1)
+    return normalizePool({ min: parts[0], max: parts[0] }, "--workers");
+  if (parts.length !== 2)
+    throw new Error(`--workers expects min:max (got "${raw}")`);
   return normalizePool({ min: parts[0], max: parts[1] }, "--workers");
 }
 
@@ -168,8 +200,12 @@ export function parsePoolSpec(spec) {
  * it as idle is how a queue starves behind a dead process.
  */
 export function poolCounts(db, { now = Date.now() } = {}) {
-  const queued = db.query(`SELECT COUNT(*) AS n FROM runs WHERE state = 'QUEUED'`).get().n;
-  const workers = listWorkers(db, { now }).filter((w) => w.state !== "stopped" && !w.stale);
+  const queued = db
+    .query(`SELECT COUNT(*) AS n FROM runs WHERE state = 'QUEUED'`)
+    .get().n;
+  const workers = listWorkers(db, { now }).filter(
+    (w) => w.state !== "stopped" && !w.stale,
+  );
   const idle = workers.filter((w) => w.state !== "busy");
   return {
     queued,
@@ -200,19 +236,41 @@ export function poolCounts(db, { now = Date.now() } = {}) {
  * and into a respawn. The ceiling is measured against the physical pool,
  * because that is what the machine is actually running.
  */
-export function poolDecision({ queued = 0, idle = 0, pool = 0, pending = 0, draining = 0, min, max } = {}) {
+export function poolDecision({
+  queued = 0,
+  idle = 0,
+  pool = 0,
+  pending = 0,
+  draining = 0,
+  min,
+  max,
+} = {}) {
   const counts = { queued, idle, pool, pending, draining, min, max };
   const decide = (action, reason) => ({ action, reason, counts });
   const remaining = pool - draining;
 
-  if (remaining < min) return decide("spawn", `pool ${remaining} below workers.min ${min}`);
+  if (remaining < min)
+    return decide("spawn", `pool ${remaining} below workers.min ${min}`);
   if (pending > 0) return decide("hold", `${pending} worker(s) still starting`);
   if (queued > 0 && idle === 0) {
-    if (pool < max) return decide("spawn", `${queued} queued run(s), no idle worker, pool ${pool} < max ${max}`);
-    return decide("hold", `${queued} queued run(s) but pool is at workers.max ${max}`);
+    if (pool < max)
+      return decide(
+        "spawn",
+        `${queued} queued run(s), no idle worker, pool ${pool} < max ${max}`,
+      );
+    return decide(
+      "hold",
+      `${queued} queued run(s) but pool is at workers.max ${max}`,
+    );
   }
   if (queued === 0 && idle > 0 && remaining > min) {
-    return decide("drain", `${idle} idle worker(s) and no queued runs, pool ${remaining} above workers.min ${min}`);
+    return decide(
+      "drain",
+      `${idle} idle worker(s) and no queued runs, pool ${remaining} above workers.min ${min}`,
+    );
   }
-  return decide("hold", `steady: ${queued} queued, ${idle} idle, pool ${pool} (min ${min}, max ${max})`);
+  return decide(
+    "hold",
+    `steady: ${queued} queued, ${idle} idle, pool ${pool} (min ${min}, max ${max})`,
+  );
 }

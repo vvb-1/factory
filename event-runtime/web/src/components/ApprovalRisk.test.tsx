@@ -2,8 +2,16 @@ import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ApprovalRiskDetails, ApprovalSafetyCard, computeApprovalRisk } from "./ApprovalRisk";
-import { createProposalFixture, createRunSpecFixture, restoreApi } from "../test-render";
+import {
+  ApprovalRiskDetails,
+  ApprovalSafetyCard,
+  computeApprovalRisk,
+} from "./ApprovalRisk";
+import {
+  createProposalFixture,
+  createRunSpecFixture,
+  restoreApi,
+} from "../test-render";
 import type { AgentDef, Proposal } from "../types";
 
 afterEach(() => {
@@ -38,7 +46,10 @@ function stubAgent(over: Partial<AgentDef> = {}): AgentDef {
   } as AgentDef;
 }
 
-function proposal(over: Partial<Proposal> = {}, spec: Record<string, unknown> = {}): Proposal {
+function proposal(
+  over: Partial<Proposal> = {},
+  spec: Record<string, unknown> = {},
+): Proposal {
   return createProposalFixture({
     agent: "shipper",
     repos: ["watt-mind/factory"],
@@ -48,8 +59,12 @@ function proposal(over: Partial<Proposal> = {}, spec: Record<string, unknown> = 
 }
 
 function renderWithClient(ui: React.ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 describe("computeApprovalRisk (WM-505)", () => {
@@ -60,21 +75,33 @@ describe("computeApprovalRisk (WM-505)", () => {
   test("prefers the agent definition for mutating and egress", () => {
     const risk = computeApprovalRisk(
       proposal({}, { capabilities: [] }),
-      stubAgent({ mutating: true, capabilities: { filesystem: "rw", services: ["github"] } }),
+      stubAgent({
+        mutating: true,
+        capabilities: { filesystem: "rw", services: ["github"] },
+      }),
     );
     expect(risk?.mutating).toBe(true);
     expect(risk?.egress).toEqual(["github"]);
   });
 
   test("falls back to capability regexes when the agent is unknown", () => {
-    const risk = computeApprovalRisk(proposal({}, { capabilities: ["gh:write", "http:fetch"] }));
+    const risk = computeApprovalRisk(
+      proposal({}, { capabilities: ["gh:write", "http:fetch"] }),
+    );
     expect(risk?.mutating).toBe(true);
     expect(risk?.egress).toEqual(["http:fetch"]);
   });
 
   test("a read-only, short, unprotected-branch run scores LOW", () => {
     const risk = computeApprovalRisk(
-      proposal({}, { capabilities: ["linear:read"], timeoutSeconds: 120, input: { branch: "feat/x" } }),
+      proposal(
+        {},
+        {
+          capabilities: ["linear:read"],
+          timeoutSeconds: 120,
+          input: { branch: "feat/x" },
+        },
+      ),
       stubAgent({ mutating: false, capabilities: { filesystem: "ro" } }),
     );
     expect(risk?.blast).toBe("LOW");
@@ -83,21 +110,37 @@ describe("computeApprovalRisk (WM-505)", () => {
 
   test("a mutating run on a protected branch with egress scores HIGH", () => {
     const risk = computeApprovalRisk(
-      proposal({}, { capabilities: ["gh:write"], timeoutSeconds: 900, input: { branch: "main" } }),
-      stubAgent({ mutating: true, capabilities: { filesystem: "rw", services: ["github"] } }),
+      proposal(
+        {},
+        {
+          capabilities: ["gh:write"],
+          timeoutSeconds: 900,
+          input: { branch: "main" },
+        },
+      ),
+      stubAgent({
+        mutating: true,
+        capabilities: { filesystem: "rw", services: ["github"] },
+      }),
     );
     expect(risk?.blast).toBe("HIGH");
     expect(risk?.branch).toBe("main");
   });
 
   test("target repo falls back to the spec input when the proposal is unscoped", () => {
-    const risk = computeApprovalRisk(proposal({ repos: [] }, { input: { repo: "acme/thing" } }));
+    const risk = computeApprovalRisk(
+      proposal({ repos: [] }, { input: { repo: "acme/thing" } }),
+    );
     expect(risk?.repo).toBe("acme/thing");
-    expect(computeApprovalRisk(proposal({ repos: [] }, { input: {} }))?.repo).toBe("unscoped");
+    expect(
+      computeApprovalRisk(proposal({ repos: [] }, { input: {} }))?.repo,
+    ).toBe("unscoped");
   });
 
   test("host reports the placement when the spec pins one", () => {
-    const risk = computeApprovalRisk(proposal({}, { placement: { host: "worker-3" } }));
+    const risk = computeApprovalRisk(
+      proposal({}, { placement: { host: "worker-3" } }),
+    );
     expect(risk?.host).toBe("host=worker-3");
     expect(computeApprovalRisk(proposal())?.host).toBe("any worker");
   });
@@ -107,8 +150,18 @@ describe("ApprovalSafetyCard (WM-505)", () => {
   test("renders the mutating badge, blast verdict, capabilities and budget", () => {
     const r = renderWithClient(
       <ApprovalSafetyCard
-        proposal={proposal({}, { capabilities: ["gh:write", "linear:read"], timeoutSeconds: 900, maxAttempts: 2 })}
-        agent={stubAgent({ mutating: true, capabilities: { filesystem: "rw", services: ["github"] } })}
+        proposal={proposal(
+          {},
+          {
+            capabilities: ["gh:write", "linear:read"],
+            timeoutSeconds: 900,
+            maxAttempts: 2,
+          },
+        )}
+        agent={stubAgent({
+          mutating: true,
+          capabilities: { filesystem: "rw", services: ["github"] },
+        })}
       />,
     );
     const text = r.container.textContent ?? "";
@@ -116,14 +169,17 @@ describe("ApprovalSafetyCard (WM-505)", () => {
     expect(text).toContain("Risk");
     expect(text).toContain("gh:write");
     expect(text).toContain("linear:read");
-    expect(text).toContain("900s");
+    expect(text).toContain("15m");
     expect(text).toContain("max 2 att");
     expect(text).toContain("github");
   });
 
   test("labels a non-mutating agent Read-Only and sandboxed capabilities", () => {
     const r = renderWithClient(
-      <ApprovalSafetyCard proposal={proposal({}, { capabilities: [] })} agent={stubAgent({ mutating: false })} />,
+      <ApprovalSafetyCard
+        proposal={proposal({}, { capabilities: [] })}
+        agent={stubAgent({ mutating: false })}
+      />,
     );
     const text = r.container.textContent ?? "";
     expect(text).toContain("Read-Only");
@@ -132,13 +188,18 @@ describe("ApprovalSafetyCard (WM-505)", () => {
 
   test("renders an optional footer slot", () => {
     const r = renderWithClient(
-      <ApprovalSafetyCard proposal={proposal()} footer={<span>Historical Comparison</span>} />,
+      <ApprovalSafetyCard
+        proposal={proposal()}
+        footer={<span>Historical Comparison</span>}
+      />,
     );
     expect(r.container.textContent).toContain("Historical Comparison");
   });
 
   test("renders nothing when the proposal has no spec", () => {
-    const r = renderWithClient(<ApprovalSafetyCard proposal={proposal({ spec: null })} />);
+    const r = renderWithClient(
+      <ApprovalSafetyCard proposal={proposal({ spec: null })} />,
+    );
     expect(r.container.textContent).toBe("");
   });
 });
@@ -147,19 +208,24 @@ describe("ApprovalRiskDetails (WM-505)", () => {
   test("surfaces capabilities, budget and the immutable RunSpec", () => {
     const r = renderWithClient(
       <ApprovalRiskDetails
-        proposal={proposal({}, { capabilities: ["gh:write"], timeoutSeconds: 900, maxAttempts: 2 })}
+        proposal={proposal(
+          {},
+          { capabilities: ["gh:write"], timeoutSeconds: 900, maxAttempts: 2 },
+        )}
         agent={stubAgent({ mutating: true })}
       />,
     );
     const text = r.container.textContent ?? "";
     expect(text).toContain("gh:write");
-    expect(text).toContain("900s");
+    expect(text).toContain("15m");
     expect(text).toContain("Mutating");
     expect(text).toContain("immutable RunSpec");
   });
 
   test("warns rather than silently hiding risk when the spec is missing", () => {
-    const r = renderWithClient(<ApprovalRiskDetails proposal={proposal({ spec: null })} />);
+    const r = renderWithClient(
+      <ApprovalRiskDetails proposal={proposal({ spec: null })} />,
+    );
     expect(r.container.textContent).toContain("no RunSpec");
   });
 });

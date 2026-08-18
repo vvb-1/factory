@@ -12,7 +12,44 @@ import {
 import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { AgentDef } from "../types";
-import { JumpLink } from "./ui";
+import { JumpLink, StateBadge } from "./ui";
+
+/** Shared empty-value glyph for registry metadata. */
+export const EMPTY_VALUE = "—";
+
+/** Compact duration labels match the cadence grammar used by Schedules. */
+export function formatDurationSeconds(
+  seconds: number | null | undefined,
+): string {
+  if (seconds == null) return EMPTY_VALUE;
+  const remaining = Math.max(0, Math.floor(seconds));
+  const units = [
+    [86_400, "d"],
+    [3_600, "h"],
+    [60, "m"],
+    [1, "s"],
+  ] as const;
+  const parts: string[] = [];
+  let rest = remaining;
+  for (const [size, suffix] of units) {
+    const value = Math.floor(rest / size);
+    if (value > 0 || (size === 1 && parts.length === 0))
+      parts.push(`${value}${suffix}`);
+    rest %= size;
+  }
+  return parts.join(" ");
+}
+
+const AGENT_MUTATION_HUES = {
+  Mutating: "var(--hue-warn)",
+  "Read-only": "var(--text-faint)",
+};
+
+/** One mutation-safety badge shared by the Agents table, pane, and hover card. */
+export function AgentMutationBadge({ mutating }: { mutating: boolean }) {
+  const state = mutating ? "Mutating" : "Read-only";
+  return <StateBadge state={state} hues={AGENT_MUTATION_HUES} />;
+}
 
 export interface AgentHoverCardProps {
   agentRef: string;
@@ -35,7 +72,11 @@ export function AgentHoverCard({
   title,
 }: AgentHoverCardProps) {
   const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; left: number; placeAbove: boolean }>({
+  const [coords, setCoords] = useState<{
+    top: number;
+    left: number;
+    placeAbove: boolean;
+  }>({
     top: 0,
     left: 0,
     placeAbove: false,
@@ -70,10 +111,9 @@ export function AgentHoverCard({
     if (left < 12) left = 12;
 
     const spaceBelow = window.innerHeight - rect.bottom;
-    const placeAbove = spaceBelow < CARD_HEIGHT + margin && rect.top > CARD_HEIGHT + margin;
-    const top = placeAbove
-      ? rect.top - margin
-      : rect.bottom + margin;
+    const placeAbove =
+      spaceBelow < CARD_HEIGHT + margin && rect.top > CARD_HEIGHT + margin;
+    const top = placeAbove ? rect.top - margin : rect.bottom + margin;
 
     setCoords({ top, left, placeAbove });
   }, []);
@@ -115,8 +155,6 @@ export function AgentHoverCard({
     onJumpAgent?.(agentRef);
   };
 
-  const isMutating = agent?.mutating ?? false;
-
   return (
     <>
       <span
@@ -140,7 +178,8 @@ export function AgentHoverCard({
         )}
       </span>
 
-      {open && typeof document !== "undefined" &&
+      {open &&
+        typeof document !== "undefined" &&
         createPortal(
           <div
             id={panelId}
@@ -152,7 +191,9 @@ export function AgentHoverCard({
             style={{
               position: "fixed",
               top: coords.placeAbove ? undefined : `${coords.top}px`,
-              bottom: coords.placeAbove ? `${window.innerHeight - coords.top}px` : undefined,
+              bottom: coords.placeAbove
+                ? `${window.innerHeight - coords.top}px`
+                : undefined,
               left: `${coords.left}px`,
               zIndex: 9999,
             }}
@@ -172,23 +213,16 @@ export function AgentHoverCard({
                   )}
                 </div>
                 {agent?.promptFile && (
-                  <div className="mt-0.5 mono text-[10px] text-(--text-faint) truncate" title={agent.promptFile}>
+                  <div
+                    className="mt-0.5 mono text-[10px] text-(--text-faint) truncate"
+                    title={agent.promptFile}
+                  >
                     {agent.promptFile}
                   </div>
                 )}
               </div>
 
-              {agent && (
-                <span
-                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                  style={{
-                    color: isMutating ? "var(--hue-err)" : "var(--hue-ok)",
-                    background: `color-mix(in oklch, ${isMutating ? "var(--hue-err)" : "var(--hue-ok)"} 12%, transparent)`,
-                  }}
-                >
-                  {isMutating ? "Mutating" : "Read-Only"}
-                </span>
-              )}
+              {agent && <AgentMutationBadge mutating={agent.mutating} />}
             </div>
 
             {/* Content metadata */}
@@ -197,14 +231,14 @@ export function AgentHoverCard({
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-(--text-faint)">Model / Tier</span>
                   <span className="mono text-(--text-dim) truncate">
-                    {agent.model ?? agent.modelTier ?? "default"}
+                    {agent.model ?? agent.modelTier ?? EMPTY_VALUE}
                   </span>
                 </div>
 
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-(--text-faint)">Output Contract</span>
                   <span className="mono text-(--text-dim) truncate">
-                    {agent.outputContract || "none"}
+                    {agent.outputContract || EMPTY_VALUE}
                   </span>
                 </div>
 
@@ -218,18 +252,22 @@ export function AgentHoverCard({
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-(--text-faint)">Limits</span>
                   <span className="mono text-(--text-dim)">
-                    {agent.limits.timeout_seconds ? `${agent.limits.timeout_seconds}s timeout` : "600s timeout"} · {agent.limits.attempts ?? 3} attempts
+                    {agent.limits.timeout_seconds != null
+                      ? `${agent.limits.timeout_seconds}s`
+                      : EMPTY_VALUE}{" "}
+                    timeout · {agent.limits.attempts ?? EMPTY_VALUE} attempts
                   </span>
                 </div>
 
-                {agent.capabilities?.services && agent.capabilities.services.length > 0 && (
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-(--text-faint)">Services</span>
-                    <span className="mono text-(--text-dim) truncate">
-                      {agent.capabilities.services.join(", ")}
-                    </span>
-                  </div>
-                )}
+                {agent.capabilities?.services &&
+                  agent.capabilities.services.length > 0 && (
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-(--text-faint)">Services</span>
+                      <span className="mono text-(--text-dim) truncate">
+                        {agent.capabilities.services.join(", ")}
+                      </span>
+                    </div>
+                  )}
 
                 {agent.eventTypes && agent.eventTypes.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-(--border)">
@@ -257,7 +295,9 @@ export function AgentHoverCard({
               </div>
             ) : (
               <div className="py-2 text-[11px] text-(--text-faint)">
-                {agentsQ.isLoading ? "Loading agent definition…" : `Agent definition for ${agentRef} not found.`}
+                {agentsQ.isLoading
+                  ? "Loading agent definition…"
+                  : `Agent definition for ${agentRef} not found.`}
               </div>
             )}
 

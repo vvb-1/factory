@@ -21,7 +21,9 @@ function renderWithClient(ui: React.ReactElement) {
       queries: { retry: false },
     },
   });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +104,11 @@ const STATUS_REPORT_SCHEMA = {
   required: ["repos"],
   additionalProperties: false,
   properties: {
-    repos: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+    repos: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string", minLength: 1 },
+    },
   },
 };
 
@@ -116,7 +122,11 @@ const DEMO_SCHEMA = {
     dryRun: { type: "boolean" },
     plan: {
       type: "array",
-      items: { type: "object", required: ["action"], properties: { action: { type: "string" } } },
+      items: {
+        type: "object",
+        required: ["action"],
+        properties: { action: { type: "string" } },
+      },
     },
   },
 };
@@ -137,11 +147,41 @@ function schemaRegistry(): AgentsView {
       mk("demo", DEMO_SCHEMA),
     ],
     eventTypes: [
-      { type: "triage.scan.requested", agent: "triage@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
-      { type: "disk.diagnose", agent: "disk@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
-      { type: "ci.run.failed", agent: "cidoctor@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
-      { type: "factory.status.requested", agent: "report@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
-      { type: "demo.requested", agent: "demo@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
+      {
+        type: "triage.scan.requested",
+        agent: "triage@1",
+        adapter: "cmd",
+        idempotencyScope: [],
+        proposalTtlSeconds: null,
+      },
+      {
+        type: "disk.diagnose",
+        agent: "disk@1",
+        adapter: "cmd",
+        idempotencyScope: [],
+        proposalTtlSeconds: null,
+      },
+      {
+        type: "ci.run.failed",
+        agent: "cidoctor@1",
+        adapter: "cmd",
+        idempotencyScope: [],
+        proposalTtlSeconds: null,
+      },
+      {
+        type: "factory.status.requested",
+        agent: "report@1",
+        adapter: "cmd",
+        idempotencyScope: [],
+        proposalTtlSeconds: null,
+      },
+      {
+        type: "demo.requested",
+        agent: "demo@1",
+        adapter: "cmd",
+        idempotencyScope: [],
+        proposalTtlSeconds: null,
+      },
     ],
     edges: {},
     contracts: {},
@@ -151,11 +191,43 @@ function schemaRegistry(): AgentsView {
 }
 
 const REPO_ITEMS = [
-  { name: "bj29", path: "/r/bj29", github: "watt-mind/bj29", team: null, project: null, base: "develop", deployBranch: null, reportOnly: false, maxInFlight: null, worktreeRoot: null, hasWorktreeUp: false, hasWorktreeDown: false, hasWorktreeWarm: false, verify: null },
-  { name: "factory", path: "/r/factory", github: null, team: null, project: null, base: "develop", reportOnly: false, deployBranch: null, maxInFlight: null, worktreeRoot: null, hasWorktreeUp: false, hasWorktreeDown: false, hasWorktreeWarm: false, verify: null },
+  {
+    name: "bj29",
+    path: "/r/bj29",
+    github: "watt-mind/bj29",
+    team: null,
+    project: null,
+    base: "develop",
+    deployBranch: null,
+    reportOnly: false,
+    maxInFlight: null,
+    worktreeRoot: null,
+    hasWorktreeUp: false,
+    hasWorktreeDown: false,
+    hasWorktreeWarm: false,
+    verify: null,
+  },
+  {
+    name: "factory",
+    path: "/r/factory",
+    github: null,
+    team: null,
+    project: null,
+    base: "develop",
+    reportOnly: false,
+    deployBranch: null,
+    maxInFlight: null,
+    worktreeRoot: null,
+    hasWorktreeUp: false,
+    hasWorktreeDown: false,
+    hasWorktreeWarm: false,
+    verify: null,
+  },
 ];
 
-function withSchemaApi(fn: (r: ReturnType<typeof renderWithClient>) => Promise<void>) {
+function withSchemaApi(
+  fn: (r: ReturnType<typeof renderWithClient>) => Promise<void>,
+) {
   const origAgents = api.agents;
   const origRepos = api.repos;
   api.agents = async () => schemaRegistry();
@@ -171,7 +243,10 @@ function withSchemaApi(fn: (r: ReturnType<typeof renderWithClient>) => Promise<v
   })();
 }
 
-async function selectTemplate(r: ReturnType<typeof renderWithClient>, name: RegExp) {
+async function selectTemplate(
+  r: ReturnType<typeof renderWithClient>,
+  name: RegExp,
+) {
   const chip = await r.findByRole("radio", { name });
   act(() => {
     fireEvent.click(chip);
@@ -189,7 +264,9 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       // enum -> select, number -> numeric input, strings -> text inputs.
       const host = r.getByLabelText("host") as HTMLSelectElement;
       expect(host.tagName.toLowerCase()).toBe("select");
-      expect([...host.querySelectorAll("option")].map((o) => o.value)).toContain("web");
+      expect(
+        [...host.querySelectorAll("option")].map((o) => o.value),
+      ).toContain("web");
       const usedPct = r.getByLabelText("usedPct") as HTMLInputElement;
       expect(usedPct.getAttribute("type")).toBe("number");
       expect(usedPct.getAttribute("min")).toBe("0");
@@ -238,14 +315,18 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       act(() => {
         fireEvent.click(gen);
       });
-      expect((r.getByLabelText("alertId") as HTMLInputElement).value).toMatch(/^web-/);
+      expect((r.getByLabelText("alertId") as HTMLInputElement).value).toMatch(
+        /^web-/,
+      );
 
       await selectTemplate(r, /demo\.requested/i);
       const now = r.getByRole("button", { name: /^now$/i });
       act(() => {
         fireEvent.click(now);
       });
-      expect((r.getByLabelText("scheduledAt") as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(
+        (r.getByLabelText("scheduledAt") as HTMLInputElement).value,
+      ).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }));
 
   test("validation flags a bad payload with a field-level error after blur", () =>
@@ -270,7 +351,9 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       act(() => {
         fireEvent.click(r.getByRole("tab", { name: /json/i }));
       });
-      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const textarea = r.getByLabelText(
+        /event envelope json/i,
+      ) as HTMLTextAreaElement;
       expect(textarea.value).toContain('"/var"');
       // JSON -> Form re-parses on switch.
       const parsed = JSON.parse(textarea.value);
@@ -281,7 +364,9 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       act(() => {
         fireEvent.click(r.getByRole("tab", { name: /form/i }));
       });
-      expect((r.getByLabelText("mount") as HTMLInputElement).value).toBe("/data");
+      expect((r.getByLabelText("mount") as HTMLInputElement).value).toBe(
+        "/data",
+      );
     }));
 
   test("unregistered type is JSON-only: form tab disabled with a stated reason", () =>
@@ -321,7 +406,9 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
         expect(sent.length).toBe(0);
         expect(r.getByText(/does not validate/i)).toBeTruthy();
         expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
-        expect(r.queryByRole("button", { name: /^confirm inject$/i })).toBeNull();
+        expect(
+          r.queryByRole("button", { name: /^confirm inject$/i }),
+        ).toBeNull();
         const confirm = r.getByRole("button", { name: /inject anyway/i });
         await act(async () => {
           fireEvent.click(confirm);
@@ -357,7 +444,9 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
       act(() => {
         fireEvent.click(r.getByRole("button", { name: /inject/i }));
       });
-      expect(r.getAllByText(/fewer than minItems 1/i).length).toBeGreaterThan(0);
+      expect(r.getAllByText(/fewer than minItems 1/i).length).toBeGreaterThan(
+        0,
+      );
     }));
 
   test("array-of-objects field renders a JSON sub-editor with parse indicator", () =>
@@ -374,6 +463,25 @@ describe("InjectDialog schema-driven Form view (WM-76)", () => {
         changeInput(plan, "[{bad json");
       });
       expect(r.getByText(/invalid json/i)).toBeTruthy();
+    }));
+});
+
+describe("InjectDialog template picker readiness (WM-555)", () => {
+  test("blank envelope reports syntactically valid JSON as missing its event type", () =>
+    withSchemaApi(async (r) => {
+      const status = await r.findByText("JSON ok · type missing");
+      expect(status).toBeTruthy();
+      expect(r.queryByText("Valid JSON")).toBeNull();
+    }));
+
+  test("template param hints expose the full truncated value in a title", () =>
+    withSchemaApi(async (r) => {
+      const template = await r.findByRole("radio", { name: /disk\.diagnose/i });
+      const hint = template.querySelector(
+        '[title="host, mount, usedPct, alertId"]',
+      );
+      expect(hint).toBeTruthy();
+      expect(hint?.className).toContain("truncate");
     }));
 });
 
@@ -407,8 +515,20 @@ describe("InjectDialog template selection sync (OPS-344)", () => {
           },
         ],
         eventTypes: [
-          { type: "worker.started", agent: "worker@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
-          { type: "worker.stopped", agent: "worker@1", adapter: "cmd", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "worker.started",
+            agent: "worker@1",
+            adapter: "cmd",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "worker.stopped",
+            agent: "worker@1",
+            adapter: "cmd",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
         edges: {},
         contracts: {},
@@ -419,7 +539,9 @@ describe("InjectDialog template selection sync (OPS-344)", () => {
     try {
       const r = renderWithClient(<InjectDialog onClose={() => {}} />);
       // Wait for template to appear
-      const templateChip = await r.findByRole("radio", { name: /worker\.started/i });
+      const templateChip = await r.findByRole("radio", {
+        name: /worker\.started/i,
+      });
       expect(templateChip).toBeTruthy();
 
       // Click worker.started template
@@ -428,12 +550,17 @@ describe("InjectDialog template selection sync (OPS-344)", () => {
       });
       expect(templateChip.getAttribute("aria-checked")).toBe("true");
 
-      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const textarea = r.getByLabelText(
+        /event envelope json/i,
+      ) as HTMLTextAreaElement;
       expect(textarea.value).toContain('"worker.started"');
 
       // Edit textarea to simulate custom edits
       act(() => {
-        changeInput(textarea, '{\n  "custom": "value",\n  "type": "worker.started"\n}');
+        changeInput(
+          textarea,
+          '{\n  "custom": "value",\n  "type": "worker.started"\n}',
+        );
       });
       expect(textarea.value).toContain('"custom": "value"');
 
@@ -459,7 +586,9 @@ describe("InjectDialog template selection sync (OPS-344)", () => {
       act(() => {
         changeInput(searchInput, "");
       });
-      const workerStoppedChip = r.getByRole("radio", { name: /worker\.stopped/i });
+      const workerStoppedChip = r.getByRole("radio", {
+        name: /worker\.stopped/i,
+      });
 
       // Explicitly clicking another template updates text
       act(() => {
@@ -529,7 +658,9 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
         act(() => {
           fireEvent.click(r.getByRole("tab", { name: /json/i }));
         });
-        const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+        const textarea = r.getByLabelText(
+          /event envelope json/i,
+        ) as HTMLTextAreaElement;
         const parsed = JSON.parse(textarea.value);
         delete parsed.eventId;
         act(() => {
@@ -555,7 +686,9 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
       await selectTemplate(r, /disk\.diagnose/i);
       expect(r.getByLabelText("usedPct")).toBeTruthy();
       await selectTemplate(r, /blank envelope/i);
-      expect(r.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
+      expect(
+        r.getByRole("tab", { name: /json/i }).getAttribute("aria-selected"),
+      ).toBe("true");
       expect(r.queryAllByLabelText("usedPct")).toHaveLength(0);
       expect(r.queryAllByLabelText("mount")).toHaveLength(0);
     }));
@@ -571,11 +704,15 @@ describe("InjectDialog Form-tab envelope guard and picker reset (WM-84)", () => 
         occurredAt: "2026-01-01T00:00:00.000Z",
         payload: { repo: "factory" },
       };
-      const view = renderWithClient(<InjectDialog onClose={() => {}} initialEnvelope={given} />);
+      const view = renderWithClient(
+        <InjectDialog onClose={() => {}} initialEnvelope={given} />,
+      );
       await selectTemplate(view, /disk\.diagnose/i);
       expect(view.getByLabelText("usedPct")).toBeTruthy();
       await selectTemplate(view, /this envelope/i);
-      expect(view.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
+      expect(
+        view.getByRole("tab", { name: /json/i }).getAttribute("aria-selected"),
+      ).toBe("true");
       expect(view.queryAllByLabelText("usedPct")).toHaveLength(0);
       expect(view.queryAllByLabelText("mount")).toHaveLength(0);
     }));
@@ -600,7 +737,9 @@ describe("InjectDialog humanized errors and hidden planner fields (WM-86)", () =
       act(() => {
         fireEvent.click(r.getByRole("tab", { name: /json/i }));
       });
-      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const textarea = r.getByLabelText(
+        /event envelope json/i,
+      ) as HTMLTextAreaElement;
       const parsed = JSON.parse(textarea.value);
       parsed.payload.repo = "factory";
       parsed.payload.repoPin = { repo: "factory", sha: "not-a-sha" };
@@ -627,7 +766,9 @@ describe("InjectDialog keyboard search (WM-80)", () => {
 
   test("ArrowDown from search focuses the first template result", () =>
     withSchemaApi(async (r) => {
-      const search = r.getByPlaceholderText(/search event types/i) as HTMLInputElement;
+      const search = r.getByPlaceholderText(
+        /search event types/i,
+      ) as HTMLInputElement;
       act(() => {
         search.focus();
       });
@@ -641,7 +782,9 @@ describe("InjectDialog keyboard search (WM-80)", () => {
 
   test("ArrowUp from the first template result returns focus to search", () =>
     withSchemaApi(async (r) => {
-      const search = r.getByPlaceholderText(/search event types/i) as HTMLInputElement;
+      const search = r.getByPlaceholderText(
+        /search event types/i,
+      ) as HTMLInputElement;
       act(() => {
         fireEvent.keyDown(search, { key: "ArrowDown" });
       });
@@ -672,7 +815,9 @@ describe("InjectDialog keyboard search (WM-80)", () => {
       act(() => {
         changeInput(search, "smoke");
       });
-      expect(r.getByText(/no templates or recent payloads matching "smoke"/i)).toBeTruthy();
+      expect(
+        r.getByText(/no templates or recent payloads matching "smoke"/i),
+      ).toBeTruthy();
     } finally {
       api.agents = origAgents;
       api.repos = origRepos;
@@ -691,7 +836,9 @@ describe("InjectDialog invalid-payload confirm is distinct (WM-85)", () => {
         fireEvent.click(r.getByRole("button", { name: /inject/i }));
       });
       expect(r.getByRole("button", { name: /inject anyway/i })).toBeTruthy();
-      expect(r.queryAllByRole("button", { name: /^confirm inject$/i })).toHaveLength(0);
+      expect(
+        r.queryAllByRole("button", { name: /^confirm inject$/i }),
+      ).toHaveLength(0);
     }));
 
   test("valid payload still confirms with Confirm inject", () =>
@@ -704,7 +851,9 @@ describe("InjectDialog invalid-payload confirm is distinct (WM-85)", () => {
         fireEvent.click(r.getByRole("button", { name: /inject/i }));
       });
       expect(r.getByRole("button", { name: /^confirm inject$/i })).toBeTruthy();
-      expect(r.queryAllByRole("button", { name: /inject anyway/i })).toHaveLength(0);
+      expect(
+        r.queryAllByRole("button", { name: /inject anyway/i }),
+      ).toHaveLength(0);
     }));
 });
 
@@ -712,7 +861,11 @@ describe("InjectDialog last-used template (WM-81)", () => {
   test("preselects the last injected template on the next open; blank remains one click", () =>
     withSchemaApi(async (r) => {
       const origReplay = api.replay;
-      api.replay = async () => ({ admitted: true, duplicate: false, eventId: "e-last" });
+      api.replay = async () => ({
+        admitted: true,
+        duplicate: false,
+        eventId: "e-last",
+      });
       try {
         await selectTemplate(r, /disk\.diagnose/i);
         act(() => {
@@ -730,13 +883,21 @@ describe("InjectDialog last-used template (WM-81)", () => {
           name: (n) => n.includes("disk.diagnose") && n.includes("disk@1"),
         });
         expect(chip.getAttribute("aria-checked")).toBe("true");
-        expect(r2.getByRole("tab", { name: /form/i }).getAttribute("aria-selected")).toBe("true");
+        expect(
+          r2.getByRole("tab", { name: /form/i }).getAttribute("aria-selected"),
+        ).toBe("true");
         expect(r2.getByLabelText("usedPct")).toBeTruthy();
         act(() => {
           fireEvent.click(r2.getByRole("radio", { name: /blank envelope/i }));
         });
-        expect(r2.getByRole("radio", { name: /blank envelope/i }).getAttribute("aria-checked")).toBe("true");
-        expect(r2.getByRole("tab", { name: /json/i }).getAttribute("aria-selected")).toBe("true");
+        expect(
+          r2
+            .getByRole("radio", { name: /blank envelope/i })
+            .getAttribute("aria-checked"),
+        ).toBe("true");
+        expect(
+          r2.getByRole("tab", { name: /json/i }).getAttribute("aria-selected"),
+        ).toBe("true");
       } finally {
         api.replay = origReplay;
       }
@@ -768,9 +929,15 @@ describe("InjectDialog Inject-anyway banner regex sanitization (WM-179)", () => 
       act(() => {
         fireEvent.click(r.getByRole("tab", { name: /json/i }));
       });
-      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const textarea = r.getByLabelText(
+        /event envelope json/i,
+      ) as HTMLTextAreaElement;
       const parsed = JSON.parse(textarea.value);
-      parsed.payload = { repo: "watt-mind/factory", runId: 123, logArtifact: "invalid-log-artifact" };
+      parsed.payload = {
+        repo: "watt-mind/factory",
+        runId: 123,
+        logArtifact: "invalid-log-artifact",
+      };
       act(() => {
         changeInput(textarea, JSON.stringify(parsed, null, 2));
       });
@@ -791,14 +958,22 @@ describe("InjectDialog Inject-anyway banner regex sanitization (WM-179)", () => 
       act(() => {
         fireEvent.click(r.getByRole("tab", { name: /json/i }));
       });
-      const textarea = r.getByLabelText(/event envelope json/i) as HTMLTextAreaElement;
+      const textarea = r.getByLabelText(
+        /event envelope json/i,
+      ) as HTMLTextAreaElement;
       const parsed = JSON.parse(textarea.value);
-      parsed.payload = { repo: "watt-mind/factory", runId: 123, logArtifact: "invalid-log-artifact" };
+      parsed.payload = {
+        repo: "watt-mind/factory",
+        runId: 123,
+        logArtifact: "invalid-log-artifact",
+      };
       act(() => {
         changeInput(textarea, JSON.stringify(parsed, null, 2));
       });
       const liveWarning = r.container.textContent ?? "";
-      expect(liveWarning).toContain("payload does not validate against the registered input schema");
+      expect(liveWarning).toContain(
+        "payload does not validate against the registered input schema",
+      );
       expect(liveWarning).not.toMatch(/\^\[0-9a-f\]\{64\}/);
       expect(liveWarning).not.toContain("does not match pattern");
       expect(liveWarning).toMatch(/expected format/i);

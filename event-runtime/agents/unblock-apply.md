@@ -6,11 +6,11 @@ via the deterministic actions adapter in item-list mode
 
 Registered actions — each resolves to one fixed `tools/linear.mjs` invocation:
 
-| action id | effect |
-| :--- | :--- |
-| `release-hold` | `state {issueId} "Todo" --remove ai:blocked --add ai:agent-ready` — evidence resolved the hold and the spec is dispatchable |
-| `release-to-triage` | `state {issueId} "Triage" --remove ai:blocked` — hold resolved, spec needs the triage stage |
-| `comment-evidence` | `comment {issueId} "unblock: <reason>"` — the citation a release must carry |
+| action id           | effect                                                                                                                      |
+| :------------------ | :-------------------------------------------------------------------------------------------------------------------------- |
+| `release-hold`      | `state {issueId} "Todo" --remove ai:blocked --add ai:agent-ready` — evidence resolved the hold and the spec is dispatchable |
+| `release-to-triage` | `state {issueId} "Triage" --remove ai:blocked` — hold resolved, spec needs the triage stage                                 |
+| `comment-evidence`  | `comment {issueId} "unblock: <reason>"` — the citation a release must carry                                                 |
 
 Every action is a forward state move or a comment; nothing here closes,
 deletes, or reassigns an issue, and nothing can add `ai:blocked`. An action

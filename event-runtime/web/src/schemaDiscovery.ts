@@ -15,18 +15,24 @@ export interface DiscoveredFieldGroup {
 }
 
 /** Preserve discovery relevance order while collecting fields under their root object. */
-export function groupDiscoveredFields(fields: DiscoveredField[]): DiscoveredFieldGroup[] {
+export function groupDiscoveredFields(
+  fields: DiscoveredField[],
+): DiscoveredFieldGroup[] {
   const groups = new Map<string, DiscoveredField[]>();
 
   for (const field of fields) {
     const separator = field.path.indexOf(".");
-    const root = separator === -1 ? "top-level" : field.path.slice(0, separator);
+    const root =
+      separator === -1 ? "top-level" : field.path.slice(0, separator);
     const group = groups.get(root);
     if (group) group.push(field);
     else groups.set(root, [field]);
   }
 
-  return Array.from(groups, ([root, groupedFields]) => ({ root, fields: groupedFields }));
+  return Array.from(groups, ([root, groupedFields]) => ({
+    root,
+    fields: groupedFields,
+  }));
 }
 
 const MAX_SCAN_ROWS = 60;
@@ -35,23 +41,37 @@ const MAX_SCAN_DEPTH = 3;
 /**
  * Scan rows to auto-discover nested keys from payload, spec.input, labels, limits, etc.
  */
-export function discoverPayloadFields<T>(rows: T[], activeCustomColumns: string[]): DiscoveredField[] {
+export function discoverPayloadFields<T>(
+  rows: T[],
+  activeCustomColumns: string[],
+): DiscoveredField[] {
   if (!rows?.length) return [];
   const sample = rows.slice(0, MAX_SCAN_ROWS);
   const counts = new Map<string, { count: number; sampleValue: string }>();
-  const activeSet = new Set(activeCustomColumns.map((c) => c.replace(/^custom:/, "")));
+  const activeSet = new Set(
+    activeCustomColumns.map((c) => c.replace(/^custom:/, "")),
+  );
 
   function walk(obj: unknown, prefix: string, depth: number) {
     if (depth > MAX_SCAN_DEPTH || obj == null) return;
     if (typeof obj !== "object" || Array.isArray(obj)) return;
 
     for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-      if (key.startsWith("_") || key === "__proto__" || key === "constructor" || key === "prototype") {
+      if (
+        key.startsWith("_") ||
+        key === "__proto__" ||
+        key === "constructor" ||
+        key === "prototype"
+      ) {
         continue;
       }
       const fullPath = prefix ? `${prefix}.${key}` : key;
 
-      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
         walk(value, fullPath, depth + 1);
       } else {
         if (!activeSet.has(fullPath) && !activeSet.has(key)) {
@@ -59,7 +79,8 @@ export function discoverPayloadFields<T>(rows: T[], activeCustomColumns: string[
           let valStr = "";
           if (value === undefined || value === null) valStr = "—";
           else if (typeof value === "string") valStr = value;
-          else if (typeof value === "number" || typeof value === "boolean") valStr = String(value);
+          else if (typeof value === "number" || typeof value === "boolean")
+            valStr = String(value);
           else if (Array.isArray(value)) valStr = `[${value.length}]`;
           else valStr = "{…}";
 
@@ -90,5 +111,8 @@ export function discoverPayloadFields<T>(rows: T[], activeCustomColumns: string[
       sampleValue: data.sampleValue,
       occurrenceCount: data.count,
     }))
-    .sort((a, b) => b.occurrenceCount - a.occurrenceCount || a.path.localeCompare(b.path));
+    .sort(
+      (a, b) =>
+        b.occurrenceCount - a.occurrenceCount || a.path.localeCompare(b.path),
+    );
 }

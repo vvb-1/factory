@@ -1,7 +1,16 @@
 {
   "title": "factory.work-plan/v1 output artifact — ordered dispatchable-ticket plan with complete candidate accounting (WM-350)",
   "type": "object",
-  "required": ["recommendation", "repo", "ticket", "plan", "deferred", "readyCandidates", "triageBacklog", "summary"],
+  "required": [
+    "recommendation",
+    "repo",
+    "ticket",
+    "plan",
+    "deferred",
+    "readyCandidates",
+    "triageBacklog",
+    "summary"
+  ],
   "additionalProperties": false,
   "properties": {
     "recommendation": {

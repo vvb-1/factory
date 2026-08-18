@@ -8,6 +8,7 @@
 #   bin/worktree-up.sh OPS-123 --no-seed       # start empty (no demo data)
 #   bin/worktree-up.sh OPS-123 --no-fetch      # skip git fetch when base ref exists
 #   bin/worktree-up.sh OPS-123 --reseed        # seed again under a fresh prefix
+#   bin/worktree-up.sh OPS-123 --resume        # preserve an existing branch as-is
 #
 # What it isolates that `git worktree add` does not: the control-API and web
 # ports (hashed from the full ticket id, persisted in .factory/run/ports) and
@@ -32,6 +33,12 @@ RESEED=0
 LIVE=0
 CHECKOUT_ONLY=0
 NO_FETCH=0
+RESUME="${FACTORY_WORKTREE_RESUME:-0}"
+PRESERVE_ABANDONED="${FACTORY_WORKTREE_PRESERVE_ABANDONED:-0}"
+WORKTREE_IN_USE="${FACTORY_WORKTREE_IN_USE:-0}"
+PRESERVATION_REPORT="${FACTORY_WORKTREE_PRESERVATION_REPORT:-}"
+EXPECTED_LEASE_FILE="${FACTORY_WORKTREE_EXPECTED_LEASE_FILE:-}"
+EXPECTED_LEASE_PID="${FACTORY_WORKTREE_EXPECTED_LEASE_PID:-}"
 POS=0
 
 while [[ $# -gt 0 ]]; do
@@ -41,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --no-seed) SEED=0 ;;
     --no-fetch) NO_FETCH=1 ;;
     --reseed) RESEED=1 ;;
+    --resume) RESUME=1 ;;
     --checkout-only) CHECKOUT_ONLY=1 ;;
     -h | --help)
       sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -59,6 +67,19 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+[[ "$RESUME" == "0" || "$RESUME" == "1" ]] \
+  || die "FACTORY_WORKTREE_RESUME must be 0 or 1 (got '$RESUME')"
+[[ "$PRESERVE_ABANDONED" == "0" || "$PRESERVE_ABANDONED" == "1" ]] \
+  || die "FACTORY_WORKTREE_PRESERVE_ABANDONED must be 0 or 1 (got '$PRESERVE_ABANDONED')"
+[[ "$WORKTREE_IN_USE" == "0" || "$WORKTREE_IN_USE" == "1" ]] \
+  || die "FACTORY_WORKTREE_IN_USE must be 0 or 1 (got '$WORKTREE_IN_USE')"
+[[ "$PRESERVE_ABANDONED" -eq 0 || -n "$PRESERVATION_REPORT" ]] \
+  || die "FACTORY_WORKTREE_PRESERVATION_REPORT is required when preserving an abandoned worktree"
+[[ -z "$EXPECTED_LEASE_PID" || "$EXPECTED_LEASE_PID" =~ ^[0-9]+$ ]] \
+  || die "FACTORY_WORKTREE_EXPECTED_LEASE_PID must be numeric (got '$EXPECTED_LEASE_PID')"
+[[ -z "$EXPECTED_LEASE_PID" || -n "$EXPECTED_LEASE_FILE" ]] \
+  || die "FACTORY_WORKTREE_EXPECTED_LEASE_FILE is required with FACTORY_WORKTREE_EXPECTED_LEASE_PID"
 
 REPO="$(repo_root)"
 WORKTREE_LIFECYCLE_LOCK=""
@@ -95,7 +116,7 @@ if [[ "$HERE" -eq 1 ]]; then
   WT="$REPO"
   LABEL="here"
 else
-  [[ -n "$TICKET" ]] || die "usage: worktree-up.sh <TICKET-ID> [type] [slug] | --here   (--checkout-only, --no-seed, --no-fetch, --reseed)"
+  [[ -n "$TICKET" ]] || die "usage: worktree-up.sh <TICKET-ID> [type] [slug] | --here   (--checkout-only, --no-seed, --no-fetch, --reseed, --resume)"
   [[ "$TICKET" =~ ^[A-Z]+-[0-9]+(-[A-Za-z0-9][A-Za-z0-9-]*)?$ ]] || die "ticket must look like OPS-123 or OPS-123-scratch"
   WT="$WT_ROOT/$TICKET"
   LABEL="$TICKET"
@@ -107,51 +128,123 @@ else
   trap 'release_worktree_lifecycle_lock; exit 130' INT
   trap 'release_worktree_lifecycle_lock; exit 143' TERM
 
-  [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "fetching origin/$BASE_BRANCH"
-  if [[ "$NO_FETCH" -eq 1 ]]; then
-    FACTORY_SKIP_FETCH=1 git_fetch "$REPO" "origin" "$BASE_BRANCH"
+  BASE_REF="origin/$BASE_BRANCH"
+  BRANCH_EXISTS=0
+  RESUMING=0
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH" && BRANCH_EXISTS=1
+
+  # An explicit resume is a promise not to refresh or inspect the existing
+  # branch against the base. Auto-resume still fetches so its unique-commit
+  # and open-PR checks use the current remote base.
+  if [[ "$BRANCH_EXISTS" -eq 1 && "$RESUME" -eq 1 ]]; then
+    RESUMING=1
   else
-    git_fetch "$REPO" "origin" "$BASE_BRANCH"
+    [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "fetching origin/$BASE_BRANCH"
+    if [[ "$NO_FETCH" -eq 1 ]]; then
+      FACTORY_SKIP_FETCH=1 git_fetch "$REPO" "origin" "$BASE_BRANCH"
+    else
+      git_fetch "$REPO" "origin" "$BASE_BRANCH"
+    fi
   fi
 
-  BASE_REF="origin/$BASE_BRANCH"
-  if git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  if [[ "$BRANCH_EXISTS" -eq 1 ]]; then
     BRANCH_SHA=$(git -C "$REPO" rev-parse "refs/heads/$BRANCH") \
       || die "worktree_branch_inspection_failed: could not resolve branch '$BRANCH'"
-    BASE_SHA=$(git -C "$REPO" rev-parse "$BASE_REF") \
-      || die "worktree_branch_inspection_failed: could not resolve $BASE_REF"
-    UNIQUE_COMMITS=$(git -C "$REPO" rev-list --count "$BASE_REF..$BRANCH") \
-      || die "worktree_branch_inspection_failed: could not compare branch '$BRANCH' with $BASE_REF"
-    if [[ "$UNIQUE_COMMITS" -gt 0 ]]; then
-      die "worktree_branch_has_commits: branch '$BRANCH' has $UNIQUE_COMMITS unique commit(s) beyond $BASE_REF — resume or remove it explicitly before re-dispatch"
+
+    if [[ "$RESUMING" -eq 0 ]]; then
+      BASE_SHA=$(git -C "$REPO" rev-parse "$BASE_REF") \
+        || die "worktree_branch_inspection_failed: could not resolve $BASE_REF"
+      UNIQUE_COMMITS=$(git -C "$REPO" rev-list --count "$BASE_REF..$BRANCH") \
+        || die "worktree_branch_inspection_failed: could not compare branch '$BRANCH' with $BASE_REF"
     fi
 
-    if [[ -d "$WT" ]]; then
-      CURRENT_BRANCH=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-      [[ "$CURRENT_BRANCH" == "$BRANCH" ]] \
-        || die "worktree_branch_mismatch: $WT is on '${CURRENT_BRANCH:-detached HEAD}', expected '$BRANCH'"
-      [[ -z "$(git -C "$WT" status --porcelain)" ]] \
-        || die "worktree_branch_dirty: $WT has uncommitted work — resume or clean it explicitly before re-dispatch"
-      # `merge --ff-only` is non-destructive if another process commits after
-      # inspection; unlike reset --hard, it can never discard that commit.
-      git -C "$WT" merge --ff-only "$BASE_REF" >/dev/null \
-        || die "worktree_branch_update_failed: branch '$BRANCH' changed while moving to $BASE_REF"
+    if [[ "$RESUMING" -eq 0 && "$UNIQUE_COMMITS" -gt 0 ]]; then
+      OPEN_PR_COUNT=$(cd "$REPO" && gh pr list --head "$BRANCH" --state open --json number --limit 1 --jq 'length' 2>/dev/null) \
+        || die "worktree_pr_inspection_failed: could not check for an open PR on branch '$BRANCH'"
+      [[ "$OPEN_PR_COUNT" == "1" ]] && RESUMING=1
+    fi
+
+    # WM-680: a branch whose tip is already on origin is preserved work, not
+    # litter — an orphaned or blocked run's WIP that the orchestrator (or the
+    # worker's own preservation) pushed so nothing is lost. Refusing to build
+    # on it forces a human to run --resume by hand for every re-dispatch, and
+    # an unattended loop just loses the slot. Resume it. A branch with unique
+    # commits that exist ONLY locally still refuses below: that is the case
+    # where nobody has vouched for the work by pushing it.
+    if [[ "$RESUMING" -eq 0 && "$UNIQUE_COMMITS" -gt 0 ]]; then
+      if [[ "${FACTORY_WORKTREE_RESUME:-0}" == "1" ]]; then
+        RESUMING=1
+      elif REMOTE_SHA=$(git -C "$REPO" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH") \
+           && [[ "$REMOTE_SHA" == "$BRANCH_SHA" ]]; then
+        RESUMING=1
+      fi
+    fi
+
+    if [[ "$RESUMING" -eq 1 ]]; then
+      if [[ -d "$WT" ]]; then
+        CURRENT_BRANCH=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+        [[ "$CURRENT_BRANCH" == "$BRANCH" ]] \
+          || die "worktree_branch_mismatch: $WT is on '${CURRENT_BRANCH:-detached HEAD}', expected '$BRANCH'"
+      fi
+      [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "resuming branch $BRANCH as-is"
     else
-      # Compare-and-swap the ref so a concurrent commit cannot be overwritten.
-      git -C "$REPO" update-ref "refs/heads/$BRANCH" "$BASE_SHA" "$BRANCH_SHA" \
-        || die "worktree_branch_update_failed: branch '$BRANCH' changed while moving to $BASE_REF"
-    fi
+      if [[ "$UNIQUE_COMMITS" -gt 0 ]]; then
+        die "worktree_branch_has_commits: branch '$BRANCH' has $UNIQUE_COMMITS unique commit(s) beyond $BASE_REF that are not on origin — push them (they are then resumed automatically), re-run with --resume, or remove branch '$BRANCH' explicitly before re-dispatch"
+      fi
 
-    UNIQUE_COMMITS=$(git -C "$REPO" rev-list --count "$BASE_REF..$BRANCH") \
-      || die "worktree_branch_inspection_failed: could not re-check branch '$BRANCH'"
-    [[ "$UNIQUE_COMMITS" -eq 0 ]] \
-      || die "worktree_branch_has_commits: branch '$BRANCH' gained $UNIQUE_COMMITS unique commit(s) while moving to $BASE_REF — refusing re-dispatch"
+      if [[ -d "$WT" ]]; then
+        CURRENT_BRANCH=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+        [[ "$CURRENT_BRANCH" == "$BRANCH" ]] \
+          || die "worktree_branch_mismatch: $WT is on '${CURRENT_BRANCH:-detached HEAD}', expected '$BRANCH'"
+        if [[ -n "$(git -C "$WT" status --porcelain)" ]]; then
+          if [[ "$WORKTREE_IN_USE" -eq 1 ]]; then
+            die "worktree_in_use: $WT has uncommitted work owned by a live run or lease"
+          fi
+          if [[ "$PRESERVE_ABANDONED" -eq 1 ]]; then
+            if [[ -n "$EXPECTED_LEASE_PID" ]]; then
+              OBSERVED_LEASE_PID=$(LEASE_FILE="$EXPECTED_LEASE_FILE" bun --eval '
+                import { readFileSync } from "node:fs";
+                try {
+                  const lease = JSON.parse(readFileSync(process.env.LEASE_FILE, "utf8"));
+                  if (Number.isInteger(lease.pid)) process.stdout.write(String(lease.pid));
+                } catch {}
+              ')
+              [[ "$OBSERVED_LEASE_PID" == "$EXPECTED_LEASE_PID" ]] \
+                && kill -0 "$EXPECTED_LEASE_PID" 2>/dev/null \
+                || die "worktree_in_use: the worker lease changed before abandoned worktree preservation"
+            fi
+            mkdir -p "$(dirname "$PRESERVATION_REPORT")"
+            rm -f "$PRESERVATION_REPORT"
+            preserve_abandoned_worktree "$WT" "$TICKET" "$BRANCH" "$PRESERVATION_REPORT"
+          else
+            die "worktree_branch_dirty: $WT has uncommitted work — re-run with --resume or clean it explicitly before re-dispatch"
+          fi
+        fi
+        # `merge --ff-only` is non-destructive if another process commits after
+        # inspection; unlike reset --hard, it can never discard that commit.
+        git -C "$WT" merge --ff-only "$BASE_REF" >/dev/null \
+          || die "worktree_branch_update_failed: branch '$BRANCH' changed while moving to $BASE_REF"
+      else
+        # Compare-and-swap the ref so a concurrent commit cannot be overwritten.
+        git -C "$REPO" update-ref "refs/heads/$BRANCH" "$BASE_SHA" "$BRANCH_SHA" \
+          || die "worktree_branch_update_failed: branch '$BRANCH' changed while moving to $BASE_REF"
+      fi
+
+      UNIQUE_COMMITS=$(git -C "$REPO" rev-list --count "$BASE_REF..$BRANCH") \
+        || die "worktree_branch_inspection_failed: could not re-check branch '$BRANCH'"
+      [[ "$UNIQUE_COMMITS" -eq 0 ]] \
+        || die "worktree_branch_has_commits: branch '$BRANCH' gained $UNIQUE_COMMITS unique commit(s) while moving to $BASE_REF — refusing re-dispatch"
+    fi
   elif [[ -d "$WT" ]]; then
     die "worktree_branch_missing: $WT exists but branch '$BRANCH' does not"
   fi
 
   if [[ -d "$WT" ]]; then
-    [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "worktree already exists at current $BASE_REF: $WT"
+    if [[ "$RESUMING" -eq 1 ]]; then
+      [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "worktree already exists on resumed branch: $WT"
+    else
+      [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "worktree already exists at current $BASE_REF: $WT"
+    fi
   else
     [[ "$CHECKOUT_ONLY" -eq 1 ]] || info "creating worktree $WT on $BRANCH"
     worktree_add "$WT" "$BRANCH" "$BASE_REF" "$REPO"

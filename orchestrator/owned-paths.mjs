@@ -42,28 +42,43 @@ export function parseOwnedPaths(description = "") {
   let inFence = false;
 
   for (const raw of section.split("\n").slice(1)) {
-    if (/^\s*```/.test(raw)) { inFence = !inFence; continue; }
+    if (/^\s*```/.test(raw)) {
+      inFence = !inFence;
+      continue;
+    }
     const line = raw.trim();
     if (!line) continue;
 
-    if (inFence) { out.push(line); continue; }
-    if (/^[-*]\s+/.test(line)) { out.push(line.replace(/^[-*]\s*/, "")); continue; }
-    if (/^ {4,}\S/.test(raw)) out.push(line);           // indented code block
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      out.push(line.replace(/^[-*]\s*/, ""));
+      continue;
+    }
+    if (/^ {4,}\S/.test(raw)) out.push(line); // indented code block
   }
 
-  return out
-    .map((s) => s.replace(/`/g, "").replace(/[,;]$/, "").trim())
-    // Tickets routinely annotate a path with its change kind — "(new)",
-    // "(modified)", "(deleted)" — right after the backtick. Left in place that
-    // annotation is prose, not part of the path, and used to sink the whole
-    // line: `foo.ts (new)` has a space, so it read as prose and got dropped,
-    // silently downgrading a perfectly good path to "no Owned Paths".
-    .map((s) => s.replace(/\s*\([^()]*\)\s*$/, "").trim())
-    .filter(Boolean)
-    .filter((s) => !s.startsWith("#"))
-    // A path has no spaces and looks like a path: a separator, a wildcard, or an
-    // extension. This drops the prose that legitimately appears in the section.
-    .filter((s) => !/\s/.test(s) && (s.includes("/") || s.includes("*") || /\.[a-z0-9]+$/i.test(s)));
+  return (
+    out
+      .map((s) => s.replace(/`/g, "").replace(/[,;]$/, "").trim())
+      // Tickets routinely annotate a path with its change kind — "(new)",
+      // "(modified)", "(deleted)" — right after the backtick. Left in place that
+      // annotation is prose, not part of the path, and used to sink the whole
+      // line: `foo.ts (new)` has a space, so it read as prose and got dropped,
+      // silently downgrading a perfectly good path to "no Owned Paths".
+      .map((s) => s.replace(/\s*\([^()]*\)\s*$/, "").trim())
+      .filter(Boolean)
+      .filter((s) => !s.startsWith("#"))
+      // A path has no spaces and looks like a path: a separator, a wildcard, or an
+      // extension. This drops the prose that legitimately appears in the section.
+      .filter(
+        (s) =>
+          !/\s/.test(s) &&
+          (s.includes("/") || s.includes("*") || /\.[a-z0-9]+$/i.test(s)),
+      )
+  );
 }
 
 /**
@@ -107,7 +122,8 @@ export function globToRegExp(glob) {
   // common at repo root), so it must match itself too, not just descendants.
   // A path with an explicit trailing slash (`app/services/`) means "contents
   // only" and does not get this treatment.
-  const matchSelf = !g.endsWith("/") && !/[*?{}]/.test(g) && !/\.[a-z0-9]+$/i.test(g);
+  const matchSelf =
+    !g.endsWith("/") && !/[*?{}]/.test(g) && !/\.[a-z0-9]+$/i.test(g);
   if (g.endsWith("/")) g += "**";
   else if (matchSelf) g += "/**";
 
@@ -117,16 +133,27 @@ export function globToRegExp(glob) {
     if (c === "*") {
       if (g[i + 1] === "*") {
         // `**/` should also match zero segments, so `a/**/b.ts` matches `a/b.ts`.
-        if (g[i + 2] === "/") { re += "(?:.*/)?"; i += 2; }
-        else { re += ".*"; i += 1; }
+        if (g[i + 2] === "/") {
+          re += "(?:.*/)?";
+          i += 2;
+        } else {
+          re += ".*";
+          i += 1;
+        }
       } else {
         re += "[^/]*";
       }
     } else if (c === "?") re += "[^/]";
     else if (c === "{") {
       const close = g.indexOf("}", i);
-      if (close === -1) { re += "\\{"; continue; }
-      const alts = g.slice(i + 1, close).split(",").map((a) => escapeLiteral(a.trim()));
+      if (close === -1) {
+        re += "\\{";
+        continue;
+      }
+      const alts = g
+        .slice(i + 1, close)
+        .split(",")
+        .map((a) => escapeLiteral(a.trim()));
       re += `(?:${alts.join("|")})`;
       i = close;
     } else re += escapeLiteral(c);
@@ -178,6 +205,42 @@ export function pathsCollide(setA = [], setB = []) {
   return setA.some((a) => setB.some((b) => globsOverlap(a, b)));
 }
 
+/**
+ * Every overlapping pair between two Owned Paths sets, for advisory evidence.
+ * Same predicate as pathsCollide, but returns the pairs instead of a boolean so
+ * a proposal can name what it overlaps with rather than just refusing.
+ */
+export function pathOverlaps(setA = [], setB = []) {
+  const out = [];
+  for (const a of setA)
+    for (const b of setB) if (globsOverlap(a, b)) out.push({ a, b });
+  return out;
+}
+
+/**
+ * The set of overlaps that still refuse dispatch under advisory mode (WM-677):
+ * a `**` claim on either side, and nothing else. `**` is the fail-closed
+ * sentinel for "this ticket's scope is unknown, it must run alone" — the one
+ * claim a rebase cannot reason about. Everything else, including two tickets
+ * naming the SAME concrete file, is textual overlap: same file is not same
+ * lines (tickets qualify claims like `App.tsx (interval constants only)` for
+ * exactly this), and rebase/merge-fix resolve it far more often than not. So
+ * it is recorded on the proposal and dispatch proceeds. The identical-file
+ * rule was tried first and refused App.tsx/hooks.ts/api.mjs across four
+ * tickets in one batch on 2026-08-18 — precisely the starvation advisory mode
+ * exists to end.
+ */
+export function hardPathConflicts(setA = [], setB = []) {
+  const norm = (g) =>
+    String(g ?? "")
+      .trim()
+      .replace(/^\.\//, "")
+      .replace(/\/$/, "");
+  return pathOverlaps(setA, setB).filter(
+    ({ a, b }) => norm(a) === "**" || norm(b) === "**",
+  );
+}
+
 function walkFiles(rootDir, baseDir = rootDir, out = []) {
   for (const dirent of readdirSync(rootDir, { withFileTypes: true })) {
     const nextPath = path.join(rootDir, dirent.name);
@@ -196,7 +259,9 @@ function walkFiles(rootDir, baseDir = rootDir, out = []) {
 function matchingManifestPaths(repoPath, manifestGlobs = []) {
   if (!Array.isArray(manifestGlobs) || manifestGlobs.length === 0) return [];
   if (!existsSync(repoPath)) {
-    throw new Error(`owned-path closure check failed: repo path does not exist: ${repoPath}`);
+    throw new Error(
+      `owned-path closure check failed: repo path does not exist: ${repoPath}`,
+    );
   }
   const files = walkFiles(repoPath);
   const matched = new Set();
@@ -214,12 +279,17 @@ function parsePinnedPaths(manifestPath) {
   try {
     payload = JSON.parse(readFileSync(manifestPath, "utf8"));
   } catch (err) {
-    throw new Error(`owned-path closure check failed: cannot parse pin manifest ${manifestPath}: ${err.message}`);
+    throw new Error(
+      `owned-path closure check failed: cannot parse pin manifest ${manifestPath}: ${err.message}`,
+      { cause: err },
+    );
   }
   const raw = payload?.pins;
   if (raw == null) return [];
   if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
-    throw new Error(`owned-path closure check failed: pin manifest ${manifestPath} has invalid "pins" value`);
+    throw new Error(
+      `owned-path closure check failed: pin manifest ${manifestPath} has invalid "pins" value`,
+    );
   }
   return Object.keys(raw)
     .filter((value) => typeof value === "string")
@@ -260,8 +330,12 @@ export function ownedPathsClosureGaps({
 } = {}) {
   const own = Array.isArray(ownedPaths) ? ownedPaths : [];
   const policy = {
-    direct: Array.isArray(ownedPathsPolicy?.direct) ? ownedPathsPolicy.direct : [],
-    pinManifests: Array.isArray(ownedPathsPolicy?.pinManifests) ? ownedPathsPolicy.pinManifests : [],
+    direct: Array.isArray(ownedPathsPolicy?.direct)
+      ? ownedPathsPolicy.direct
+      : [],
+    pinManifests: Array.isArray(ownedPathsPolicy?.pinManifests)
+      ? ownedPathsPolicy.pinManifests
+      : [],
   };
 
   const gaps = [];
@@ -289,12 +363,21 @@ export function ownedPathsClosureGaps({
   }
 
   for (const manifestRequirement of pinManifestRequirements) {
-    const pinnedPaths = Array.isArray(manifestRequirement?.pinnedPaths) ? manifestRequirement.pinnedPaths : [];
+    const pinnedPaths = Array.isArray(manifestRequirement?.pinnedPaths)
+      ? manifestRequirement.pinnedPaths
+      : [];
     const manifestPath = manifestRequirement?.manifestPath;
     if (!manifestPath || !Array.isArray(pinnedPaths)) continue;
-    if (!pinnedPaths.some((pinnedPath) => own.some((owned) => globsOverlap(owned, pinnedPath)))) continue;
+    if (
+      !pinnedPaths.some((pinnedPath) =>
+        own.some((owned) => globsOverlap(owned, pinnedPath)),
+      )
+    )
+      continue;
     if (!own.some((owned) => globsOverlap(owned, manifestPath))) {
-      const requiredBy = pinnedPaths.find((pinnedPath) => own.some((owned) => globsOverlap(owned, pinnedPath)));
+      const requiredBy = pinnedPaths.find((pinnedPath) =>
+        own.some((owned) => globsOverlap(owned, pinnedPath)),
+      );
       addGap({
         rule: "pin-manifest",
         requiredPath: manifestPath,

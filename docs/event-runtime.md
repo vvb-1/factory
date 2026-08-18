@@ -220,6 +220,8 @@ The LLM appears only inside `execute`.
 
 ## 5. Versioned contracts
 
+Besides the three below, `factory.decision-request/v1` and `factory.decision-response/v1` (`event-runtime/schemas/`, validated by `lib/decision.mjs`) define a bounded human question — 1–6 options with runtime effects plus gated fields from a closed widget vocabulary — and its hash-bound answer; a refused agent-result may carry a request as `decision` (docs/event-runtime-inbox.md §2–§4).
+
 ### 5.1 Event envelope
 
 ```json
@@ -359,6 +361,14 @@ mutating: false
 
 A definition is admitted only when its adapter can prove the required
 capabilities. Adapter support is a contract, not a hopeful command-line flag.
+
+**Artifact-view sidecar (`agents/<name>.view.json`, WM-454).** An optional
+`factory.artifact-view/v1` document beside the definition annotates pointers
+into the output schema with rendering hints ([event-runtime-artifact-views.md](event-runtime-artifact-views.md)
+§2); it is validated against the output schema at load, is not part of the
+definition pin, is served as `GET /agents[].outputView`, and a view that does
+not fit its schema is a `/status.anomalies.configuration` entry — the agent
+still loads, without a view.
 
 **Per-agent repo scoping (`repos`, WM-64).** A definition may declare an
 optional top-level `"repos": ["bj29", "cw-app"]` — a closed set of repos the
@@ -634,6 +644,32 @@ timeout discipline (TERM, then KILL) and terminates as `cancelled`. Every
 transition records actor, reason code, attempt, correlation ID, causation ID,
 and policy version. Illegal transitions are rejected rather than repaired.
 
+A `RUNNING` or `VERIFYING` run may be extended through
+`POST /runs/:runId/extend` with `{ "seconds": N }`. Each call is limited to
+3600 seconds and the resulting deadline may not exceed
+`limits.max_run_minutes` from `config/policy.yaml` unless the operator supplies
+`override: true`. The runtime appends an audited `deadline_extended` lifecycle
+record (actor, increment, resulting deadline), moves the attempt lease to the
+new deadline plus grace, and includes those extension records in a terminal
+receipt. Refusals are typed and non-retryable. The CLI equivalent is:
+
+```bash
+bun event-runtime/cli.mjs extend <runId> --seconds 900
+```
+
+The worker re-reads the deadline while the adapter is running. Expiry and
+extension acceptance serialize through the database: an extension committed
+before the old edge postpones adapter TERM/KILL and lease renewal, while expiry
+commits a durable marker before TERM and makes later requests typed refusals
+throughout kill grace. Neither changes the approved `RunSpec`.
+
+The synchronous `actions` adapter is explicitly not extendable: it blocks the
+worker event loop inside bounded child calls and its timeout machinery cannot
+be rescheduled safely from the owned worker/API boundary. The API returns
+`adapter_deadline_not_extendable` rather than accepting an extension it cannot
+honor. Making actions extendable requires a separately owned adapter change to
+use cooperative asynchronous execution.
+
 Delivery is **at least once**, never assumed exactly once:
 
 - unique source event IDs deduplicate intake;
@@ -871,6 +907,9 @@ inbox ledger (WM-285) carries typed decision requests and responses for that —
 agent-authored within a closed vocabulary, rendered generically, applied
 through runtime-owned effects. Design of record:
 [event-runtime-inbox.md](event-runtime-inbox.md).
+The control API exposes `GET /inbox/:id` plus `POST /inbox/:id/decide` and
+`POST /inbox/:id/decide/retry` for reading, answering, and retrying those
+requests.
 
 **What the operator sees.** The full `RunSpec`, plus the planner's evidence:
 the admitted event, the authoritative-state read that produced the proposal and
@@ -921,6 +960,9 @@ lifecycle transitions with the operator as actor:
   same admitted event, a fresh planning pass against current state. Replay is
   for a fixed _event body_; requeue is for a fixed _world_ — after a registry
   or planner fix, the stored event is fine and only the decision was wrong.
+- **decide** — answer an inbox item's hash-bound request through `POST
+/inbox/:id/decide`; retry a stored response's failed effect through `POST
+/inbox/:id/decide/retry` without asking for the fields again.
 
 **Dead-lettering.** An event that fails planning repeatedly (default: 3
 attempts) parks as dead-lettered with its last error, visible in status and

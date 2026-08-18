@@ -276,5 +276,4 @@ describe("artifact store and agent registry surfacing (OPS-212)", () => {
       server.close();
     }
   });
-
 });

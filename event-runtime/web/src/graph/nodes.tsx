@@ -7,9 +7,15 @@ import { DECISION_HUES, STATE_HUES, StateBadge } from "../components/ui";
 // reads as part of the tool rather than an embedded diagram widget. Accents
 // and dash styles come from ./style so the legend stays truthful (WM-99).
 
-export const handleStyle = { background: "var(--border-strong)", width: 6, height: 6, border: "none" };
+export const handleStyle = {
+  background: "var(--border-strong)",
+  width: 6,
+  height: 6,
+  border: "none",
+};
 
-const searchHitOf = (data: NodeProps["data"]) => Boolean((data as { searchHit?: boolean }).searchHit);
+const searchHitOf = (data: NodeProps["data"]) =>
+  Boolean((data as { searchHit?: boolean }).searchHit);
 const searchCurrentOf = (data: NodeProps["data"]) =>
   Boolean((data as { searchCurrent?: boolean }).searchCurrent);
 
@@ -18,16 +24,21 @@ function materialState(node: GraphNode): string {
     case "eventType": {
       const admitted = node.admittedCount ?? 0;
       const planned = node.plannedCount ?? 0;
-      if (admitted > 0 || planned > 0) return `${admitted} admitted, ${planned} planned`;
+      if (admitted > 0 || planned > 0)
+        return `${admitted} admitted, ${planned} planned`;
       return "idle";
     }
     case "agent": {
       const runs = node.activeRuns ?? [];
       if (runs.length === 0) return "idle";
-      return runs.map(({ state, count }) => (count > 1 ? `${state} ${count}` : state)).join(", ");
+      return runs
+        .map(({ state, count }) => (count > 1 ? `${state} ${count}` : state))
+        .join(", ");
     }
     case "proposal":
-      return node.proposal.expired ? `${node.decision}, expired` : node.decision;
+      return node.proposal.expired
+        ? `${node.decision}, expired`
+        : node.decision;
     case "terminal":
       return node.reason;
   }
@@ -74,7 +85,11 @@ export function Shell({
         boxShadow: selected ? `0 0 0 1px ${accent}` : "none",
         borderLeft: `3px solid ${accent}`,
         outlineWidth: searchHit || searchCurrent ? "2px" : undefined,
-        outlineStyle: searchCurrent ? "solid" : searchHit ? "dashed" : undefined,
+        outlineStyle: searchCurrent
+          ? "solid"
+          : searchHit
+            ? "dashed"
+            : undefined,
         outlineColor: searchHit || searchCurrent ? "var(--accent)" : undefined,
         outlineOffset: searchHit || searchCurrent ? 2 : undefined,
       }}
@@ -84,7 +99,13 @@ export function Shell({
   );
 }
 
-export function Line({ children, dim }: { children: React.ReactNode; dim?: boolean }) {
+export function Line({
+  children,
+  dim,
+}: {
+  children: React.ReactNode;
+  dim?: boolean;
+}) {
   return (
     <div
       className="mono truncate text-[11.5px]"
@@ -111,7 +132,10 @@ export function EventTypeNode({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div className="flex items-center justify-between gap-1">
-        <span className="text-[10px] tracking-wide uppercase" style={{ color: NODE_STYLES.eventType.accent }}>
+        <span
+          className="text-[10px] tracking-wide uppercase"
+          style={{ color: NODE_STYLES.eventType.accent }}
+        >
           event type
         </span>
         {hasCounts && (
@@ -121,7 +145,8 @@ export function EventTypeNode({ data, selected }: NodeProps) {
                 className="rounded px-1 text-[11px] font-medium"
                 style={{
                   color: "var(--hue-info)",
-                  background: "color-mix(in oklch, var(--hue-info) 12%, transparent)",
+                  background:
+                    "color-mix(in oklch, var(--hue-info) 12%, transparent)",
                 }}
               >
                 {admitted} admitted
@@ -132,7 +157,8 @@ export function EventTypeNode({ data, selected }: NodeProps) {
                 className="rounded px-1 text-[11px] font-medium"
                 style={{
                   color: "var(--hue-ok)",
-                  background: "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
+                  background:
+                    "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
                 }}
               >
                 {planned} planned
@@ -157,7 +183,9 @@ export function EventTypeNode({ data, selected }: NodeProps) {
 
 export function AgentNode({ data, selected }: NodeProps) {
   const node = data.node as Extract<GraphNode, { kind: "agent" }>;
-  const accent = node.mutating ? NODE_STYLES.agentMutating.accent : NODE_STYLES.agentReadOnly.accent;
+  const accent = node.mutating
+    ? NODE_STYLES.agentMutating.accent
+    : NODE_STYLES.agentReadOnly.accent;
   const activeRuns = node.activeRuns ?? [];
 
   return (
@@ -170,8 +198,13 @@ export function AgentNode({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] tracking-wide uppercase" style={{ color: accent }}>
-          {node.execution === "model" ? "agent · model" : `agent · ${node.execution}`}
+        <span
+          className="text-[10px] tracking-wide uppercase"
+          style={{ color: accent }}
+        >
+          {node.execution === "model"
+            ? "agent · model"
+            : `agent · ${node.execution}`}
         </span>
         <div className="flex items-center gap-1">
           {node.mutating && (
@@ -209,7 +242,7 @@ export function AgentNode({ data, selected }: NodeProps) {
       <Line dim>
         {node.execution === "actions"
           ? `${node.actions.length} actions · ${node.hosts.join(", ")}`
-          : (node.capabilities.join(", ") || "no declared services")}
+          : node.capabilities.join(", ") || "no declared services"}
       </Line>
       <Handle type="source" position={Position.Right} style={handleStyle} />
     </Shell>
@@ -228,7 +261,10 @@ export function TerminalNode({ data, selected }: NodeProps) {
       accessibleName={nodeAccessibleName(node)}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
-      <div className="text-[10px] tracking-wide uppercase" style={{ color: "var(--text-faint)" }}>
+      <div
+        className="text-[10px] tracking-wide uppercase"
+        style={{ color: "var(--text-faint)" }}
+      >
         terminal
       </div>
       <div className="text-[12px]" style={{ color: "var(--text-dim)" }}>
@@ -252,7 +288,10 @@ export function ProposalNode({ data, selected }: NodeProps) {
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div className="flex items-center justify-between gap-1">
-        <span className="text-[10px] tracking-wide uppercase font-semibold" style={{ color: NODE_STYLES.proposal.accent }}>
+        <span
+          className="text-[10px] tracking-wide uppercase font-semibold"
+          style={{ color: NODE_STYLES.proposal.accent }}
+        >
           proposal
         </span>
         <StateBadge state={node.decision} hues={DECISION_HUES} />
@@ -261,10 +300,13 @@ export function ProposalNode({ data, selected }: NodeProps) {
         {node.label}
       </div>
       <Line dim>
-        {node.agentRef ? `agent: ${node.agentRef}` : (node.proposal.reason || "pending execution")}
+        {node.agentRef
+          ? `agent: ${node.agentRef}`
+          : node.proposal.reason || "pending execution"}
       </Line>
       <Line dim>
-        ttl: {node.proposal.ttl_seconds}s {node.proposal.expired ? "(expired)" : "remaining"}
+        ttl: {node.proposal.ttl_seconds}s{" "}
+        {node.proposal.expired ? "(expired)" : "remaining"}
       </Line>
       <Handle type="source" position={Position.Right} style={handleStyle} />
     </Shell>

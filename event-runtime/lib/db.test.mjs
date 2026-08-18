@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -18,7 +25,8 @@ import {
 } from "./db.mjs";
 import { createIsolatedHome, realFactorySnapshot } from "../test-helpers.mjs";
 
-const freshFile = () => path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-db-")), "runtime.db");
+const freshFile = () =>
+  path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-db-")), "runtime.db");
 
 describe("cold start (OPS-376, OPS-424)", () => {
   test("a second connection to a brand-new database does not fight for the WAL switch", () => {
@@ -98,7 +106,9 @@ describe("cold start (OPS-376, OPS-424)", () => {
     }
 
     const verifyDb = openDb(file);
-    expect(verifyDb.query("PRAGMA journal_mode").get().journal_mode).toBe("wal");
+    expect(verifyDb.query("PRAGMA journal_mode").get().journal_mode).toBe(
+      "wal",
+    );
     verifyDb.close();
   });
 });
@@ -125,7 +135,8 @@ describe("schema migration runner and assertions (OPS-415)", () => {
   test("metrics indexes migrate onto an existing v2 database (WM-281)", () => {
     const file = freshFile();
     const db = new Database(file);
-    for (const migration of MIGRATIONS.filter((entry) => entry.version <= 2)) migration.up(db);
+    for (const migration of MIGRATIONS.filter((entry) => entry.version <= 2))
+      migration.up(db);
     setSchemaVersion(db, 2);
     db.close();
 
@@ -151,7 +162,9 @@ describe("schema migration runner and assertions (OPS-415)", () => {
 
     const db = openDb(file);
     expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(db.query("SELECT count(*) as count FROM events").get()?.count).toBe(0);
+    expect(db.query("SELECT count(*) as count FROM events").get()?.count).toBe(
+      0,
+    );
     db.close();
   });
 
@@ -160,17 +173,87 @@ describe("schema migration runner and assertions (OPS-415)", () => {
     const db = new Database(file);
     migrateDb(db, { targetVersion: 2 });
     expect(getSchemaVersion(db)).toBe(2);
-    expect(db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inbox_items'").get()).toBeNull();
+    expect(
+      db
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inbox_items'",
+        )
+        .get(),
+    ).toBeNull();
     db.close();
 
     const upgraded = openDb(file);
     expect(getSchemaVersion(upgraded)).toBe(CURRENT_SCHEMA_VERSION);
-    expect(upgraded.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inbox_items'").get()?.name).toBe("inbox_items");
-    const columns = upgraded.query("PRAGMA table_info(inbox_items)").all().map((row) => row.name);
+    expect(
+      upgraded
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inbox_items'",
+        )
+        .get()?.name,
+    ).toBe("inbox_items");
+    const columns = upgraded
+      .query("PRAGMA table_info(inbox_items)")
+      .all()
+      .map((row) => row.name);
     expect(columns).toEqual([
-      "id", "kind", "severity", "title", "body", "refs_json", "source",
-      "created_at", "acked_at", "resolved_at", "resolved_by", "delivery_json",
+      "id",
+      "kind",
+      "severity",
+      "title",
+      "body",
+      "refs_json",
+      "source",
+      "created_at",
+      "acked_at",
+      "resolved_at",
+      "resolved_by",
+      "delivery_json",
+      "decision_json",
+      "response_json",
+      "decided_at",
+      "decided_by",
+      "dedupe_key",
     ]);
+    upgraded.close();
+  });
+
+  test("the decision ledger migration upgrades a populated v5 inbox database", () => {
+    const file = freshFile();
+    const db = new Database(file);
+    migrateDb(db, { targetVersion: 5 });
+    db.query(
+      `INSERT INTO inbox_items
+         (id, kind, title, source, created_at)
+       VALUES ('legacy', 'BLOCKED', 'legacy item', 'cli', '2026-08-16T00:00:00.000Z')`,
+    ).run();
+    expect(getSchemaVersion(db)).toBe(5);
+    db.close();
+
+    const upgraded = openDb(file);
+    expect(getSchemaVersion(upgraded)).toBe(CURRENT_SCHEMA_VERSION);
+    const columns = upgraded
+      .query("PRAGMA table_info(inbox_items)")
+      .all()
+      .map((row) => row.name);
+    expect(columns.slice(-5)).toEqual([
+      "decision_json",
+      "response_json",
+      "decided_at",
+      "decided_by",
+      "dedupe_key",
+    ]);
+    expect(
+      upgraded.query("SELECT title FROM inbox_items WHERE id = 'legacy'").get()
+        .title,
+    ).toBe("legacy item");
+    const index = upgraded
+      .query(
+        `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'inbox_items_open_dedupe'`,
+      )
+      .get();
+    expect(index.sql).toContain(
+      "WHERE resolved_at IS NULL AND dedupe_key IS NOT NULL",
+    );
     upgraded.close();
   });
 
@@ -205,16 +288,23 @@ describe("schema migration runner and assertions (OPS-415)", () => {
         version: customVersion,
         name: "add_priority_to_events",
         up(targetDb) {
-          targetDb.exec("ALTER TABLE events ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';");
+          targetDb.exec(
+            "ALTER TABLE events ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';",
+          );
         },
       },
     ];
 
-    migrateDb(db, { migrations: migrationsWithCustom, targetVersion: customVersion });
+    migrateDb(db, {
+      migrations: migrationsWithCustom,
+      targetVersion: customVersion,
+    });
     expect(getSchemaVersion(db)).toBe(customVersion);
 
     // Verify existing row is preserved and has default value
-    const row = db.query("SELECT event_id, priority FROM events WHERE event_id = 'evt-415'").get();
+    const row = db
+      .query("SELECT event_id, priority FROM events WHERE event_id = 'evt-415'")
+      .get();
     expect(row.event_id).toBe("evt-415");
     expect(row.priority).toBe("normal");
 
@@ -224,7 +314,9 @@ describe("schema migration runner and assertions (OPS-415)", () => {
        VALUES ('github', 'evt-416', 'issue.closed', '2026-08-14T00:01:00Z', '2026-08-14T00:01:01Z', '{}', 'hash2', '2026-08-14T00:01:01Z', 'urgent')`,
     ).run();
 
-    const row2 = db.query("SELECT event_id, priority FROM events WHERE event_id = 'evt-416'").get();
+    const row2 = db
+      .query("SELECT event_id, priority FROM events WHERE event_id = 'evt-416'")
+      .get();
     expect(row2.priority).toBe("urgent");
 
     db.close();
@@ -234,7 +326,9 @@ describe("schema migration runner and assertions (OPS-415)", () => {
     const file = freshFile();
     const db = openDb(file);
     db.exec("DROP TABLE counters;");
-    expect(() => assertSchema(db)).toThrow('Database schema drift detected: missing table "counters"');
+    expect(() => assertSchema(db)).toThrow(
+      'Database schema drift detected: missing table "counters"',
+    );
     db.close();
   });
 
@@ -254,7 +348,13 @@ describe("run usage persistence and aggregation (WM-66)", () => {
     db.query(
       `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
        VALUES (?, ?, ?, 'hash', 'COMPLETED', 1, ?, ?)`,
-    ).run(runId, `idem-${runId}`, JSON.stringify({ agent, adapter: "fake" }), at, at);
+    ).run(
+      runId,
+      `idem-${runId}`,
+      JSON.stringify({ agent, adapter: "fake" }),
+      at,
+      at,
+    );
   }
 
   test("persists per-attempt usage across reopen and returns explicit totals", () => {
@@ -287,18 +387,20 @@ describe("run usage persistence and aggregation (WM-66)", () => {
         totalTokens: 100,
         costUSD: 0.5,
       },
-      attempts: [{
-        attempt: 1,
-        adapter: "claude",
-        model: "claude-sonnet-4-6",
-        inputTokens: 10,
-        outputTokens: 20,
-        cacheCreationInputTokens: 30,
-        cacheReadInputTokens: 40,
-        totalTokens: 100,
-        costUSD: 0.5,
-        recordedAt: at,
-      }],
+      attempts: [
+        {
+          attempt: 1,
+          adapter: "claude",
+          model: "claude-sonnet-4-6",
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheCreationInputTokens: 30,
+          cacheReadInputTokens: 40,
+          totalTokens: 100,
+          costUSD: 0.5,
+          recordedAt: at,
+        },
+      ],
     });
     db.close();
   });
@@ -315,26 +417,59 @@ describe("run usage persistence and aggregation (WM-66)", () => {
     for (const [runId, agent, atMs, inputTokens, outputTokens] of rows) {
       const at = new Date(atMs).toISOString();
       insertRun(db, runId, agent, at);
-      recordRunUsage(db, { runId, attempt: 1, adapter: "fake", inputTokens, outputTokens, recordedAt: at });
+      recordRunUsage(db, {
+        runId,
+        attempt: 1,
+        adapter: "fake",
+        inputTokens,
+        outputTokens,
+        recordedAt: at,
+      });
     }
 
     expect(usageSpend(db, { now })).toEqual({
       rolling1h: {
-        runs: 1, attempts: 1, inputTokens: 10, outputTokens: 5,
-        cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalTokens: 15, costUSD: 0,
+        runs: 1,
+        attempts: 1,
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        totalTokens: 15,
+        costUSD: 0,
       },
       rolling24h: {
-        runs: 3, attempts: 3, inputTokens: 37, outputTokens: 18,
-        cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalTokens: 55, costUSD: 0,
+        runs: 3,
+        attempts: 3,
+        inputTokens: 37,
+        outputTokens: 18,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        totalTokens: 55,
+        costUSD: 0,
       },
       byAgent24h: [
         {
-          agent: "agent-a@1", runs: 2, attempts: 2, inputTokens: 30, outputTokens: 15,
-          cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalTokens: 45, costUSD: 0,
+          agent: "agent-a@1",
+          runs: 2,
+          attempts: 2,
+          inputTokens: 30,
+          outputTokens: 15,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          totalTokens: 45,
+          costUSD: 0,
         },
         {
-          agent: "agent-b@2", runs: 1, attempts: 1, inputTokens: 7, outputTokens: 3,
-          cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalTokens: 10, costUSD: 0,
+          agent: "agent-b@2",
+          runs: 1,
+          attempts: 1,
+          inputTokens: 7,
+          outputTokens: 3,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          totalTokens: 10,
+          costUSD: 0,
         },
       ],
     });
@@ -348,7 +483,9 @@ describe("txImmediate (OPS-233)", () => {
     txImmediate(db, () => {
       db.query(`INSERT INTO counters (name, value) VALUES ('x', 1)`).run();
     });
-    expect(db.query(`SELECT value FROM counters WHERE name = 'x'`).get().value).toBe(1);
+    expect(
+      db.query(`SELECT value FROM counters WHERE name = 'x'`).get().value,
+    ).toBe(1);
 
     expect(() =>
       txImmediate(db, () => {
@@ -356,7 +493,9 @@ describe("txImmediate (OPS-233)", () => {
         throw new Error("boom");
       }),
     ).toThrow("boom");
-    expect(db.query(`SELECT value FROM counters WHERE name = 'x'`).get().value).toBe(1);
+    expect(
+      db.query(`SELECT value FROM counters WHERE name = 'x'`).get().value,
+    ).toBe(1);
     db.close();
   });
 });
@@ -372,7 +511,9 @@ describe("hermetic execution guard (OPS-425)", () => {
     const testDbPath = path.join(isolated, "runtime.db");
     const db = openDb(testDbPath);
     db.query(`INSERT INTO counters (name, value) VALUES ('guard', 42)`).run();
-    expect(db.query(`SELECT value FROM counters WHERE name = 'guard'`).get().value).toBe(42);
+    expect(
+      db.query(`SELECT value FROM counters WHERE name = 'guard'`).get().value,
+    ).toBe(42);
     db.close();
     const after = realFactorySnapshot();
     expectRealDbUnchanged(before, after);
@@ -389,7 +530,9 @@ describe("hermetic execution guard (OPS-425)", () => {
       utimesSync(dbPath, oldTime, oldTime);
 
       const before = realFactorySnapshot(factoryHome);
-      expect(() => expectRealDbUnchanged(before, realFactorySnapshot(factoryHome))).not.toThrow();
+      expect(() =>
+        expectRealDbUnchanged(before, realFactorySnapshot(factoryHome)),
+      ).not.toThrow();
 
       appendFileSync(dbPath, " after");
       const after = realFactorySnapshot(factoryHome);

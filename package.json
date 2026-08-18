@@ -23,9 +23,11 @@
     "sync-floor": "bun build/emit.mjs --sync-floor",
     "economics": "bun orchestrator/economics.mjs",
     "schedule": "bun deploy/gen.mjs",
-    "format:check": "prettier --check 'shared/**/*.md'",
-    "format": "prettier --write 'shared/**/*.md'",
-    "test": "bun test"
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "test": "bun test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "engines": {
     "bun": ">=1.3"
@@ -36,6 +38,11 @@
     "react": "^19.2.8"
   },
   "devDependencies": {
-    "prettier": "^3.5.0"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.11.0",
+    "prettier": "^3.5.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

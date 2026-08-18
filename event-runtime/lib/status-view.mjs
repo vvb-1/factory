@@ -44,7 +44,7 @@ function runCounts(db) {
 /** Node-local pool state: pidfile liveness and workers carrying drain requests. */
 function runtimePoolState(runDir) {
   const drainingIds = new Set();
-  let names = [];
+  let names;
   try {
     names = readdirSync(runDir);
   } catch {
@@ -255,6 +255,9 @@ export function statusView(
   if (policyVersion === "unknown")
     configAnomalies.push("policyVersion is unknown");
   if (fleet.policyError) configAnomalies.push(fleet.policyError);
+  // Registry-load anomalies that are deliberately not load errors — today
+  // only artifact-view sidecars that do not fit their schema (WM-454).
+  configAnomalies.push(...(registry?.anomalies ?? []));
 
   return {
     events: eventCounts(db),

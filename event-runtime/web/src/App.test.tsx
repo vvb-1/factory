@@ -81,6 +81,23 @@ beforeEach(() => {
       });
     }
     if (url.includes("/api/repos")) return jsonResponse({ repos: [] });
+    if (url.includes("/api/runs?ticket=")) {
+      const ticket =
+        new URL(url, "http://localhost").searchParams.get("ticket") ?? "WM-0";
+      return jsonResponse({
+        ticket: {
+          id: ticket,
+          title: null,
+          state: null,
+          createdAt: null,
+          url: `https://linear.app/watt-mind/issue/${ticket}`,
+        },
+        activity: false,
+        events: [],
+        proposals: [],
+        runs: [],
+      });
+    }
     // Views poll their own endpoints; an empty list keeps them quiet.
     return jsonResponse([]);
   }) as typeof fetch;
@@ -170,9 +187,9 @@ describe("bottom status bar", () => {
     const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
 
     await waitFor(() => {
-      expect(utils.sidebar.getByRole("button", { name: "Workers" }).textContent).toContain(
-        "1stale",
-      );
+      expect(
+        utils.sidebar.getByRole("button", { name: "Workers" }).textContent,
+      ).toContain("1stale");
       expect(statusBar.textContent).toContain("1 stale worker");
     });
     expect(statusBar.textContent).not.toContain("no workers");
@@ -315,7 +332,7 @@ describe("context strip fast jump chords (WM-235)", () => {
     expect(utils.queryByPlaceholderText(/search event types/i)).toBeNull();
   });
 
-  test("view chords (g o, g e, g p, g r) still work alongside context chords", async () => {
+  test("view chords (including g k ticket picker) still work alongside context chords", async () => {
     window.location.hash = "#/overview";
     const utils = renderApp();
     await waitFor(() => {
@@ -341,6 +358,16 @@ describe("context strip fast jump chords (WM-235)", () => {
       fireEvent.keyDown(document.body, { key: "r" });
     });
     expect(window.location.hash).toBe("#/runs");
+
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "g" });
+      fireEvent.keyDown(document.body, { key: "k" });
+    });
+    expect(window.location.hash).toBe("#/tickets");
+    const ticketInput = await utils.findByRole("textbox", {
+      name: "Ticket id",
+    });
+    expect(document.activeElement === ticketInput).toBe(true);
   });
 
   test("`g` prefix arms and displays GoPrefixHint legend with context chords", async () => {
@@ -363,12 +390,61 @@ describe("context strip fast jump chords (WM-235)", () => {
   });
 });
 
-describe("view navigation landmark focus and announcement (WM-325)", () => {
-  test("main landmark receives focus without visual focus ring on view navigation", async () => {
+describe("ticket journey navigation (WM-595)", () => {
+  test("exact ticket-id chips in detail panes navigate to the ticket journey", async () => {
+    const utils = renderApp();
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.title = "WM-542";
+    chip.textContent = "WM-542";
+    utils.getByRole("main").appendChild(chip);
+
+    await waitFor(() => {
+      fireEvent.click(chip);
+      expect(window.location.hash).toBe("#/tickets/WM-542");
+    });
+  });
+
+  test("exact ticket values in JSON are exposed as keyboard-navigable journey links", async () => {
+    const utils = renderApp();
+    const value = document.createElement("span");
+    value.textContent = '"WM-400"';
+    utils.getByRole("main").appendChild(value);
+    const link = await utils.findByRole("link", { name: "Open ticket WM-400" });
+    fireEvent.keyDown(link, { key: "Enter" });
+    expect(window.location.hash).toBe("#/tickets/WM-400");
+  });
+
+  test("typing a PR reference in the command palette opens #/prs/<n> (WM-640)", async () => {
+    const utils = renderApp();
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    const input = utils.getByPlaceholderText("Type a command…");
+    fireEvent.input(input, { target: { value: "#541" } });
+    const command = await utils.findByText("#541", { selector: "span.mono" });
+    fireEvent.click(command.closest("[cmdk-item]")!);
+    expect(window.location.hash).toBe("#/prs/541");
+    await utils.findByText("no runtime activity for PR #541");
+  });
+
+  test("typing a ticket id in the command palette offers its journey", async () => {
+    const utils = renderApp();
+    fireEvent.keyDown(document.body, { key: "k", metaKey: true });
+    const input = utils.getByPlaceholderText("Type a command…");
+    fireEvent.input(input, { target: { value: "WM-595" } });
+    // Two items name the ticket (WM-594 adds "Why isn't WM-595 running?"); both open the journey.
+    const [command, why] = await utils.findAllByText("WM-595", {
+      selector: "span.mono",
+    });
+    expect(why.closest("[cmdk-item]")!.textContent).toContain("Why isn't");
+    fireEvent.click(command.closest("[cmdk-item]")!);
+    expect(window.location.hash).toBe("#/tickets/WM-595");
+  });
+});
+
+describe("view navigation landmark focus and announcement (WM-325, WM-542)", () => {
+  test("main landmark receives focus and announces the view on navigation", async () => {
     const utils = renderApp();
     const main = utils.getByRole("main");
-    expect(main.className).toContain("focus:outline-none");
-    expect(main.className).not.toContain("focus:ring");
 
     act(() => {
       fireEvent.keyDown(document.body, { key: "g" });
@@ -377,8 +453,21 @@ describe("view navigation landmark focus and announcement (WM-325)", () => {
     expect(window.location.hash).toBe("#/runs");
 
     await waitFor(() => {
+      expect(document.activeElement).toBe(main);
       expect(main.textContent).toContain("Runs view");
     });
   });
-});
 
+  test("theme suppresses the landmark ring without removing interactive focus rings", async () => {
+    const themeCss = await Bun.file(
+      new URL("./theme.css", import.meta.url),
+    ).text();
+
+    expect(themeCss).toMatch(
+      /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\);[^}]*\}/s,
+    );
+    expect(themeCss).toMatch(
+      /main\[tabindex="-1"\]:focus-visible\s*\{\s*outline:\s*none;\s*\}/,
+    );
+  });
+});

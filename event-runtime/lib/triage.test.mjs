@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as actions from "./adapters/actions.mjs";
@@ -17,8 +23,16 @@ const registry = loadRegistry();
 const PV = "git:test-pv";
 // See repository.test.mjs: neutralise the operator's global git config so a
 // signing key or a global hooks path cannot hang the fixture (OPS-441).
-const HERMETIC = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.template="];
-const git = (args, cwd) => execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
+const HERMETIC = [
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.template=",
+];
+const git = (args, cwd) =>
+  execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
 
 // Hermetic repo fixtures: these tests must not depend on which repos happen
 // to be checked out on the machine, so they point FACTORY_REPOS_ROOT at a
@@ -121,13 +135,22 @@ function harness({ adapters = { pi: fake, actions: fake } } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-triage-"));
   const db = openDb(path.join(dir, "runtime.db"));
   const workspaces = mkdtempSync(path.join(os.tmpdir(), "evrt-triage-ws-"));
-  const workerOpts = { workspacesRoot: workspaces, owner: "w-test", policyVersion: PV };
+  const workerOpts = {
+    workspacesRoot: workspaces,
+    owner: "w-test",
+    policyVersion: PV,
+  };
 
   async function approveNext(agentRef) {
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const proposal = openProposals(db, {}).find((p) => p.spec?.agent === agentRef);
+    const proposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === agentRef,
+    );
     expect(proposal).toBeTruthy();
-    const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
+    const approved = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
     const summary = await runOnce(db, registry, adapters, workerOpts);
     return { proposal, runId: approved.runId, summary };
   }
@@ -153,7 +176,8 @@ const fakeCanonicalScan = {
                 reason: "fake: canonical multi-section detail",
                 detail: canonicalWriteDetail,
                 ownedPaths: ["README.md"],
-                verificationCommand: "bun test event-runtime/lib/triage.test.mjs",
+                verificationCommand:
+                  "bun test event-runtime/lib/triage.test.mjs",
               },
             ],
             summary: `fake triage of ${spec.input.repo}`,
@@ -190,24 +214,48 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
 
     expect(resolveChains(db, registry).emitted).toBe(1);
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const apply = openProposals(db, {}).find((p) => p.spec?.agent === "triage-apply@1");
+    const apply = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "triage-apply@1",
+    );
     expect(apply.status).toBe("open"); // never applied without approval
     expect(apply.spec.input).toEqual({
       repo: "bj29",
-      plan: [{ issueId: "CLNT-999", action: "label-agent-ready", reason: "fake: fully specified" }],
+      plan: [
+        {
+          issueId: "CLNT-999",
+          action: "label-agent-ready",
+          reason: "fake: fully specified",
+        },
+      ],
     });
 
     const applied = await approveNext("triage-apply@1");
     expect(applied.summary.terminalState).toBe("COMPLETED");
-    const result = JSON.parse(db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(applied.runId).result_json);
-    expect(result.artifact.applied).toEqual([{ issueId: "CLNT-999", action: "label-agent-ready" }]);
+    const result = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(applied.runId).result_json,
+    );
+    expect(result.artifact.applied).toEqual([
+      { issueId: "CLNT-999", action: "label-agent-ready" },
+    ]);
   });
 
   test("a canonical write-detail triage-scan chain proposal is approved and chained", async () => {
-    expect(/^## (Acceptance criteria|Owned Paths|Verification)/.test(canonicalWriteDetail)).toBe(false);
-    expect(/^\s*## (Acceptance Criteria|Owned Paths|Verification)/.test(canonicalWriteDetail)).toBe(true);
+    expect(
+      /^## (Acceptance criteria|Owned Paths|Verification)/.test(
+        canonicalWriteDetail,
+      ),
+    ).toBe(false);
+    expect(
+      /^\s*## (Acceptance Criteria|Owned Paths|Verification)/.test(
+        canonicalWriteDetail,
+      ),
+    ).toBe(true);
 
-    const { db, approveNext } = harness({ adapters: { pi: fakeCanonicalScan, actions: fake } });
+    const { db, approveNext } = harness({
+      adapters: { pi: fakeCanonicalScan, actions: fake },
+    });
     admitEvent(db, registry, triageEnvelope("bj29", "triage-5"));
 
     const scan = await approveNext("triage-scan@1");
@@ -216,7 +264,9 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
     const chain = resolveChains(db, registry);
     expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const apply = openProposals(db, {}).find((p) => p.spec?.agent === "triage-apply@1");
+    const apply = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "triage-apply@1",
+    );
     expect(apply).toBeTruthy();
     expect(apply.decision).toBe("run");
     expect(apply.status).toBe("open");
@@ -229,7 +279,9 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
   });
 
   test("apply outcome SUPPLY_CHANGED chains to work.requested", async () => {
-    const { db, approveNext } = harness({ adapters: { pi: fake, actions: fake } });
+    const { db, approveNext } = harness({
+      adapters: { pi: fake, actions: fake },
+    });
     admitEvent(db, registry, triageEnvelope("bj29", "triage-6"));
 
     const scan = await approveNext("triage-scan@1");
@@ -242,13 +294,23 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
 
     const chain = resolveChains(db, registry);
     expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
-    const event = db.query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`).get(applied.runId);
+    const event = db
+      .query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`)
+      .get(applied.runId);
     expect(event.type).toBe("factory.work.requested");
     expect(JSON.parse(event.envelope_json).payload).toEqual({ repo: "bj29" });
   });
 
   test("apply outcome DETAIL_CHANGED chains to triage.requested", async () => {
-    const { db, approveNext } = harness({ adapters: { pi: triagePlanScan({ action: "write-detail", detail: canonicalWriteDetail }), actions: fake } });
+    const { db, approveNext } = harness({
+      adapters: {
+        pi: triagePlanScan({
+          action: "write-detail",
+          detail: canonicalWriteDetail,
+        }),
+        actions: fake,
+      },
+    });
     admitEvent(db, registry, triageEnvelope("bj29", "triage-7"));
 
     const scan = await approveNext("triage-scan@1");
@@ -261,13 +323,20 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
 
     const chain = resolveChains(db, registry);
     expect(chain).toEqual({ emitted: 1, skipped: 0, errors: [] });
-    const event = db.query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`).get(applied.runId);
+    const event = db
+      .query(`SELECT * FROM events WHERE source = 'chain' AND causation_id = ?`)
+      .get(applied.runId);
     expect(event.type).toBe("factory.triage.requested");
     expect(JSON.parse(event.envelope_json).payload).toEqual({ repo: "bj29" });
   });
 
   test("apply outcome NO_CHANGE terminates with no follow-up", async () => {
-    const { db, approveNext } = harness({ adapters: { pi: triagePlanScan({ action: "move-to-todo" }), actions: fake } });
+    const { db, approveNext } = harness({
+      adapters: {
+        pi: triagePlanScan({ action: "move-to-todo" }),
+        actions: fake,
+      },
+    });
     admitEvent(db, registry, triageEnvelope("bj29", "triage-8"));
 
     const scan = await approveNext("triage-scan@1");
@@ -286,18 +355,29 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
     const { db, approveNext } = harness();
     admitEvent(db, registry, triageEnvelope("clean", "triage-2"));
     await approveNext("triage-scan@1");
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 1,
+      errors: [],
+    });
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "triage-apply@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "triage-apply@1"),
+    ).toBeUndefined();
   });
 
   test("the scan run's spec pins an immutable sha — reproducible, and dedup sees new commits", async () => {
     const { db } = harness();
     admitEvent(db, registry, triageEnvelope("bj29", "triage-3"));
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const proposal = openProposals(db, {}).find((p) => p.spec?.agent === "triage-scan@1");
+    const proposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "triage-scan@1",
+    );
     expect(proposal.spec.input.repo).toBe("bj29");
-    expect(proposal.spec.input.repoPin).toMatchObject({ repo: "bj29", ref: "develop" });
+    expect(proposal.spec.input.repoPin).toMatchObject({
+      repo: "bj29",
+      ref: "develop",
+    });
     expect(proposal.spec.input.repoPin.sha).toMatch(/^[0-9a-f]{40}$/);
   });
 
@@ -305,7 +385,9 @@ describe("triage chain: scan → approved apply (OPS-229)", () => {
     const { db } = harness();
     admitEvent(db, registry, triageEnvelope("not-a-repo", "triage-4"));
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const proposal = openProposals(db, {}).find((p) => p.decision === "human_needed");
+    const proposal = openProposals(db, {}).find(
+      (p) => p.decision === "human_needed",
+    );
     expect(proposal.reason).toContain("repo_pin_failed");
   });
 });
@@ -318,7 +400,9 @@ describe("triage-apply is closed by construction (OPS-229)", () => {
       itemsField: "plan",
       itemKey: "issueId",
       actionRegistry: {
-        "label-agent-ready": { argv: ["sh", "-c", `echo {issueId} >> ${dir}/applied.txt`] },
+        "label-agent-ready": {
+          argv: ["sh", "-c", `echo {issueId} >> ${dir}/applied.txt`],
+        },
       },
     };
   }
@@ -341,11 +425,14 @@ describe("triage-apply is closed by construction (OPS-229)", () => {
       timeoutMs: 10_000,
     });
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-    expect(readFileSync(path.join(dir, "applied.txt"), "utf8").split("\n").filter(Boolean)).toEqual([
-      "CLNT-1",
-      "CLNT-2",
-    ]);
-    const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+    expect(
+      readFileSync(path.join(dir, "applied.txt"), "utf8")
+        .split("\n")
+        .filter(Boolean),
+    ).toEqual(["CLNT-1", "CLNT-2"]);
+    const result = JSON.parse(
+      readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+    );
     expect(result.artifact.applied).toHaveLength(2);
   });
 
@@ -368,14 +455,16 @@ describe("triage-apply is closed by construction (OPS-229)", () => {
     });
     expect(outcome.exitCode).toBe(1);
     expect(() => readFileSync(path.join(dir, "applied.txt"))).toThrow(); // CLNT-1 never ran
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain(
-      "not in the closed action registry",
-    );
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("not in the closed action registry");
   });
 
   test("the registry admits item-list definitions and rejects a mutating one with no closed form", () => {
     expect(registry.agents.get("triage-apply@1").mutating).toBe(true);
     expect(registry.agents.get("triage-apply@1").itemsField).toBe("plan");
-    expect(registry.agents.get("triage-scan@1").workspace.type).toBe("repository");
+    expect(registry.agents.get("triage-scan@1").workspace.type).toBe(
+      "repository",
+    );
   });
 });

@@ -17,15 +17,24 @@ export function canonicalJson(value) {
 }
 
 function sortValue(value, path) {
-  if (value === undefined) throw new TypeError(`undefined at ${path} is not representable in canonical JSON`);
+  if (value === undefined)
+    throw new TypeError(
+      `undefined at ${path} is not representable in canonical JSON`,
+    );
   if (value === null || typeof value !== "object") {
     if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new TypeError(`non-finite number at ${path} is not representable in canonical JSON`);
+      throw new TypeError(
+        `non-finite number at ${path} is not representable in canonical JSON`,
+      );
     }
-    if (typeof value === "bigint") throw new TypeError(`bigint at ${path} is not representable in canonical JSON`);
+    if (typeof value === "bigint")
+      throw new TypeError(
+        `bigint at ${path} is not representable in canonical JSON`,
+      );
     return value;
   }
-  if (Array.isArray(value)) return value.map((v, i) => sortValue(v, `${path}[${i}]`));
+  if (Array.isArray(value))
+    return value.map((v, i) => sortValue(v, `${path}[${i}]`));
   const sorted = {};
   for (const key of Object.keys(value).sort()) {
     if (value[key] === undefined) continue;

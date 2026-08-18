@@ -1,7 +1,14 @@
 {
   "title": "factory.ship-plan/v1 output artifact — release-candidate assembly: is base ahead, green, and ready for the human deploy-branch decision?",
   "type": "object",
-  "required": ["recommendation", "repo", "github", "changelog", "plan", "summary"],
+  "required": [
+    "recommendation",
+    "repo",
+    "github",
+    "changelog",
+    "plan",
+    "summary"
+  ],
   "additionalProperties": false,
   "properties": {
     "recommendation": {
@@ -114,7 +121,14 @@
       "description": "One line the human reads before taking the deploy decision"
     },
     "noopReason": {
-      "enum": ["not_ahead", "diverged", "ci_red", "ci_pending", "no_checks", "no_deploy_config"],
+      "enum": [
+        "not_ahead",
+        "diverged",
+        "ci_red",
+        "ci_pending",
+        "no_checks",
+        "no_deploy_config"
+      ],
       "description": "Typed reason accompanying a NOOP — nothing to ship, branch divergence (behind_by > 0 or status diverged), base CI red, base CI still running, no real checks on the head commit (no checks is not green), or the repo has no deploy branch distinct from base"
     }
   }

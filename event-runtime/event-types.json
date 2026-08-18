@@ -2,243 +2,181 @@
   "factory.status-report.requested": {
     "agent": "factory-status-report@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "correlationId",
-      "inputHash"
-    ],
+    "idempotencyScope": ["correlationId", "inputHash"],
     "proposalTtlSeconds": 1800
   },
   "github.workflow-run.failed": {
     "agent": "ci-log-capture@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.ci-rerun.requested": {
     "agent": "ci-rerun@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.ci-escalate.requested": {
     "agent": "ci-notify@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "keephq.disk-alert.raised": {
     "agent": "disk-diagnose@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "subject",
-      "correlationId"
-    ],
+    "idempotencyScope": ["subject", "correlationId"],
     "proposalTtlSeconds": 1800
   },
   "keephq.disk-remediate.requested": {
     "agent": "disk-remediate@1",
     "adapter": "actions",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.triage.requested": {
     "agent": "triage-scan@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.triage-apply.requested": {
     "agent": "triage-apply@1",
     "adapter": "actions",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.janitor-scan.requested": {
     "agent": "janitor-scan@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.janitor-apply.requested": {
     "agent": "janitor-apply@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.ci-diagnose.requested": {
     "agent": "ci-doctor@2",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.run-postmortem.requested": {
     "agent": "run-postmortem@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.reconcile.requested": {
     "agent": "reconcile@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.label-guard.requested": {
     "agent": "label-guard@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.warm.requested": {
     "agent": "warm@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.unblock.requested": {
     "agent": "unblock-scan@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.unblock-apply.requested": {
     "agent": "unblock-apply@1",
     "adapter": "actions",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.sweep.requested": {
     "agent": "sweep-scan@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.sweep-apply.requested": {
     "agent": "sweep-apply@1",
     "adapter": "actions",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.merge.requested": {
     "agent": "merge-scan@2",
-    "adapter": "cursor",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "adapter": "pi",
+    "idempotencyScope": ["correlationId", "inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.merge-apply.requested": {
     "agent": "merge-apply@2",
     "adapter": "actions",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.merge-escalate.requested": {
     "agent": "merge-notify@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.merge-fix.requested": {
     "agent": "merge-fix@1",
-    "adapter": "cursor",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "adapter": "pi",
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.merge-landed": {
     "agent": "merge-verify@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 7200
   },
   "factory.merge-verify.requested": {
     "agent": "merge-verify@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 7200
   },
   "factory.unblock-digest.requested": {
     "agent": "unblock-digest@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.dispatch.requested": {
     "agent": "dispatch@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.work.requested": {
     "agent": "work-scan@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.ship.requested": {
     "agent": "ship-scan@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.ship-apply.requested": {
     "agent": "ship-apply@1",
     "adapter": "actions",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800,
     "humanApprovalOnly": true
   },
@@ -257,33 +195,25 @@
   "clock.tick.reaper": {
     "agent": "reaper@1",
     "adapter": "command",
-    "idempotencyScope": [
-      "correlationId"
-    ],
+    "idempotencyScope": ["correlationId"],
     "proposalTtlSeconds": 3600
   },
   "factory.pi-smoke.requested": {
     "agent": "pi-smoke@1",
     "adapter": "pi",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.agy-smoke.requested": {
     "agent": "agy-smoke@1",
     "adapter": "agy",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   },
   "factory.cursor-smoke.requested": {
     "agent": "cursor-smoke@1",
     "adapter": "cursor",
-    "idempotencyScope": [
-      "inputHash"
-    ],
+    "idempotencyScope": ["inputHash"],
     "proposalTtlSeconds": 1800
   }
 }

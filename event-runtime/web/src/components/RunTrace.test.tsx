@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { RunState, TraceEntry } from "../types";
 import { changeInput, renderWithClient, restoreApi } from "../test-render";
-import { LIVE_STATES, RunTrace } from "./RunTrace";
+import { formatErrorRowLabel, LIVE_STATES, RunTrace } from "./RunTrace";
 
 afterEach(() => {
   cleanup();
@@ -12,7 +12,11 @@ afterEach(() => {
 
 const NOW = new Date().toISOString();
 
-function entry(seq: number, kind: string, payload: TraceEntry["payload"]): TraceEntry {
+function entry(
+  seq: number,
+  kind: string,
+  payload: TraceEntry["payload"],
+): TraceEntry {
   return { seq, attempt: 1, ts: NOW, kind, payload };
 }
 
@@ -35,7 +39,10 @@ function renderTrace(overrides?: { state?: RunState }) {
     />,
     {
       apiMocks: {
-        trace: async () => ({ head: TRACE[TRACE.length - 1].seq, entries: TRACE }),
+        trace: async () => ({
+          head: TRACE[TRACE.length - 1].seq,
+          entries: TRACE,
+        }),
       },
     },
   );
@@ -51,15 +58,20 @@ async function waitForChrome(r: ReturnType<typeof renderTrace>) {
 describe("RunTrace feed", () => {
   test("resets accumulated entries and cursor when runId changes (WM-245)", async () => {
     const requests: Array<{ runId: string; since: number }> = [];
-    const firstRunEntry = entry(41, "assistant_text", { text: "first run trace" });
-    const secondRunEntry = entry(1, "assistant_text", { text: "second run trace" });
+    const firstRunEntry = entry(41, "assistant_text", {
+      text: "first run trace",
+    });
+    const secondRunEntry = entry(1, "assistant_text", {
+      text: "second run trace",
+    });
     const r = renderWithClient(
       <RunTrace runId="run_first" state="COMPLETED" variant="full" />,
       {
         apiMocks: {
           trace: async (runId, since = 0) => {
             requests.push({ runId, since });
-            const entries = runId === "run_first" ? [firstRunEntry] : [secondRunEntry];
+            const entries =
+              runId === "run_first" ? [firstRunEntry] : [secondRunEntry];
             return { head: entries[0].seq, entries };
           },
         },
@@ -68,13 +80,73 @@ describe("RunTrace feed", () => {
 
     await waitFor(() => expect(r.getByText("first run trace")).toBeTruthy());
 
-    r.rerender(<RunTrace runId="run_second" state="COMPLETED" variant="full" />);
+    r.rerender(
+      <RunTrace runId="run_second" state="COMPLETED" variant="full" />,
+    );
 
     await waitFor(() => expect(r.getByText("second run trace")).toBeTruthy());
     expect(r.queryByText("first run trace")).toBeNull();
-    expect(requests.filter((request) => request.runId === "run_second")).toEqual([
-      { runId: "run_second", since: 0 },
-    ]);
+    expect(
+      requests.filter((request) => request.runId === "run_second"),
+    ).toEqual([{ runId: "run_second", since: 0 }]);
+  });
+});
+
+describe("RunTrace error context (WM-588)", () => {
+  test("formats the tool name and a truncated first error line", () => {
+    const firstLine = "x".repeat(120);
+    const formatted = formatErrorRowLabel("bash", `${firstLine}\nsecond line`);
+
+    expect(formatted.label.startsWith("bash · ")).toBe(true);
+    expect(formatted.label.endsWith("…")).toBe(true);
+    expect(formatted.label).not.toContain("second line");
+    expect(formatted.title).toBe(`bash · ${firstLine}`);
+  });
+
+  test("error rows retain their originating call input in the Errors tab", async () => {
+    const ts = "2026-08-17T15:26:37Z";
+    const contextualTrace: TraceEntry[] = [
+      {
+        ...entry(1, "tool_use", {
+          id: "call_bash",
+          name: "bash",
+          input: { command: "bun test missing.test.ts" },
+        }),
+        ts,
+      },
+      {
+        ...entry(2, "tool_result", {
+          toolUseId: "call_bash",
+          content: "Command exited with code 2\nfull stderr",
+          isError: true,
+        }),
+        ts,
+      },
+    ];
+    const r = renderWithClient(
+      <RunTrace runId="run_error_context" state="COMPLETED" variant="full" />,
+      {
+        apiMocks: {
+          trace: async () => ({ head: 2, entries: contextualTrace }),
+        },
+      },
+    );
+    await waitForChrome(r);
+
+    fireEvent.click(r.getByRole("tab", { name: /^Errors/ }));
+    const label = r.getByText("bash · Command exited with code 2");
+    expect(label.getAttribute("title")).toBe(
+      "bash · Command exited with code 2",
+    );
+    const timestamp = r.getByTitle(ts);
+    expect(timestamp.textContent).toContain("15:26:37");
+
+    const summary = label.closest("summary")!;
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(summary);
+    expect(summary.getAttribute("aria-expanded")).toBe("true");
+    expect(await r.findByText("Originating call · bash")).toBeTruthy();
+    expect(r.getByText(/bun test missing\.test\.ts/)).toBeTruthy();
   });
 });
 
@@ -82,16 +154,31 @@ describe("RunTrace timing (WM-272)", () => {
   test("filtered views use the next unfiltered entry for duration", async () => {
     const start = Date.parse("2025-01-01T00:00:00.000Z");
     const timedTrace: TraceEntry[] = [
-      { ...entry(1, "tool_use", { name: "Read" }), ts: new Date(start).toISOString() },
-      { ...entry(2, "assistant_text", { text: "hidden by the tools filter" }), ts: new Date(start + 200).toISOString() },
-      { ...entry(3, "tool_use", { name: "Write" }), ts: new Date(start + 50_000).toISOString() },
-      { ...entry(4, "tool_result", { content: "done" }), ts: new Date(start + 50_300).toISOString() },
+      {
+        ...entry(1, "tool_use", { name: "Read" }),
+        ts: new Date(start).toISOString(),
+      },
+      {
+        ...entry(2, "assistant_text", { text: "hidden by the tools filter" }),
+        ts: new Date(start + 200).toISOString(),
+      },
+      {
+        ...entry(3, "tool_use", { name: "Write" }),
+        ts: new Date(start + 50_000).toISOString(),
+      },
+      {
+        ...entry(4, "tool_result", { content: "done" }),
+        ts: new Date(start + 50_300).toISOString(),
+      },
     ];
     const r = renderWithClient(
       <RunTrace runId="run_trace_timing" state="COMPLETED" variant="full" />,
       {
         apiMocks: {
-          trace: async () => ({ head: timedTrace[timedTrace.length - 1].seq, entries: timedTrace }),
+          trace: async () => ({
+            head: timedTrace[timedTrace.length - 1].seq,
+            entries: timedTrace,
+          }),
         },
       },
     );
@@ -131,7 +218,7 @@ describe("RunTrace a11y (WM-143)", () => {
 
     expect(r.getByText("tool · Read")).toBeTruthy();
     expect(r.getByText(/12 in · 34 out/)).toBeTruthy();
-    const errorJump = r.getByRole("button", { name: /1 error/ });
+    const errorJump = r.getByRole("button", { name: /next error/ });
     expect(errorJump).toBeTruthy();
 
     const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
@@ -141,16 +228,34 @@ describe("RunTrace a11y (WM-143)", () => {
     const clear = r.getByRole("button", { name: "Clear search" });
     expect(clear).toBeTruthy();
 
-    const scroller = r.container.querySelector("[data-trace-idx]")?.parentElement as HTMLElement;
-    Object.defineProperty(scroller, "scrollHeight", { value: 400, configurable: true });
-    Object.defineProperty(scroller, "clientHeight", { value: 100, configurable: true });
-    Object.defineProperty(scroller, "scrollTop", { value: 0, configurable: true });
+    const scroller = r.container.querySelector("[data-trace-idx]")
+      ?.parentElement as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      value: 400,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "clientHeight", {
+      value: 100,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "scrollTop", {
+      value: 0,
+      configurable: true,
+    });
     act(() => {
       fireEvent.scroll(scroller);
     });
-    const jump = await waitFor(() => r.getByRole("button", { name: /Jump to latest/ }));
+    const jump = await waitFor(() =>
+      r.getByRole("button", { name: /Jump to latest/ }),
+    );
 
-    const chrome = [tablist, errorJump, clear, jump, r.getByText(/12 in · 34 out/).parentElement!];
+    const chrome = [
+      tablist,
+      errorJump,
+      clear,
+      jump,
+      r.getByText(/12 in · 34 out/).parentElement!,
+    ];
     for (const el of chrome) {
       expect(el.textContent ?? "").not.toMatch(/🔧|🔥|⚠️|⬇|✕/);
       expect(el.textContent ?? "").not.toMatch(/\p{Extended_Pictographic}/u);
@@ -173,19 +278,29 @@ describe("RunTrace a11y (WM-143)", () => {
 
     tabs[0].focus();
     fireEvent.keyDown(tablist, { key: "ArrowRight" });
-    expect(r.getByRole("tab", { name: /^Tools/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Tools/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     fireEvent.keyDown(tablist, { key: "ArrowRight" });
-    expect(r.getByRole("tab", { name: /^Reasoning/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Reasoning/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     fireEvent.keyDown(tablist, { key: "End" });
-    expect(r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     fireEvent.keyDown(tablist, { key: "Home" });
-    expect(r.getByRole("tab", { name: /^All/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^All/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     fireEvent.keyDown(tablist, { key: "ArrowLeft" });
-    expect(r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   test.each(["LEASED", "RUNNING", "VERIFYING"] as const)(
@@ -203,7 +318,9 @@ describe("RunTrace a11y (WM-143)", () => {
         const r = renderTrace({ state });
         await waitForChrome(r);
 
-        const search = r.getByPlaceholderText("Search trace…") as HTMLInputElement;
+        const search = r.getByPlaceholderText(
+          "Search trace…",
+        ) as HTMLInputElement;
         search.focus();
         expect(document.activeElement).toBe(search);
 
@@ -240,40 +357,68 @@ describe("RunTrace a11y (WM-143)", () => {
     await waitForChrome(r);
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "2", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "2", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^Tools/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Tools/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "3", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "3", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^Reasoning/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Reasoning/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "4", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "4", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^Errors/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Errors/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "5", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "5", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Usage/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "1", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^All/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^All/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     // [ and ] relative cycling
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "]", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "]", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^Tools/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^Tools/ }).getAttribute("aria-selected"),
+    ).toBe("true");
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "[", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "[", bubbles: true }),
+      );
     });
-    expect(r.getByRole("tab", { name: /^All/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      r.getByRole("tab", { name: /^All/ }).getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   test("e toggles expand/collapse details and l toggles follow live (WM-217)", async () => {
@@ -284,12 +429,16 @@ describe("RunTrace a11y (WM-143)", () => {
     expect(expandBtn).toBeTruthy();
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "e", bubbles: true }),
+      );
     });
     expect(r.getByRole("button", { name: /Collapse details/ })).toBeTruthy();
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "e", bubbles: true }),
+      );
     });
     expect(r.getByRole("button", { name: /Expand details/ })).toBeTruthy();
 
@@ -298,12 +447,18 @@ describe("RunTrace a11y (WM-143)", () => {
     expect(followLiveBtn.textContent).toContain("Follow live");
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "l", bubbles: true }),
+      );
     });
-    expect(r.getByRole("button", { name: /Follow live \(paused\)/ })).toBeTruthy();
+    expect(
+      r.getByRole("button", { name: /Follow live \(paused\)/ }),
+    ).toBeTruthy();
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "l", bubbles: true }),
+      );
     });
     expect(r.getByRole("button", { name: /Follow live/ })).toBeTruthy();
   });
@@ -312,17 +467,21 @@ describe("RunTrace a11y (WM-143)", () => {
     const r = renderTrace();
     await waitForChrome(r);
 
-    const errorBtn = r.getByRole("button", { name: /1 error/ });
+    const errorBtn = r.getByRole("button", { name: /next error/ });
     expect(errorBtn).toBeTruthy();
 
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: ".", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: ".", bubbles: true }),
+      );
     });
-    expect(r.getByText(/\(1\/1\)/)).toBeTruthy();
+    expect(r.getByText("1/1")).toBeTruthy();
 
     // G triggers jump to latest
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "G", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "G", bubbles: true }),
+      );
     });
     expect(r.getByRole("button", { name: /Follow live/ })).toBeTruthy();
   });
@@ -367,12 +526,18 @@ describe("RunTrace a11y (WM-143)", () => {
     expect(r.getByText("/")).toBeTruthy();
 
     // e hint on Expand details
-    expect(r.getByRole("button", { name: /Expand details/ }).textContent).toContain("e");
+    expect(
+      r.getByRole("button", { name: /Expand details/ }).textContent,
+    ).toContain("e");
 
     // l hint on Follow live
-    expect(r.getByRole("button", { name: /Follow live/ }).textContent).toContain("l");
+    expect(
+      r.getByRole("button", { name: /Follow live/ }).textContent,
+    ).toContain("l");
 
     // . hint on Error button
-    expect(r.getByRole("button", { name: /1 error/ }).textContent).toContain(".");
+    expect(r.getByRole("button", { name: /next error/ }).textContent).toContain(
+      ".",
+    );
   });
 });

@@ -32,13 +32,26 @@ import { createInterface } from "node:readline";
 import { FACTORY_ROOT } from "../config.mjs";
 import { DEFAULT_MODEL } from "../registry.mjs";
 import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV } from "./claude.mjs";
+import { refuseSandbox } from "./sandboxed.mjs";
 
 export { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV };
+
+/**
+ * No guest execution path exists for this adapter (WM-313): a sandboxed
+ * definition is refused, not run on the host. See lib/adapters/sandboxed.mjs.
+ */
+export const SANDBOX_SUPPORT = "unsupported";
+const SANDBOX_REFUSAL_REASON =
+  "the Cursor Agent CLI has no guest execution path yet — its binary and CURSOR_API_KEY transport have not been translated to the microVM";
 
 export const KILL_GRACE_MS = 30_000;
 
 /** Terminate a detached CLI and every subprocess it started (WM-263). */
-export function killProcessGroup(child, signal = "SIGTERM", kill = process.kill) {
+export function killProcessGroup(
+  child,
+  signal = "SIGTERM",
+  kill = process.kill,
+) {
   const pid = child?.pid;
   if (!pid) return;
   try {
@@ -88,8 +101,18 @@ export function buildCursorArgv({ prompt, model }) {
 }
 
 export const BASE_INHERITED_ENV = [
-  "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM",
-  "TMPDIR", "USER", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
   // `agent -p` ignores the login session and requires this Cursor user key
   // (WM-443). It authenticates as the account and bills the user's plan —
   // not a provider BYOK key. Still strip CURSOR_API_ENDPOINT below.
@@ -106,18 +129,30 @@ export const BASE_INHERITED_ENV = [
  * `CURSOR_API_ENDPOINT` stay stripped.
  */
 export function safeChildEnvironment(env = {}, defOrOpts = {}) {
-  const isMutating = typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
-  const inherited = isMutating ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV] : BASE_INHERITED_ENV;
+  const isMutating =
+    typeof defOrOpts === "boolean" ? defOrOpts : defOrOpts?.mutating === true;
+  const inherited = isMutating
+    ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV]
+    : BASE_INHERITED_ENV;
   const childEnv = Object.fromEntries(
-    inherited.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
+    inherited.flatMap((key) =>
+      process.env[key] === undefined ? [] : [[key, process.env[key]]],
+    ),
   );
   Object.assign(childEnv, env);
   childEnv.FACTORY_ROOT = FACTORY_ROOT;
   for (const key of [
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
     "CURSOR_API_ENDPOINT",
-    "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
   ]) {
     delete childEnv[key];
   }
@@ -133,12 +168,17 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
 export const HARNESS_DENIAL_PATTERNS = [];
 
 export function isHarnessDenial(content) {
-  return typeof content === "string" && HARNESS_DENIAL_PATTERNS.some((re) => re.test(content));
+  return (
+    typeof content === "string" &&
+    HARNESS_DENIAL_PATTERNS.some((re) => re.test(content))
+  );
 }
 
 function clip(text) {
   const s = String(text ?? "");
-  return s.length > TEXT_PREVIEW_CHARS ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]` : s;
+  return s.length > TEXT_PREVIEW_CHARS
+    ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]`
+    : s;
 }
 
 function contentText(content) {
@@ -161,7 +201,8 @@ export function toolNameFromKey(key) {
 }
 
 export function describeToolCall(toolCall) {
-  if (!toolCall || typeof toolCall !== "object") return { name: "tool", input: {} };
+  if (!toolCall || typeof toolCall !== "object")
+    return { name: "tool", input: {} };
   if (toolCall.function && typeof toolCall.function === "object") {
     let args = toolCall.function.arguments;
     if (typeof args === "string") {
@@ -185,11 +226,17 @@ function toolResultPayload(msg) {
   const id = msg.call_id ?? null;
   if (result.success !== undefined) {
     const success = result.success;
-    const content = typeof success?.content === "string" ? success.content : JSON.stringify(success ?? {});
+    const content =
+      typeof success?.content === "string"
+        ? success.content
+        : JSON.stringify(success ?? {});
     return { content: clip(content), toolUseId: id };
   }
   if (result.error !== undefined) {
-    const content = typeof result.error === "string" ? result.error : JSON.stringify(result.error);
+    const content =
+      typeof result.error === "string"
+        ? result.error
+        : JSON.stringify(result.error);
     return { content: clip(content), toolUseId: id, isError: true };
   }
   return { content: "", toolUseId: id };
@@ -214,7 +261,10 @@ export function mapStreamEvent(msg) {
     const events = [];
     for (const block of blocks) {
       if (block?.type === "text" && block.text) {
-        events.push({ kind: "assistant_text", payload: { text: clip(block.text) } });
+        events.push({
+          kind: "assistant_text",
+          payload: { text: clip(block.text) },
+        });
       }
     }
     return events;
@@ -222,7 +272,9 @@ export function mapStreamEvent(msg) {
 
   if (msg.type === "tool_call" && msg.subtype === "started") {
     const { name, input } = describeToolCall(msg.tool_call);
-    return [{ kind: "tool_use", payload: { id: msg.call_id ?? null, name, input } }];
+    return [
+      { kind: "tool_use", payload: { id: msg.call_id ?? null, name, input } },
+    ];
   }
 
   if (msg.type === "tool_call" && msg.subtype === "completed") {
@@ -259,16 +311,22 @@ export async function execute({
   abortSignal,
   signal,
 }) {
+  refuseSandbox("cursor", def, SANDBOX_REFUSAL_REASON);
   const prompt = readFileSync(def.promptPath, "utf8") + PROMPT_SUFFIX;
   const childEnv = safeChildEnvironment(env, def);
 
-  const resolved = resolveCursorCommand({ which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }) });
+  const resolved = resolveCursorCommand({
+    which: (name) => Bun.which(name, { PATH: childEnv.PATH ?? "" }),
+  });
   if (!resolved) {
     throw new CliNotFoundError(
       "neither agent nor cursor-agent is on PATH — install the Cursor Agent CLI (docs/event-runtime.md §6)",
     );
   }
-  const argv = [...resolved.args, ...buildCursorArgv({ prompt, model: spec?.model })];
+  const argv = [
+    ...resolved.args,
+    ...buildCursorArgv({ prompt, model: spec?.model }),
+  ];
 
   return new Promise((resolve, reject) => {
     const child = spawn(resolved.command, argv, {
@@ -278,7 +336,9 @@ export async function execute({
       detached: true,
     });
 
-    const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
+    const transcript = createWriteStream(
+      path.join(workspaceDir, ".transcript.json"),
+    );
     transcript.on("error", () => {});
     if (child.stdout) {
       child.stdout.pipe(transcript);
@@ -308,7 +368,11 @@ export async function execute({
           return;
         }
         try {
-          if (parsed?.type === "system" && parsed?.subtype === "init" && typeof parsed.model === "string") {
+          if (
+            parsed?.type === "system" &&
+            parsed?.subtype === "init" &&
+            typeof parsed.model === "string"
+          ) {
             observedModel = parsed.model;
           }
           const usageInfo = extractUsage(parsed);
@@ -319,9 +383,22 @@ export async function execute({
               if (event.payload?.id) toolNames.set(event.payload.id, lastTool);
             }
             onTrace?.(event.kind, event.payload);
-            const content = typeof event.payload?.content === "string" ? event.payload.content : "";
-            if (event.kind === "tool_result" && event.payload?.isError && isHarnessDenial(content)) {
-              const denial = { tool: toolNames.get(event.payload?.toolUseId) ?? lastTool ?? "unknown", rule: clip(content) };
+            const content =
+              typeof event.payload?.content === "string"
+                ? event.payload.content
+                : "";
+            if (
+              event.kind === "tool_result" &&
+              event.payload?.isError &&
+              isHarnessDenial(content)
+            ) {
+              const denial = {
+                tool:
+                  toolNames.get(event.payload?.toolUseId) ??
+                  lastTool ??
+                  "unknown",
+                rule: clip(content),
+              };
               policyDenials.push(denial);
               onTrace?.("lifecycle", { note: "policy_denial", ...denial });
             }
@@ -337,14 +414,20 @@ export async function execute({
     const termTimer = setTimeout(() => {
       timedOut = true;
       killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+      killTimer = setTimeout(
+        () => killProcessGroup(child, "SIGKILL"),
+        killGraceMs,
+      );
       killTimer.unref?.();
     }, timeoutMs);
 
     const onAbort = () => {
       killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+        killTimer = setTimeout(
+          () => killProcessGroup(child, "SIGKILL"),
+          killGraceMs,
+        );
         killTimer.unref?.();
       }
     };
@@ -389,17 +472,28 @@ export async function execute({
       }
       if (exitCode !== 0 && stderrBuf) {
         try {
-          writeFileSync(path.join(workspaceDir, ".stderr.txt"), stderrBuf, "utf8");
+          writeFileSync(
+            path.join(workspaceDir, ".stderr.txt"),
+            stderrBuf,
+            "utf8",
+          );
         } catch {
           // workspace may already be gone; trace still carries the tail
         }
         try {
-          onTrace?.("lifecycle", { note: "adapter_stderr", text: clip(stderrBuf) });
+          onTrace?.("lifecycle", {
+            note: "adapter_stderr",
+            text: clip(stderrBuf),
+          });
         } catch {
           // observability
         }
       }
-      resolve({ exitCode, timedOut, policyDenials: exitCode === 0 ? [] : policyDenials });
+      resolve({
+        exitCode,
+        timedOut,
+        policyDenials: exitCode === 0 ? [] : policyDenials,
+      });
     });
   });
 }

@@ -42,7 +42,9 @@ import type {
 // Fixture Factories
 // ============================================================================
 
-export function createEnvFixture(overrides?: Partial<EnvIdentity>): EnvIdentity {
+export function createEnvFixture(
+  overrides?: Partial<EnvIdentity>,
+): EnvIdentity {
   return {
     name: "test",
     home: "/tmp/factory-test",
@@ -51,7 +53,9 @@ export function createEnvFixture(overrides?: Partial<EnvIdentity>): EnvIdentity 
   };
 }
 
-export function createStatusFixture(overrides?: Partial<StatusView>): StatusView {
+export function createStatusFixture(
+  overrides?: Partial<StatusView>,
+): StatusView {
   return {
     env: createEnvFixture(),
     events: {},
@@ -72,7 +76,9 @@ export function createStatusFixture(overrides?: Partial<StatusView>): StatusView
   };
 }
 
-export function createRunListItemFixture(overrides?: Partial<RunListItem>): RunListItem {
+export function createRunListItemFixture(
+  overrides?: Partial<RunListItem>,
+): RunListItem {
   const now = new Date().toISOString();
   return {
     runId: "run_test_1001",
@@ -113,7 +119,10 @@ export function createLifecycleEventFixture(
   };
 }
 
-export function createRunSpecFixture(runId = "run_test_1001", overrides?: Partial<RunSpec>): RunSpec {
+export function createRunSpecFixture(
+  runId = "run_test_1001",
+  overrides?: Partial<RunSpec>,
+): RunSpec {
   return {
     schemaVersion: "1",
     runId,
@@ -133,7 +142,9 @@ export function createRunSpecFixture(runId = "run_test_1001", overrides?: Partia
   };
 }
 
-export function createRunDetailFixture(overrides?: Partial<RunDetail>): RunDetail {
+export function createRunDetailFixture(
+  overrides?: Partial<RunDetail>,
+): RunDetail {
   const now = new Date().toISOString();
   const runId = overrides?.run?.runId ?? "run_test_1001";
   const state: RunState = overrides?.run?.state ?? "RUNNING";
@@ -174,7 +185,9 @@ export function createRunDetailFixture(overrides?: Partial<RunDetail>): RunDetai
   };
 }
 
-export function createEventFixture(overrides?: Partial<AdmittedEvent>): AdmittedEvent {
+export function createEventFixture(
+  overrides?: Partial<AdmittedEvent>,
+): AdmittedEvent {
   const now = new Date().toISOString();
   return {
     source: "github",
@@ -243,7 +256,9 @@ export function createWorkerFixture(overrides?: Partial<Worker>): Worker {
   };
 }
 
-export function createAgentsFixture(overrides?: Partial<AgentsView>): AgentsView {
+export function createAgentsFixture(
+  overrides?: Partial<AgentsView>,
+): AgentsView {
   return {
     agents: [],
     eventTypes: [],
@@ -277,35 +292,55 @@ export function createDefaultApiMocks(): Record<ApiKey, any> {
       env: createEnvFixture(),
     })),
     status: mock(async () => createStatusFixture()),
-    events: mock(async (_status?: string) => ({ events: [] as AdmittedEvent[] })),
-    chain: mock(async (correlationId: string) => ({ correlationId, events: [], runs: [] })),
+    events: mock(async (_status?: string) => ({
+      events: [] as AdmittedEvent[],
+    })),
+    chain: mock(async (correlationId: string) => ({
+      correlationId,
+      events: [],
+      runs: [],
+    })),
     proposals: mock(async () => ({ proposals: [] as Proposal[] })),
-    proposalHistory: mock(async (_status = "all") => ({ proposals: [] as Proposal[] })),
+    proposalHistory: mock(async (_status = "all") => ({
+      proposals: [] as Proposal[],
+    })),
     approve: mock(async (id: string): Promise<ApproveOutcome> => ({
       approved: true,
       runId: `run_${id}`,
     })),
     reject: mock(async (_id: string, _reason?: string) => ({ rejected: true })),
     runs: mock(async (_state?: string) => ({ runs: [] as RunListItem[] })),
-    run: mock(async (id: string) => createRunDetailFixture({ run: { runId: id, state: "RUNNING" } as any })),
-    trace: mock(async (_id: string, _since = 0, _limit = 500): Promise<TraceView> => ({
-      head: 0,
-      entries: [],
-    })),
-    cancel: mock(async (_id: string, _reason?: string): Promise<CancelOutcome> => ({
-      cancelled: true,
-    })),
+    run: mock(async (id: string) =>
+      createRunDetailFixture({ run: { runId: id, state: "RUNNING" } as any }),
+    ),
+    trace: mock(
+      async (_id: string, _since = 0, _limit = 500): Promise<TraceView> => ({
+        head: 0,
+        entries: [],
+      }),
+    ),
+    cancel: mock(
+      async (_id: string, _reason?: string): Promise<CancelOutcome> => ({
+        cancelled: true,
+      }),
+    ),
     retry: mock(async (_id: string, _force = false) => ({ queued: true })),
     replay: mock(async (_envelope: unknown) => ({
       admitted: true,
       duplicate: false,
       eventId: "evt_replayed_1",
     })),
-    injectEvent: mock(async (_type: string, _payload: Record<string, unknown>, _source = "factory-web") => ({
-      admitted: true,
-      duplicate: false,
-      eventId: `evt_injected_${Date.now()}`,
-    })),
+    injectEvent: mock(
+      async (
+        _type: string,
+        _payload: Record<string, unknown>,
+        _source = "factory-web",
+      ) => ({
+        admitted: true,
+        duplicate: false,
+        eventId: `evt_injected_${Date.now()}`,
+      }),
+    ),
     journal: mock(async (_since = 0, _limit = 100): Promise<JournalView> => ({
       head: 0,
       entries: [],
@@ -313,25 +348,43 @@ export function createDefaultApiMocks(): Record<ApiKey, any> {
     outbox: mock(async (_limit = 20): Promise<{ outbox: OutboxRow[] }> => ({
       outbox: [],
     })),
-    requeue: mock(async (_source: string, _eventId: string) => ({ requeued: true })),
-    archive: mock(async (_source: string, _eventId: string) => ({ archived: true })),
-    releaseWorker: mock(async (_workerId: string, runId: string) => ({ released: true, runId })),
+    requeue: mock(async (_source: string, _eventId: string) => ({
+      requeued: true,
+    })),
+    archive: mock(async (_source: string, _eventId: string) => ({
+      archived: true,
+    })),
+    releaseWorker: mock(async (_workerId: string, runId: string) => ({
+      released: true,
+      runId,
+    })),
     agents: mock(async () => createAgentsFixture()),
     repos: mock(async (): Promise<{ repos: RepoItem[] }> => ({ repos: [] })),
-    janitor: mock(async (name: string, apply = false): Promise<JanitorResult> => ({
-      repo: name,
-      apply,
-      actor: "janitor",
-      reclaimable: [],
-      kept: [],
-      named: [],
-      unknown: [],
-      removed: [],
-      refused: [],
-      held: [],
+    janitor: mock(
+      async (name: string, apply = false): Promise<JanitorResult> => ({
+        repo: name,
+        apply,
+        actor: "janitor",
+        reclaimable: [],
+        kept: [],
+        named: [],
+        unknown: [],
+        removed: [],
+        refused: [],
+        held: [],
+      }),
+    ),
+    workers: mock(async (): Promise<{ workers: Worker[] }> => ({
+      workers: [],
     })),
-    workers: mock(async (): Promise<{ workers: Worker[] }> => ({ workers: [] })),
-    schedules: mock(async (): Promise<{ schedules: any[] }> => ({ schedules: [] })),
+    inbox: mock(async (_status = "open") => ({ items: [] })),
+    ackInbox: mock(async (id: string) => ({ item: { id } })),
+    resolveInbox: mock(async (id: string, _reason?: string) => ({
+      item: { id },
+    })),
+    schedules: mock(async (): Promise<{ schedules: any[] }> => ({
+      schedules: [],
+    })),
     triggerSchedule: mock(async (_loop: string, _prNumbers?: number[]) => ({
       admitted: true,
       duplicate: false,
@@ -465,10 +518,13 @@ function setNativeValue(element: HTMLElement, value: string): void {
   const setter =
     descriptor?.set ??
     (element instanceof HTMLTextAreaElement
-      ? Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      ? Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")
+          ?.set
       : element instanceof HTMLSelectElement
-        ? Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
-        : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set);
+        ? Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")
+            ?.set
+        : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")
+            ?.set);
 
   if (setter) {
     setter.call(element, value);
@@ -490,13 +546,19 @@ export function changeInput(el: HTMLElement, value: string): void {
   }
   setNativeValue(el, value);
   try {
-    el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
+    el.dispatchEvent(
+      new InputEvent("input", { bubbles: true, cancelable: true }),
+    );
   } catch {
     el.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
   }
   el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
-  el.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true }));
-  el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true }));
+  el.dispatchEvent(
+    new KeyboardEvent("keydown", { bubbles: true, cancelable: true }),
+  );
+  el.dispatchEvent(
+    new KeyboardEvent("keyup", { bubbles: true, cancelable: true }),
+  );
 }
 
 /**
@@ -505,15 +567,25 @@ export function changeInput(el: HTMLElement, value: string): void {
  * emits input and keyUp, and finally emits change when typing is complete.
  */
 export function typeText(element: HTMLElement, text: string): void {
-  if (typeof element.focus === "function" && document.activeElement !== element) {
+  if (
+    typeof element.focus === "function" &&
+    document.activeElement !== element
+  ) {
     try {
       element.focus();
     } catch {}
   }
   for (const char of text) {
-    element.dispatchEvent(new KeyboardEvent("keydown", { key: char, bubbles: true, cancelable: true }));
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: char,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
 
-    const currentVal = (element as HTMLInputElement | HTMLTextAreaElement).value ?? "";
+    const currentVal =
+      (element as HTMLInputElement | HTMLTextAreaElement).value ?? "";
     const start = (element as any).selectionStart ?? currentVal.length;
     const end = (element as any).selectionEnd ?? currentVal.length;
     const nextVal = currentVal.slice(0, start) + char + currentVal.slice(end);
@@ -533,13 +605,29 @@ export function typeText(element: HTMLElement, text: string): void {
     }
 
     try {
-      element.dispatchEvent(new InputEvent("input", { data: char, inputType: "insertText", bubbles: true, cancelable: true }));
+      element.dispatchEvent(
+        new InputEvent("input", {
+          data: char,
+          inputType: "insertText",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     } catch {
-      element.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+      element.dispatchEvent(
+        new Event("input", { bubbles: true, cancelable: true }),
+      );
     }
 
-    element.dispatchEvent(new KeyboardEvent("keyup", { key: char, bubbles: true, cancelable: true }));
+    element.dispatchEvent(
+      new KeyboardEvent("keyup", {
+        key: char,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   }
-  element.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+  element.dispatchEvent(
+    new Event("change", { bubbles: true, cancelable: true }),
+  );
 }
-

@@ -25,7 +25,19 @@
  *
  * Runs on bun (see lib/schedule.mjs); no npm dependencies.
  */
-import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, readdirSync, existsSync, statSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  cpSync,
+  readdirSync,
+  existsSync,
+  statSync,
+  symlinkSync,
+  lstatSync,
+  unlinkSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +55,10 @@ const read = (p) => readFileSync(p, "utf8");
 const listFiles = (dir) =>
   existsSync(dir)
     ? readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-        e.isDirectory() ? listFiles(path.join(dir, e.name)) : [path.join(dir, e.name)])
+        e.isDirectory()
+          ? listFiles(path.join(dir, e.name))
+          : [path.join(dir, e.name)],
+      )
     : [];
 
 /** Split `---` frontmatter from a markdown body. */
@@ -72,9 +87,15 @@ function withoutFrontmatterFields(text, fields) {
 
 /** Render a harness-native Markdown agent without leaking another harness's model id. */
 function markdownAgent(agent, fields = {}) {
-  const frontmatter = { name: agent.name, description: agent.description, ...fields };
-  const lines = Object.entries(frontmatter).map(([key, value]) =>
-    `${key}: ${typeof value === "string" ? JSON.stringify(value) : value}`);
+  const frontmatter = {
+    name: agent.name,
+    description: agent.description,
+    ...fields,
+  };
+  const lines = Object.entries(frontmatter).map(
+    ([key, value]) =>
+      `${key}: ${typeof value === "string" ? JSON.stringify(value) : value}`,
+  );
   return `---\n${lines.join("\n")}\n---\n\n${agent.body.trimStart()}`;
 }
 
@@ -98,19 +119,35 @@ function emit(file, content) {
   writeFileSync(file, content);
 }
 
+/** Purge generated subtrees before writing so renamed or deleted sources cannot linger. */
+function cleanGenerated(...directories) {
+  if (CHECK) return;
+  for (const directory of directories)
+    rmSync(directory, { recursive: true, force: true });
+}
+
 // ------------------------------------------------------------------ inputs ---
 const floor = read(path.join(SHARED, "floor.md"));
-const commands = listFiles(path.join(SHARED, "commands")).filter((f) => f.endsWith(".md"));
+const commands = listFiles(path.join(SHARED, "commands")).filter((f) =>
+  f.endsWith(".md"),
+);
 const skillDirs = existsSync(path.join(SHARED, "skills"))
-  ? readdirSync(path.join(SHARED, "skills"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  ? readdirSync(path.join(SHARED, "skills"), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
   : [];
-const agents = listFiles(path.join(SHARED, "agents")).filter((f) => f.endsWith(".md"));
+const agents = listFiles(path.join(SHARED, "agents")).filter((f) =>
+  f.endsWith(".md"),
+);
 const agentDefinitions = agents.map((file) => {
   const { fm, body } = splitFrontmatter(read(file));
   const name = fm.name || path.basename(file, ".md");
-  if (!fm.description) throw new Error(`${rel(file)}: agents require a description`);
+  if (!fm.description)
+    throw new Error(`${rel(file)}: agents require a description`);
   if (name !== path.basename(file, ".md"))
-    throw new Error(`${rel(file)}: agent name must match its filename (${name})`);
+    throw new Error(
+      `${rel(file)}: agent name must match its filename (${name})`,
+    );
   return { file, name, description: fm.description, fm, body };
 });
 
@@ -118,13 +155,24 @@ const agentDefinitions = agents.map((file) => {
 // Shared frontmatter uses Claude's expressive keys by default. Pi-only fields
 // are stripped so one harness's tool names cannot alter Claude's allowlist.
 const CLAUDE = path.join(ROOT, "plugins", "core");
-for (const f of commands) emit(path.join(CLAUDE, "commands", path.basename(f)), read(f));
+cleanGenerated(
+  path.join(CLAUDE, "commands"),
+  path.join(CLAUDE, "skills"),
+  path.join(CLAUDE, "agents"),
+);
+for (const f of commands)
+  emit(path.join(CLAUDE, "commands", path.basename(f)), read(f));
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
-    emit(path.join(CLAUDE, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
-// Agent directories are cleaned on a normal emit so renames do not leave a
-// second, stale specialist registered alongside the canonical one.
-if (!CHECK) rmSync(path.join(CLAUDE, "agents"), { recursive: true, force: true });
+    emit(
+      path.join(
+        CLAUDE,
+        "skills",
+        s,
+        path.relative(path.join(SHARED, "skills", s), f),
+      ),
+      read(f),
+    );
 for (const agent of agentDefinitions)
   emit(
     path.join(CLAUDE, "agents", `${agent.name}.md`),
@@ -136,47 +184,73 @@ for (const agent of agentDefinitions)
 // become skills so they work in the desktop app too; custom prompts are a
 // deprecated CLI/IDE-only surface.
 const CODEX = path.join(ROOT, "dist", "codex");
-if (!CHECK) rmSync(path.join(CODEX, "agents"), { recursive: true, force: true });
+cleanGenerated(
+  path.join(CODEX, "agents"),
+  path.join(CODEX, "skills"),
+  path.join(CODEX, "prompts"),
+);
 for (const agent of agentDefinitions)
   emit(path.join(CODEX, "agents", `${agent.name}.toml`), codexAgent(agent));
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
-    emit(path.join(CODEX, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
+    emit(
+      path.join(
+        CODEX,
+        "skills",
+        s,
+        path.relative(path.join(SHARED, "skills", s), f),
+      ),
+      read(f),
+    );
 
 const codexCommandSkills = commands.map((f) => path.basename(f, ".md"));
 for (const f of commands) {
   const { fm, body } = splitFrontmatter(read(f));
   const name = path.basename(f, ".md");
-  emit(path.join(CODEX, "skills", name, "SKILL.md"),
-    `---\nname: ${name}\ndescription: ${fm.description || `Run the ${name} Factory workflow.`}\n---\n\n# ${name}\n\nThe user's accompanying request is this workflow's argument string. Wherever these instructions refer to \`$ARGUMENTS\`, interpret it as that request.\n\n${body.trimStart()}`);
+  emit(
+    path.join(CODEX, "skills", name, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${fm.description || `Run the ${name} Factory workflow.`}\n---\n\n# ${name}\n\nThe user's accompanying request is this workflow's argument string. Wherever these instructions refer to \`$ARGUMENTS\`, interpret it as that request.\n\n${body.trimStart()}`,
+  );
 }
-// Remove the legacy custom-prompt output on regular emits. In --check mode it
-// remains visible as an orphan, which catches a missing regeneration.
-if (!CHECK) rmSync(path.join(CODEX, "prompts"), { recursive: true, force: true });
-
 // ------------------------------------------------- Gemini CLI / Antigravity ---
 // Antigravity shares ~/.gemini, so one emit covers both.
 const GEMINI = path.join(ROOT, "dist", "gemini");
-if (!CHECK) rmSync(path.join(GEMINI, "agents"), { recursive: true, force: true });
+cleanGenerated(path.join(GEMINI, "agents"), path.join(GEMINI, "skills"));
 for (const agent of agentDefinitions)
-  emit(path.join(GEMINI, "agents", `${agent.name}.md`), markdownAgent(agent, { kind: "local" }));
+  emit(
+    path.join(GEMINI, "agents", `${agent.name}.md`),
+    markdownAgent(agent, { kind: "local" }),
+  );
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
-    emit(path.join(GEMINI, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
+    emit(
+      path.join(
+        GEMINI,
+        "skills",
+        s,
+        path.relative(path.join(SHARED, "skills", s), f),
+      ),
+      read(f),
+    );
 
 for (const f of commands) {
   const { fm, body } = splitFrontmatter(read(f));
   const name = path.basename(f, ".md");
-  emit(path.join(GEMINI, "skills", name, "SKILL.md"),
-    `---\nname: ${name}\ndescription: ${fm.description || `Run the ${name} Factory workflow.`}\n---\n\n# ${name}\n\nThe user's accompanying request is this workflow's argument string. Wherever these instructions refer to \`$ARGUMENTS\`, interpret it as that request.\n\n${body.trimStart()}`);
+  emit(
+    path.join(GEMINI, "skills", name, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${fm.description || `Run the ${name} Factory workflow.`}\n---\n\n# ${name}\n\nThe user's accompanying request is this workflow's argument string. Wherever these instructions refer to \`$ARGUMENTS\`, interpret it as that request.\n\n${body.trimStart()}`,
+  );
 }
 
 // ------------------------------------------------------------- Cursor --------
 // ~/.cursor/commands/*.md — plain markdown, no frontmatter.
 const CURSOR = path.join(ROOT, "dist", "cursor");
-if (!CHECK) rmSync(path.join(CURSOR, "agents"), { recursive: true, force: true });
+cleanGenerated(path.join(CURSOR, "agents"), path.join(CURSOR, "commands"));
 for (const agent of agentDefinitions)
-  emit(path.join(CURSOR, "agents", `${agent.name}.md`), markdownAgent(agent, { readonly: true }));
+  emit(
+    path.join(CURSOR, "agents", `${agent.name}.md`),
+    markdownAgent(agent, { readonly: true }),
+  );
 for (const f of commands) {
   const { body } = splitFrontmatter(read(f));
   emit(path.join(CURSOR, "commands", path.basename(f)), body.trimStart());
@@ -186,7 +260,11 @@ for (const f of commands) {
 // dist/pi/ — skills and prompts for the Pi coding agent.
 const PI = path.join(ROOT, "dist", "pi");
 const PI_DEFAULT_AGENT_TOOLS = "read, grep, find, ls, bash";
-if (!CHECK) rmSync(path.join(PI, "agents"), { recursive: true, force: true });
+cleanGenerated(
+  path.join(PI, "agents"),
+  path.join(PI, "skills"),
+  path.join(PI, "prompts"),
+);
 for (const agent of agentDefinitions) {
   // Pi-specific declarations live in shared frontmatter so an exceptional
   // agent's surface is reviewable at the source. Prefixing them avoids passing
@@ -199,16 +277,30 @@ for (const agent of agentDefinitions) {
     inheritProjectContext: true,
     inheritSkills: true,
   };
-  if (agent.fm["pi-extensions"]) piFields.extensions = agent.fm["pi-extensions"];
-  emit(path.join(PI, "agents", `${agent.name}.md`), markdownAgent(agent, piFields));
+  if (agent.fm["pi-extensions"])
+    piFields.extensions = agent.fm["pi-extensions"];
+  emit(
+    path.join(PI, "agents", `${agent.name}.md`),
+    markdownAgent(agent, piFields),
+  );
 }
 for (const s of skillDirs)
   for (const f of listFiles(path.join(SHARED, "skills", s)))
-    emit(path.join(PI, "skills", s, path.relative(path.join(SHARED, "skills", s), f)), read(f));
+    emit(
+      path.join(
+        PI,
+        "skills",
+        s,
+        path.relative(path.join(SHARED, "skills", s), f),
+      ),
+      read(f),
+    );
 for (const f of commands) {
   const { fm, body } = splitFrontmatter(read(f));
-  emit(path.join(PI, "prompts", path.basename(f)),
-    `# ${path.basename(f, ".md")}\n\n${fm.description ? `> ${fm.description}\n\n` : ""}${body.trimStart()}`);
+  emit(
+    path.join(PI, "prompts", path.basename(f)),
+    `# ${path.basename(f, ".md")}\n\n${fm.description ? `> ${fm.description}\n\n` : ""}${body.trimStart()}`,
+  );
 }
 
 // ------------------------------------------------- universal floor block ------
@@ -230,27 +322,47 @@ emit(path.join(ROOT, "dist", "AGENTS.floor.md"), floor);
 // idempotent so running it twice is a no-op.
 /** [{name, path, state}] — state is ok | stale | missing | no-checkout. */
 function floorStatus() {
-  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+  const cfg = Bun.YAML.parse(
+    readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+  );
   return (cfg.repos ?? []).map((repo) => {
     const repoPath = String(repo.path).replace(/^~/, homedir());
     const agents = path.join(repoPath, "AGENTS.md");
     if (!existsSync(repoPath)) return { ...repo, agents, state: "no-checkout" };
     if (!existsSync(agents)) return { ...repo, agents, state: "missing" };
     const body = read(agents);
-    if (!body.includes(FLOOR_BEGIN)) return { ...repo, agents, state: "missing" };
-    return { ...repo, agents, state: floorIsCurrent(body, floor) ? "ok" : "stale" };
+    if (!body.includes(FLOOR_BEGIN))
+      return { ...repo, agents, state: "missing" };
+    return {
+      ...repo,
+      agents,
+      state: floorIsCurrent(body, floor) ? "ok" : "stale",
+    };
   });
 }
 
 if (process.argv.includes("--sync-floor")) {
   console.log("\nsyncing the floor into each configured repo's AGENTS.md:");
   for (const r of floorStatus()) {
-    if (r.state === "no-checkout") { console.log(`  skip     ${r.name} — no checkout at ${r.path}`); continue; }
-    if (r.state === "ok") { console.log(`  current  ${r.name}`); continue; }
-    writeFileSync(r.agents, spliceFloor(existsSync(r.agents) ? read(r.agents) : "", floor));
-    console.log(`  ${r.state === "stale" ? "updated " : "added   "} ${r.name}  -> ${r.path}/AGENTS.md`);
+    if (r.state === "no-checkout") {
+      console.log(`  skip     ${r.name} — no checkout at ${r.path}`);
+      continue;
+    }
+    if (r.state === "ok") {
+      console.log(`  current  ${r.name}`);
+      continue;
+    }
+    writeFileSync(
+      r.agents,
+      spliceFloor(existsSync(r.agents) ? read(r.agents) : "", floor),
+    );
+    console.log(
+      `  ${r.state === "stale" ? "updated " : "added   "} ${r.name}  -> ${r.path}/AGENTS.md`,
+    );
   }
-  console.log("\nCommit AGENTS.md in each repo — the floor only protects a sandbox if it is checked in.");
+  console.log(
+    "\nCommit AGENTS.md in each repo — the floor only protects a sandbox if it is checked in.",
+  );
 }
 
 // ------------------------------------------------------------------ check ----
@@ -259,25 +371,33 @@ if (CHECK) {
   // `.claude-plugin/` holds the plugin + marketplace manifests, which are
   // hand-maintained (version, keywords) and have no shared/ source. Everything
   // else under plugins/ and dist/ must be reproducible.
-  const isHandMaintained = (p) => p.includes(`${path.sep}.claude-plugin${path.sep}`);
+  const isHandMaintained = (p) =>
+    p.includes(`${path.sep}.claude-plugin${path.sep}`);
   const actual = [
     ...listFiles(path.join(ROOT, "plugins")),
     ...listFiles(path.join(ROOT, "dist")),
-  ].map((p) => path.resolve(p)).filter((p) => !isHandMaintained(p));
+  ]
+    .map((p) => path.resolve(p))
+    .filter((p) => !isHandMaintained(p));
 
   const problems = [];
   for (const [file, content] of written) {
     if (!existsSync(file)) problems.push(`missing:   ${rel(file)}`);
     else if (read(file) !== content) problems.push(`stale:     ${rel(file)}`);
   }
-  for (const file of actual) if (!expected.includes(file)) problems.push(`orphaned:  ${rel(file)}`);
+  for (const file of actual)
+    if (!expected.includes(file)) problems.push(`orphaned:  ${rel(file)}`);
 
   if (problems.length) {
     console.error("Generated tree does not match shared/:\n");
     for (const p of problems) console.error("  " + p);
     console.error(`\nRun \`bun build/emit.mjs\` and commit the result.`);
-    console.error("If a harness file has a rule that shared/ doesn't, move the rule into shared/ —");
-    console.error("a rule that lives in one harness is a rule the other harnesses silently lack.");
+    console.error(
+      "If a harness file has a rule that shared/ doesn't, move the rule into shared/ —",
+    );
+    console.error(
+      "a rule that lives in one harness is a rule the other harnesses silently lack.",
+    );
     process.exit(1);
   }
   console.log(`ok — ${expected.length} generated files match shared/`);
@@ -291,23 +411,42 @@ if (CHECK) {
   const repos = floorStatus().filter((r) => r.state !== "no-checkout");
   const behind = repos.filter((r) => r.state !== "ok");
   if (!repos.length) {
-    console.log("floor delivery: no configured repo checked out here — not verified");
+    console.log(
+      "floor delivery: no configured repo checked out here — not verified",
+    );
   } else if (behind.length) {
-    console.log(`\n! floor delivery: ${behind.length} of ${repos.length} repo(s) are not carrying the current floor`);
-    for (const r of behind) console.log(`    ${r.state.padEnd(8)} ${r.name}  ${r.path}/AGENTS.md`);
-    console.log("  Fix: bun build/emit.mjs --sync-floor   (then commit AGENTS.md in each repo)");
+    console.log(
+      `\n! floor delivery: ${behind.length} of ${repos.length} repo(s) are not carrying the current floor`,
+    );
+    for (const r of behind)
+      console.log(`    ${r.state.padEnd(8)} ${r.name}  ${r.path}/AGENTS.md`);
+    console.log(
+      "  Fix: bun build/emit.mjs --sync-floor   (then commit AGENTS.md in each repo)",
+    );
   } else {
-    console.log(`floor delivery: ${repos.length} repo(s) carrying the current floor`);
+    console.log(
+      `floor delivery: ${repos.length} repo(s) carrying the current floor`,
+    );
   }
   process.exit(0);
 }
 
 console.log(`emitted ${written.size} files from shared/`);
-console.log(`  claude  plugins/core/  (${commands.length} commands, ${skillDirs.length} skills, ${agents.length} agents)`);
-console.log(`  codex   dist/codex/    (${skillDirs.length + commands.length} skills, ${agents.length} agents)`);
-console.log(`  gemini  dist/gemini/   (${skillDirs.length + commands.length} skills, ${agents.length} agents)  — also Antigravity`);
-console.log(`  cursor  dist/cursor/   (${commands.length} commands, ${agents.length} agents)`);
-console.log(`  pi      dist/pi/       (${skillDirs.length} skills, ${commands.length} prompts, ${agents.length} agents)`);
+console.log(
+  `  claude  plugins/core/  (${commands.length} commands, ${skillDirs.length} skills, ${agents.length} agents)`,
+);
+console.log(
+  `  codex   dist/codex/    (${skillDirs.length + commands.length} skills, ${agents.length} agents)`,
+);
+console.log(
+  `  gemini  dist/gemini/   (${skillDirs.length + commands.length} skills, ${agents.length} agents)  — also Antigravity`,
+);
+console.log(
+  `  cursor  dist/cursor/   (${commands.length} commands, ${agents.length} agents)`,
+);
+console.log(
+  `  pi      dist/pi/       (${skillDirs.length} skills, ${commands.length} prompts, ${agents.length} agents)`,
+);
 console.log(`  floor   dist/AGENTS.floor.md`);
 
 // -------------------------------------------------------------- link repos ---
@@ -319,25 +458,45 @@ console.log(`  floor   dist/AGENTS.floor.md`);
 // The marketplace route (SETUP.md) still works and is nicer for interactive use;
 // this is the one that reliably works for `claude -p`.
 if (process.argv.includes("--link-repos")) {
-  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+  const cfg = Bun.YAML.parse(
+    readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+  );
   console.log("\nlinking factory commands into each configured repo:");
   for (const repo of cfg.repos ?? []) {
     const repoPath = String(repo.path).replace(/^~/, homedir());
-    if (!existsSync(repoPath)) { console.log(`  skip     ${repo.name} — no checkout at ${repo.path}`); continue; }
+    if (!existsSync(repoPath)) {
+      console.log(`  skip     ${repo.name} — no checkout at ${repo.path}`);
+      continue;
+    }
     const dst = path.join(repoPath, ".claude", "commands");
     mkdirSync(dst, { recursive: true });
     for (const f of commands) {
       const target = path.join(dst, path.basename(f));
       let st = null;
-      try { st = lstatSync(target); } catch {}
-      if (st && !st.isSymbolicLink()) { console.log(`  skip     ${repo.name}/${path.basename(f)} (real file)`); continue; }
+      try {
+        st = lstatSync(target);
+      } catch {
+        /* intentionally ignored */
+      }
+      if (st && !st.isSymbolicLink()) {
+        console.log(`  skip     ${repo.name}/${path.basename(f)} (real file)`);
+        continue;
+      }
       if (st) unlinkSync(target);
       symlinkSync(path.join(CLAUDE, "commands", path.basename(f)), target);
     }
-    console.log(`  linked   ${repo.name}  ${commands.length} command(s) -> ${repo.path}/.claude/commands/`);
+    console.log(
+      `  linked   ${repo.name}  ${commands.length} command(s) -> ${repo.path}/.claude/commands/`,
+    );
     const gi = ensureHarnessGitignore(repoPath);
-    if (gi === "ok") console.log(`  gitignore  ${repo.name}  harness symlinks already excluded`);
-    else console.log(`  gitignore  ${repo.name}  ${gi} FACTORY:HARNES block -> .gitignore`);
+    if (gi === "ok")
+      console.log(
+        `  gitignore  ${repo.name}  harness symlinks already excluded`,
+      );
+    else
+      console.log(
+        `  gitignore  ${repo.name}  ${gi} FACTORY:HARNES block -> .gitignore`,
+      );
   }
 }
 
@@ -350,7 +509,11 @@ function linkFactoryBin() {
   }
   mkdirSync(path.dirname(dst), { recursive: true });
   let existing = null;
-  try { existing = lstatSync(dst); } catch {}
+  try {
+    existing = lstatSync(dst);
+  } catch {
+    /* intentionally ignored */
+  }
   if (existing) {
     if (!existing.isSymbolicLink()) {
       console.log(`  skip     ${dst}  (real file — not overwriting)`);
@@ -359,35 +522,76 @@ function linkFactoryBin() {
     unlinkSync(dst);
   }
   symlinkSync(src, dst);
-  console.log(`  linked   ${dst.replace(homedir(), "~")} -> ${src.replace(homedir(), "~")}`);
+  console.log(
+    `  linked   ${dst.replace(homedir(), "~")} -> ${src.replace(homedir(), "~")}`,
+  );
 }
 
 if (LINK_BIN || LINK) linkFactoryBin();
 
 // ------------------------------------------------------------------- link ----
 if (LINK) {
-  console.log("\nlinking this machine's harnesses to shared/ (source of truth, no copy to go stale):");
+  console.log(
+    "\nlinking this machine's harnesses to shared/ (source of truth, no copy to go stale):",
+  );
   const geminiCommandSkills = [...skillDirs, ...codexCommandSkills];
   const links = [
-    ...[...skillDirs, ...codexCommandSkills].map((s) => [path.join(CODEX, "skills", s), path.join(homedir(), ".agents/skills", s)]),
-    ...geminiCommandSkills.map((s) => [path.join(GEMINI, "skills", s), path.join(homedir(), ".gemini/skills", s)]),
-    ...commands.map((f) => [path.join(CURSOR, "commands", path.basename(f)), path.join(homedir(), ".cursor/commands", path.basename(f))]),
-    ...commands.map((f) => [path.join(PI, "prompts", path.basename(f)), path.join(homedir(), ".pi/agent/prompts", path.basename(f))]),
-    ...skillDirs.map((s) => [path.join(PI, "skills", s), path.join(homedir(), ".pi/agent/skills", s)]),
+    ...[...skillDirs, ...codexCommandSkills].map((s) => [
+      path.join(CODEX, "skills", s),
+      path.join(homedir(), ".agents/skills", s),
+    ]),
+    ...geminiCommandSkills.map((s) => [
+      path.join(GEMINI, "skills", s),
+      path.join(homedir(), ".gemini/skills", s),
+    ]),
+    ...commands.map((f) => [
+      path.join(CURSOR, "commands", path.basename(f)),
+      path.join(homedir(), ".cursor/commands", path.basename(f)),
+    ]),
+    ...commands.map((f) => [
+      path.join(PI, "prompts", path.basename(f)),
+      path.join(homedir(), ".pi/agent/prompts", path.basename(f)),
+    ]),
+    ...skillDirs.map((s) => [
+      path.join(PI, "skills", s),
+      path.join(homedir(), ".pi/agent/skills", s),
+    ]),
     ...agentDefinitions.flatMap((agent) => [
-      [path.join(CLAUDE, "agents", `${agent.name}.md`), path.join(homedir(), ".claude/agents", `${agent.name}.md`)],
-      [path.join(CODEX, "agents", `${agent.name}.toml`), path.join(homedir(), ".codex/agents", `${agent.name}.toml`)],
-      [path.join(GEMINI, "agents", `${agent.name}.md`), path.join(homedir(), ".gemini/agents", `${agent.name}.md`)],
-      [path.join(CURSOR, "agents", `${agent.name}.md`), path.join(homedir(), ".cursor/agents", `${agent.name}.md`)],
-      [path.join(PI, "agents", `${agent.name}.md`), path.join(homedir(), ".pi/agent/agents", `${agent.name}.md`)],
+      [
+        path.join(CLAUDE, "agents", `${agent.name}.md`),
+        path.join(homedir(), ".claude/agents", `${agent.name}.md`),
+      ],
+      [
+        path.join(CODEX, "agents", `${agent.name}.toml`),
+        path.join(homedir(), ".codex/agents", `${agent.name}.toml`),
+      ],
+      [
+        path.join(GEMINI, "agents", `${agent.name}.md`),
+        path.join(homedir(), ".gemini/agents", `${agent.name}.md`),
+      ],
+      [
+        path.join(CURSOR, "agents", `${agent.name}.md`),
+        path.join(homedir(), ".cursor/agents", `${agent.name}.md`),
+      ],
+      [
+        path.join(PI, "agents", `${agent.name}.md`),
+        path.join(homedir(), ".pi/agent/agents", `${agent.name}.md`),
+      ],
     ]),
   ];
   for (const [src, dst] of links) {
     mkdirSync(path.dirname(dst), { recursive: true });
     let existing = null;
-    try { existing = lstatSync(dst); } catch {}
+    try {
+      existing = lstatSync(dst);
+    } catch {
+      /* intentionally ignored */
+    }
     if (existing) {
-      if (!existing.isSymbolicLink()) { console.log(`  skip     ${dst}  (real file — not overwriting)`); continue; }
+      if (!existing.isSymbolicLink()) {
+        console.log(`  skip     ${dst}  (real file — not overwriting)`);
+        continue;
+      }
       unlinkSync(dst);
     }
     symlinkSync(src, dst);

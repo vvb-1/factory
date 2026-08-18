@@ -14,6 +14,9 @@ import path from "node:path";
 
 import {
   effectiveOwnedPaths,
+  globToRegExp,
+  hardPathConflicts,
+  pathOverlaps,
   pathsCollide,
   parseOwnedPaths,
   readPinManifestRequirements,
@@ -23,17 +26,36 @@ import { budgetExhausted } from "../../lib/spend.mjs";
 import { liveWorkerLeases } from "../../lib/worker-leases.mjs";
 import { findArtifact, pinRunArtifact } from "./artifacts.mjs";
 import { canonicalJson, hashJson } from "./canonical.mjs";
-import { artifactsRoot, DEAD_LETTER_AFTER, DEFAULT_PROPOSAL_TTL_SECONDS, FACTORY_ROOT } from "./config.mjs";
+import {
+  artifactsRoot,
+  DEAD_LETTER_AFTER,
+  DEFAULT_PROPOSAL_TTL_SECONDS,
+  FACTORY_ROOT,
+} from "./config.mjs";
 import { isBusyError, tx, txImmediate } from "./db.mjs";
 import { newProposalId, newRunId } from "./ids.mjs";
-import { TERMINAL_STATES, createRun, idempotencyKeyForNewRun, resolveIdempotency } from "./lifecycle.mjs";
+import {
+  TERMINAL_STATES,
+  createRun,
+  idempotencyKeyForNewRun,
+  resolveIdempotency,
+} from "./lifecycle.mjs";
 import { getAgent, getEventType, resolveModel } from "./registry.mjs";
 import { pinRepo } from "./repository.mjs";
-import { RepoError, getRepo, loadRepos, reposConfigPath, reposRoot } from "./repos.mjs";
+import {
+  RepoError,
+  getRepo,
+  loadRepos,
+  reposConfigPath,
+  reposRoot,
+} from "./repos.mjs";
 import { validate } from "./schema.mjs";
 import { inFlightRunsForAgent } from "./schedules.mjs";
 import { resolveInputRef } from "./workspace.mjs";
-import { autoApproveChains, buildChainApprovalPolicy } from "./auto-approval.mjs";
+import {
+  autoApproveChains,
+  buildChainApprovalPolicy,
+} from "./auto-approval.mjs";
 
 /**
  * §5.4 idempotency key: agent ref, output contract, then the event type's
@@ -50,7 +72,9 @@ export function idempotencyKeyFor(mapping, def, envelope, inputHash) {
       case "inputHash":
         return inputHash;
       default:
-        throw new Error(`unknown idempotency scope field "${field}" (docs/event-runtime.md §5.4 — fail closed)`);
+        throw new Error(
+          `unknown idempotency scope field "${field}" (docs/event-runtime.md §5.4 — fail closed)`,
+        );
     }
   });
   return `${def.ref}:${def.output_contract}:${parts.join(":")}`;
@@ -64,7 +88,8 @@ export function idempotencyKeyFor(mapping, def, envelope, inputHash) {
  * `repos` declared, or no `repo` in the payload, or a member of the set).
  */
 export function repoNotAllowed(def, payload) {
-  if (!Array.isArray(def.repos) || typeof payload?.repo !== "string") return null;
+  if (!Array.isArray(def.repos) || typeof payload?.repo !== "string")
+    return null;
   if (def.repos.includes(payload.repo)) return null;
   return `repo_not_allowed: ${def.ref} may not run over ${payload.repo} (allowed: ${def.repos.join(", ")})`;
 }
@@ -73,22 +98,41 @@ export function repoNotAllowed(def, payload) {
  * Pure assembly of the §5.2 RunSpec from a registered mapping. No I/O, no
  * clock reads beyond the injected `now` — same inputs, same spec, always.
  */
-export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion, adapterOverride, now = Date.now(), approvalPolicy = null } = {}) {
+export function buildRunSpec(
+  registry,
+  envelope,
+  mapping,
+  {
+    runId,
+    policyVersion,
+    adapterOverride,
+    now = Date.now(),
+    approvalPolicy = null,
+  } = {},
+) {
   const def = getAgent(registry, mapping.agent);
   let payload = envelope.payload;
   if (def.workspace?.type === "repository" && payload?.repo) {
     try {
-      payload = { ...payload, repoPin: pinRepo(payload.repo, payload.ref ?? undefined) };
+      payload = {
+        ...payload,
+        repoPin: pinRepo(payload.repo, payload.ref ?? undefined),
+      };
     } catch (err) {
       if (!payload?.repoPin) throw err;
     }
   }
   const inputHash = hashJson(payload);
   const placement = def.placement ?? mapping.placement ?? undefined;
-  const specEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
+  const specEnvelope =
+    payload === envelope.payload ? envelope : { ...envelope, payload };
   let idempotencyKey = idempotencyKeyFor(mapping, def, specEnvelope, inputHash);
   const correlation = envelope.correlationId ?? envelope.eventId ?? null;
-  if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
+  if (
+    correlation &&
+    !mapping.idempotencyScope.includes("correlationId") &&
+    !mapping.idempotencyScope.includes("eventId")
+  ) {
     idempotencyKey = `${idempotencyKey}:${correlation}`;
   }
   return {
@@ -116,7 +160,10 @@ export function buildRunSpec(registry, envelope, mapping, { runId, policyVersion
     // ignores the model; the spec still records what was routed. A null model
     // means the routed adapter takes none (not applicable).
     ...(def.model_tier !== undefined || def.model !== undefined
-      ? { modelTier: def.model_tier ?? null, model: resolveModel(def, mapping.adapter, registry.modelTiers) }
+      ? {
+          modelTier: def.model_tier ?? null,
+          model: resolveModel(def, mapping.adapter, registry.modelTiers),
+        }
       : {}),
     timeoutSeconds: def.limits.timeout_seconds,
     maxAttempts: def.limits.attempts,
@@ -139,18 +186,70 @@ function linearCli() {
 
 function fetchTicketDefault(ticketId) {
   try {
-    return JSON.parse(execFileSync("bun", [linearCli(), "get", ticketId, "--json"], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-    }));
+    return JSON.parse(
+      execFileSync("bun", [linearCli(), "get", ticketId, "--json"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    );
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
     if (stderr.includes("no such issue")) return null;
-    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`);
+    throw new Error(
+      `linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`,
+      { cause: err },
+    );
   }
 }
 
-const IN_FLIGHT_QUERY =
-  `query($t:String!,$p:String!){ issues(first:250, filter:{ team:{key:{eq:$t}}, project:{name:{eq:$p}}, state:{name:{eq:"In Progress"}} }){ nodes{ identifier description } } }`;
+function fetchViewerDefault() {
+  try {
+    const out = execFileSync(
+      "bun",
+      [linearCli(), "raw", "query{ viewer{ id name } }"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    return JSON.parse(out)?.viewer ?? null;
+  } catch (err) {
+    const stderr = String(err?.stderr ?? "");
+    throw new Error(
+      `linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`,
+      { cause: err },
+    );
+  }
+}
+
+function fetchPullRequestDefault(payload) {
+  try {
+    return JSON.parse(
+      execFileSync(
+        "gh",
+        [
+          "pr",
+          "view",
+          String(payload?.pr),
+          "--repo",
+          payload?.github,
+          "--json",
+          "state,headRefOid",
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ),
+    );
+  } catch (err) {
+    const stderr = String(err?.stderr ?? "");
+    if (/not found|no pull request/i.test(stderr)) return null;
+    throw new Error(
+      `github_read_failed: ${stderr.trim().split("\n").pop() || err.message}`,
+      { cause: err },
+    );
+  }
+}
+
+const IN_FLIGHT_QUERY = `query($t:String!,$p:String!){ issues(first:250, filter:{ team:{key:{eq:$t}}, project:{name:{eq:$p}}, state:{name:{eq:"In Progress"}} }){ nodes{ identifier description } } }`;
 
 const OWNED_PATHS_CLOSURE_CACHE = new Map();
 
@@ -159,7 +258,10 @@ function ownedPathsClosureDetails(repoName, repo, ticketDescription) {
   const cacheKey = `${repoName}::${repo.path}`;
   if (!OWNED_PATHS_CLOSURE_CACHE.has(cacheKey)) {
     const requirements = repo.ownedPathsPolicy.pinManifests?.length
-      ? readPinManifestRequirements(repo.path, repo.ownedPathsPolicy.pinManifests)
+      ? readPinManifestRequirements(
+          repo.path,
+          repo.ownedPathsPolicy.pinManifests,
+        )
       : [];
     OWNED_PATHS_CLOSURE_CACHE.set(cacheKey, requirements);
   }
@@ -174,13 +276,29 @@ function ownedPathsClosureDetails(repoName, repo, ticketDescription) {
 
 function fetchInFlightDefault(repoConfig) {
   try {
-    const out = execFileSync("bun", [linearCli(), "raw", IN_FLIGHT_QUERY, "--var", `t=${repoConfig.team}`, "--var", `p=${repoConfig.project}`], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-    });
+    const out = execFileSync(
+      "bun",
+      [
+        linearCli(),
+        "raw",
+        IN_FLIGHT_QUERY,
+        "--var",
+        `t=${repoConfig.team}`,
+        "--var",
+        `p=${repoConfig.project}`,
+      ],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     return JSON.parse(out)?.issues?.nodes ?? [];
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
-    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`);
+    throw new Error(
+      `linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`,
+      { cause: err },
+    );
   }
 }
 
@@ -188,10 +306,35 @@ function policyMaxInFlight(root = reposRoot()) {
   const file = path.join(root, "config", "policy.yaml");
   if (!existsSync(file)) return DEFAULT_MAX_IN_FLIGHT;
   try {
-    const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.concurrency?.max_in_flight_per_repo;
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_IN_FLIGHT;
+    const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.concurrency
+      ?.max_in_flight_per_repo;
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? value
+      : DEFAULT_MAX_IN_FLIGHT;
   } catch {
     return DEFAULT_MAX_IN_FLIGHT;
+  }
+}
+
+/**
+ * Owned Paths collision mode (WM-677). `strict` refuses dispatch on any overlap
+ * with an in-flight ticket — the historical behavior, and the fail-closed
+ * default when the key is absent or malformed. `advisory` records the overlap
+ * on the proposal as evidence and dispatches anyway, refusing only the narrow
+ * hard-conflict set (identical concrete file, or `**`): textual overlap is what
+ * rebase and merge-fix already resolve, and refusing it at dispatch was
+ * starving the pool for conflicts that mostly never materialized.
+ */
+export const DEFAULT_OWNED_PATHS_COLLISION = "strict";
+export function policyOwnedPathsCollision(root = reposRoot()) {
+  const file = path.join(root, "config", "policy.yaml");
+  if (!existsSync(file)) return DEFAULT_OWNED_PATHS_COLLISION;
+  try {
+    const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.dispatch
+      ?.owned_paths_collision;
+    return value === "advisory" ? "advisory" : DEFAULT_OWNED_PATHS_COLLISION;
+  } catch {
+    return DEFAULT_OWNED_PATHS_COLLISION;
   }
 }
 
@@ -202,25 +345,32 @@ export function policyMaxConcurrentMerges(root = reposRoot()) {
   const file = path.join(root, "config", "policy.yaml");
   if (!existsSync(file)) return DEFAULT_MAX_CONCURRENT_MERGES;
   try {
-    const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.concurrency?.max_concurrent_merges;
-    return Number.isInteger(value) && value > 0 ? value : DEFAULT_MAX_CONCURRENT_MERGES;
+    const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.concurrency
+      ?.max_concurrent_merges;
+    return Number.isInteger(value) && value > 0
+      ? value
+      : DEFAULT_MAX_CONCURRENT_MERGES;
   } catch {
     return DEFAULT_MAX_CONCURRENT_MERGES;
   }
 }
 
 function agentSingletonEnabled(registry, agentRef) {
-  return Object.values(registry.schedules ?? {}).some((candidate) =>
-    candidate.enabled &&
-    candidate.singleton !== false &&
-    registry.eventTypes?.[candidate.eventType]?.agent === agentRef
+  return Object.values(registry.schedules ?? {}).some(
+    (candidate) =>
+      candidate.enabled &&
+      candidate.singleton !== false &&
+      registry.eventTypes?.[candidate.eventType]?.agent === agentRef,
   );
 }
 
 function singletonApplies(registry, envelope, agentRef) {
   const loop = envelope.payload?.loop;
   const schedule = loop ? registry.schedules?.[loop] : null;
-  if (schedule && registry.eventTypes?.[schedule.eventType]?.agent === agentRef) {
+  if (
+    schedule &&
+    registry.eventTypes?.[schedule.eventType]?.agent === agentRef
+  ) {
     return schedule.singleton !== false;
   }
   return agentSingletonEnabled(registry, agentRef);
@@ -253,17 +403,23 @@ export function inFlightDispatchForTicket(db, payload) {
 function loadRepoEscalatePaths(repoName, root = reposRoot()) {
   const file = reposConfigPath(root);
   if (!existsSync(file)) {
-    throw new RepoError(`${file}: cannot verify escalate_paths because repos.yaml is missing`);
+    throw new RepoError(
+      `${file}: cannot verify escalate_paths because repos.yaml is missing`,
+    );
   }
   let parsed;
   try {
     parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new RepoError(`${file}: cannot verify escalate_paths: ${err.message}`);
+    throw new RepoError(
+      `${file}: cannot verify escalate_paths: ${err.message}`,
+    );
   }
   const entry = (parsed?.repos ?? []).find((row) => row?.name === repoName);
   if (!entry) {
-    throw new RepoError(`${file}: cannot verify escalate_paths for unknown repo ${repoName}`);
+    throw new RepoError(
+      `${file}: cannot verify escalate_paths for unknown repo ${repoName}`,
+    );
   }
   const escalate = entry.escalate_paths ?? entry.escalatePaths;
   if (!Array.isArray(escalate)) {
@@ -301,7 +457,9 @@ function defaultBudgetRefusal() {
 }
 
 function sortUnique(values) {
-  return [...new Set(values.filter((value) => typeof value === "string"))].sort();
+  return [
+    ...new Set(values.filter((value) => typeof value === "string")),
+  ].sort();
 }
 
 function evidenceTicket(ticket, ticketId) {
@@ -311,7 +469,9 @@ function evidenceTicket(ticket, ticketId) {
     id: ticketId,
     state: ticket?.state?.name ?? null,
     assigneeNull: !ticket?.assignee,
-    labels: sortUnique((ticket?.labels?.nodes ?? []).map((label) => label?.name).filter(Boolean)),
+    labels: sortUnique(
+      (ticket?.labels?.nodes ?? []).map((label) => label?.name).filter(Boolean),
+    ),
     ownedPaths: effectiveOwnedPaths(description),
     ownedPathsParsed: parsed.length > 0,
     descriptionHash: hashJson(description),
@@ -329,22 +489,35 @@ function evidenceInFlight(issue) {
   };
 }
 
-function refusal(reason, evidence, decision = "noop") {
-  return { ok: false, refusal: { decision, reason }, evidence };
+function refusal(reason, evidence, decision = "noop", detail = null) {
+  return {
+    ok: false,
+    refusal: {
+      decision,
+      reason,
+      ...(detail ? { detail } : {}),
+    },
+    evidence,
+  };
 }
 
 /**
  * The shared dispatch proof used at plan time and immediately before a chain
  * auto-approval. Its evidence captures every fact the latter needs to compare.
  */
-export function worktreeDispatchAutoEligibility(payload, {
-  fetchTicket = fetchTicketDefault,
-  fetchInFlight = fetchInFlightDefault,
-  countLeases = (repoName) => liveWorkerLeases(repoName).length,
-  maxInFlightFallback,
-  budgetRefusal = defaultBudgetRefusal,
-  now = Date.now(),
-} = {}) {
+export function worktreeDispatchAutoEligibility(
+  payload,
+  {
+    fetchTicket = fetchTicketDefault,
+    fetchViewer = fetchViewerDefault,
+    fetchInFlight = fetchInFlightDefault,
+    countLeases = (repoName) => liveWorkerLeases(repoName).length,
+    maxInFlightFallback,
+    budgetRefusal = defaultBudgetRefusal,
+    claimedRetry = null,
+    now = Date.now(),
+  } = {},
+) {
   const evidence = {
     checkedAt: new Date(resolveNow(now)).toISOString(),
     repo: {},
@@ -368,12 +541,17 @@ export function worktreeDispatchAutoEligibility(payload, {
     project: repo.project ?? null,
     capLimit: cap,
     capCurrent: live,
-    capSource: repo.maxInFlight === null || repo.maxInFlight === undefined ? "policy.yaml: max_in_flight_per_repo" : "repo.max_in_flight",
+    capSource:
+      repo.maxInFlight === null || repo.maxInFlight === undefined
+        ? "policy.yaml: max_in_flight_per_repo"
+        : "repo.max_in_flight",
   };
   evidence.checks.repo_found = true;
-  if (repo.reportOnly) return refusal("repo_report_only", evidence, "human_needed");
+  if (repo.reportOnly)
+    return refusal("repo_report_only", evidence, "human_needed");
   evidence.checks.repo_is_dispatchable = true;
-  if (!repo.worktreeUp || !repo.worktreeDown || !repo.worktreeRoot) return refusal("no_worktree_scripts", evidence, "human_needed");
+  if (!repo.worktreeUp || !repo.worktreeDown || !repo.worktreeRoot)
+    return refusal("no_worktree_scripts", evidence, "human_needed");
   evidence.checks.worktree_scripts_configured = true;
 
   let budgetReason;
@@ -392,15 +570,68 @@ export function worktreeDispatchAutoEligibility(payload, {
   evidence.ticket = evidenceTicket(ticket, payload?.ticket);
   if (!ticket) return refusal("ticket_not_found", evidence, "human_needed");
   evidence.checks.ticket_found = true;
-  if (ticket.assignee) return refusal("ticket_assigned", evidence);
-  evidence.checks.ticket_unassigned = true;
-  if (ticket.state?.name !== "Todo") return refusal("ticket_not_todo", evidence);
-  evidence.checks.ticket_todo = true;
-  if (!evidence.ticket.labels.includes("ai:agent-ready")) return refusal("ticket_not_agent_ready", evidence);
-  evidence.checks.ticket_agent_ready = true;
+
+  // A lease-loss retry is the one exception to the ordinary Todo/unassigned
+  // admission rule. The prior attempt already performed the Linear claim, so
+  // its durable state is expected to be In Progress and assigned. Accept that
+  // state only when the worker proves this is the same run's lease-expired
+  // attempt and Linear still names the factory's own viewer identity.
+  const canResumeClaim = Boolean(
+    claimedRetry?.runId &&
+    Number.isInteger(claimedRetry?.priorAttempt) &&
+    claimedRetry.priorAttempt > 0 &&
+    claimedRetry?.reasonCode === "lease_expired",
+  );
+  let retryClaimedByFactory = false;
+  let resumingOwnClaim = false;
+  if (ticket.assignee) {
+    if (!canResumeClaim) return refusal("ticket_assigned", evidence);
+    const viewer = fetchViewer();
+    if (!viewer?.id || ticket.assignee.id !== viewer.id)
+      return refusal("ticket_assigned", evidence);
+    retryClaimedByFactory = true;
+  } else {
+    evidence.checks.ticket_unassigned = true;
+  }
+
+  if (ticket.state?.name !== "Todo") {
+    if (!(retryClaimedByFactory && ticket.state?.name === "In Progress")) {
+      return refusal("ticket_not_todo", evidence);
+    }
+    resumingOwnClaim = true;
+    evidence.checks.ticket_claim_retry = true;
+    evidence.checks.ticket_in_progress_retry = true;
+    evidence.ticket.claimedRetryRunId = claimedRetry.runId;
+  } else {
+    // Assignment alone is not a surviving factory claim. Requiring the state
+    // transition as well prevents an own-assigned Todo ticket from bypassing
+    // the normal claim mutation and its read-back concurrency control.
+    if (retryClaimedByFactory) return refusal("ticket_assigned", evidence);
+    evidence.checks.ticket_todo = true;
+  }
+
+  if (!evidence.ticket.labels.includes("ai:agent-ready")) {
+    if (!(
+      resumingOwnClaim && evidence.ticket.labels.includes("ai:in-progress")
+    )) {
+      return refusal("ticket_not_agent_ready", evidence);
+    }
+    evidence.checks.ticket_in_progress_label_retry = true;
+  } else {
+    evidence.checks.ticket_agent_ready = true;
+  }
   if (evidence.ticket.labels.includes("ai:escalated")) {
     return refusal("ticket_escalated", evidence);
   }
+
+  // Never let effectiveOwnedPaths' fail-closed `**` sentinel masquerade as a
+  // real path during a sensitive-path check. Unknown ticket scope is its own
+  // refusal, before overlap or escalate_paths can assign a misleading cause.
+  if (!evidence.ticket.ownedPathsParsed) {
+    evidence.checks.owned_paths_parsed = false;
+    return refusal("owned_paths_unknown", evidence);
+  }
+  evidence.checks.owned_paths_parsed = true;
 
   try {
     const gaps = ownedPathsClosureDetails(repo.name, repo, ticket.description);
@@ -408,7 +639,11 @@ export function worktreeDispatchAutoEligibility(payload, {
       return refusal("owned_paths_not_closed", evidence, "human_needed");
     }
   } catch (err) {
-    return refusal(`owned_paths_not_closed: ${err.message || String(err)}`, evidence, "human_needed");
+    return refusal(
+      `owned_paths_not_closed: ${err.message || String(err)}`,
+      evidence,
+      "human_needed",
+    );
   }
 
   evidence.checks.ticket_not_escalated = true;
@@ -419,21 +654,62 @@ export function worktreeDispatchAutoEligibility(payload, {
     return refusal("ticket_security", evidence);
   }
   evidence.checks.ticket_not_security = true;
-  if (!repo.team || !repo.project) return refusal("repo_unconfigured: team/project missing for the in-flight query", evidence, "human_needed");
+  if (!repo.team || !repo.project)
+    return refusal(
+      "repo_unconfigured: team/project missing for the in-flight query",
+      evidence,
+      "human_needed",
+    );
   evidence.checks.repo_team_project = true;
 
   const inFlight = fetchInFlight(repo);
-  evidence.inFlight = inFlight.filter((issue) => String(issue.identifier) !== String(payload?.ticket)).map(evidenceInFlight);
-  if (pathsCollide(evidence.ticket.ownedPaths, evidence.inFlight.flatMap((issue) => issue.ownedPaths))) {
+  evidence.inFlight = inFlight
+    .filter((issue) => String(issue.identifier) !== String(payload?.ticket))
+    .map(evidenceInFlight);
+  const collisionMode = policyOwnedPathsCollision();
+  evidence.checks.owned_paths_collision_mode = collisionMode;
+  const inFlightPaths = evidence.inFlight.flatMap((issue) => issue.ownedPaths);
+  if (pathsCollide(evidence.ticket.ownedPaths, inFlightPaths)) {
     evidence.checks.owned_paths_disjoint = false;
-    return refusal("owned_paths_overlap", evidence);
+    if (collisionMode !== "advisory")
+      return refusal("owned_paths_overlap", evidence);
+    // Advisory: name every overlapping claim and who holds it, so the proposal
+    // and `inspect` show what this run may have to rebase across, then only
+    // refuse the pairs that cannot be reconciled by a rebase.
+    evidence.ownedPathsOverlap = evidence.inFlight.flatMap((issue) =>
+      pathOverlaps(evidence.ticket.ownedPaths, issue.ownedPaths).map(
+        ({ a, b }) => ({
+          ticket: issue.id,
+          path: a,
+          inFlightPath: b,
+        }),
+      ),
+    );
+    const hard = evidence.inFlight.flatMap((issue) =>
+      hardPathConflicts(evidence.ticket.ownedPaths, issue.ownedPaths).map(
+        ({ a, b }) => ({
+          ticket: issue.id,
+          path: a,
+          inFlightPath: b,
+        }),
+      ),
+    );
+    if (hard.length) {
+      evidence.ownedPathsHardConflicts = hard;
+      return refusal("owned_paths_conflict_hard", evidence);
+    }
+  } else {
+    evidence.checks.owned_paths_disjoint = true;
   }
-  evidence.checks.owned_paths_disjoint = true;
   try {
     evidence.repo.escalatePaths = loadRepoEscalatePaths(repo.name);
   } catch (err) {
     evidence.checks.escalate_paths = { verified: false };
-    return refusal(`escalate_paths_unverifiable: ${err.message}`, evidence, "human_needed");
+    return refusal(
+      `escalate_paths_unverifiable: ${err.message}`,
+      evidence,
+      "human_needed",
+    );
   }
   evidence.escalatePathIntersections = evidence.repo.escalatePaths.filter(
     (item) => pathsCollide(evidence.ticket.ownedPaths, [item]),
@@ -444,9 +720,13 @@ export function worktreeDispatchAutoEligibility(payload, {
     intersect: evidence.escalatePathIntersections,
   };
   if (evidence.escalatePathIntersections.length > 0) {
-    return refusal("escalate_paths_intersect", evidence);
+    return refusal(
+      "escalate_paths_intersect",
+      evidence,
+      "noop",
+      `intersecting escalate_paths globs: ${evidence.escalatePathIntersections.join(", ")}`,
+    );
   }
-  evidence.checks.owned_paths_parsed = evidence.ticket.ownedPathsParsed;
   return { ok: true, evidence };
 }
 
@@ -456,30 +736,270 @@ export function worktreeDispatchAutoEligibility(payload, {
  */
 export function worktreeDispatchGate(payload, options = {}) {
   const result = worktreeDispatchAutoEligibility(payload, options);
-  return result.ok ? null : result.refusal;
+  if (result.ok) return null;
+  // Keep the historical gate contract stable for planner/orchestrator callers;
+  // richer claim-time consumers use worktreeDispatchAutoEligibility directly
+  // to retain evidence and operator-facing detail.
+  return {
+    decision: result.refusal.decision,
+    reason: result.refusal.reason,
+  };
 }
 
-function insertProposal(db, { id, event, runId = null, decision, specJson = null, specHash = null, idempotencyKey = null, status, reason = null, at, ttlSeconds }) {
+function normalizedOwnedPath(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^\.\//, "")
+    .replace(/\/$/, "");
+}
+
+/** Conservative containment proof for the Owned Paths syntax used by tickets. */
+function ownedPathContains(ownerValue, candidateValue) {
+  const owner = normalizedOwnedPath(ownerValue);
+  const candidate = normalizedOwnedPath(candidateValue);
+  if (!owner || !candidate) return false;
+  if (owner === "**" || owner === candidate) return true;
+
+  const candidateHasGlob = /[*?{]/.test(candidate);
+  if (!candidateHasGlob) return globToRegExp(owner).test(candidate);
+
+  // A directory (bare or /**) owns narrower globs rooted below it. Other
+  // wildcard-to-wildcard containment is deliberately fail-closed unless equal.
+  const broadRoot = owner.endsWith("/**")
+    ? owner.slice(0, -3).replace(/\/$/, "")
+    : !/[*?{]/.test(owner) && !/\.[a-z0-9]+$/i.test(owner)
+      ? owner
+      : null;
+  if (!broadRoot) return false;
+  const candidatePrefix = candidate
+    .slice(0, candidate.search(/[*?{]/))
+    .replace(/\/$/, "");
+  return (
+    candidatePrefix === broadRoot || candidatePrefix.startsWith(`${broadRoot}/`)
+  );
+}
+
+/**
+ * Claim-time gate for a bounded merge correction. Unlike dispatch, assignment
+ * and In Review are expected facts, not refusal conditions.
+ */
+export function worktreeMergeFixEligibility(
+  payload,
+  {
+    fetchTicket = fetchTicketDefault,
+    fetchPullRequest = fetchPullRequestDefault,
+    fetchNonTerminalRuns = () => [],
+    now = Date.now(),
+  } = {},
+) {
+  const evidence = {
+    checkedAt: new Date(resolveNow(now)).toISOString(),
+    ticket: null,
+    pullRequest: null,
+    competingRuns: [],
+    checks: {},
+  };
+
+  let ticket;
+  try {
+    ticket = fetchTicket(payload?.ticket);
+  } catch (err) {
+    return refusal(
+      "merge_fix_ticket_read_failed",
+      evidence,
+      "noop",
+      err?.message ?? String(err),
+    );
+  }
+  evidence.ticket = evidenceTicket(ticket, payload?.ticket);
+  if (!ticket)
+    return refusal("merge_fix_ticket_not_found", evidence, "human_needed");
+  evidence.checks.ticket_found = true;
+
+  const labels = evidence.ticket.labels;
+  if (labels.includes("ai:escalated")) {
+    return refusal("merge_fix_ticket_escalated", evidence, "human_needed");
+  }
+  if (
+    labels.includes("type:security") ||
+    labels.some((label) => /security/i.test(label))
+  ) {
+    return refusal("merge_fix_ticket_security", evidence, "human_needed");
+  }
+  evidence.checks.ticket_not_escalated_or_security = true;
+
+  if (!["In Review", "In Progress"].includes(evidence.ticket.state)) {
+    return refusal("merge_fix_ticket_state", evidence);
+  }
+  evidence.checks.ticket_state = true;
+
+  if (!evidence.ticket.ownedPathsParsed) {
+    return refusal("merge_fix_owned_paths_unknown", evidence, "human_needed");
+  }
+  const fixPaths = Array.isArray(payload?.ownedPaths) ? payload.ownedPaths : [];
+  if (
+    fixPaths.length === 0 ||
+    fixPaths.some(
+      (candidate) =>
+        !evidence.ticket.ownedPaths.some((owner) =>
+          ownedPathContains(owner, candidate),
+        ),
+    )
+  ) {
+    return refusal("merge_fix_owned_paths_moved", evidence);
+  }
+  evidence.checks.owned_paths_within_ticket = true;
+
+  let pullRequest;
+  try {
+    pullRequest = fetchPullRequest(payload);
+  } catch (err) {
+    return refusal(
+      "merge_fix_pr_read_failed",
+      evidence,
+      "noop",
+      err?.message ?? String(err),
+    );
+  }
+  evidence.pullRequest = pullRequest;
+  if (!pullRequest)
+    return refusal("merge_fix_pr_not_found", evidence, "human_needed");
+  evidence.checks.pr_found = true;
+  if (pullRequest.state !== "OPEN")
+    return refusal("merge_fix_pr_not_open", evidence);
+  evidence.checks.pr_open = true;
+  if (pullRequest.headRefOid !== payload?.headSha)
+    return refusal("merge_fix_pr_moved", evidence);
+  evidence.checks.pr_head_matches = true;
+
+  try {
+    evidence.competingRuns = fetchNonTerminalRuns(payload) ?? [];
+  } catch (err) {
+    return refusal(
+      "merge_fix_run_check_failed",
+      evidence,
+      "noop",
+      err?.message ?? String(err),
+    );
+  }
+  if (evidence.competingRuns.length > 0)
+    return refusal("merge_fix_run_active", evidence);
+  evidence.checks.no_competing_run = true;
+
+  return { ok: true, evidence };
+}
+
+function worktreeGateFor(def) {
+  if (def?.workspace?.type !== "worktree") return null;
+  return def.dispatchGateExempt === true ? null : "dispatch";
+}
+
+function insertProposal(
+  db,
+  {
+    id,
+    event,
+    runId = null,
+    decision,
+    specJson = null,
+    specHash = null,
+    idempotencyKey = null,
+    status,
+    reason = null,
+    at,
+    ttlSeconds,
+  },
+) {
   db.query(
     `INSERT INTO proposals
        (id, event_source, event_id, run_id, decision, spec_json, spec_hash,
         idempotency_key, status, reason, created_at, ttl_seconds)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, event.source, event.event_id, runId, decision, specJson, specHash, idempotencyKey, status, reason, at, ttlSeconds);
+  ).run(
+    id,
+    event.source,
+    event.event_id,
+    runId,
+    decision,
+    specJson,
+    specHash,
+    idempotencyKey,
+    status,
+    reason,
+    at,
+    ttlSeconds,
+  );
   return db.query(`SELECT * FROM proposals WHERE id = ?`).get(id);
 }
 
 function setEventStatus(db, event, status) {
-  db.query(`UPDATE events SET status = ? WHERE source = ? AND event_id = ?`).run(status, event.source, event.event_id);
+  db.query(
+    `UPDATE events SET status = ? WHERE source = ? AND event_id = ?`,
+  ).run(status, event.source, event.event_id);
 }
 
 function isIdempotencyKeyCollision(err) {
-  return err?.code === "SQLITE_CONSTRAINT_UNIQUE" || /UNIQUE constraint failed: runs\.idempotency_key/.test(String(err?.message ?? err));
+  return (
+    err?.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+    /UNIQUE constraint failed: runs\.idempotency_key/.test(
+      String(err?.message ?? err),
+    )
+  );
+}
+
+function liveRunForInput(
+  db,
+  agentRef,
+  { repo, ticket = null, includeFailed = false },
+) {
+  if (
+    typeof repo !== "string" ||
+    (ticket !== null && typeof ticket !== "string")
+  )
+    return null;
+  const versionSeparator = agentRef.lastIndexOf("@");
+  const agentFamily =
+    versionSeparator > 0
+      ? `${agentRef.slice(0, versionSeparator)}@*`
+      : agentRef;
+  return db
+    .query(
+      `SELECT run_id, state FROM runs
+     WHERE state NOT IN ('COMPLETED','REFUSED','TIMED_OUT','CANCELLED')
+       AND (? = 1 OR state <> 'FAILED')
+       AND json_extract(spec_json, '$.agent') GLOB ?
+       AND json_extract(spec_json, '$.input.repo') = ?
+       AND (? IS NULL OR json_extract(spec_json, '$.input.ticket') = ?)
+     ORDER BY created_at ASC, rowid ASC
+     LIMIT 1`,
+    )
+    .get(includeFailed ? 1 : 0, agentFamily, repo, ticket, ticket);
+}
+
+function noopBehindLiveRun(db, event, blockingRun, reason, at, ttlSeconds) {
+  const proposal = insertProposal(db, {
+    id: newProposalId(),
+    event,
+    runId: blockingRun.run_id,
+    decision: "noop",
+    status: "resolved",
+    reason,
+    at,
+    ttlSeconds,
+  });
+  setEventStatus(db, event, "noop");
+  return { decision: "noop", proposal, runId: blockingRun.run_id, reason };
 }
 
 function humanNeeded(db, event, reason, at, ttlSeconds) {
   const proposal = insertProposal(db, {
-    id: newProposalId(), event, decision: "human_needed", status: "open", reason, at, ttlSeconds,
+    id: newProposalId(),
+    event,
+    decision: "human_needed",
+    status: "open",
+    reason,
+    at,
+    ttlSeconds,
   });
   setEventStatus(db, event, "human_needed");
   return { decision: "human_needed", proposal, reason };
@@ -488,9 +1008,15 @@ function humanNeeded(db, event, reason, at, ttlSeconds) {
 /** Idempotent path: the event was already planned — report what was decided. */
 function existingOutcome(db, event) {
   const proposal = db
-    .query(`SELECT * FROM proposals WHERE event_source = ? AND event_id = ? ORDER BY rowid DESC LIMIT 1`)
+    .query(
+      `SELECT * FROM proposals WHERE event_source = ? AND event_id = ? ORDER BY rowid DESC LIMIT 1`,
+    )
     .get(event.source, event.event_id);
-  if (!proposal) return { decision: event.status, reason: event.last_plan_error ?? undefined };
+  if (!proposal)
+    return {
+      decision: event.status,
+      reason: event.last_plan_error ?? undefined,
+    };
   return {
     decision: proposal.decision,
     proposal,
@@ -505,7 +1031,18 @@ function existingOutcome(db, event) {
  *
  * @returns {{ decision: string, proposal?: object, runId?: string, reason?: string }}
  */
-export function planEvent(db, registry, { source, eventId }, { now = Date.now(), policyVersion = "unknown", adapterOverride, artifactStore = artifactsRoot(), dispatch = {} } = {}) {
+export function planEvent(
+  db,
+  registry,
+  { source, eventId },
+  {
+    now = Date.now(),
+    policyVersion = "unknown",
+    adapterOverride,
+    artifactStore = artifactsRoot(),
+    dispatch = {},
+  } = {},
+) {
   // Dispatch gate for tier-2 worktree agents (WM-108), evaluated BEFORE the
   // write transaction: its Linear and lease reads must never hold the SQLite
   // write lock across a network round trip. The verdict is applied inside the
@@ -513,27 +1050,39 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
   // simply discards it via the idempotent early return.
   let worktreeRefusal = null;
   {
-    const row = db.query(`SELECT status, envelope_json FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
+    const row = db
+      .query(
+        `SELECT status, envelope_json FROM events WHERE source = ? AND event_id = ?`,
+      )
+      .get(source, eventId);
     if (row?.status === "admitted") {
       const preEnvelope = JSON.parse(row.envelope_json);
       const preMapping = getEventType(registry, preEnvelope.type);
-      const preDef = preMapping && preMapping.observe !== true ? registry.agents.get(preMapping.agent) : null;
+      const preDef =
+        preMapping && preMapping.observe !== true
+          ? registry.agents.get(preMapping.agent)
+          : null;
       // An event already outside the definition's repo scope (WM-64) skips
       // the gate's Linear/lease reads entirely — the transaction below parks
       // it repo_not_allowed before anything else happens.
       if (
-        preDef?.workspace?.type === "worktree" &&
-        preDef?.ref !== "merge-fix@1" &&
+        worktreeGateFor(preDef) === "dispatch" &&
         typeof preEnvelope.payload?.repo === "string" &&
         typeof preEnvelope.payload?.ticket === "string" &&
         !repoNotAllowed(preDef, preEnvelope.payload)
       ) {
-        worktreeRefusal = worktreeDispatchGate(preEnvelope.payload, dispatch);
+        const eligibility = worktreeDispatchAutoEligibility(
+          preEnvelope.payload,
+          dispatch,
+        );
+        worktreeRefusal = eligibility.ok ? null : eligibility.refusal;
       }
     }
   }
   return txImmediate(db, () => {
-    const event = db.query(`SELECT * FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
+    const event = db
+      .query(`SELECT * FROM events WHERE source = ? AND event_id = ?`)
+      .get(source, eventId);
     if (!event) throw new Error(`no admitted event (${source}, ${eventId})`);
     if (event.status !== "admitted") return existingOutcome(db, event);
 
@@ -541,16 +1090,29 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     const at = new Date(now).toISOString();
 
     const mapping = getEventType(registry, envelope.type);
-    if (!mapping) return humanNeeded(db, event, "unregistered_event_type", at, DEFAULT_PROPOSAL_TTL_SECONDS);
-    const ttlSeconds = mapping.proposalTtlSeconds ?? DEFAULT_PROPOSAL_TTL_SECONDS;
+    if (!mapping)
+      return humanNeeded(
+        db,
+        event,
+        "unregistered_event_type",
+        at,
+        DEFAULT_PROPOSAL_TTL_SECONDS,
+      );
+    const ttlSeconds =
+      mapping.proposalTtlSeconds ?? DEFAULT_PROPOSAL_TTL_SECONDS;
 
     // Observe-only types (WM-75): the orchestrator reporting its own
     // lifecycle. The event is the deliverable — admitted, journaled,
     // queryable — and the plan is a typed NOOP, never an inbox ask.
     if (mapping.observe === true) {
       const proposal = insertProposal(db, {
-        id: newProposalId(), event, decision: "noop", status: "resolved",
-        reason: "observed", at, ttlSeconds,
+        id: newProposalId(),
+        event,
+        decision: "noop",
+        status: "resolved",
+        reason: "observed",
+        at,
+        ttlSeconds,
       });
       setEventStatus(db, event, "noop");
       return { decision: "noop", proposal, reason: "observed" };
@@ -563,22 +1125,94 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     // materialization for a repo the definition may never touch. Same idea as
     // the actions adapter's host allowlist, enforced at plan time.
     const scopeRefusal = repoNotAllowed(def, envelope.payload);
-    if (scopeRefusal) return humanNeeded(db, event, scopeRefusal, at, ttlSeconds);
+    if (scopeRefusal)
+      return humanNeeded(db, event, scopeRefusal, at, ttlSeconds);
+
+    // A work scan reserves its repo as soon as its run is PROPOSED, before the
+    // expensive model read can select a ticket. This is deliberately stronger
+    // than schedule singleton semantics (which exclude watched PROPOSED runs):
+    // two operator/chain scans for one queue must never run concurrently. The
+    // IMMEDIATE transaction makes the reservation check and run creation
+    // atomic across planner connections.
+    if (
+      envelope.type === "factory.work.requested" &&
+      typeof envelope.payload?.repo === "string"
+    ) {
+      const blockingScan = liveRunForInput(db, mapping.agent, {
+        repo: envelope.payload.repo,
+      });
+      if (blockingScan) {
+        return noopBehindLiveRun(
+          db,
+          event,
+          blockingScan,
+          "work_scan_already_in_flight",
+          at,
+          ttlSeconds,
+        );
+      }
+    }
+
+    // Defense in depth for stale/advisory scan results: once any dispatch for
+    // this exact repo/ticket has a live run (including an unapproved PROPOSED
+    // run), a second dispatch is refused here with the worktree owner named.
+    // It therefore never reaches provisioning where the same deterministic
+    // worktree path and port pair would masquerade as a foreign port collision.
+    if (
+      envelope.type === "factory.dispatch.requested" &&
+      typeof envelope.payload?.repo === "string" &&
+      typeof envelope.payload?.ticket === "string"
+    ) {
+      const blockingDispatch = liveRunForInput(db, mapping.agent, {
+        repo: envelope.payload.repo,
+        ticket: envelope.payload.ticket,
+        // FAILED dispatches remain retryable and retain their worktree; a new
+        // run for the same ticket would still collide with that owner.
+        includeFailed: true,
+      });
+      if (blockingDispatch) {
+        const reason = `ticket_dispatch_already_live:${blockingDispatch.run_id}:same_ticket_worktree_held`;
+        return noopBehindLiveRun(
+          db,
+          event,
+          blockingDispatch,
+          reason,
+          at,
+          ttlSeconds,
+        );
+      }
+    }
 
     // §5 singleton is agent policy, not clock-envelope policy: operator and
     // chain origins mapped to an enabled singleton agent must not bypass it by
     // omitting payload.loop. Merge scans additionally obey the git-owned
     // global admission cap even when a concrete schedule opts out of
-    // singleton behavior. PROPOSED remains excluded (OPS-436).
+    // singleton behavior. PROPOSED remains excluded here (OPS-436); the
+    // repo-scoped work-scan reservation above intentionally includes it.
     const inFlight = inFlightRunsForAgent(db, mapping.agent);
-    const singletonBlocked = singletonApplies(registry, envelope, mapping.agent) && inFlight.length > 0;
-    const mergeCap = envelope.type === "factory.merge.requested" ? policyMaxConcurrentMerges() : null;
+    // factory.work.requested already has the stricter repo-scoped reservation
+    // above. Applying the schedule's legacy agent-global singleton as well
+    // would incorrectly serialize unrelated repo queues after PROPOSED.
+    const singletonBlocked =
+      envelope.type !== "factory.work.requested" &&
+      singletonApplies(registry, envelope, mapping.agent) &&
+      inFlight.length > 0;
+    const mergeCap =
+      envelope.type === "factory.merge.requested"
+        ? policyMaxConcurrentMerges()
+        : null;
     const mergeCapBlocked = mergeCap !== null && inFlight.length >= mergeCap;
     if (singletonBlocked || mergeCapBlocked) {
       const blockingRun = inFlight[0];
       const proposal = insertProposal(db, {
-        id: newProposalId(), event, runId: blockingRun.run_id, decision: "noop", status: "resolved",
-        reason: "previous_run_in_flight", at, ttlSeconds,
+        id: newProposalId(),
+        event,
+        runId: blockingRun.run_id,
+        decision: "noop",
+        status: "resolved",
+        reason: "previous_run_in_flight",
+        at,
+        ttlSeconds,
       });
       setEventStatus(db, event, "noop");
       return {
@@ -590,7 +1224,14 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     }
 
     const input = validate(def.inputSchema, envelope.payload);
-    if (!input.valid) return humanNeeded(db, event, `invalid_input: ${input.errors[0]}`, at, ttlSeconds);
+    if (!input.valid)
+      return humanNeeded(
+        db,
+        event,
+        `invalid_input: ${input.errors[0]}`,
+        at,
+        ttlSeconds,
+      );
 
     // merge-fix and dispatch derive the same repo-owned
     // worktree_root/<ticket> path. Enforce both planning orders inside this
@@ -620,13 +1261,18 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     // WM-108), computed above outside this transaction. Refusals are typed
     // and carry their reason; a null verdict means every check passed at the
     // moment of the read — the doc's execute-time re-check owns the TTL gap.
-    if (def.workspace?.type === "worktree" && def.ref !== "merge-fix@1" && worktreeRefusal) {
+    if (worktreeGateFor(def) === "dispatch" && worktreeRefusal) {
       if (worktreeRefusal.decision === "human_needed") {
         return humanNeeded(db, event, worktreeRefusal.reason, at, ttlSeconds);
       }
       const proposal = insertProposal(db, {
-        id: newProposalId(), event, decision: "noop", status: "resolved",
-        reason: worktreeRefusal.reason, at, ttlSeconds,
+        id: newProposalId(),
+        event,
+        decision: "noop",
+        status: "resolved",
+        reason: worktreeRefusal.detail ?? worktreeRefusal.reason,
+        at,
+        ttlSeconds,
       });
       setEventStatus(db, event, "noop");
       return { decision: "noop", proposal, reason: worktreeRefusal.reason };
@@ -642,12 +1288,21 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     // has no chain relationship with.
     if (
       def.workspace?.type === "artifacts" &&
-      (def.workspace.inputs ?? []).some((i) => typeof i.from === "string" && i.from.startsWith("$.input.runPin."))
+      (def.workspace.inputs ?? []).some(
+        (i) =>
+          typeof i.from === "string" && i.from.startsWith("$.input.runPin."),
+      )
     ) {
       try {
         payload = { ...payload, runPin: pinRunArtifact(db, payload.runId) };
       } catch (err) {
-        return humanNeeded(db, event, `run_pin_failed: ${err.message}`, at, ttlSeconds);
+        return humanNeeded(
+          db,
+          event,
+          `run_pin_failed: ${err.message}`,
+          at,
+          ttlSeconds,
+        );
       }
     }
     // Declared artifact inputs must exist in the store at plan time (OPS-372):
@@ -658,29 +1313,61 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
         try {
           const sha = resolveInputRef(payload, entry.from);
           if (!findArtifact(artifactStore, sha)) {
-            return humanNeeded(db, event, `artifact_missing: ${entry.as} (${sha})`, at, ttlSeconds);
+            return humanNeeded(
+              db,
+              event,
+              `artifact_missing: ${entry.as} (${sha})`,
+              at,
+              ttlSeconds,
+            );
           }
         } catch (err) {
-          return humanNeeded(db, event, `artifact_ref_failed: ${err.message}`, at, ttlSeconds);
+          return humanNeeded(
+            db,
+            event,
+            `artifact_ref_failed: ${err.message}`,
+            at,
+            ttlSeconds,
+          );
         }
       }
     }
     if (def.workspace?.type === "repository") {
       try {
-        payload = { ...payload, repoPin: pinRepo(payload.repo, payload.ref ?? undefined) };
+        payload = {
+          ...payload,
+          repoPin: pinRepo(payload.repo, payload.ref ?? undefined),
+        };
       } catch (err) {
-        return humanNeeded(db, event, `repo_pin_failed: ${err.message}`, at, ttlSeconds);
+        return humanNeeded(
+          db,
+          event,
+          `repo_pin_failed: ${err.message}`,
+          at,
+          ttlSeconds,
+        );
       }
     }
 
-    const pinnedEnvelope = payload === envelope.payload ? envelope : { ...envelope, payload };
+    const pinnedEnvelope =
+      payload === envelope.payload ? envelope : { ...envelope, payload };
     if (pinnedEnvelope !== envelope) {
-      db.query(`UPDATE events SET envelope_json = ? WHERE source = ? AND event_id = ?`)
-        .run(canonicalJson(pinnedEnvelope), event.source, event.event_id);
+      db.query(
+        `UPDATE events SET envelope_json = ? WHERE source = ? AND event_id = ?`,
+      ).run(canonicalJson(pinnedEnvelope), event.source, event.event_id);
     }
-    let idempotencyKey = idempotencyKeyFor(mapping, def, pinnedEnvelope, hashJson(payload));
+    let idempotencyKey = idempotencyKeyFor(
+      mapping,
+      def,
+      pinnedEnvelope,
+      hashJson(payload),
+    );
     const correlation = envelope.correlationId ?? envelope.eventId ?? null;
-    if (correlation && !mapping.idempotencyScope.includes("correlationId") && !mapping.idempotencyScope.includes("eventId")) {
+    if (
+      correlation &&
+      !mapping.idempotencyScope.includes("correlationId") &&
+      !mapping.idempotencyScope.includes("eventId")
+    ) {
       idempotencyKey = `${idempotencyKey}:${correlation}`;
     }
     const existingRun = resolveIdempotency(db, {
@@ -691,11 +1378,23 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     });
     if (existingRun) {
       const proposal = insertProposal(db, {
-        id: newProposalId(), event, runId: existingRun.run_id, decision: "noop",
-        idempotencyKey, status: "resolved", reason: "duplicate_run", at, ttlSeconds,
+        id: newProposalId(),
+        event,
+        runId: existingRun.run_id,
+        decision: "noop",
+        idempotencyKey,
+        status: "resolved",
+        reason: "duplicate_run",
+        at,
+        ttlSeconds,
       });
       setEventStatus(db, event, "noop");
-      return { decision: "noop", proposal, runId: existingRun.run_id, reason: "duplicate_run" };
+      return {
+        decision: "noop",
+        proposal,
+        runId: existingRun.run_id,
+        reason: "duplicate_run",
+      };
     }
 
     // A terminal generation releases the family for another trigger. Keep the
@@ -710,11 +1409,25 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
 
     let approvalPolicy = null;
     if (envelope.source === "chain") {
-      approvalPolicy = buildChainApprovalPolicy(envelope.type, { source: envelope.source });
-      if (approvalPolicy?.mode === "auto" && envelope.type === "factory.dispatch.requested") {
-        const result = worktreeDispatchAutoEligibility(pinnedEnvelope.payload, dispatch);
+      approvalPolicy = buildChainApprovalPolicy(envelope.type, {
+        source: envelope.source,
+      });
+      if (
+        approvalPolicy?.mode === "auto" &&
+        envelope.type === "factory.dispatch.requested"
+      ) {
+        const result = worktreeDispatchAutoEligibility(
+          pinnedEnvelope.payload,
+          dispatch,
+        );
         if (!result?.ok) {
-          return humanNeeded(db, event, `dispatch_eligibility_check_failed_at_plan: ${result?.refusal?.reason ?? "unknown"}`, at, ttlSeconds);
+          return humanNeeded(
+            db,
+            event,
+            `dispatch_eligibility_check_failed_at_plan: ${result?.refusal?.reason ?? "unknown"}`,
+            at,
+            ttlSeconds,
+          );
         }
         approvalPolicy = {
           ...approvalPolicy,
@@ -737,11 +1450,16 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
     const specHash = hashJson(spec);
     try {
       createRun(db, {
-        runId, idempotencyKey, spec, specJson, specHash,
+        runId,
+        idempotencyKey,
+        spec,
+        specJson,
+        specHash,
         actor: "planner",
         correlationId: envelope.correlationId ?? null,
         causationId: envelope.causationId ?? null,
-        policyVersion, now,
+        policyVersion,
+        now,
       });
     } catch (err) {
       if (!isIdempotencyKeyCollision(err)) throw err;
@@ -749,15 +1467,30 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
       if (!winner) throw err;
       const reason = `idempotency_collision:${winner.run_id}`;
       const proposal = insertProposal(db, {
-        id: newProposalId(), event, runId: winner.run_id, decision: "noop",
-        idempotencyKey, status: "resolved", reason, at, ttlSeconds,
+        id: newProposalId(),
+        event,
+        runId: winner.run_id,
+        decision: "noop",
+        idempotencyKey,
+        status: "resolved",
+        reason,
+        at,
+        ttlSeconds,
       });
       setEventStatus(db, event, "noop");
       return { decision: "noop", proposal, runId: winner.run_id, reason };
     }
     const proposal = insertProposal(db, {
-      id: newProposalId(), event, runId, decision: "run",
-      specJson, specHash, idempotencyKey, status: "open", at, ttlSeconds,
+      id: newProposalId(),
+      event,
+      runId,
+      decision: "run",
+      specJson,
+      specHash,
+      idempotencyKey,
+      status: "open",
+      at,
+      ttlSeconds,
     });
     setEventStatus(db, event, "planned");
     return { decision: "run", proposal, runId };
@@ -771,12 +1504,20 @@ export function planEvent(db, registry, { source, eventId }, { now = Date.now(),
  * human_needed proposal for it is superseded so the inbox does not show a
  * stale ask next to a fresh plan.
  */
-export function requeueEvent(db, { source, eventId }, { actor = "operator", now = Date.now() } = {}) {
+export function requeueEvent(
+  db,
+  { source, eventId },
+  { actor = "operator", now = Date.now() } = {},
+) {
   return txImmediate(db, () => {
-    const event = db.query(`SELECT status FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
+    const event = db
+      .query(`SELECT status FROM events WHERE source = ? AND event_id = ?`)
+      .get(source, eventId);
     if (!event) throw new Error(`unknown event (${source}, ${eventId})`);
     if (!["dead_lettered", "human_needed"].includes(event.status)) {
-      throw new Error(`requeue applies to dead_lettered or human_needed events, not ${event.status}`);
+      throw new Error(
+        `requeue applies to dead_lettered or human_needed events, not ${event.status}`,
+      );
     }
     db.query(
       `UPDATE proposals SET status = 'superseded', decided_at = ?, decided_by = ?, reason = 'requeued'
@@ -796,18 +1537,27 @@ export function requeueEvent(db, { source, eventId }, { actor = "operator", now 
  * The archive marker removes it from the active doctor deck while preserving
  * the event in the ledger and allowing a later explicit requeue.
  */
-export function archiveDeadLetteredEvent(db, { source, eventId }, { now = Date.now() } = {}) {
+export function archiveDeadLetteredEvent(
+  db,
+  { source, eventId },
+  { now = Date.now() } = {},
+) {
   return txImmediate(db, () => {
     const event = db
-      .query(`SELECT status, archived_at FROM events WHERE source = ? AND event_id = ?`)
+      .query(
+        `SELECT status, archived_at FROM events WHERE source = ? AND event_id = ?`,
+      )
       .get(source, eventId);
     if (!event) throw new Error(`unknown event (${source}, ${eventId})`);
     if (event.status !== "dead_lettered") {
-      throw new Error(`archive applies to dead_lettered events, not ${event.status}`);
+      throw new Error(
+        `archive applies to dead_lettered events, not ${event.status}`,
+      );
     }
     if (!event.archived_at) {
-      db.query(`UPDATE events SET archived_at = ? WHERE source = ? AND event_id = ?`)
-        .run(new Date(now).toISOString(), source, eventId);
+      db.query(
+        `UPDATE events SET archived_at = ? WHERE source = ? AND event_id = ?`,
+      ).run(new Date(now).toISOString(), source, eventId);
     }
     return { archived: true };
   });
@@ -822,7 +1572,11 @@ export function archiveDeadLetteredEvent(db, { source, eventId }, { now = Date.n
  * @returns {{ planned: number, failed: number, deadLettered: number }}
  */
 export function planAdmittedEvents(db, registry, opts = {}) {
-  const rows = db.query(`SELECT source, event_id FROM events WHERE status = 'admitted' ORDER BY admitted_at, rowid`).all();
+  const rows = db
+    .query(
+      `SELECT source, event_id FROM events WHERE status = 'admitted' ORDER BY admitted_at, rowid`,
+    )
+    .all();
   let planned = 0;
   let failed = 0;
   let deadLettered = 0;
@@ -841,9 +1595,15 @@ export function planAdmittedEvents(db, registry, opts = {}) {
           db.query(
             `UPDATE events SET plan_failures = plan_failures + 1, last_plan_error = ? WHERE source = ? AND event_id = ?`,
           ).run(message, source, eventId);
-          const row = db.query(`SELECT plan_failures FROM events WHERE source = ? AND event_id = ?`).get(source, eventId);
+          const row = db
+            .query(
+              `SELECT plan_failures FROM events WHERE source = ? AND event_id = ?`,
+            )
+            .get(source, eventId);
           if (row.plan_failures >= DEAD_LETTER_AFTER) {
-            db.query(`UPDATE events SET status = 'dead_lettered' WHERE source = ? AND event_id = ?`).run(source, eventId);
+            db.query(
+              `UPDATE events SET status = 'dead_lettered' WHERE source = ? AND event_id = ?`,
+            ).run(source, eventId);
           }
           return row.plan_failures;
         });

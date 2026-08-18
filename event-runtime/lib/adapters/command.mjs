@@ -18,13 +18,18 @@
  * reach the guest only as placeholders. The result contract is identical
  * either way — the same result.json, the same captured artifact, the same
  * exit-code semantics — so downstream verification cannot tell the two apart.
- * Without the block, this adapter behaves exactly as it always has.
+ * Without the block, this adapter behaves exactly as it always has. The
+ * decision itself (sandboxed, or refused) is not this adapter's own any more:
+ * it goes through lib/adapters/sandboxed.mjs like every other adapter (WM-313).
  */
 import { spawn } from "node:child_process";
 import { createWriteStream, writeFileSync } from "node:fs";
 import path from "node:path";
 import { FACTORY_ROOT } from "../config.mjs";
-import { runInSandbox } from "../sandbox/gondolin.mjs";
+import { runSandboxed, sandboxRequested } from "./sandboxed.mjs";
+
+/** This adapter executes inside the VM when a definition asks (WM-185). */
+export const SANDBOX_SUPPORT = "gondolin";
 
 const KILL_GRACE_MS = 10_000;
 const OUTPUT_TAIL_CHARS = 2_000;
@@ -43,10 +48,14 @@ export function resolveTemplate(template, input) {
     element.replace(/\{([A-Za-z0-9_]+)\}/g, (_, field) => {
       const value = context[field];
       if (value === undefined || value === null) {
-        throw new Error(`command template references missing input field "${field}"`);
+        throw new Error(
+          `command template references missing input field "${field}"`,
+        );
       }
       if (!["string", "number", "boolean"].includes(typeof value)) {
-        throw new Error(`command template field "${field}" must be a primitive, got ${typeof value}`);
+        throw new Error(
+          `command template field "${field}" must be a primitive, got ${typeof value}`,
+        );
       }
       return String(value);
     }),
@@ -72,7 +81,9 @@ function killProcessGroup(child, signal = "SIGTERM") {
  * paths so the two can never drift into producing different artifacts.
  */
 function writeResultJson({ workspaceDir, def, argv, output }) {
-  const captured = def.captureStdout ? [{ kind: def.captureKind ?? "output", path: def.captureStdout }] : [];
+  const captured = def.captureStdout
+    ? [{ kind: def.captureKind ?? "output", path: def.captureStdout }]
+    : [];
   writeFileSync(
     path.join(workspaceDir, "result.json"),
     `${JSON.stringify(
@@ -103,28 +114,32 @@ function writeResultJson({ workspaceDir, def, argv, output }) {
  *
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-async function executeSandboxed({ def, argv, workspaceDir, timeoutMs, abortSignal }) {
-  // Array-form exec does not search $PATH inside the guest, and a host path
-  // like /opt/homebrew/bin/bun does not exist there. Failing here with the
-  // real reason beats a bare "no such file" from inside a VM.
-  if (!argv[0].startsWith("/")) {
-    throw new Error(
-      `definition ${def.ref} is sandboxed, so its command must start with an absolute guest path (got ${JSON.stringify(argv[0])})`,
-    );
-  }
-
+async function executeSandboxed({
+  def,
+  argv,
+  workspaceDir,
+  timeoutMs,
+  abortSignal,
+  onTrace,
+  runSandbox,
+}) {
   let output = "";
   const collect = (chunk) => {
     output = (output + chunk).slice(-OUTPUT_TAIL_CHARS);
   };
-  const capture = def.captureStdout ? createWriteStream(path.join(workspaceDir, def.captureStdout)) : null;
+  const capture = def.captureStdout
+    ? createWriteStream(path.join(workspaceDir, def.captureStdout))
+    : null;
 
-  const { exitCode, timedOut } = await runInSandbox({
-    policy: def.sandbox,
-    command: argv,
+  const { exitCode, timedOut } = await runSandboxed({
+    adapter: "command",
+    def,
+    argv,
     workspaceDir,
     timeoutMs,
     abortSignal,
+    onTrace,
+    runSandbox,
     onStdout: (chunk) => {
       capture?.write(chunk);
       collect(chunk);
@@ -142,14 +157,33 @@ async function executeSandboxed({ def, argv, workspaceDir, timeoutMs, abortSigna
 /**
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-export async function execute({ spec, def, workspaceDir, timeoutMs, abortSignal, signal }) {
+export async function execute({
+  spec,
+  def,
+  workspaceDir,
+  timeoutMs,
+  abortSignal,
+  signal,
+  onTrace,
+  runSandbox,
+}) {
   if (!Array.isArray(def.command) || def.command.length === 0) {
-    throw new Error(`definition ${def.ref} has no command template — not a command-adapter agent`);
+    throw new Error(
+      `definition ${def.ref} has no command template — not a command-adapter agent`,
+    );
   }
   const argv = resolveTemplate(def.command, spec.input);
 
-  if (def.sandbox) {
-    return executeSandboxed({ def, argv, workspaceDir, timeoutMs, abortSignal: abortSignal ?? signal });
+  if (sandboxRequested(def)) {
+    return executeSandboxed({
+      def,
+      argv,
+      workspaceDir,
+      timeoutMs,
+      abortSignal: abortSignal ?? signal,
+      onTrace,
+      runSandbox,
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -180,13 +214,19 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, abortSignal,
     const termTimer = setTimeout(() => {
       timedOut = true;
       killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
+      killTimer = setTimeout(
+        () => killProcessGroup(child, "SIGKILL"),
+        KILL_GRACE_MS,
+      );
     }, timeoutMs);
 
     const onAbort = () => {
       killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
+        killTimer = setTimeout(
+          () => killProcessGroup(child, "SIGKILL"),
+          KILL_GRACE_MS,
+        );
       }
     };
     const abortSig = abortSignal ?? signal;

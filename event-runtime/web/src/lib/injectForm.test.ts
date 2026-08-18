@@ -37,7 +37,9 @@ describe("errorsByField pattern humanization (WM-86)", () => {
   });
 
   test("does not leak regex when no placeholder is available", () => {
-    const mapped = errorsByField(["$.logArtifact: does not match pattern ^[0-9a-f]{64}$"]);
+    const mapped = errorsByField([
+      "$.logArtifact: does not match pattern ^[0-9a-f]{64}$",
+    ]);
     const msg = (mapped.get("logArtifact") ?? []).join(" ");
     expect(msg).not.toContain("^");
     expect(msg).toMatch(/expected format/i);
