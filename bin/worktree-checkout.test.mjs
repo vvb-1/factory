@@ -844,6 +844,41 @@ test("concurrent worktree-up --checkout-only succeed in parallel", async () => {
   }
 });
 
+test("worktree_add retries transient worktree metadata read races", () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "factory-wt-metadata-race-"));
+  const attemptsFile = path.join(tempDir, "attempts");
+  const worktreePath = path.join(tempDir, "checkout");
+
+  try {
+    const r = sh(`
+      git() {
+        if [[ "$*" == *" show-ref --verify --quiet refs/heads/feat/WM-TEST"* ]]; then
+          return 1
+        fi
+        if [[ "$*" == *" worktree add "* ]]; then
+          local attempts=0
+          [[ -f "$MOCK_GIT_ATTEMPTS" ]] && attempts=$(cat "$MOCK_GIT_ATTEMPTS")
+          attempts=$((attempts + 1))
+          printf '%s\n' "$attempts" >"$MOCK_GIT_ATTEMPTS"
+          if [[ "$attempts" -eq 1 ]]; then
+            printf '%s\n' 'fatal: failed to read .git/worktrees/PARA-123/commondir: Success' >&2
+            return 1
+          fi
+          return 0
+        fi
+        return 1
+      }
+      worktree_add "${worktreePath}" "feat/WM-TEST" "origin/develop" "/repo"
+    `, { MOCK_GIT_ATTEMPTS: attemptsFile });
+
+    expect(r.status).toBe(0);
+    expect(readFileSync(attemptsFile, "utf8").trim()).toBe("2");
+    expect(r.stderr).toContain("git worktree add hit lock contention (attempt 1/6)");
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("high concurrency worktree-up --checkout-only with 4 parallel bring-ups succeeds", async () => {
   const tempWtRoot = mkdtempSync(path.join(tmpdir(), "factory-wt-4conc-"));
   const tickets = [
@@ -1080,4 +1115,3 @@ test("worktree-down refuses dirty worktree without --force and cleans up with --
     Bun.spawnSync({ cmd: ["git", "branch", "-D", `feat/${ticketId}`] });
   }
 });
-
