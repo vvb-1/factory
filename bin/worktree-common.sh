@@ -64,7 +64,7 @@ worktree_add() { # <worktree> <branch> <base-ref> [repo]
       return 0
     fi
     if [[ $attempt -lt $max_attempts ]] \
-      && grep -qiE '\.lock|could not lock|cannot lock|unable to create|another git process|temporarily unavailable|resource deadlock|resource temporarily unavailable|device or resource busy|already exists' <<<"$err"; then
+      && grep -qiE '\.lock|could not lock|cannot lock|unable to create|another git process|temporarily unavailable|resource deadlock|resource temporarily unavailable|device or resource busy|already exists|failed to read .*\.git/worktrees|commondir' <<<"$err"; then
       local delay_idx=$((attempt - 1))
       [[ $delay_idx -ge ${#delays[@]} ]] && delay_idx=$((${#delays[@]} - 1))
       warn "git worktree add hit lock contention (attempt $attempt/$max_attempts) — retrying in ${delays[$delay_idx]}s"
@@ -777,5 +777,4 @@ locked_bun_install() { # <dir>
 }
 
 source "$(dirname "${BASH_SOURCE[0]}")/worktree-daemons.sh"
-
 
