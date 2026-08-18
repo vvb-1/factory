@@ -4,7 +4,7 @@ import {
   buildChainTimeline,
   chainNeedsRevisit,
   chainViewModeFromQuery,
-  coveringSchedule,
+  nextScheduledRetry,
   formatDelta,
   formatUntil,
   humanizeRunReason,
@@ -255,8 +255,8 @@ describe("buildChainTimeline", () => {
     const { rows } = build();
     const next = rows.at(-1)!;
     expect(next.kind).toBe("next");
-    expect(next.actor).toBe("merge-factory");
-    expect(next.what).toMatch(/^re-examines at \d{2}:\d{2} \(in 8m 30s\)$/);
+    expect(next.actor).toBeNull();
+    expect(next.what).toMatch(/^next: merge-factory · re-examines at \d{2}:\d{2} \(in 8m 30s\)$/);
     expect(next.refs).toEqual([{ kind: "schedule", label: "merge-factory", id: "merge-factory" }]);
     expect(next.muted).toBe(true);
   });
@@ -310,8 +310,8 @@ describe("buildChainTimeline", () => {
     });
     const noop = rows.find((r) => r.badge === "noop")!;
     expect(noop.actor).toBe("planner");
-    expect(noop.what).toBe("the ticket is already assigned");
-    expect(noop.reason).toEqual({ text: "the ticket is already assigned", raw: "ticket_assigned" });
+    expect(noop.what).toBe("Ticket is already assigned");
+    expect(noop.reason).toEqual({ text: "Ticket is already assigned", raw: "ticket_assigned" });
     expect(noop.nodeId).toBe(`event:chain:${FIX_EVENT}`);
     expect(rows.at(-1)!.kind).toBe("next");
   });
@@ -333,7 +333,7 @@ describe("buildChainTimeline", () => {
 
 describe("helpers", () => {
   test("humanizeRunReason keeps the suffix and de-snakes unknown codes", () => {
-    expect(humanizeRunReason("auto_approved:chain-policy@1")).toEqual({ text: "auto-approved: chain-policy@1", raw: "auto_approved:chain-policy@1" });
+    expect(humanizeRunReason("auto_approved:chain-policy@1")).toEqual({ text: "Auto-approved — chain-policy@1", raw: "auto_approved:chain-policy@1" });
     expect(humanizeRunReason("some_new_code")).toEqual({ text: "some new code", raw: "some_new_code" });
     expect(humanizeRunReason(null)).toBeNull();
   });
@@ -357,11 +357,11 @@ describe("helpers", () => {
     expect(specInputRefs(null)).toEqual([]);
   });
 
-  test("coveringSchedule ignores disabled/stopped loops and matches repo", () => {
+  test("nextScheduledRetry ignores disabled/stopped loops and matches repo", () => {
     const origin = chain().events[0];
-    expect(coveringSchedule(origin, [schedule({ stopped: true })])).toBeNull();
-    expect(coveringSchedule(origin, [schedule({ repo: null })])?.loop).toBe("merge-factory");
-    expect(coveringSchedule(origin, [schedule({ eventType: "factory.work.requested" })])).toBeNull();
+    expect(nextScheduledRetry(origin, [schedule({ stopped: true })])).toBeNull();
+    expect(nextScheduledRetry(origin, [schedule({ repo: null })])?.loop).toBe("merge-factory");
+    expect(nextScheduledRetry(origin, [schedule({ eventType: "factory.work.requested" })])).toBeNull();
   });
 
   test("view mode persists and ?view= parses", () => {

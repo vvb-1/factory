@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   buildTicketJourney,
   formatDuration,
-  humanizeReason,
   parsePrRef,
   prNumbersIn,
   scanVerdictFor,
@@ -14,6 +13,7 @@ import {
   type SubjectJourneySource,
   type TicketJourneySource,
 } from "./subjectJourney";
+import { humanizeReason } from "./reasons";
 
 const lifecycle = (runId: string, start: string, end: string) => [
   {
@@ -229,8 +229,8 @@ describe("ticket journey helpers", () => {
   });
 
   test("humanizes known and unknown reason codes", () => {
-    expect(humanizeReason("ticket_assigned")).toBe("Ticket is already assigned");
-    expect(humanizeReason("foreign_reason:WM-1")).toBe("Foreign reason — WM-1");
+    expect(humanizeReason("ticket_assigned").text).toBe("Ticket is already assigned");
+    expect(humanizeReason("foreign_reason:WM-1").text).toBe("foreign reason — WM-1");
   });
 });
 
@@ -373,7 +373,7 @@ describe("subjectJourney(pr)", () => {
     // The refusal is the last run activity → it is the blocking reason, and the schedule tells when the loop comes back.
     expect(journey.blockingReason).toBe("PR head moved since the scan (merge_fix_pr_moved)");
     expect(journey.nextVisit).toEqual({ loop: "merge-factory", at: "2026-08-17T19:30:00.000Z" });
-    expect(labels.at(-1)).toMatch(/^next: merge-factory at \d\d:\d\d$/);
+    expect(labels.at(-1)).toMatch(/^next: merge-factory · re-examines at \d\d:\d\d \(/);
     expect(journey.nextAction).toContain("Waiting: PR head moved since the scan");
     expect(journey.nextAction).toContain("merge-factory revisits at");
     // PR opened row links out to GitHub on a PR journey.

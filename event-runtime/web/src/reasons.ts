@@ -15,6 +15,12 @@
 
 /** Head codes → sentence-cased phrase. Suffix fragments are appended after ` — `. */
 export const REASONS: Record<string, string> = {
+  // run lifecycle actors
+  planned: "Planned",
+  claimed: "Claimed",
+  started: "Started",
+  auto_approved: "Auto-approved",
+  approved: "Approved",
   // planner: dispatch gate (lib/planner.mjs worktreeDispatchAutoEligibility)
   owned_paths_overlap: "Owned paths overlap",
   owned_paths_unknown: "Owned paths unknown",
@@ -71,13 +77,18 @@ export const REASONS: Record<string, string> = {
   merge_fix_pr_moved: "PR head moved since the plan",
   merge_fix_pr_not_open: "PR is no longer open",
   merge_fix_pr_not_found: "PR not found",
+  merge_fix_pr_read_failed: "PR could not be read from GitHub",
   merge_fix_run_active: "A merge-fix run is already active",
+  merge_fix_run_check_failed: "Could not check for competing merge-fix runs",
   merge_fix_owned_paths_moved: "PR touches paths outside Owned Paths",
   merge_fix_owned_paths_unknown: "Owned paths unknown",
   merge_fix_ticket_state: "Ticket is not in a merge-fix state",
   merge_fix_ticket_escalated: "Ticket is escalated",
   merge_fix_ticket_security: "Ticket is security-labelled",
   merge_fix_ticket_not_found: "Ticket not found",
+  merge_fix_ticket_read_failed: "Ticket could not be read from Linear",
+  merge_apply_pr_moved: "PR head moved since the plan",
+  merge_apply_base_moved: "Base moved since the plan",
   // worker / verify (lib/worker.mjs, lib/verify.mjs, adapters)
   needs_human: "Needs human",
   missing_input: "Missing input",
