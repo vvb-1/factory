@@ -46,11 +46,11 @@ export async function spawnFactoryJanitor(
       timedOut = true;
       try {
         child.kill("SIGTERM");
-      } catch {}
+      } catch { /* intentionally ignored */ }
       killTimer = setTimeout(() => {
         try {
           child.kill("SIGKILL");
-        } catch {}
+        } catch { /* intentionally ignored */ }
       }, 2000);
     }, timeoutMs);
 
@@ -60,7 +60,7 @@ export async function spawnFactoryJanitor(
       if (stdout.length > maxBuffer) {
         try {
           child.kill("SIGKILL");
-        } catch {}
+        } catch { /* intentionally ignored */ }
       }
     });
 
@@ -70,7 +70,7 @@ export async function spawnFactoryJanitor(
       if (stderr.length > maxBuffer) {
         try {
           child.kill("SIGKILL");
-        } catch {}
+        } catch { /* intentionally ignored */ }
       }
     });
 

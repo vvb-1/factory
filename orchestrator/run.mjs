@@ -61,7 +61,7 @@ export function createChildTracker({ setTimeoutFn = setTimeout, clearTimeoutFn =
 
     terminateAll(signal = "SIGTERM") {
       for (const child of [...active]) {
-        try { child.kill(signal); } catch {}
+        try { child.kill(signal); } catch { /* intentionally ignored */ }
       }
     },
 

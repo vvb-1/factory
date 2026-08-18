@@ -37,7 +37,7 @@ for (const repo of cfg.repos || []) {
   try {
     const repoPath = expand(repo.path);
     byPath = target === repoPath || target.startsWith(repoPath + path.sep);
-  } catch {}
+  } catch { /* intentionally ignored */ }
   if (!byPath && !(remote && repo.github === remote)) continue;
   const sec = repo.security || {};
   if (sec.semgrep_args) console.log(`export SEMGREP_ARGS=${JSON.stringify(sec.semgrep_args)}`);

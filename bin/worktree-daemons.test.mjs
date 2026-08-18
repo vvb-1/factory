@@ -84,7 +84,7 @@ test("spawn_daemon creates detached process that survives subshell exit", () => 
       try {
         const pid = readFileSync(pidfile, "utf8").trim();
         process.kill(Number(pid), "SIGKILL");
-      } catch {}
+      } catch { /* intentionally ignored */ }
     }
     rmSync(testDir, { recursive: true, force: true });
   }
@@ -158,7 +158,7 @@ test("await_daemon falls back to SIGKILL when process ignores SIGTERM", () => {
     if (pid) {
       try {
         process.kill(Number(pid), "SIGKILL");
-      } catch {}
+      } catch { /* intentionally ignored */ }
     }
     rmSync(testDir, { recursive: true, force: true });
   }
@@ -248,7 +248,7 @@ test("supervise_tick restarts dead daemon and logs restart line", () => {
     expect(logContent).toContain("[supervisor] restarting dead worker");
 
     // Clean up spawned worker
-    try { process.kill(Number(newPid), "SIGKILL"); } catch {}
+    try { process.kill(Number(newPid), "SIGKILL"); } catch { /* intentionally ignored */ }
   } finally {
     rmSync(testDir, { recursive: true, force: true });
   }

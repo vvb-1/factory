@@ -229,14 +229,14 @@ try {
   for (const p of (priorProposals ?? [])) {
     try {
       await client.reject(p.id, "cancelled by demo re-seed");
-    } catch {}
+    } catch { /* intentionally ignored */ }
   }
   const { runs: priorRuns } = await client.runs();
   for (const r of (priorRuns ?? [])) {
     if (r.state === "RUNNING" || r.state === "QUEUED") {
       try {
         await client.cancel(r.runId, "cancelled by demo re-seed");
-      } catch {}
+      } catch { /* intentionally ignored */ }
     }
   }
   await until(

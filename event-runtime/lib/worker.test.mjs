@@ -2985,6 +2985,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
         try {
           child.kill();
         } catch {
+          /* intentionally ignored */
         }
       }
       for (const [key, value] of Object.entries(originalEnv)) {

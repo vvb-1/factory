@@ -70,7 +70,7 @@ if (buf.trim()) handle(buf);
 function handle(line) {
   const t = line.trim();
   if (!t) return;
-  if (logFile) { try { appendFileSync(logFile, t + "\n"); } catch {} }
+  if (logFile) { try { appendFileSync(logFile, t + "\n"); } catch { /* intentionally ignored */ } }
   if (!t.startsWith("{")) { if (t) console.log(c.dim("  " + oneLine(t, 160))); return; }
 
   let e;

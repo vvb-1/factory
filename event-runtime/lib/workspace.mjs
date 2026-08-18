@@ -49,6 +49,7 @@ export class WorktreeError extends Error {
   }
 }
 
+// eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
 const ANSI_ESCAPE = /\x1b\[[0-9;]*m/g;
 const WARNING_LINE = /^warn:\s*/i;
 
@@ -298,7 +299,7 @@ function materializeWorktree({
     throw new WorktreeError(`worktree_up reported success for ${repoName}/${ticket} but did not create ${worktreePath}`);
   }
 
-  let preservation = null;
+  let preservation;
   try {
     preservation = readPreservationReport(preservationPath);
   } catch (err) {
@@ -460,7 +461,7 @@ export function destroyWorkspace(
     try {
       record = JSON.parse(readFileSync(marker, "utf8"));
     } catch {
-      record = null;
+      /* malformed marker: record stays null from the initializer */
     }
     if (!record?.down || !record?.ticket) return false;
     const down = spawnSync("/bin/bash", [record.down, record.ticket], {

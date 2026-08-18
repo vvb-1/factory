@@ -90,7 +90,7 @@ function deadlineEventFromReason(reason, type) {
       typeof value.deadlineAt === "string" &&
       Number.isFinite(Date.parse(value.deadlineAt))
     ) return value;
-  } catch {}
+  } catch { /* intentionally ignored */ }
   return null;
 }
 
@@ -613,7 +613,7 @@ export function acquireClaimLock(lockFile, { pid = process.pid, now = Date.now()
       writeFileSync(lockFile, `${pid} ${now}\n`, { flag: "wx" });
       return true;
     } catch {
-      let lockPid = 0;
+      let lockPid;
       try {
         const content = readFileSync(lockFile, "utf8").trim();
         [lockPid] = content.split(/\s+/).map(Number);
@@ -624,14 +624,14 @@ export function acquireClaimLock(lockFile, { pid = process.pid, now = Date.now()
       // Age alone is not proof of abandonment: a slow but live Linear claim
       // must retain mutual exclusion. Only a dead owner makes the lock stale.
       if (alive) return false;
-      try { unlinkSync(lockFile); } catch {}
+      try { unlinkSync(lockFile); } catch { /* intentionally ignored */ }
     }
   }
   return false;
 }
 
 export function releaseClaimLock(lockFile) {
-  try { unlinkSync(lockFile); } catch {}
+  try { unlinkSync(lockFile); } catch { /* intentionally ignored */ }
 }
 
 function claimLockBackoffMs(contentionNumber, random = Math.random) {
@@ -1039,8 +1039,8 @@ export async function executeClaimed(db, registry, adapters, claim, {
   const retain = spec.workspace?.retainOnFailure === true;
   let workspaceDir = null;
   let checkoutPath = null;
-  let checkoutBaseline = null;
-  let worktreeRecord = null;
+  let checkoutBaseline;
+  let worktreeRecord;
   const cleanupWorkspace = ({ retainWorkspace = false } = {}) => {
     if (!workspaceDir) return;
     const fenced = !assertCurrentToken(db, runId, fencingToken);
@@ -1048,7 +1048,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       // A newer attempt for this run uses the same delegated worktree. Remove
       // only the stale attempt's teardown marker so destroyWorkspace cleans its
       // wrapper directory without invoking worktree_down under the live retry.
-      try { unlinkSync(path.join(workspaceDir, ".worktree.json")); } catch {}
+      try { unlinkSync(path.join(workspaceDir, ".worktree.json")); } catch { /* intentionally ignored */ }
     }
     destroyWorkspace(workspaceDir, {
       retain: retainWorkspace,
@@ -1156,7 +1156,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
   let def = null;
   try {
     def = getAgent(registry, spec.agent);
-  } catch {}
+  } catch { /* intentionally ignored */ }
 
   const refuseTerminal = (reasonCode, checks = ["dispatch_gate"], { causeTyped = false, detail = null } = {}) =>
     txImmediate(db, () => {
@@ -1380,7 +1380,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
         leaseHeartbeat = setInterval(() => {
           try {
             renewWorkerLease({ repo: repoName, ticket: ticketId, owner: ticketLeaseOwner, dir: leasesDir, now: Date.now() });
-          } catch {}
+          } catch { /* intentionally ignored */ }
         }, LEASE_HEARTBEAT_MS);
         leaseHeartbeat?.unref?.();
       }
@@ -1461,7 +1461,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
           fencingToken,
           leaseExpiresAt,
         );
-      } catch {}
+      } catch { /* intentionally ignored */ }
       if (deadlineTimer) clearTimeout(deadlineTimer);
       const leftMs = deadlineMs - logicalNow();
       if (leftMs <= 0) {
@@ -1518,7 +1518,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     if (abortController.signal.aborted && !deadlineExpired) {
       if (mayMutateClaimedTicket()) {
-        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: "cancelled", log: null }); } catch {}
+        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: "cancelled", log: null }); } catch { /* intentionally ignored */ }
       }
       cleanupWorkspace();
       const res = txImmediate(db, () => {
@@ -1558,7 +1558,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
       if (!lateCompletion) {
         if (mayMutateClaimedTicket()) {
-          try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: "timeout", log: null }); } catch {}
+          try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: "timeout", log: null }); } catch { /* intentionally ignored */ }
         }
         const res = failTerminal("TIMED_OUT", "timeout", "timeout");
         cleanupWorkspace({ retainWorkspace: retain });
@@ -1569,7 +1569,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     const denial = policyDenials[0];
     if (!lateCompletion && denial) {
       if (mayMutateClaimedTicket()) {
-        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `policy_denied:${denial.tool}`, log: null }); } catch {}
+        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `policy_denied:${denial.tool}`, log: null }); } catch { /* intentionally ignored */ }
       }
       const reasonCode = `policy_denied:${denial.tool}`;
       const res = failTerminal("FAILED", reasonCode, reasonCode);
@@ -1579,7 +1579,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     }
     if (!lateCompletion && exitCode !== 0) {
       if (mayMutateClaimedTicket()) {
-        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `agent_exit_${exitCode}`, log: null }); } catch {}
+        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `agent_exit_${exitCode}`, log: null }); } catch { /* intentionally ignored */ }
       }
       const reasonCode = `agent_exit_${exitCode}`;
       const res = failTerminal("FAILED", reasonCode, reasonCode);
@@ -1636,9 +1636,9 @@ export async function executeClaimed(db, registry, adapters, claim, {
               log: null,
               baseline: worktreeRecord?.baseline,
             });
-          } catch {}
+          } catch { /* intentionally ignored */ }
         } else {
-          try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: failureReason, log: null }); } catch {}
+          try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: failureReason, log: null }); } catch { /* intentionally ignored */ }
         }
       }
       // Invalid output is a typed contract failure and emits no completion
@@ -1673,7 +1673,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     if (verified.kind === "refused") {
       if (mayMutateClaimedTicket()) {
-        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `refused: ${verified.reasonCode}`, log: null }); } catch {}
+        try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `refused: ${verified.reasonCode}`, log: null }); } catch { /* intentionally ignored */ }
       }
       const collected = [];
       for (const entry of RUNTIME_ARTIFACTS) {
@@ -1803,7 +1803,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     return { runId, attempt, terminalState: "COMPLETED", reasonCode: "ok", receipt: published.receipt };
   } catch (err) {
     if (mayMutateClaimedTicket()) {
-      try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: err?.message ?? String(err), log: null }); } catch {}
+      try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: err?.message ?? String(err), log: null }); } catch { /* intentionally ignored */ }
     }
     if (err instanceof IllegalTransition) {
       // Operator moved the run under us (cancel) — stop quietly, publish nothing.
@@ -1846,7 +1846,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     stopCancellationMonitor();
     if (leaseHeartbeat) clearInterval(leaseHeartbeat);
     if (ticketClaimed) {
-      try { releaseWorkerLease({ repo: repoName, ticket: ticketId, owner: ticketLeaseOwner, dir: leasesDir }); } catch {}
+      try { releaseWorkerLease({ repo: repoName, ticket: ticketId, owner: ticketLeaseOwner, dir: leasesDir }); } catch { /* intentionally ignored */ }
     }
   }
 }

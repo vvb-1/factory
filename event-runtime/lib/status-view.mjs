@@ -44,7 +44,7 @@ function runCounts(db) {
 /** Node-local pool state: pidfile liveness and workers carrying drain requests. */
 function runtimePoolState(runDir) {
   const drainingIds = new Set();
-  let names = [];
+  let names;
   try {
     names = readdirSync(runDir);
   } catch {

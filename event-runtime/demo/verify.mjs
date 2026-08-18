@@ -148,7 +148,10 @@ check("CI chain: ci-doctor@2 run present", Boolean(ciDoctorRun));
 check("CI chain: ci-rerun@1 run present", Boolean(ciRerunRun));
 
 let ciDoctorView = null;
-let ciRerunView = null;
+// No later read outside the `if (ciRerunRun)` block below, unlike ciDoctorView
+// (used again at the workspace-type coverage check) — an initializer here
+// would never be observed, so eslint(no-useless-assignment) flags it.
+let ciRerunView;
 
 if (ciDoctorRun) {
   ciDoctorView = await client.run(ciDoctorRun.runId);

@@ -44,7 +44,7 @@ function hasLinearKey() {
       try {
         const content = readFileSync(envPath, "utf8");
         if (content.includes("LINEAR_API_KEY=")) return true;
-      } catch {}
+      } catch { /* intentionally ignored */ }
     }
   }
   return false;
@@ -144,7 +144,7 @@ export async function gatherPulse({
         const reposCfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
         const match = (reposCfg.repos ?? []).find((r) => r.name === repoName);
         if (match?.team) team = match.team;
-      } catch {}
+      } catch { /* intentionally ignored */ }
       pulse.supply.team = team;
 
       if (!hasLinearKey()) {
@@ -224,7 +224,7 @@ export async function gatherPulse({
       ahead: aheadRes.ok ? parseInt(aheadRes.out, 10) || 0 : 0,
       clean: statusRes.ok && statusRes.out.length === 0,
     };
-  } catch {}
+  } catch { /* intentionally ignored */ }
 
   return pulse;
 }

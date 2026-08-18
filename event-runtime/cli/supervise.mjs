@@ -78,7 +78,7 @@ export function readPool(dir = runDir()) {
   try {
     names = readdirSync(dir);
   } catch {
-    names = [];
+    /* dir missing or unreadable: names stays [] from the initializer */
   }
   const slots = [];
   for (const name of names) {

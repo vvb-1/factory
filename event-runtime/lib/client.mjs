@@ -23,7 +23,7 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
-      json = null;
+      /* malformed response body: json stays null from the initializer */
     }
     if (!res.ok) {
       const message =

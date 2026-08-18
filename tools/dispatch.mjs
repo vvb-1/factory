@@ -82,7 +82,7 @@ async function streamTrace(runId) {
         since = Math.max(since, entry.seq);
         const time = entry.occurred_at ? new Date(entry.occurred_at).toLocaleTimeString() : "";
         const type = entry.type || "trace";
-        let detail = "";
+        let detail;
         if (entry.data?.text) detail = entry.data.text;
         else if (entry.data?.summary) detail = entry.data.summary;
         else if (entry.data?.command) detail = entry.data.command;
@@ -95,7 +95,8 @@ async function streamTrace(runId) {
 
     const run = await api(`/runs/${encodeURIComponent(runId)}`);
     if (run && ["COMPLETED", "FAILED", "CANCELLED"].includes(run.state)) {
-      finished = true;
+      // Not `finished = true`: the `break` below exits the loop directly, so
+      // the while(!finished) condition is never re-evaluated after this branch.
       console.log(`\n==> Run ${runId} settled: ${run.state} (${run.reasonCode || "ok"})`);
       if (run.state !== "COMPLETED") {
         process.exit(1);

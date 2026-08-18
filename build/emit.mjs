@@ -342,7 +342,7 @@ if (process.argv.includes("--link-repos")) {
     for (const f of commands) {
       const target = path.join(dst, path.basename(f));
       let st = null;
-      try { st = lstatSync(target); } catch {}
+      try { st = lstatSync(target); } catch { /* intentionally ignored */ }
       if (st && !st.isSymbolicLink()) { console.log(`  skip     ${repo.name}/${path.basename(f)} (real file)`); continue; }
       if (st) unlinkSync(target);
       symlinkSync(path.join(CLAUDE, "commands", path.basename(f)), target);
@@ -363,7 +363,7 @@ function linkFactoryBin() {
   }
   mkdirSync(path.dirname(dst), { recursive: true });
   let existing = null;
-  try { existing = lstatSync(dst); } catch {}
+  try { existing = lstatSync(dst); } catch { /* intentionally ignored */ }
   if (existing) {
     if (!existing.isSymbolicLink()) {
       console.log(`  skip     ${dst}  (real file — not overwriting)`);
@@ -398,7 +398,7 @@ if (LINK) {
   for (const [src, dst] of links) {
     mkdirSync(path.dirname(dst), { recursive: true });
     let existing = null;
-    try { existing = lstatSync(dst); } catch {}
+    try { existing = lstatSync(dst); } catch { /* intentionally ignored */ }
     if (existing) {
       if (!existing.isSymbolicLink()) { console.log(`  skip     ${dst}  (real file — not overwriting)`); continue; }
       unlinkSync(dst);

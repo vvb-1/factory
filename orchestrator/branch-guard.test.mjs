@@ -253,7 +253,7 @@ repos:
       },
     );
 
-    try { unlinkSync(tmpConfig); } catch {}
+    try { unlinkSync(tmpConfig); } catch { /* intentionally ignored */ }
     expect(r.status).toBe(EXIT.SAFE);
     expect(r.stdout).toContain("safe to delete");
   });
@@ -289,7 +289,7 @@ repos:
       },
     );
 
-    try { unlinkSync(tmpConfig); } catch {}
+    try { unlinkSync(tmpConfig); } catch { /* intentionally ignored */ }
     expect(r.status).toBe(EXIT.REFUSED);
     expect(r.stderr).toContain("protected branch");
   });

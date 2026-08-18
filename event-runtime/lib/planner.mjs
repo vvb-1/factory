@@ -148,7 +148,7 @@ function fetchTicketDefault(ticketId) {
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
     if (stderr.includes("no such issue")) return null;
-    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`);
+    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`, { cause: err });
   }
 }
 
@@ -160,7 +160,7 @@ function fetchViewerDefault() {
     return JSON.parse(out)?.viewer ?? null;
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
-    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`);
+    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`, { cause: err });
   }
 }
 
@@ -174,7 +174,7 @@ function fetchPullRequestDefault(payload) {
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
     if (/not found|no pull request/i.test(stderr)) return null;
-    throw new Error(`github_read_failed: ${stderr.trim().split("\n").pop() || err.message}`);
+    throw new Error(`github_read_failed: ${stderr.trim().split("\n").pop() || err.message}`, { cause: err });
   }
 }
 
@@ -209,7 +209,7 @@ function fetchInFlightDefault(repoConfig) {
     return JSON.parse(out)?.issues?.nodes ?? [];
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
-    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`);
+    throw new Error(`linear_read_failed: ${stderr.trim().split("\n").pop() || err.message}`, { cause: err });
   }
 }
 

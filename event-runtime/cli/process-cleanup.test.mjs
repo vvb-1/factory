@@ -36,7 +36,7 @@ async function waitForFile(file, timeoutMs = 5_000) {
   while (Date.now() < deadline) {
     try {
       return readFileSync(file, "utf8").trim();
-    } catch {}
+    } catch { /* intentionally ignored */ }
     await Bun.sleep(10);
   }
   throw new Error(`timed out waiting for ${file}`);

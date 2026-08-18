@@ -170,8 +170,8 @@ export async function reconcileRepo(repo, { apply = false, gate = false, quietMi
     return { drift: 0, actions: [] };
   }
 
-  let activeNodes = [];
-  let doneNodes = [];
+  let activeNodes;
+  let doneNodes;
   if (deps.issues) {
     activeNodes = deps.issues.filter((i) => i.state?.type !== "completed" && i.state?.name?.toLowerCase() !== "done");
     doneNodes = deps.issues.filter((i) => i.state?.type === "completed" || i.state?.name?.toLowerCase() === "done");
