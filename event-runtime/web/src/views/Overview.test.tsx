@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -24,6 +25,7 @@ import { changeInput, withApi } from "../test-render";
 import type {
   AdmittedEvent,
   EventFocus,
+  InboxItem,
   JournalEntry,
   Proposal,
   RunListItem,
@@ -195,6 +197,14 @@ function renderOverview(
       onInject={noop}
     />,
   );
+}
+
+/**
+ * Scope a query to the anomaly remediation deck. Needs-you (WM-596) repeats the
+ * same anomaly text above it, so unscoped text/role queries are ambiguous.
+ */
+function deck(view: ReturnType<typeof renderOverview>) {
+  return within(view.getByLabelText("Anomalies"));
 }
 
 /** Build a journal entry; the feed keeps entries newest-first, so tests pass them that way. */
@@ -485,10 +495,10 @@ describe("Overview keyboard navigation (WM-292)", () => {
       const view = renderOverview();
       await waitFor(() => view.getByText(/Anomalies · 2 active issues/));
 
-      const first = view
+      const first = deck(view)
         .getByRole("button", { name: "expired open" })
         .closest('[tabindex="-1"]');
-      const second = view
+      const second = deck(view)
         .getByRole("button", { name: /github.*planner failed/ })
         .closest('[tabindex="-1"]');
       expect(first).toBeTruthy();
@@ -670,7 +680,7 @@ describe("Overview anomaly deck (WM-95)", () => {
     try {
       const view = renderOverview({ kind: "all" }, { onJumpEvents });
       const group = await waitFor(() =>
-        view.getByRole("button", {
+        deck(view).getByRole("button", {
           name: /3 dead-lettered.*chain.*duplicate key/,
         }),
       );
@@ -682,7 +692,7 @@ describe("Overview anomaly deck (WM-95)", () => {
       fireEvent.click(group);
       expect(group.getAttribute("aria-expanded")).toBe("true");
 
-      const firstEvent = view.getByTitle(eventIds[0]!);
+      const firstEvent = deck(view).getByTitle(eventIds[0]!);
       expect(firstEvent.textContent).toBe(shortId(eventIds[0]!));
       fireEvent.click(firstEvent);
       expect(onJumpEvents).toHaveBeenCalledWith({
@@ -700,6 +710,219 @@ describe("Overview anomaly deck (WM-95)", () => {
       api.proposals = originals.proposals;
       api.outbox = originals.outbox;
       api.journal = originals.journal;
+    }
+  });
+
+  test("archives dead letters and releases stalled worker leases, removing both rows (WM-326)", async () => {
+    const mutableApi = api as typeof api & {
+      archive: (
+        source: string,
+        eventId: string,
+      ) => Promise<{ archived: boolean }>;
+      releaseWorker: (
+        workerId: string,
+        runId: string,
+      ) => Promise<{ released: boolean; runId: string }>;
+    };
+    const originals = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+      archive: mutableApi.archive,
+      releaseWorker: mutableApi.releaseWorker,
+    };
+    let deadLettered = true;
+    let stalled = true;
+    api.status = async () =>
+      baseStatus({
+        deadLettered: deadLettered
+          ? [
+              {
+                source: "github",
+                eventId: "dead-1",
+                lastError: "historical failure",
+              },
+            ]
+          : [],
+        stalledWorkers: stalled
+          ? [
+              {
+                workerId: "worker-1",
+                runId: "run-1",
+                host: "lab",
+                lastSeen: new Date(0).toISOString(),
+              },
+            ]
+          : [],
+      });
+    api.proposals = async () => ({ proposals: [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+    mutableApi.archive = async (source, eventId) => {
+      expect({ source, eventId }).toEqual({
+        source: "github",
+        eventId: "dead-1",
+      });
+      deadLettered = false;
+      return { archived: true };
+    };
+    mutableApi.releaseWorker = async (workerId, runId) => {
+      expect({ workerId, runId }).toEqual({
+        workerId: "worker-1",
+        runId: "run-1",
+      });
+      stalled = false;
+      return { released: true, runId };
+    };
+
+    try {
+      const view = renderOverview();
+      await waitFor(() => view.getByRole("button", { name: "Archive" }));
+
+      expect(
+        deck(view).getByRole("button", { name: /github.*historical failure/ }),
+      ).toBeTruthy();
+      view.getByRole("button", { name: "Archive" }).click();
+      await waitFor(() =>
+        expect(
+          deck(view).queryByRole("button", {
+            name: /github.*historical failure/,
+          }),
+        ).toBeNull(),
+      );
+
+      const releaseLease = await waitFor(() =>
+        view.getByRole("button", { name: "Release lease" }),
+      );
+      releaseLease.click();
+      // Both anomalies are gone, so the deck unmounts entirely.
+      await waitFor(() =>
+        expect(view.queryByLabelText("Anomalies")).toBeNull(),
+      );
+      expect(view.queryByText(/stalled worker worker-1/)).toBeNull();
+    } finally {
+      api.status = originals.status;
+      api.proposals = originals.proposals;
+      api.outbox = originals.outbox;
+      api.journal = originals.journal;
+      mutableApi.archive = originals.archive;
+      mutableApi.releaseWorker = originals.releaseWorker;
+    }
+    // Two 2s status polls plus the waitFor budgets put this right at bun's
+    // default 5s — it passed on develop by ~100ms. Give it its real budget.
+  }, 30_000);
+
+  test("other anomaly kinds (stale leases, unpublished outbox) render unchanged", async () => {
+    const origStatus = api.status;
+    const origProposals = api.proposals;
+    const origOutbox = api.outbox;
+    const origJournal = api.journal;
+    api.status = async () =>
+      baseStatus({ staleLeases: 3, unpublishedOutbox: 2 });
+    api.proposals = async () => ({ proposals: [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+
+    try {
+      const view = renderOverview();
+
+      await waitFor(() => deck(view).getByText(/stale leases: 3/));
+      expect(deck(view).getByText(/unpublished outbox rows: 2/)).toBeTruthy();
+    } finally {
+      api.status = origStatus;
+      api.proposals = origProposals;
+      api.outbox = origOutbox;
+      api.journal = origJournal;
+    }
+  });
+});
+
+describe("Overview needs you (WM-596)", () => {
+  const originalInbox = api.inbox;
+
+  function inboxItem(
+    id: string,
+    kind: string,
+    createdAt: string,
+    title?: string,
+  ): InboxItem {
+    return {
+      id,
+      kind,
+      severity: "normal",
+      title: title ?? `Attention ${id}`,
+      body: null,
+      refs: {},
+      source: "test",
+      createdAt,
+      ackedAt: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      delivery: {},
+    };
+  }
+
+  function stubNeedsYou(
+    items: InboxItem[] | (() => Promise<{ items: InboxItem[] }>),
+    status = baseStatus(),
+  ) {
+    const restore = {
+      status: api.status,
+      proposals: api.proposals,
+      outbox: api.outbox,
+      journal: api.journal,
+    };
+    const list = Array.isArray(items) ? items : [];
+    api.status = async () => ({
+      ...status,
+      inbox: { open: list.length, acked: 0, byKind: {} },
+    });
+    api.proposals = async () => ({ proposals: [] });
+    api.outbox = async () => ({ outbox: [] });
+    api.journal = async () => ({ entries: [], head: 0 });
+    api.inbox = Array.isArray(items) ? async () => ({ items }) : items;
+    return () => {
+      api.status = restore.status;
+      api.proposals = restore.proposals;
+      api.outbox = restore.outbox;
+      api.journal = restore.journal;
+      api.inbox = originalInbox;
+    };
+  }
+
+  test("leads with capped oldest-first inbox groups and opens the selected row", async () => {
+    const items = Array.from({ length: 6 }, (_, index) =>
+      inboxItem(
+        `blocked-${index}`,
+        "BLOCKED",
+        `2026-08-17T0${index}:00:00.000Z`,
+      ),
+    );
+    const restore = stubNeedsYou(items);
+    const onNavigate = mock((_path: string) => {});
+
+    try {
+      const view = renderOverview({ kind: "all" }, { onNavigate });
+      await waitFor(() =>
+        expect(view.getByRole("heading", { name: "Needs you" })).toBeTruthy(),
+      );
+      expect(
+        view
+          .getAllByRole("heading")
+          .map((heading) => heading.textContent)
+          .slice(0, 2),
+      ).toEqual(["Overview", "Needs you"]);
+      expect(view.getAllByTitle(/Attention blocked-/)).toHaveLength(5);
+      expect(view.queryByTitle("Attention blocked-5")).toBeNull();
+
+      fireEvent.click(view.getByRole("button", { name: "1 more →" }));
+      expect(onNavigate).toHaveBeenCalledWith("inbox");
+
+      fireEvent.keyDown(document.body, { key: "Enter" });
+      expect(onNavigate).toHaveBeenCalledWith("inbox/blocked-0");
+    } finally {
+      restore();
     }
   });
 
@@ -793,122 +1016,107 @@ describe("Overview anomaly deck (WM-95)", () => {
     }
   });
 
-  test("archives dead letters and releases stalled worker leases, removing both rows (WM-326)", async () => {
-    const mutableApi = api as typeof api & {
-      archive: (
-        source: string,
-        eventId: string,
-      ) => Promise<{ archived: boolean }>;
-      releaseWorker: (
-        workerId: string,
-        runId: string,
-      ) => Promise<{ released: boolean; runId: string }>;
-    };
-    const originals = {
-      status: api.status,
-      proposals: api.proposals,
-      outbox: api.outbox,
-      journal: api.journal,
-      archive: mutableApi.archive,
-      releaseWorker: mutableApi.releaseWorker,
-    };
-    let deadLettered = true;
-    let stalled = true;
-    api.status = async () =>
-      baseStatus({
-        deadLettered: deadLettered
-          ? [
-              {
-                source: "github",
-                eventId: "dead-1",
-                lastError: "historical failure",
-              },
-            ]
-          : [],
-        stalledWorkers: stalled
-          ? [
-              {
-                workerId: "worker-1",
-                runId: "run-1",
-                host: "lab",
-                lastSeen: new Date(0).toISOString(),
-              },
-            ]
-          : [],
-      });
-    api.proposals = async () => ({ proposals: [] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
-    mutableApi.archive = async (source, eventId) => {
-      expect({ source, eventId }).toEqual({
-        source: "github",
-        eventId: "dead-1",
-      });
-      deadLettered = false;
-      return { archived: true };
-    };
-    mutableApi.releaseWorker = async (workerId, runId) => {
-      expect({ workerId, runId }).toEqual({
-        workerId: "worker-1",
-        runId: "run-1",
-      });
-      stalled = false;
-      return { released: true, runId };
-    };
+  test("rows read the display title and keep the raw title as the tooltip", async () => {
+    const restore = stubNeedsYou([
+      inboxItem(
+        "blocked-1",
+        "BLOCKED",
+        "2026-08-17T00:00:00.000Z",
+        "BLOCKED needs a decision",
+      ),
+    ]);
 
     try {
       const view = renderOverview();
-      await waitFor(() => view.getByRole("button", { name: "Archive" }));
-
-      expect(
-        view.getByRole("button", { name: /github.*historical failure/ }),
-      ).toBeTruthy();
-      view.getByRole("button", { name: "Archive" }).click();
-      await waitFor(() =>
-        expect(
-          view.queryByRole("button", { name: /github.*historical failure/ }),
-        ).toBeNull(),
+      const row = await waitFor(() =>
+        view.getByTitle("BLOCKED needs a decision"),
       );
-
-      const releaseLease = await waitFor(() =>
-        view.getByRole("button", { name: "Release lease" }),
-      );
-      releaseLease.click();
-      await waitFor(() => view.getByText(/Doctor: All systems nominal/));
-      expect(view.queryByText(/stalled worker worker-1/)).toBeNull();
+      expect(row.textContent).toBe("needs a decision");
     } finally {
-      api.status = originals.status;
-      api.proposals = originals.proposals;
-      api.outbox = originals.outbox;
-      api.journal = originals.journal;
-      mutableApi.archive = originals.archive;
-      mutableApi.releaseWorker = originals.releaseWorker;
+      restore();
     }
-    // Two 2s status polls plus the waitFor budgets put this right at bun's
-    // default 5s — it passed on develop by ~100ms. Give it its real budget.
-  }, 15_000);
+  });
 
-  test("other anomaly kinds (stale leases, unpublished outbox) render unchanged", async () => {
-    const origStatus = api.status;
-    const origProposals = api.proposals;
-    const origOutbox = api.outbox;
-    const origJournal = api.journal;
-    api.status = async () =>
-      baseStatus({ staleLeases: 3, unpublishedOutbox: 2 });
-    api.proposals = async () => ({ proposals: [] });
-    api.outbox = async () => ({ outbox: [] });
-    api.journal = async () => ({ entries: [], head: 0 });
+  test("renders Runtime anomalies in the shared compact grammar", async () => {
+    const onJumpRuns = mock((_state?: string) => {});
+    const restore = stubNeedsYou([], baseStatus({ staleLeases: 1 }));
 
     try {
-      const { getByText } = renderOverview();
-
-      await waitFor(() => getByText(/stale leases: 3/));
-      expect(getByText(/unpublished outbox rows: 2/)).toBeTruthy();
+      const view = renderOverview({ kind: "all" }, { onJumpRuns });
+      const needsYou = await waitFor(() => view.getByLabelText("Needs you"));
+      within(needsYou).getByRole("heading", { name: "Runtime" });
+      fireEvent.click(
+        within(needsYou).getByRole("button", { name: "View leased runs" }),
+      );
+      expect(onJumpRuns).toHaveBeenCalledWith("LEASED");
     } finally {
-      api.status = origStatus;
-      api.proposals = origProposals;
-      api.outbox = origOutbox;
-      api.journal = origJournal;
+      restore();
+    }
+  });
+
+  test("keeps the ack verb visible but inert while an ack is in flight", async () => {
+    const origAck = api.ackInbox;
+    const restore = stubNeedsYou([
+      inboxItem("blocked-1", "BLOCKED", "2026-08-17T00:00:00.000Z"),
+    ]);
+    api.ackInbox = () => new Promise(() => {});
+
+    try {
+      const view = renderOverview();
+      const needsYou = await waitFor(() => view.getByLabelText("Needs you"));
+      const ack = within(needsYou).getByRole("button", {
+        name: "ack",
+      }) as HTMLButtonElement;
+      expect(ack.disabled).toBe(false);
+      fireEvent.click(ack);
+      await waitFor(() =>
+        expect(
+          (
+            within(needsYou).getByRole("button", {
+              name: "ack",
+            }) as HTMLButtonElement
+          ).disabled,
+        ).toBe(true),
+      );
+      expect(
+        within(needsYou).getByRole("button", { name: "Open" }),
+      ).toBeTruthy();
+    } finally {
+      api.ackInbox = origAck;
+      restore();
+    }
+  });
+
+  test("waits for the ledger before claiming nothing needs you", async () => {
+    const restore = stubNeedsYou(() => new Promise(() => {}));
+
+    try {
+      const view = renderOverview();
+      const needsYou = await waitFor(() => view.getByLabelText("Needs you"));
+      expect(
+        within(needsYou).getByText(/Checking what needs you/),
+      ).toBeTruthy();
+      expect(view.queryByText(/Nothing needs you · last decision/)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test("uses the unfenced calm line when the ledger and runtime are clear", async () => {
+    const restore = stubNeedsYou([]);
+
+    try {
+      const view = renderOverview();
+      await waitFor(() =>
+        expect(
+          view.getByText(/Nothing needs you · last decision/),
+        ).toBeTruthy(),
+      );
+      const needsYou = view.getByLabelText("Needs you");
+      expect(needsYou.querySelector("table")).toBeNull();
+      expect(needsYou.querySelector(".border")).toBeNull();
+    } finally {
+      restore();
     }
   });
 });
@@ -1346,7 +1554,7 @@ describe("Overview 4-Band layout & telemetry (WM-205)", () => {
     });
   });
 
-  test("renders nominal status banner when no anomalies are present", async () => {
+  test("renders a calm Needs-you line when no anomalies are present", async () => {
     const origStatus = api.status;
     const origProposals = api.proposals;
     const origOutbox = api.outbox;
@@ -1357,10 +1565,10 @@ describe("Overview 4-Band layout & telemetry (WM-205)", () => {
     api.journal = async () => ({ entries: [], head: 0 });
 
     try {
-      const { getByText } = renderOverview();
-      await waitFor(() => getByText(/Doctor: All systems nominal/));
-      expect(getByText(/Doctor: All systems nominal/)).toBeTruthy();
-      expect(getByText(/scope: all repos/)).toBeTruthy();
+      const { getByText, queryByText, queryByLabelText } = renderOverview();
+      await waitFor(() => getByText(/Nothing needs you · last decision/));
+      expect(queryByText(/Doctor: All systems nominal/)).toBeNull();
+      expect(queryByLabelText("Anomalies")).toBeNull();
     } finally {
       api.status = origStatus;
       api.proposals = origProposals;

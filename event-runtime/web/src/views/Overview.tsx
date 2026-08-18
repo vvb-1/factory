@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard, refetchIntervals, useNow, useRequeuePoll } from "../hooks";
@@ -32,6 +40,12 @@ import {
 import { Button as PrimitiveButton } from "../components/ui";
 
 const FEED_CAP = 50;
+
+const OverviewNeedsYou = lazy(() =>
+  import("./Inbox").then(({ OverviewNeedsYou }) => ({
+    default: OverviewNeedsYou,
+  })),
+);
 
 export function SectionTitle({
   title,
@@ -858,6 +872,14 @@ export function Overview({
     queryFn: api.status,
     ...refetchIntervals.primary,
   });
+  // Overview uses the ledger itself rather than a status summary so rows stay
+  // in the exact Inbox order and acknowledgement never needs an optimistic
+  // local rewrite.
+  const inbox = useQuery({
+    queryKey: ["inbox", "all"],
+    queryFn: () => api.inbox("all"),
+    ...refetchIntervals.primary,
+  });
   const outbox = useQuery({
     queryKey: ["outbox"],
     queryFn: () => api.outbox(15),
@@ -998,6 +1020,17 @@ export function Overview({
     reject.mutate({ proposalId: rejectingProposalId, why: rejectReason });
   };
 
+  const ackInbox = useMutation({
+    mutationFn: (id: string) => api.ackInbox(id),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["inbox"] }),
+        queryClient.invalidateQueries({ queryKey: ["status"] }),
+      ]),
+    onError: (error) =>
+      notify(`Ack failed: ${(error as Error).message}`, "err"),
+  });
+
   const s = useMemo(() => normalizeStatus(status.data), [status.data]);
   const anomalies = s?.anomalies;
   const proposalsById = useMemo(() => {
@@ -1035,6 +1068,31 @@ export function Overview({
   const hasAnomalies = anomalyRows.length > 0;
   const deadLetterEventCount = anomalies?.deadLettered?.length ?? 0;
   const anomalyRowRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  const openInboxItems = useMemo(
+    () =>
+      (inbox.data?.items ?? []).filter(
+        (item) => !item.ackedAt && !item.resolvedAt,
+      ),
+    [inbox.data?.items],
+  );
+  const lastDecision = useMemo(() => {
+    const decisionTimes = (inbox.data?.items ?? [])
+      .flatMap((item) => [item.ackedAt, item.resolvedAt])
+      .filter((time): time is string => Boolean(time));
+    return decisionTimes.sort().at(-1) ?? null;
+  }, [inbox.data?.items]);
+  const runtimeNeeds = useMemo(
+    () =>
+      anomalyRows.map((row, index) => ({
+        id: `runtime-${index}`,
+        title: row.text,
+        primaryAction: row.links[0]
+          ? { label: row.links[0].label, onClick: row.links[0].go }
+          : undefined,
+      })),
+    [anomalyRows],
+  );
 
   const deadLetterGroupKey = (group: DeadLetterGroup) =>
     JSON.stringify([group.source, group.errorMessage]);
@@ -1241,9 +1299,37 @@ export function Overview({
       </div>
       <OverviewScopeNotice context={context} />
 
-      {/* Band A: Promoted Doctor Deck or Nominal Status (WM-205) */}
+      <Suspense
+        fallback={
+          <div className="mb-6 text-[12px] text-(--text-faint)">
+            Loading needs you
+          </div>
+        }
+      >
+        <OverviewNeedsYou
+          items={openInboxItems}
+          runtimeItems={runtimeNeeds}
+          now={now}
+          lastDecision={lastDecision}
+          runtimeLabel={feedsUnscoped ? "Runtime · factory-wide" : "Runtime"}
+          connected={connected}
+          ackPending={ackInbox.isPending}
+          isPending={inbox.isPending || status.isPending}
+          onOpenItem={(id) => onNavigate(`inbox/${id}`)}
+          onAck={(id) => ackInbox.mutate(id)}
+          onMore={() => onNavigate("inbox")}
+        />
+      </Suspense>
+
+      {/*
+        Band A: the anomaly remediation deck (WM-205). Needs-you above surfaces
+        these same anomalies as one-click jumps, but every remediation verb
+        (archive, requeue, release lease, reject) still lives only here. It stays
+        until those actions move onto the Runtime rows.
+      */}
       {hasAnomalies ? (
-        <div
+        <section
+          aria-label="Anomalies"
           className="mb-5 rounded-lg border p-3"
           style={{
             borderColor: "var(--hue-warn)",
@@ -1561,26 +1647,8 @@ export function Overview({
               requeue.error
             }
           />
-        </div>
-      ) : (
-        <div className="mb-5 flex flex-col items-start gap-2 rounded-lg border border-(--border) bg-(--surface-1) px-3.5 py-2.5 text-[12px] text-(--text-dim) sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-(--hue-ok)" />
-            <span className="font-medium text-(--text)">
-              Doctor: All systems nominal
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] text-(--text-faint)">
-            <span>
-              as of {formatRelative(new Date(status.dataUpdatedAt || now), now)}
-            </span>
-            <span>·</span>
-            <span>
-              {feedsUnscoped ? "scope: factory-wide" : "scope: all repos"}
-            </span>
-          </div>
-        </div>
-      )}
+        </section>
+      ) : null}
 
       {/* Band B: Unified Stage Cards (WM-205) */}
       {!s ? (

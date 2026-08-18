@@ -563,10 +563,11 @@ export function App() {
     const id = route.length > 1 ? route[route.length - 1] : null;
     const typeQ = hashSearch(window.location.hash).get("type");
     const detail = id ?? typeQ;
-    document.title = detail
+    const pageTitle = detail
       ? `factory · ${viewLabel} · ${detail}`
       : `factory · ${viewLabel}`;
-  }, [route, viewLabel]);
+    document.title = inboxOpen > 0 ? `(${inboxOpen}) ${pageTitle}` : pageTitle;
+  }, [inboxOpen, route, viewLabel]);
 
   useEffect(() => {
     if (!filterFocus) return;
