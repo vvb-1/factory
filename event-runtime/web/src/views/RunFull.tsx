@@ -531,10 +531,10 @@ export function RunFull({
           {detail.isError ? "Could not load run detail." : "Loading run…"}
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden">
           {/* Main column: the trace, at a readable measure — the point of the
               page — scrolling on its own so the sidebar never moves with it. */}
-          <main className="min-w-0 flex-1 overflow-y-auto">
+          <main className="min-w-0 flex-none overflow-visible xl:flex-1 xl:overflow-y-auto">
             <div className="p-6 xl:mx-auto xl:max-w-[900px]">
               {/* The failure first (WM-93) — renders nothing for other states. */}
               <RunFailureBanner
@@ -588,7 +588,7 @@ export function RunFull({
               rather than the whole layout reflowing (WM-136). Stacks full
               width below the trace under xl, where there is no room for two
               columns. */}
-          <aside className="w-full shrink-0 overflow-y-auto border-(--border) bg-(--surface-1) p-4 xl:w-[460px] xl:border-l">
+          <aside className="w-full shrink-0 overflow-visible border-(--border) bg-(--surface-1) p-4 xl:w-[460px] xl:overflow-y-auto xl:border-l">
             <div onClickCapture={handleRunArtifactClick}>
               <RunDetailBlocks
                 d={d}
