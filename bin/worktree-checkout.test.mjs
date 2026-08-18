@@ -1218,7 +1218,8 @@ test("worktree_add retries transient worktree metadata read races", () => {
   const worktreePath = path.join(tempDir, "checkout");
 
   try {
-    const r = sh(`
+    const r = sh(
+      `
       git() {
         if [[ "$*" == *" show-ref --verify --quiet refs/heads/feat/WM-TEST"* ]]; then
           return 1
@@ -1237,11 +1238,15 @@ test("worktree_add retries transient worktree metadata read races", () => {
         return 1
       }
       worktree_add "${worktreePath}" "feat/WM-TEST" "origin/develop" "/repo"
-    `, { MOCK_GIT_ATTEMPTS: attemptsFile });
+    `,
+      { MOCK_GIT_ATTEMPTS: attemptsFile },
+    );
 
     expect(r.status).toBe(0);
     expect(readFileSync(attemptsFile, "utf8").trim()).toBe("2");
-    expect(r.stderr).toContain("git worktree add hit lock contention (attempt 1/6)");
+    expect(r.stderr).toContain(
+      "git worktree add hit lock contention (attempt 1/6)",
+    );
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
