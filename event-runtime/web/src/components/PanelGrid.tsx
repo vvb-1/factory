@@ -60,7 +60,7 @@ function PanelTile({
           {panel.title}
         </span>
         <span
-          className="text-[10.5px] text-(--text-faint)"
+          className="text-xs text-(--text-faint)"
           title={`${panel.file} · ${panel.source.endpoint}`}
         >
           {panel.origin}
@@ -205,7 +205,7 @@ export function PanelBody({
     : null;
   const aside = (
     <span
-      className={`text-[10.5px] text-(--text-faint) ${source.isFetching ? "opacity-60" : ""}`}
+      className={`text-xs text-(--text-faint) ${source.isFetching ? "opacity-60" : ""}`}
       title={`refreshes every ${panel.refreshSeconds}s`}
     >
       {refreshed ? `as of ${refreshed}` : null}
