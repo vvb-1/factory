@@ -296,8 +296,7 @@ export function Graph({
     graphDisplayFromHash(window.location.hash),
   );
   const [metricsFallback, setMetricsFallback] = useState<string | null>(null);
-  const hashWriter = useRef<HashWriter | null>(null);
-  if (!hashWriter.current) hashWriter.current = createDisplayHashWriter();
+  const hashWriter = useMemo(() => createDisplayHashWriter(), []);
 
   // `immediate` is the operator changing a picker — a reader must see that at
   // once, the way `useHashRoute` flushes a query change. The re-attach below
@@ -306,10 +305,10 @@ export function Graph({
     (options: GraphDisplayOptions, immediate: boolean) => {
       const next = graphHashWithDisplay(window.location.hash, options);
       if (next === window.location.hash) return;
-      hashWriter.current?.replace(next);
-      if (immediate) hashWriter.current?.flush();
+      hashWriter.replace(next);
+      if (immediate) hashWriter.flush();
     },
-    [],
+    [hashWriter],
   );
 
   const commitDisplay = useCallback(
