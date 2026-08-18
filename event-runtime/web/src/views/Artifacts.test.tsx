@@ -324,16 +324,17 @@ describe("Artifacts inventory (WM-207)", () => {
     const query =
       "kind=report&orphan=false&search=reporter%401&project=factory";
     window.location.hash = `#/artifacts?${query}`;
-    const view = renderArtifacts(mock(() => {}), {
-      kind: "report",
-      orphan: false,
-      search: "reporter@1",
-    });
+    const view = renderArtifacts(
+      mock(() => {}),
+      {
+        kind: "report",
+        orphan: false,
+        search: "reporter@1",
+      },
+    );
 
     fireEvent.click(await view.findByRole("link", { name: "aaaaaaaaaaaa" }));
-    expect(window.location.hash).toBe(
-      `#/artifacts/${"a".repeat(64)}?${query}`,
-    );
+    expect(window.location.hash).toBe(`#/artifacts/${"a".repeat(64)}?${query}`);
     expect(
       await view.findByRole("region", { name: "Artifact content" }),
     ).toBeTruthy();
