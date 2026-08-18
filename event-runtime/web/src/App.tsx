@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -748,38 +749,47 @@ export function App() {
             </div>
           </div>
           <div className="flex-1 px-2">
-            {NAV.map((n) => {
+            {NAV.map((n, index) => {
+              const prev = index > 0 ? NAV[index - 1] : null;
+              const isGroupBoundary = prev && prev.group !== n.group;
               const badge = navBadges[n.key];
               const current = navIsCurrent(n.key, view);
               return (
-                <PrimitiveButton
-                  bare
-                  key={n.key}
-                  type="button"
-                  aria-current={current ? "page" : undefined}
-                  aria-describedby={
-                    badge.count > 0 ? `nav-badge-${n.key}` : undefined
-                  }
-                  onClick={() => {
-                    setMobileNavOpen(false);
-                    navigate(n.key);
-                  }}
-                  className={`flex min-h-11 w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] md:min-h-0 ${
-                    current
-                      ? "bg-(--surface-3) font-medium text-(--text)"
-                      : "text-(--text-dim) hover:bg-(--surface-2)"
-                  }`}
-                >
-                  <span>{n.label}</span>
-                  {badge.count > 0 && (
-                    /* aria-hidden keeps the count out of the accessible name —
-                       "Events" must not announce as "Events 6" — while the
-                       aria-describedby reference above still reads it back as
-                       the button's description (accname spec includes hidden
-                       nodes referenced by labelledby/describedby). */
-                    <NavCount id={`nav-badge-${n.key}`} badge={badge} />
+                <Fragment key={n.key}>
+                  {isGroupBoundary && (
+                    <div
+                      role="separator"
+                      className="my-1.5 mx-2.5 border-t border-(--border)"
+                    />
                   )}
-                </PrimitiveButton>
+                  <PrimitiveButton
+                    bare
+                    type="button"
+                    aria-current={current ? "page" : undefined}
+                    aria-describedby={
+                      badge.count > 0 ? `nav-badge-${n.key}` : undefined
+                    }
+                    onClick={() => {
+                      setMobileNavOpen(false);
+                      navigate(n.key);
+                    }}
+                    className={`flex min-h-11 w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] md:min-h-0 ${
+                      current
+                        ? "bg-(--surface-3) font-medium text-(--text)"
+                        : "text-(--text-dim) hover:bg-(--surface-2)"
+                    }`}
+                  >
+                    <span>{n.label}</span>
+                    {badge.count > 0 && (
+                      /* aria-hidden keeps the count out of the accessible name —
+                         "Events" must not announce as "Events 6" — while the
+                         aria-describedby reference above still reads it back as
+                         the button's description (accname spec includes hidden
+                         nodes referenced by labelledby/describedby). */
+                      <NavCount id={`nav-badge-${n.key}`} badge={badge} />
+                    )}
+                  </PrimitiveButton>
+                </Fragment>
               );
             })}
             <PrimitiveButton
