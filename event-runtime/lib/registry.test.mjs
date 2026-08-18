@@ -139,13 +139,10 @@ describe("registry", () => {
     // (digest regenerated on top of the #559 baseline).
     // Regenerated after WM-610 prettier reformat of code and markdown files.
     // Regenerated (WM-722): merge-scan/merge-fix adapter pi→claude; event-types.json is a registry input.
-    // Regenerated for WM-718 (rebase onto the WM-722 baseline above):
-    // agents/dispatch.md now states that the worker verifies the handoff
-    // mechanically (re-pinned dispatch.json). Registry input change only;
-    // both changes are registry inputs to the same merged-view digest,
-    // hence one combined regeneration here.
+    // Regenerated (WM-391): dispatch admits and documents bounded humanDecision authorisations.
+    // Regenerated (WM-718): mechanical handoff verification in dispatch prompt (re-pinned dispatch.json).
     const expected =
-      "sha256:065ec74d0146e2e98a10d9f907e22bd78d4417523c78d6b3d647ba39e6123ca0";
+      "sha256:6f33a795eca85444f554a82476873b962f5b2040097e01bd10f3e0e18366853b";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -162,11 +159,11 @@ describe("registry", () => {
     const def = registry.agents.get("dispatch@1");
     expect(def.pack).toBe("event-runtime");
     expect(Object.keys(def)).not.toContain("pack");
-    // WM-718 changed dispatch@1's prompt content (agents/dispatch.md), so its
+    // WM-718 and WM-391 changed dispatch@1's prompt and input schema, so its
     // pin — and therefore this defHash — legitimately moved, exactly as it did
     // for WM-610. Still not a provenance break: `pack` stays non-enumerable.
     expect(computeDefHash(def)).toBe(
-      "sha256:0332c31d1436edebf6882d4dafb9787ef4f7f54beb3f615dea368c05ca342736",
+      "sha256:a1b92d864080643c54113007d30d6f00557858d3a790acc625ca705e1d924e94",
     );
   });
 

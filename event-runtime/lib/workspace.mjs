@@ -57,6 +57,18 @@ export class WorktreeError extends Error {
   }
 }
 
+/** A worktree checkout is outside the mounted workspace and dangles in a VM. */
+export class WorktreeSandboxUnsupportedError extends Error {
+  constructor(workspaceDir) {
+    super(
+      `sandboxed execution cannot use worktree workspace ${workspaceDir}: its checkout is a symlink outside the mounted workspace`,
+    );
+    this.name = "WorktreeSandboxUnsupportedError";
+    this.code = "worktree_sandbox_unsupported";
+    this.workspaceDir = workspaceDir;
+  }
+}
+
 // eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
 const ANSI_ESCAPE = /\x1b\[[0-9;]*m/g;
 const WARNING_LINE = /^warn:\s*/i;
@@ -139,6 +151,23 @@ export function resolveInputRef(input, expr) {
  * worker that dies and restarts must still know what to tear down.
  */
 const WORKTREE_MARKER = ".worktree.json";
+/**
+ * Refuse sandbox execution when materialization recorded a delegated worktree.
+ * Only the attempt workspace is mounted in the guest, while the checkout link
+ * points at the repo-owned worktree root outside it, so following it there
+ * would fail. A malformed non-null sandbox block still counts as a request;
+ * policy validation must not turn isolation off by accident.
+ */
+export function assertSandboxWorkspaceSupported(workspaceDir, def) {
+  const sandboxRequested = def?.sandbox !== undefined && def?.sandbox !== null;
+  if (
+    sandboxRequested &&
+    existsSync(path.join(workspaceDir, WORKTREE_MARKER))
+  ) {
+    throw new WorktreeSandboxUnsupportedError(workspaceDir);
+  }
+}
+
 /**
  * Return competing runtime ownership for a ticket, excluding the run currently
  * provisioning its own workspace. The shared worker lease is the fast local

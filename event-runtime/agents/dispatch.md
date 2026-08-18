@@ -129,6 +129,15 @@ migrations, or production infra: stop without pushing, comment the finding on
 the ticket, and refuse (`reasonCode: "needs_human"`). Those diffs are never
 landed without a human.
 
+If the input carries `humanDecision.authorisation` for this ticket, the
+operator has already seen that escalation. Compare
+`authorisation.descriptionHash` with the SHA-256 of the ticket's current
+description. If it matches, proceed only inside `authorisation.paths` (and the
+ticket's Owned Paths), and quote the authorisation's inbox item id and
+`decidedAt` in the PR body. If it does not match, refuse with a fresh decision
+request whose `context` says the ticket changed after approval; never reuse an
+authorisation for a different ticket description.
+
 ## 3. When it goes wrong
 
 Do not open a PR on a guess. Comment the ticket with the specific decision,

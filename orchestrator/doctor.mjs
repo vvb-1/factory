@@ -26,6 +26,10 @@ import { homedir } from "node:os";
 import { gql } from "./reaper.mjs";
 import { factoryRoot } from "../lib/factory-root.mjs";
 import { harnessGitignoreIsCurrent } from "../lib/factory-gitignore.mjs";
+import {
+  browserLaunchCheck,
+  piChromeDevtoolsCheck,
+} from "./doctor-browser.mjs";
 
 const ROOT = factoryRoot();
 const argv = process.argv.slice(2);
@@ -107,6 +111,32 @@ check(
   factoryScript,
   "git pull the factory repo — bin/factory is part of the control plane",
 );
+
+// The UX critic's browser (WM-670). It was silently dead for a day: pi's
+// chrome-devtools extension launched Chrome headed on this display-less box,
+// Chrome died on "Missing X server or $DISPLAY", every web PR shipped
+// NOT-ASSESSED. Two checks: the headless wrapper really binds a DevTools port,
+// and the extension is pointed at it. Details in doctor-browser.mjs.
+{
+  const b = await browserLaunchCheck();
+  check(
+    b.status === "pass" ? true : b.status === "skip" ? "warn" : false,
+    "browser launches headless",
+    b.status === "pass"
+      ? `${path.relative(ROOT, b.executable)} → DevTools on :${b.port} in ${b.ms}ms`
+      : b.detail,
+    b.status === "pass"
+      ? null
+      : `missing: ${b.missing ?? "unknown — run bin/chrome-headless.sh --remote-debugging-port=0 --user-data-dir=$(mktemp -d) about:blank by hand"}`,
+  );
+  const pcd = piChromeDevtoolsCheck();
+  check(
+    pcd.status === "pass" ? true : pcd.status === "skip" ? "warn" : false,
+    "pi chrome-devtools → headless wrapper",
+    pcd.detail,
+    pcd.status === "pass" ? null : pcd.fix,
+  );
+}
 
 const key =
   process.env.LINEAR_API_KEY ||

@@ -6,6 +6,8 @@
  *   bun tools/linear.mjs comments CLNT-616
  *   bun tools/linear.mjs claim CLNT-616 --agent claude
  *   bun tools/linear.mjs comment CLNT-616 "verified: 42 tests pass"
+ *   bun tools/linear.mjs triage CLNT-616 --comment "Owned Paths need revision"
+ *   bun tools/linear.mjs answer CLNT-616 "Use the existing token cache"
  *   bun tools/linear.mjs detail CLNT-616 "## Acceptance criteria\n- [ ] ..."
  *   bun tools/linear.mjs labels CLNT-616 --add ai:needs-review --remove ai:in-progress
  *   bun tools/linear.mjs state CLNT-616 "In Review" --add ai:needs-review
@@ -340,6 +342,7 @@ const VALUE_FLAGS = new Set([
   "agent",
   "area",
   "body",
+  "comment",
   "label",
   "project",
   "remove",
@@ -460,6 +463,62 @@ const VERBS = {
       { in: { issueId: issue.id, body: stampRun(body) } },
     );
     out({ ok: true, identifier: key }, `commented on ${key}`);
+  },
+
+  async triage() {
+    const key = positional[0];
+    const comment = flag("comment");
+    if (!key || comment === null)
+      throw new Error(`usage: triage <ISSUE-ID> --comment "<text>"`);
+    const issue = await issueByKey(key);
+    let { states } = await statesFor(teamOf(key));
+    let target = states.find((s) => s.name.toLowerCase() === "triage");
+    if (!target) ({ states } = await statesFor(teamOf(key), true));
+    target = states.find((s) => s.name.toLowerCase() === "triage");
+    if (!target) throw new Error(`team ${teamOf(key)} has no "Triage" state`);
+    const labelIds = await applyLabels(issue, [], ["ai:agent-ready"]);
+    const updated = await gql(
+      `mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
+      { id: issue.id, in: { stateId: target.id, labelIds } },
+    );
+    if (!updated?.issueUpdate?.success)
+      throw new Error(`failed to move ${key} to Triage`);
+    if (comment.trim()) {
+      const commented = await gql(
+        `mutation($in:CommentCreateInput!){ commentCreate(input:$in){ success } }`,
+        { in: { issueId: issue.id, body: stampRun(comment) } },
+      );
+      if (!commented?.commentCreate?.success)
+        throw new Error(`failed to comment on ${key}`);
+    }
+    out({ ok: true, identifier: key }, `${key} -> Triage`);
+  },
+
+  async answer() {
+    const key = positional[0];
+    const text = positional[1];
+    if (!key || !text) throw new Error(`usage: answer <ISSUE-ID> "<text>"`);
+    const issue = await issueByKey(key);
+    if (issue.state?.name?.toLowerCase() === "blocked") {
+      let { states } = await statesFor(teamOf(key));
+      let target = states.find((s) => s.name.toLowerCase() === "todo");
+      if (!target) ({ states } = await statesFor(teamOf(key), true));
+      target = states.find((s) => s.name.toLowerCase() === "todo");
+      if (!target) throw new Error(`team ${teamOf(key)} has no "Todo" state`);
+      const updated = await gql(
+        `mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
+        { id: issue.id, in: { stateId: target.id } },
+      );
+      if (!updated?.issueUpdate?.success)
+        throw new Error(`failed to move ${key} to Todo`);
+    }
+    const commented = await gql(
+      `mutation($in:CommentCreateInput!){ commentCreate(input:$in){ success } }`,
+      { in: { issueId: issue.id, body: stampRun(text) } },
+    );
+    if (!commented?.commentCreate?.success)
+      throw new Error(`failed to comment on ${key}`);
+    out({ ok: true, identifier: key }, `answered ${key}`);
   },
 
   async detail() {

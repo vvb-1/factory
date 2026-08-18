@@ -251,6 +251,17 @@ test("values for other flags are not treated as positional arguments", () => {
       "--todo",
     ]),
   ).toEqual([]);
+  expect(
+    parsePositionalArgs([
+      "triage",
+      "WM-313",
+      "--comment",
+      "Scope needs revision",
+    ]),
+  ).toEqual(["WM-313"]);
+  expect(
+    parsePositionalArgs(["answer", "WM-313", "Use the existing seam"]),
+  ).toEqual(["WM-313", "Use the existing seam"]);
 });
 
 // -------------------------------------------------------- label mutations ---

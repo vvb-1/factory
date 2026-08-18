@@ -57,6 +57,7 @@ import {
 } from "../../orchestrator/owned-paths.mjs";
 import { HEARTBEAT_STALE_MS, satisfiesPlacement } from "./workers.mjs";
 import {
+  assertSandboxWorkspaceSupported,
   createWorkspace,
   destroyWorkspace,
   PathViolation,
@@ -70,7 +71,10 @@ import { templateFor } from "./decision-templates.mjs";
  * it here (workspace-relative); the verifier includes it when present. The
  * agent does not have to declare its own transcript.
  */
-const RUNTIME_ARTIFACTS = [{ kind: "transcript", path: ".transcript.json" }];
+const RUNTIME_ARTIFACTS = [
+  { kind: "transcript", path: ".transcript.json" },
+  { kind: "sandbox-console", path: ".sandbox-console.log" },
+];
 
 /** Grace added to the execution deadline before a lease is considered abandoned. */
 export const LEASE_GRACE_SECONDS = 120;
@@ -436,6 +440,8 @@ const ENVIRONMENT_FAILURES = new Set([
 const AGENT_FAILURES = new Set(["contract_violation", ...HANDOFF_REASON_CODES]);
 const FATAL_FAILURES = new Set([
   "cli_not_found",
+  "sandbox_unsupported",
+  "worktree_sandbox_unsupported",
   "unknown_adapter",
   "agent_definition_mismatch",
   "workspace_integrity_violation",
@@ -2133,6 +2139,7 @@ export async function executeClaimed(
       workerLeasesDir: leasesDir,
     });
     workspaceDir = created.dir;
+    assertSandboxWorkspaceSupported(workspaceDir, def);
     checkoutPath = created.checkout?.path ?? null;
     checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
     worktreeRecord = created.worktree
@@ -2890,13 +2897,20 @@ export async function executeClaimed(
     // lib/adapters/pi.mjs's CliNotFoundError) before ever spawning a child.
     // No `requeue`: retrying on the same worker just fails the same way.
     const isCliNotFound = err?.code === "cli_not_found";
+    const isSandboxUnsupported = err?.code === "sandbox_unsupported";
+    const isWorktreeSandboxUnsupported =
+      err?.code === "worktree_sandbox_unsupported";
     const isWorkspaceProvisioning =
       err?.code === "workspace_provisioning_error";
     const reasonCode = isCliNotFound
       ? "cli_not_found"
-      : isWorkspaceProvisioning
-        ? "workspace_provisioning_error"
-        : "adapter_error";
+      : isSandboxUnsupported
+        ? "sandbox_unsupported"
+        : isWorktreeSandboxUnsupported
+          ? "worktree_sandbox_unsupported"
+          : isWorkspaceProvisioning
+            ? "workspace_provisioning_error"
+            : "adapter_error";
     const journalReason = `${reasonCode}: ${err?.message ?? String(err)}`;
     let res;
     try {

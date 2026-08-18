@@ -13,8 +13,19 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": ["linear:write", "repo:write", "github:write"],
-    "tools": ["Bash", "Read", "Write", "Edit", "Grep", "Glob"]
+    "services": [
+      "linear:write",
+      "repo:write",
+      "github:write"
+    ],
+    "tools": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob"
+    ]
   },
   "limits": {
     "timeout_seconds": 5400,
@@ -23,8 +34,8 @@
   },
   "mutating": true,
   "pins": {
-    "agents/dispatch.md": "sha256:552d1354c1fb9b95e961853c67544beae5bd7ae93850abbdbfa577b1d122a730",
-    "schemas/dispatch.input.json": "sha256:b5c0643c0ed41272900b4d31947b0b1e96a45c092623514b6e14ef20a8bdf485",
+    "agents/dispatch.md": "sha256:13aed898b1fd8aa61cd6d9a688d07de4715693775f7498d96a1852b3a9c755be",
+    "schemas/dispatch.input.json": "sha256:7287e8fa923036b1a4f887efef9540a65bf09c03e0e219907e160efa3272f26f",
     "schemas/dispatch.output.json": "sha256:bc25aee1baa16aa21f50e9a3f8c320e57cec11cbdf31c822baee838d49ddb672"
   }
 }
