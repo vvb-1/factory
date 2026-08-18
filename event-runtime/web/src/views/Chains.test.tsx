@@ -202,4 +202,17 @@ describe("Chains list (WM-537)", () => {
       });
     });
   });
+
+  test("renders within a full-height flex container for list pane scrolling (WM-818)", async () => {
+    await withApi({ chains: async () => ({ chains: rows }) }, async () => {
+      const view = renderChains();
+      await waitFor(() => {
+        expect(view.getByText("Chains")).toBeTruthy();
+      });
+      const root = view.container.firstElementChild as HTMLElement;
+      expect(root.className).toContain("flex");
+      expect(root.className).toContain("h-full");
+      expect(root.className).toContain("min-w-0");
+    });
+  });
 });

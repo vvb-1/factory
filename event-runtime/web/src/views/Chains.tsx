@@ -277,226 +277,236 @@ export function Chains({
 
   const hiddenSingles = scoped.filter((chain) => chain.single).length;
   return (
-    <ListPane
-      chrome={
-        <>
-          <h1 className="display mb-1 text-lg font-semibold">Chains</h1>
-          <p className="mb-3 text-[11px] text-(--text-faint)">
-            Correlated event and run journeys with activity in the last 24
-            hours.
-          </p>
-          {context.kind === "repo" && (
+    <div className="flex h-full min-w-0">
+      <ListPane
+        chrome={
+          <>
+            <h1 className="display mb-1 text-lg font-semibold">Chains</h1>
             <p className="mb-3 text-[11px] text-(--text-faint)">
-              Scoped to <span className="mono">{context.name}</span> — only
-              chains naming this repo.
+              Correlated event and run journeys with activity in the last 24
+              hours.
             </p>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              aria-pressed={showSingles}
-              onClick={() => setShowSingles((value) => !value)}
-              className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                showSingles
-                  ? "bg-(--surface-3) text-(--text)"
-                  : "text-(--text-faint) hover:bg-(--surface-1)"
-              }`}
-            >
-              Single-event roots{hiddenSingles > 0 ? ` ${hiddenSingles}` : ""}
-            </button>
-            <span className="ml-auto">
-              <DisplayOptions
-                config={CHAINS_DISPLAY}
-                state={display}
-                onChange={setDisplay}
-                rows={scoped}
-              />
-            </span>
-            <FilterInput
-              value={filter}
-              onChange={setFilter}
-              placeholder="type:… repo:… state:… is:active"
-              label="Filter chains"
-              query={parsed}
-              facets={CHAIN_FACETS}
-            />
-          </div>
-        </>
-      }
-    >
-      <table className="w-full table-fixed border-separate border-spacing-0">
-        <thead>
-          <tr className="text-left text-[11px] text-(--text-faint)">
-            {cols.map((column) => {
-              const sort = CHAINS_DISPLAY.sorts.find(
-                (item) => item.column === column.key,
-              );
-              const isCustom =
-                column.isCustom || column.key.startsWith("custom:");
-              const path = column.key.replace(/^custom:/, "");
-              const current = isCustom
-                ? display.sortBy === column.key
-                : sort && display.sortBy === sort.key;
-              return (
-                <Th
-                  key={column.key}
-                  label={column.label}
-                  dir={current ? display.sortDir : null}
-                  naturalDir={sort?.defaultDir ?? "asc"}
-                  onSort={
-                    sort || isCustom
-                      ? () =>
-                          setDisplay((state) =>
-                            cycleColumnSort(CHAINS_DISPLAY, state, column.key),
-                          )
-                      : undefined
-                  }
-                  onRemove={
-                    isCustom
-                      ? () =>
-                          setDisplay((state) => removeCustomColumn(state, path))
-                      : undefined
-                  }
-                />
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {windowTokens.map((token) => {
-            if (token.length === 2) {
-              const [section, sub] = token;
-              return (
-                <GroupHeaderRow
-                  key={`group:${section.key}`}
-                  colSpan={cols.length}
-                  section={section}
-                  collapsed={display.collapsed.includes(section.key)}
-                  onToggle={() =>
-                    setDisplay((state) => toggleCollapsed(state, section.key))
-                  }
-                  sub={sub}
-                />
-              );
-            }
-            const chain = token[0];
-            const selected = chain.correlationId === selectedId;
-            return (
-              <tr
-                key={chain.correlationId}
-                data-chain-id={chain.correlationId}
-                aria-selected={selected}
-                onClick={() => onOpenChain(chain.correlationId)}
-                className={`cursor-pointer hover:bg-(--surface-1) ${selected ? "row-selected" : ""}`}
+            {context.kind === "repo" && (
+              <p className="mb-3 text-[11px] text-(--text-faint)">
+                Scoped to <span className="mono">{context.name}</span> — only
+                chains naming this repo.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={showSingles}
+                onClick={() => setShowSingles((value) => !value)}
+                className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                  showSingles
+                    ? "bg-(--surface-3) text-(--text)"
+                    : "text-(--text-faint) hover:bg-(--surface-1)"
+                }`}
               >
-                <td className="max-w-56 border-b border-(--border) px-3 py-1.5">
-                  <div
-                    className="truncate text-(--text-dim)"
-                    title={chain.origin.type}
-                  >
-                    {chain.origin.type}
-                  </div>
-                  <div
-                    className="mono truncate text-xs text-(--text-faint)"
-                    title={chain.origin.source}
-                  >
-                    {chain.origin.source}
-                  </div>
-                </td>
-                {show.has("root") && (
-                  <td
-                    className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5"
-                    title={chain.origin.eventId}
-                  >
-                    {shortId(chain.origin.eventId)}
-                  </td>
-                )}
-                {show.has("depth") && (
-                  <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
-                    {chain.maxDepth}
-                  </td>
-                )}
-                {show.has("events") && (
-                  <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
-                    {chain.eventCount}
-                  </td>
-                )}
-                {show.has("runs") && (
-                  <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
-                    {chain.runCount}
-                  </td>
-                )}
-                {show.has("states") && (
-                  <td className="border-b border-(--border) px-3 py-1.5">
-                    <div className="flex flex-wrap gap-1">
-                      {Object.entries(chain.states).map(([state, count]) =>
-                        count ? (
-                          <StateBadge
-                            key={state}
-                            state={`${state} ${count}`}
-                            hues={{ [`${state} ${count}`]: STATE_HUES[state] }}
-                            dot={false}
-                          />
-                        ) : null,
-                      )}
-                      {chain.runCount === 0 && (
-                        <span className="text-(--text-faint)">—</span>
-                      )}
+                Single-event roots{hiddenSingles > 0 ? ` ${hiddenSingles}` : ""}
+              </button>
+              <span className="ml-auto">
+                <DisplayOptions
+                  config={CHAINS_DISPLAY}
+                  state={display}
+                  onChange={setDisplay}
+                  rows={scoped}
+                />
+              </span>
+              <FilterInput
+                value={filter}
+                onChange={setFilter}
+                placeholder="type:… repo:… state:… is:active"
+                label="Filter chains"
+                query={parsed}
+                facets={CHAIN_FACETS}
+              />
+            </div>
+          </>
+        }
+      >
+        <table className="w-full table-fixed border-separate border-spacing-0">
+          <thead>
+            <tr className="text-left text-[11px] text-(--text-faint)">
+              {cols.map((column) => {
+                const sort = CHAINS_DISPLAY.sorts.find(
+                  (item) => item.column === column.key,
+                );
+                const isCustom =
+                  column.isCustom || column.key.startsWith("custom:");
+                const path = column.key.replace(/^custom:/, "");
+                const current = isCustom
+                  ? display.sortBy === column.key
+                  : sort && display.sortBy === sort.key;
+                return (
+                  <Th
+                    key={column.key}
+                    label={column.label}
+                    dir={current ? display.sortDir : null}
+                    naturalDir={sort?.defaultDir ?? "asc"}
+                    onSort={
+                      sort || isCustom
+                        ? () =>
+                            setDisplay((state) =>
+                              cycleColumnSort(
+                                CHAINS_DISPLAY,
+                                state,
+                                column.key,
+                              ),
+                            )
+                        : undefined
+                    }
+                    onRemove={
+                      isCustom
+                        ? () =>
+                            setDisplay((state) =>
+                              removeCustomColumn(state, path),
+                            )
+                        : undefined
+                    }
+                  />
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {windowTokens.map((token) => {
+              if (token.length === 2) {
+                const [section, sub] = token;
+                return (
+                  <GroupHeaderRow
+                    key={`group:${section.key}`}
+                    colSpan={cols.length}
+                    section={section}
+                    collapsed={display.collapsed.includes(section.key)}
+                    onToggle={() =>
+                      setDisplay((state) => toggleCollapsed(state, section.key))
+                    }
+                    sub={sub}
+                  />
+                );
+              }
+              const chain = token[0];
+              const selected = chain.correlationId === selectedId;
+              return (
+                <tr
+                  key={chain.correlationId}
+                  data-chain-id={chain.correlationId}
+                  aria-selected={selected}
+                  onClick={() => onOpenChain(chain.correlationId)}
+                  className={`cursor-pointer hover:bg-(--surface-1) ${selected ? "row-selected" : ""}`}
+                >
+                  <td className="max-w-56 border-b border-(--border) px-3 py-1.5">
+                    <div
+                      className="truncate text-(--text-dim)"
+                      title={chain.origin.type}
+                    >
+                      {chain.origin.type}
+                    </div>
+                    <div
+                      className="mono truncate text-xs text-(--text-faint)"
+                      title={chain.origin.source}
+                    >
+                      {chain.origin.source}
                     </div>
                   </td>
-                )}
-                {show.has("activity") && (
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)">
-                    <Ago iso={chain.lastActivityAt} now={now} />
-                  </td>
-                )}
-                {show.has("repos") && (
-                  <td
-                    className="mono max-w-36 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)"
-                    title={chain.repos.join(", ")}
-                  >
-                    {chain.repos.join(", ") || "—"}
-                  </td>
-                )}
-                {cols
-                  .filter(
-                    (column) =>
-                      column.isCustom || column.key.startsWith("custom:"),
-                  )
-                  .map((column) => (
-                    <CustomCell
-                      key={column.key}
-                      row={chain}
-                      path={column.key.replace(/^custom:/, "")}
-                    />
-                  ))}
-              </tr>
-            );
-          })}
-          <TableWindowFooter
-            colSpan={cols.length}
-            range={[windowStart, windowEnd, tokens.length]}
-            move={moveWindow}
-          />
-          {visible.length === 0 && (
-            <ListEmpty
+                  {show.has("root") && (
+                    <td
+                      className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5"
+                      title={chain.origin.eventId}
+                    >
+                      {shortId(chain.origin.eventId)}
+                    </td>
+                  )}
+                  {show.has("depth") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                      {chain.maxDepth}
+                    </td>
+                  )}
+                  {show.has("events") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                      {chain.eventCount}
+                    </td>
+                  )}
+                  {show.has("runs") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                      {chain.runCount}
+                    </td>
+                  )}
+                  {show.has("states") && (
+                    <td className="border-b border-(--border) px-3 py-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(chain.states).map(([state, count]) =>
+                          count ? (
+                            <StateBadge
+                              key={state}
+                              state={`${state} ${count}`}
+                              hues={{
+                                [`${state} ${count}`]: STATE_HUES[state],
+                              }}
+                              dot={false}
+                            />
+                          ) : null,
+                        )}
+                        {chain.runCount === 0 && (
+                          <span className="text-(--text-faint)">—</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                  {show.has("activity") && (
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)">
+                      <Ago iso={chain.lastActivityAt} now={now} />
+                    </td>
+                  )}
+                  {show.has("repos") && (
+                    <td
+                      className="mono max-w-36 truncate border-b border-(--border) px-3 py-1.5 text-(--text-faint)"
+                      title={chain.repos.join(", ")}
+                    >
+                      {chain.repos.join(", ") || "—"}
+                    </td>
+                  )}
+                  {cols
+                    .filter(
+                      (column) =>
+                        column.isCustom || column.key.startsWith("custom:"),
+                    )
+                    .map((column) => (
+                      <CustomCell
+                        key={column.key}
+                        row={chain}
+                        path={column.key.replace(/^custom:/, "")}
+                      />
+                    ))}
+                </tr>
+              );
+            })}
+            <TableWindowFooter
               colSpan={cols.length}
-              query={list}
-              filtered={withoutSingles.length > 0}
-              onClear={filter ? () => setFilter("") : undefined}
-              noun="chains"
-              empty={
-                context.kind === "repo"
-                  ? `No chains for ${context.name}.`
-                  : showSingles
-                    ? "No chains in the last 24 hours."
-                    : "No multi-step chains in the last 24 hours."
-              }
-              escHint={Boolean(filter)}
+              range={[windowStart, windowEnd, tokens.length]}
+              move={moveWindow}
             />
-          )}
-        </tbody>
-      </table>
-    </ListPane>
+            {visible.length === 0 && (
+              <ListEmpty
+                colSpan={cols.length}
+                query={list}
+                filtered={withoutSingles.length > 0}
+                onClear={filter ? () => setFilter("") : undefined}
+                noun="chains"
+                empty={
+                  context.kind === "repo"
+                    ? `No chains for ${context.name}.`
+                    : showSingles
+                      ? "No chains in the last 24 hours."
+                      : "No multi-step chains in the last 24 hours."
+                }
+                escHint={Boolean(filter)}
+              />
+            )}
+          </tbody>
+        </table>
+      </ListPane>
+    </div>
   );
 }
