@@ -11,7 +11,13 @@ import {
   nodeAccessibleName,
 } from "./nodes";
 import type { GraphNode } from "./model";
-import { Graph, focusedNodeFit, useSelectedNodeReveal } from "../views/Graph";
+import {
+  Graph,
+  focusedNodeFit,
+  graphDisplayFromHash,
+  graphHashWithDisplay,
+  useSelectedNodeReveal,
+} from "../views/Graph";
 import {
   changeInput,
   createAgentsFixture,
@@ -26,6 +32,8 @@ import type { AgentsView } from "../types";
 afterEach(() => {
   cleanup();
   restoreApi();
+  localStorage.clear();
+  window.location.hash = "";
 });
 
 function renderNode(ui: React.ReactElement) {
@@ -391,6 +399,196 @@ function renderGraph(props: Partial<Parameters<typeof Graph>[0]> = {}) {
 }
 
 describe("Graph view inspect loop", () => {
+  test("graph display hash helpers preserve selection and unrelated query keys", () => {
+    expect(
+      graphHashWithDisplay("#/graph/agent%3Adoctor%401?project=factory", {
+        overlay: "health",
+        window: "7d",
+      }),
+    ).toBe(
+      "#/graph/agent%3Adoctor%401?project=factory&overlay=health&window=7d",
+    );
+    expect(
+      graphDisplayFromHash("#/graph?overlay=latency&window=30d", {
+        overlay: "activity",
+        window: "1h",
+      }),
+    ).toEqual({ overlay: "latency", window: "30d" });
+  });
+
+  // WM-291 review: Live is the prior behaviour byte for byte. An operator who
+  // never opens the overlay picker must not find `?overlay=live&window=24h`
+  // appended to every graph URL they copy.
+  test("Live writes no query of its own and strips a stale one", () => {
+    expect(
+      graphHashWithDisplay("#/graph", { overlay: "live", window: "24h" }),
+    ).toBe("#/graph");
+    expect(
+      graphHashWithDisplay("#/graph/agent%3Adoctor%401", {
+        overlay: "live",
+        window: "7d",
+      }),
+    ).toBe("#/graph/agent%3Adoctor%401");
+    expect(
+      graphHashWithDisplay("#/graph?overlay=health&window=7d", {
+        overlay: "live",
+        window: "7d",
+      }),
+    ).toBe("#/graph");
+    // Unrelated keys are still none of Live's business.
+    expect(
+      graphHashWithDisplay("#/graph?project=factory&overlay=cost&window=1h", {
+        overlay: "live",
+        window: "1h",
+      }),
+    ).toBe("#/graph?project=factory");
+  });
+
+  test("overlay and window selectors initialize from and write back to the hash", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mock(
+      async () => new Response(JSON.stringify({ rows: [] }), { status: 200 }),
+    ) as any;
+    window.location.hash = "#/graph?overlay=health&window=7d";
+    try {
+      await withApi(
+        {
+          agents: async () => graphAgents(),
+          status: async () => createStatusFixture(),
+        },
+        async () => {
+          const { getByLabelText } = renderGraph();
+          const overlay = (await waitFor(() =>
+            getByLabelText("Graph overlay"),
+          )) as HTMLSelectElement;
+          const windowSelect = getByLabelText(
+            "Graph time window",
+          ) as HTMLSelectElement;
+          expect(overlay.value).toBe("health");
+          expect(windowSelect.value).toBe("7d");
+          expect(windowSelect.disabled).toBe(false);
+
+          fireEvent.change(overlay, { target: { value: "activity" } });
+          await waitFor(() =>
+            expect(window.location.hash).toContain("overlay=activity"),
+          );
+          expect(window.location.hash).toContain("window=7d");
+          expect(
+            JSON.parse(localStorage.getItem("evrt-display-graph") ?? "null"),
+          ).toEqual({
+            overlay: "activity",
+            window: "7d",
+          });
+        },
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test("an unreachable metrics endpoint falls back to Live with an inline notice", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mock(
+      async () => new Response("unavailable", { status: 503 }),
+    ) as any;
+    window.location.hash = "#/graph?overlay=cost&window=24h";
+    try {
+      await withApi(
+        {
+          agents: async () => graphAgents(),
+          status: async () => createStatusFixture(),
+        },
+        async () => {
+          const { getByLabelText, getByText } = renderGraph();
+          const notice = await waitFor(() =>
+            getByText(/Historical metrics unavailable/),
+          );
+          expect(notice.textContent).toContain(
+            "Historical metrics unavailable",
+          );
+          const overlay = getByLabelText("Graph overlay") as HTMLSelectElement;
+          const windowSelect = getByLabelText(
+            "Graph time window",
+          ) as HTMLSelectElement;
+          expect(overlay.value).toBe("live");
+          expect(windowSelect.disabled).toBe(true);
+          // Falling back to Live restores the bare graph hash, not `overlay=live`.
+          await waitFor(() => expect(window.location.hash).toBe("#/graph"));
+        },
+      );
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  // WM-291 review D5: the re-attach effect fires on every selection change and
+  // a held `j` produces ~30 a second. hash.ts exists because Safari throws
+  // SecurityError past ~100 history writes per 30s.
+  test("a burst of selection changes coalesces into at most one history write", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mock(
+      async () => new Response(JSON.stringify({ rows: [] }), { status: 200 }),
+    ) as any;
+    window.location.hash = "#/graph?overlay=health&window=7d";
+    const raw = window.history.replaceState.bind(window.history);
+    let writes = 0;
+    window.history.replaceState = ((
+      state: unknown,
+      unused: string,
+      url: string,
+    ) => {
+      writes += 1;
+      raw(state, unused, url);
+    }) as typeof window.history.replaceState;
+    try {
+      await withApi(
+        {
+          agents: async () => graphAgents(),
+          status: async () => createStatusFixture(),
+        },
+        async () => {
+          const { rerender, getByLabelText } = renderGraph({
+            focusNodeId: "agent:doctor@1",
+          });
+          await waitFor(() => getByLabelText("Graph overlay"));
+          writes = 0;
+          for (let i = 0; i < 30; i += 1) {
+            // App owns the path and rewrites it on every selection, dropping
+            // Graph's query — `raw` so its own writes are not counted here.
+            raw(window.history.state, "", `#/graph/agent%3An${i}`);
+            rerender(
+              <Graph
+                context={{ kind: "all" }}
+                focusNodeId={`agent:n${i}`}
+                onSelectNode={() => {}}
+                onJumpAgent={() => {}}
+                onJumpEvents={() => {}}
+                onJumpProposal={() => {}}
+              />,
+            );
+          }
+          // Uncoalesced this was one write per selection change.
+          expect(writes).toBeLessThanOrEqual(1);
+          // The last value still lands, one interval later.
+          await waitFor(
+            () => expect(window.location.hash).toContain("overlay=health"),
+            {
+              timeout: 2000,
+            },
+          );
+          expect(window.location.hash).toBe(
+            "#/graph/agent%3An29?overlay=health&window=7d",
+          );
+          expect(writes).toBeGreaterThan(0);
+          expect(writes).toBeLessThanOrEqual(2);
+        },
+      );
+    } finally {
+      window.history.replaceState = raw;
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test("deep-link focus fit centres only the requested node at the current zoom", () => {
     expect(focusedNodeFit("event:gh.failed", 0.8)).toEqual({
       nodes: [{ id: "event:gh.failed" }],

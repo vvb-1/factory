@@ -5,6 +5,7 @@ import type {
   RunListItem,
   StatusView,
 } from "../types";
+import type { GraphOverlay } from "../displayOptions";
 
 // The capability map: what this runtime can do, derived from the registry,
 // overlaid with live runtime state (OPS-227 phase 2): active run state badges,
@@ -13,7 +14,27 @@ import type {
 // Kept as plain data, separate from React Flow, so it stays testable and the
 // rendering layer can be swapped without touching the topology rules.
 
-export type GraphNode =
+export interface HistoricalOverlayValue {
+  mode: Exclude<GraphOverlay, "live">;
+  /** Value displayed to the operator: count, rate, dollars, or milliseconds. */
+  value: number;
+  /** 0–1 position within this response's visible ramp. */
+  intensity: number;
+  formatted: string;
+  label: string;
+  /** Activity fades zero-use topology; every overlay fades a no-data node. */
+  faint: boolean;
+  /**
+   * The window produced no measurement for this key (no runs at all, or — for
+   * Health — a zero denominator). Distinct from a measured zero: `0%` at the
+   * healthy end of the ramp and `0.00s` at the fastest end are both claims the
+   * data does not support, so these render `—`, stay out of the legend ramp,
+   * and never take a ramp colour.
+   */
+  noData: boolean;
+}
+
+export type GraphNode = (
   | {
       id: string;
       kind: "eventType";
@@ -47,7 +68,8 @@ export type GraphNode =
       agentRef: string | null;
       eventType: string | null;
       proposal: Proposal;
-    };
+    }
+) & { historical?: HistoricalOverlayValue };
 
 export type GraphEdge = {
   id: string;
@@ -56,6 +78,7 @@ export type GraphEdge = {
   kind: "routes" | "recommends" | "proposal";
   label?: string;
   invocations?: number;
+  historical?: HistoricalOverlayValue;
 };
 
 export interface CapabilityGraph {
@@ -70,9 +93,177 @@ export interface LiveGraphState {
   status?: StatusView;
 }
 
+export interface BreakdownRows {
+  rows: Array<{ key: string; value: number }>;
+}
+
+/** All server-side aggregates needed for one historical overlay refresh. */
+export interface HistoricalBreakdowns {
+  agents?: BreakdownRows;
+  eventTypes?: BreakdownRows;
+  edges?: BreakdownRows;
+  agentRuns?: BreakdownRows;
+  eventTypeRuns?: BreakdownRows;
+  edgeRuns?: BreakdownRows;
+}
+
 export const eventNodeId = (type: string) => `event:${type}`;
 export const agentNodeId = (ref: string) => `agent:${ref}`;
 export const proposalNodeId = (id: string) => `proposal:${id}`;
+
+const rowsMap = (data?: BreakdownRows) =>
+  new Map((data?.rows ?? []).map((row) => [row.key, Number(row.value) || 0]));
+
+function overlayFormat(
+  mode: Exclude<GraphOverlay, "live">,
+  value: number,
+): string {
+  if (mode === "health") return `${Math.round(value * 100)}%`;
+  if (mode === "cost")
+    return `$${value < 0.01 ? value.toFixed(3) : value.toFixed(2)}`;
+  if (mode === "latency")
+    return `${value < 1000 ? (value / 1000).toFixed(2) : (value / 1000).toFixed(1)}s`;
+  return String(Math.round(value));
+}
+
+const overlayLabel = (mode: Exclude<GraphOverlay, "live">) =>
+  mode === "activity"
+    ? "runs"
+    : mode === "health"
+      ? "failure rate"
+      : mode === "cost"
+        ? "spend"
+        : "p95 execution";
+
+/**
+ * The measured value for one key, or `null` when the window measured nothing.
+ *
+ * Activity is the one overlay where an absent row is a real answer — the
+ * breakdown endpoint omits empty groups, and "0 runs" is exactly what makes a
+ * dead route visible. Every other overlay has no honest reading without a
+ * denominator: a missing Health row is not a 0% failure rate, and a missing
+ * Latency row is not a 0.00s p95.
+ */
+function valueFor(
+  mode: Exclude<GraphOverlay, "live">,
+  values: Map<string, number>,
+  totals: Map<string, number>,
+  key: string,
+): number | null {
+  if (mode === "activity") return values.get(key) ?? 0;
+  if (mode === "health") {
+    const runs = totals.get(key) ?? 0;
+    if (runs <= 0) return null;
+    // The server counts failures by `updated_at` and runs by `created_at`
+    // (lib/metrics.mjs), so the ratio can exceed 1.0 across a window boundary.
+    // Clamp rather than render "140%" — the server-side fix is separate.
+    return Math.min(1, Math.max(0, (values.get(key) ?? 0) / runs));
+  }
+  return values.has(key) ? values.get(key)! : null;
+}
+
+function overlayValues(
+  mode: Exclude<GraphOverlay, "live">,
+  keyed: Array<{ key: string; value: number | null }>,
+): Map<string, HistoricalOverlayValue> {
+  const measured = keyed.flatMap((entry) =>
+    entry.value == null ? [] : [entry.value],
+  );
+  const max = Math.max(0, ...measured);
+  const min = Math.min(...measured, 0);
+  const span = max - min;
+  return new Map(
+    keyed.map(({ key, value }) => [
+      key,
+      {
+        mode,
+        value: value ?? 0,
+        intensity: value == null || span <= 0 ? 0 : (value - min) / span,
+        formatted: value == null ? "—" : overlayFormat(mode, value),
+        label: overlayLabel(mode),
+        faint: value == null || (mode === "activity" && value === 0),
+        noData: value == null,
+      },
+    ]),
+  );
+}
+
+/**
+ * Add a historical overlay without changing topology. Under Activity a missing
+ * row is a real zero (the breakdown endpoint omits empty groups), which is what
+ * makes dead routes visible instead of silently leaving them uncoloured; under
+ * every other overlay it is no data, and says so rather than inventing a
+ * best-in-class reading (see `valueFor`).
+ */
+export function applyHistoricalOverlay(
+  graph: CapabilityGraph,
+  mode: Exclude<GraphOverlay, "live">,
+  breakdowns: HistoricalBreakdowns,
+): CapabilityGraph {
+  const agents = rowsMap(breakdowns.agents);
+  const eventTypes = rowsMap(breakdowns.eventTypes);
+  const edgeValues = rowsMap(breakdowns.edges);
+  const agentRuns = rowsMap(breakdowns.agentRuns);
+  const eventTypeRuns = rowsMap(breakdowns.eventTypeRuns);
+  const edgeRuns = rowsMap(breakdowns.edgeRuns);
+
+  const rawNodes = graph.nodes.map((node) => {
+    const eligible = node.kind === "agent" || node.kind === "eventType";
+    const key = node.label;
+    const value =
+      node.kind === "agent"
+        ? valueFor(mode, agents, agentRuns, key)
+        : node.kind === "eventType"
+          ? valueFor(mode, eventTypes, eventTypeRuns, key)
+          : null;
+    return { node, key: node.id, value, eligible };
+  });
+  const nodeOverlay = overlayValues(
+    mode,
+    rawNodes
+      .filter(({ eligible }) => eligible)
+      .map(({ key, value }) => ({ key, value })),
+  );
+
+  // Only routing and recommendation edges carry a server-side metric. A ghost
+  // proposal edge has no key in any breakdown, so it has no reading — mirroring
+  // the node guard above. Left unmeasured it kept its `var(--hue-info)` stroke;
+  // colouring it would paint "pending" as the healthy end of the Health ramp.
+  const rawEdges = graph.edges.map((edge) => {
+    const eligible = edge.kind === "recommends" || edge.kind === "routes";
+    let metricKey = "";
+    if (edge.kind === "recommends") {
+      const source = edge.source.replace(/^agent:/, "");
+      const target = edge.target.replace(/^event:/, "");
+      metricKey = `${source}→${target}`;
+    } else if (edge.kind === "routes") {
+      metricKey = edge.source.replace(/^event:/, "");
+    }
+    const values = edge.kind === "routes" ? eventTypes : edgeValues;
+    const totals = edge.kind === "routes" ? eventTypeRuns : edgeRuns;
+    return {
+      edge,
+      key: edge.id,
+      value: eligible ? valueFor(mode, values, totals, metricKey) : null,
+      eligible,
+    };
+  });
+  const edgeOverlay = overlayValues(
+    mode,
+    rawEdges
+      .filter(({ eligible }) => eligible)
+      .map(({ key, value }) => ({ key, value })),
+  );
+
+  return {
+    nodes: rawNodes.map(({ node, eligible }) =>
+      eligible ? { ...node, historical: nodeOverlay.get(node.id) } : node,
+    ),
+    edges: rawEdges.map(({ edge, eligible }) =>
+      eligible ? { ...edge, historical: edgeOverlay.get(edge.id) } : edge,
+    ),
+  };
+}
 
 /** How an agent actually executes — the honest distinction for the map. */
 function executionOf(

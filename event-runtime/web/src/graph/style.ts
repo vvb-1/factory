@@ -1,4 +1,9 @@
-import type { CapabilityGraph, GraphEdge, GraphNode } from "./model";
+import type {
+  CapabilityGraph,
+  GraphEdge,
+  GraphNode,
+  HistoricalOverlayValue,
+} from "./model";
 
 // The single source of truth for what node/edge colors and dashes *mean*
 // (WM-99). Node components, edge mapping, and the legend all read from here,
@@ -53,6 +58,59 @@ export const EDGE_STYLES: Record<
     strokeDasharray: "3 3",
   },
 };
+
+const rampPct = (value: HistoricalOverlayValue) =>
+  Math.round(Math.max(0, Math.min(1, value.intensity)) * 100);
+
+/**
+ * Floor and ceiling for a node *background* tint. Node body text stays on
+ * `var(--text)`, so the hottest cell must still be a tint, not a fill —
+ * theme.css tints rows at 6–14% for exactly this reason. 22% is the top of that
+ * band: enough gradation from 5% to read as a ramp, dark enough in neither
+ * theme to swallow near-black or near-white body text.
+ */
+const TINT_MIN_PCT = 5;
+const TINT_MAX_PCT = 22;
+
+/** Theme-token ramps resolve at paint time, so dark, light, and high-contrast
+ * all use their own --accent/semantic hues rather than baked RGB values. */
+export function historicalColor(value: HistoricalOverlayValue): string {
+  if (value.noData) return "var(--surface-1)";
+  const pct = rampPct(value);
+  const tint =
+    value.mode === "health"
+      ? `color-mix(in oklch, var(--hue-err) ${pct}%, var(--hue-ok))`
+      : "var(--accent)";
+  const strength =
+    TINT_MIN_PCT + Math.round((pct * (TINT_MAX_PCT - TINT_MIN_PCT)) / 100);
+  return `color-mix(in oklch, ${tint} ${strength}%, var(--surface-1))`;
+}
+
+/**
+ * The same ramp as a stroke. A 1.5px line carries no text, so it keeps full
+ * saturation — capping it to the background tint would make edges invisible
+ * against the canvas.
+ */
+export function historicalStroke(value: HistoricalOverlayValue): string {
+  const pct = rampPct(value);
+  return value.mode === "health"
+    ? `color-mix(in oklch, var(--hue-err) ${pct}%, var(--hue-ok))`
+    : `color-mix(in oklch, var(--accent) ${15 + Math.round(pct * 0.85)}%, var(--surface-1))`;
+}
+
+export function historicalRamp(graph: CapabilityGraph): {
+  min: HistoricalOverlayValue;
+  max: HistoricalOverlayValue;
+} | null {
+  const values = graph.nodes.flatMap((node) =>
+    node.historical && !node.historical.noData ? [node.historical] : [],
+  );
+  if (values.length === 0) return null;
+  return {
+    min: values.reduce((a, b) => (b.value < a.value ? b : a)),
+    max: values.reduce((a, b) => (b.value > a.value ? b : a)),
+  };
+}
 
 export interface LegendEntries {
   nodes: Array<{ key: NodeStyleKey } & (typeof NODE_STYLES)[NodeStyleKey]>;

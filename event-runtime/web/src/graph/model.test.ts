@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildCapabilityGraph } from "./model";
+import { applyHistoricalOverlay, buildCapabilityGraph } from "./model";
 import type { AgentsView, RunListItem, RunState } from "../types";
 
 // The topology rules are pure data — tested without React or a browser.
@@ -528,5 +528,317 @@ describe("buildCapabilityGraph", () => {
     );
     expect(propToAgentEdge).toBeDefined();
     expect(propToAgentEdge?.kind).toBe("proposal");
+  });
+});
+
+describe("applyHistoricalOverlay (WM-291)", () => {
+  const topology = () =>
+    buildCapabilityGraph(
+      view({
+        agents: [agent({ ref: "doctor@1" }), agent({ ref: "idle@1" })],
+        eventTypes: [
+          {
+            type: "ci.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "ci.idle",
+            agent: "idle@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+        ],
+        edges: {
+          "doctor@1": {
+            recommendationField: "verdict",
+            edges: { RETRY: { eventType: "ci.idle", input: {} } },
+          },
+        },
+      }),
+    );
+
+  test("maps activity counts and explicitly fades zero-activity nodes", () => {
+    const graph = applyHistoricalOverlay(topology(), "activity", {
+      agents: { rows: [{ key: "doctor@1", value: 12 }] },
+      eventTypes: { rows: [{ key: "ci.failed", value: 12 }] },
+      edges: { rows: [{ key: "doctor@1→ci.idle", value: 3 }] },
+    });
+    expect(
+      graph.nodes.find((n) => n.id === "agent:doctor@1")?.historical,
+    ).toMatchObject({
+      formatted: "12",
+      intensity: 1,
+      faint: false,
+    });
+    expect(
+      graph.nodes.find((n) => n.id === "agent:idle@1")?.historical,
+    ).toMatchObject({
+      value: 0,
+      faint: true,
+    });
+    expect(
+      graph.edges.find((e) => e.kind === "recommends")?.historical,
+    ).toMatchObject({
+      value: 3,
+      intensity: 0.25,
+    });
+  });
+
+  test("maps health as failures divided by runs and formats latency/cost units", () => {
+    const health = applyHistoricalOverlay(topology(), "health", {
+      agents: { rows: [{ key: "doctor@1", value: 2 }] },
+      agentRuns: { rows: [{ key: "doctor@1", value: 8 }] },
+      eventTypes: { rows: [{ key: "ci.failed", value: 1 }] },
+      eventTypeRuns: { rows: [{ key: "ci.failed", value: 4 }] },
+      edges: { rows: [{ key: "doctor@1→ci.idle", value: 1 }] },
+      edgeRuns: { rows: [{ key: "doctor@1→ci.idle", value: 2 }] },
+    });
+    expect(
+      health.nodes.find((n) => n.id === "agent:doctor@1")?.historical,
+    ).toMatchObject({
+      value: 0.25,
+      formatted: "25%",
+    });
+    expect(
+      health.edges.find((e) => e.kind === "recommends")?.historical?.formatted,
+    ).toBe("50%");
+
+    const cost = applyHistoricalOverlay(topology(), "cost", {
+      agents: { rows: [{ key: "doctor@1", value: 1.25 }] },
+    });
+    expect(
+      cost.nodes.find((n) => n.id === "agent:doctor@1")?.historical?.formatted,
+    ).toBe("$1.25");
+
+    const latency = applyHistoricalOverlay(topology(), "latency", {
+      agents: { rows: [{ key: "doctor@1", value: 2500 }] },
+    });
+    expect(
+      latency.nodes.find((n) => n.id === "agent:doctor@1")?.historical
+        ?.formatted,
+    ).toBe("2.5s");
+  });
+});
+
+describe("applyHistoricalOverlay guards (WM-291 review)", () => {
+  // A topology with an open proposal: two ghost edges (event → proposal,
+  // proposal → agent) alongside the routing and recommendation edges.
+  const withProposal = () =>
+    buildCapabilityGraph(
+      view({
+        agents: [agent({ ref: "doctor@1" }), agent({ ref: "rerun@1" })],
+        eventTypes: [
+          {
+            type: "ci.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "ci.rerun",
+            agent: "rerun@1",
+            adapter: "command",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+        ],
+        edges: {
+          "doctor@1": {
+            recommendationField: "verdict",
+            edges: { FLAKE: { eventType: "ci.rerun", input: {} } },
+          },
+        },
+      }),
+      {
+        events: [
+          {
+            source: "factory.chain",
+            eventId: "ev-1",
+            type: "ci.rerun",
+            subject: null,
+            status: "planned",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: null,
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: "prop-1",
+            runId: null,
+            envelope: {},
+            repos: [],
+          } as any,
+        ],
+        proposals: [
+          {
+            id: "prop-1",
+            decision: "run",
+            status: "open",
+            expired: false,
+            created_at: new Date().toISOString(),
+            ttl_seconds: 600,
+            decided_at: null,
+            decided_by: null,
+            reason: null,
+            runId: "run-1",
+            eventId: "ev-1",
+            eventSource: "factory.chain",
+            agent: "rerun@1",
+            spec: null,
+            repos: [],
+          } as any,
+        ],
+      },
+    );
+
+  test("proposal edges take no overlay value — pending is not the healthy end of the ramp", () => {
+    const graph = applyHistoricalOverlay(withProposal(), "health", {
+      agents: { rows: [{ key: "doctor@1", value: 1 }] },
+      agentRuns: { rows: [{ key: "doctor@1", value: 4 }] },
+      eventTypes: { rows: [{ key: "ci.failed", value: 1 }] },
+      eventTypeRuns: { rows: [{ key: "ci.failed", value: 4 }] },
+      edges: { rows: [{ key: "doctor@1→ci.rerun", value: 1 }] },
+      edgeRuns: { rows: [{ key: "doctor@1→ci.rerun", value: 4 }] },
+    });
+
+    const proposalEdges = graph.edges.filter((e) => e.kind === "proposal");
+    expect(proposalEdges.length).toBeGreaterThan(0);
+    for (const edge of proposalEdges) expect(edge.historical).toBeUndefined();
+    // The measurable edges still get their reading.
+    expect(
+      graph.edges.find((e) => e.kind === "recommends")?.historical?.formatted,
+    ).toBe("25%");
+  });
+
+  test("proposal nodes and edges stay unmeasured under every overlay", () => {
+    for (const mode of ["activity", "health", "cost", "latency"] as const) {
+      const graph = applyHistoricalOverlay(withProposal(), mode, {
+        agents: { rows: [{ key: "doctor@1", value: 3 }] },
+        agentRuns: { rows: [{ key: "doctor@1", value: 3 }] },
+      });
+      expect(
+        graph.nodes.find((n) => n.kind === "proposal")?.historical,
+      ).toBeUndefined();
+      expect(
+        graph.edges
+          .filter((e) => e.kind === "proposal")
+          .every((e) => !e.historical),
+      ).toBe(true);
+    }
+  });
+
+  test("a node with no runs reads as no data, not as a perfect score", () => {
+    const health = applyHistoricalOverlay(withProposal(), "health", {
+      agents: { rows: [{ key: "doctor@1", value: 1 }] },
+      agentRuns: { rows: [{ key: "doctor@1", value: 4 }] },
+      eventTypes: { rows: [] },
+      eventTypeRuns: { rows: [] },
+      edges: { rows: [] },
+      edgeRuns: { rows: [] },
+    });
+    // rerun@1 never ran in the window: no denominator, so no failure rate.
+    expect(
+      health.nodes.find((n) => n.id === "agent:rerun@1")?.historical,
+    ).toMatchObject({
+      formatted: "—",
+      noData: true,
+      faint: true,
+      intensity: 0,
+    });
+    // doctor@1 did run — a measured 25% is still shown.
+    expect(
+      health.nodes.find((n) => n.id === "agent:doctor@1")?.historical,
+    ).toMatchObject({
+      formatted: "25%",
+      noData: false,
+      faint: false,
+    });
+  });
+
+  test("a measured zero is still a measurement — only a missing denominator is no data", () => {
+    const health = applyHistoricalOverlay(withProposal(), "health", {
+      agents: { rows: [] },
+      agentRuns: { rows: [{ key: "rerun@1", value: 9 }] },
+    });
+    expect(
+      health.nodes.find((n) => n.id === "agent:rerun@1")?.historical,
+    ).toMatchObject({
+      value: 0,
+      formatted: "0%",
+      noData: false,
+      faint: false,
+    });
+  });
+
+  test("latency and cost report no data rather than the fastest/cheapest reading", () => {
+    const latency = applyHistoricalOverlay(withProposal(), "latency", {
+      agents: { rows: [{ key: "doctor@1", value: 2500 }] },
+      eventTypes: { rows: [] },
+      edges: { rows: [] },
+    });
+    expect(
+      latency.nodes.find((n) => n.id === "agent:rerun@1")?.historical,
+    ).toMatchObject({
+      formatted: "—",
+      noData: true,
+      faint: true,
+    });
+    expect(
+      latency.nodes.find((n) => n.id === "agent:doctor@1")?.historical
+        ?.formatted,
+    ).toBe("2.5s");
+
+    const cost = applyHistoricalOverlay(withProposal(), "cost", {
+      agents: { rows: [{ key: "doctor@1", value: 1.25 }] },
+    });
+    expect(
+      cost.nodes.find((n) => n.id === "agent:rerun@1")?.historical?.formatted,
+    ).toBe("—");
+
+    // Activity keeps its zeroes: a missing row there really is "no runs".
+    const activity = applyHistoricalOverlay(withProposal(), "activity", {
+      agents: { rows: [{ key: "doctor@1", value: 7 }] },
+    });
+    expect(
+      activity.nodes.find((n) => n.id === "agent:rerun@1")?.historical,
+    ).toMatchObject({
+      formatted: "0",
+      noData: false,
+      faint: true,
+    });
+  });
+
+  test("health is clamped to 100% — the server counts failures and runs on different clocks", () => {
+    const health = applyHistoricalOverlay(withProposal(), "health", {
+      // lib/metrics.mjs buckets failures by updated_at and runs by created_at,
+      // so a run that started before the window and failed inside it makes the
+      // ratio exceed 1.0. That must never render as "140%".
+      agents: { rows: [{ key: "doctor@1", value: 14 }] },
+      agentRuns: { rows: [{ key: "doctor@1", value: 10 }] },
+    });
+    expect(
+      health.nodes.find((n) => n.id === "agent:doctor@1")?.historical,
+    ).toMatchObject({
+      value: 1,
+      formatted: "100%",
+    });
+  });
+
+  test("a negative ratio cannot drag the ramp below zero either", () => {
+    const health = applyHistoricalOverlay(withProposal(), "health", {
+      agents: { rows: [{ key: "doctor@1", value: -3 }] },
+      agentRuns: { rows: [{ key: "doctor@1", value: 10 }] },
+    });
+    expect(
+      health.nodes.find((n) => n.id === "agent:doctor@1")?.historical,
+    ).toMatchObject({
+      value: 0,
+      formatted: "0%",
+    });
   });
 });

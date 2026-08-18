@@ -12,11 +12,36 @@ import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import {
+  GRAPH_OVERLAYS,
+  GRAPH_WINDOWS,
+  isGraphOverlay,
+  isGraphWindow,
+  loadGraphDisplayOptions,
+  saveGraphDisplayOptions,
+  type GraphDisplayOptions,
+  type GraphOverlay,
+  type GraphWindow,
+} from "../displayOptions";
 import { keyGuard, refetchIntervals, useNow } from "../hooks";
-import { buildCapabilityGraph, type GraphNode } from "../graph/model";
+import {
+  applyHistoricalOverlay,
+  buildCapabilityGraph,
+  type BreakdownRows,
+  type GraphEdge,
+  type GraphNode,
+  type HistoricalBreakdowns,
+} from "../graph/model";
 import { nodeTypes } from "../graph/nodes";
 import { matchNodes, missingFocusNode, searchEnter } from "../graph/search";
-import { EDGE_STYLES, legendEntries } from "../graph/style";
+import {
+  EDGE_STYLES,
+  historicalColor,
+  historicalRamp,
+  historicalStroke,
+  legendEntries,
+} from "../graph/style";
+import { createHashWriter, hashSearch, type HashWriter } from "../hash";
 import type { EventFocus } from "../types";
 import type { OperatorContext } from "../context";
 import {
@@ -38,6 +63,120 @@ import { ScopeCaption } from "../components/ContextTabs";
 
 const GRAPH_FIT_PADDING = "24px";
 const FOCUSED_NODE_MIN_ZOOM = 0.65;
+
+/** Poll cadence per window: a 7-day or 30-day rollup barely moves, so it is
+ * refreshed half as often as an hour's worth. Live state keeps its own 5s. */
+const HISTORICAL_REFETCH_MS: Record<GraphWindow, number> = {
+  "1h": 30_000,
+  "24h": 30_000,
+  "7d": 60_000,
+  "30d": 60_000,
+};
+
+const OVERLAY_LABELS: Record<GraphOverlay, string> = {
+  live: "Live",
+  activity: "Activity",
+  health: "Health",
+  cost: "Cost",
+  latency: "Latency",
+};
+
+export function graphDisplayFromHash(
+  hash: string,
+  saved: GraphDisplayOptions = loadGraphDisplayOptions(),
+): GraphDisplayOptions {
+  const query = hashSearch(hash);
+  const overlay = query.get("overlay");
+  const windowValue = query.get("window");
+  return {
+    overlay: isGraphOverlay(overlay) ? overlay : saved.overlay,
+    window: isGraphWindow(windowValue) ? windowValue : saved.window,
+  };
+}
+
+export function graphHashWithDisplay(
+  hash: string,
+  options: GraphDisplayOptions,
+): string {
+  const raw = hash.replace(/^#\/?/, "") || "graph";
+  const i = raw.indexOf("?");
+  const path = i >= 0 ? raw.slice(0, i) : raw;
+  const query = new URLSearchParams(i >= 0 ? raw.slice(i + 1) : "");
+  if (options.overlay === "live") {
+    // Live is the prior behaviour byte for byte: no query of its own, so an
+    // operator who never opens the overlay picker still gets a bare `#/graph`
+    // to copy. `?project=` and anything else on the hash survive.
+    query.delete("overlay");
+    query.delete("window");
+  } else {
+    query.set("overlay", options.overlay);
+    query.set("window", options.window);
+  }
+  const qs = query.toString();
+  return qs ? `#/${path}?${qs}` : `#/${path}`;
+}
+
+/**
+ * The display query rides the same coalescing seam as the router (hash.ts):
+ * Safari throws `SecurityError` past ~100 history writes per 30s, and the
+ * re-attach effect below re-runs on every selection change — a held `j` fires
+ * ~30 a second. Writes preserve `history.state` exactly as `useHashRoute`
+ * does; a `null` there wipes state the rest of the app may be carrying.
+ */
+function createDisplayHashWriter(): HashWriter {
+  return createHashWriter((hash, replace) => {
+    if (!replace) {
+      window.location.hash = hash;
+      return;
+    }
+    // A bare `#…` resolves against the current URL, so path and search survive
+    // untouched. `history.state` is passed through, never nulled.
+    window.history.replaceState(window.history.state, "", hash);
+  });
+}
+
+async function breakdown(
+  windowValue: GraphWindow,
+  by: "agent" | "event_type" | "edge",
+  metric: "runs" | "failures" | "cost" | "p95_execution",
+): Promise<BreakdownRows> {
+  const query = new URLSearchParams({ window: windowValue, by, metric });
+  // Agent breakdowns default to top ten; a topology overlay must account for
+  // every registered node. Event type/edge are unlimited server-side.
+  if (by === "agent") query.set("limit", "500");
+  const response = await fetch(`/api/metrics/breakdown?${query.toString()}`);
+  if (!response.ok)
+    throw new Error(`/metrics/breakdown returned HTTP ${response.status}`);
+  return response.json() as Promise<BreakdownRows>;
+}
+
+/** One React Query refresh per overlay. The server aggregates each dimension
+ * once per refresh; requests are never multiplied by topology size. */
+export async function fetchHistoricalOverlay(
+  overlay: Exclude<GraphOverlay, "live">,
+  windowValue: GraphWindow,
+): Promise<HistoricalBreakdowns> {
+  const metric =
+    overlay === "activity"
+      ? "runs"
+      : overlay === "health"
+        ? "failures"
+        : overlay === "cost"
+          ? "cost"
+          : "p95_execution";
+  const [agents, eventTypes, edges] = await Promise.all([
+    breakdown(windowValue, "agent", metric),
+    breakdown(windowValue, "event_type", metric),
+    breakdown(windowValue, "edge", metric),
+  ]);
+  if (overlay !== "health") return { agents, eventTypes, edges };
+  const [agentRuns, eventTypeRuns, edgeRuns] = await Promise.all([
+    breakdown(windowValue, "agent", "runs"),
+    breakdown(windowValue, "event_type", "runs"),
+    breakdown(windowValue, "edge", "runs"),
+  ]);
+  return { agents, eventTypes, edges, agentRuns, eventTypeRuns, edgeRuns };
+}
 
 type GraphFitViewOptions = {
   nodes?: Array<{ id: string }>;
@@ -87,15 +226,7 @@ export function useSelectedNodeReveal(
   return revealSelected;
 }
 
-function flowEdges(graph: {
-  edges: Array<{
-    id: string;
-    source: string;
-    target: string;
-    kind: keyof typeof EDGE_STYLES;
-    label?: string;
-  }>;
-}): Edge[] {
+function flowEdges(graph: { edges: GraphEdge[] }): Edge[] {
   return graph.edges.map((edge) => ({
     id: edge.id,
     source: edge.source,
@@ -103,8 +234,16 @@ function flowEdges(graph: {
     label: edge.label,
     animated: false,
     style: {
-      stroke: EDGE_STYLES[edge.kind].stroke,
-      strokeWidth: 1.5,
+      // A no-data edge keeps its topology stroke: intensity 0 on the Health
+      // ramp is pure `--hue-ok`, and "unmeasured" must not read as "healthy".
+      stroke:
+        edge.historical && !edge.historical.noData
+          ? historicalStroke(edge.historical)
+          : EDGE_STYLES[edge.kind].stroke,
+      strokeWidth:
+        edge.historical?.mode === "activity"
+          ? 1.5 + 5 * edge.historical.intensity
+          : 1.5,
       strokeDasharray: EDGE_STYLES[edge.kind].strokeDasharray,
     },
     labelStyle: { fill: "var(--text-faint)", fontSize: "var(--text-xs)" },
@@ -114,10 +253,7 @@ function flowEdges(graph: {
 
 function applyGraphOverlay(
   prev: { nodes: Node[]; edges: Edge[] } | null,
-  graph: {
-    nodes: GraphNode[];
-    edges: Parameters<typeof flowEdges>[0]["edges"];
-  },
+  graph: { nodes: GraphNode[]; edges: GraphEdge[] },
 ): { nodes: Node[]; edges: Edge[] } | null {
   if (!prev) return prev;
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -156,6 +292,57 @@ export function Graph({
   onJumpEvents: (focus: EventFocus) => void;
   onJumpProposal: (id: string) => void;
 }) {
+  const [display, setDisplay] = useState<GraphDisplayOptions>(() =>
+    graphDisplayFromHash(window.location.hash),
+  );
+  const [metricsFallback, setMetricsFallback] = useState<string | null>(null);
+  const hashWriter = useMemo(() => createDisplayHashWriter(), []);
+
+  // `immediate` is the operator changing a picker — a reader must see that at
+  // once, the way `useHashRoute` flushes a query change. The re-attach below
+  // rides the interval instead, because selection changes arrive in bursts.
+  const writeDisplayHash = useCallback(
+    (options: GraphDisplayOptions, immediate: boolean) => {
+      const next = graphHashWithDisplay(window.location.hash, options);
+      if (next === window.location.hash) return;
+      hashWriter.replace(next);
+      if (immediate) hashWriter.flush();
+    },
+    [hashWriter],
+  );
+
+  const commitDisplay = useCallback(
+    (next: GraphDisplayOptions) => {
+      setDisplay(next);
+      saveGraphDisplayOptions(next);
+      writeDisplayHash(next, true);
+    },
+    [writeDisplayHash],
+  );
+
+  // App owns node-selection navigation and rewrites the graph path. Re-attach
+  // Graph's display query after those writes, and honor Back/pasted hashes
+  // without losing the independently persisted value when a key is omitted.
+  useEffect(() => {
+    saveGraphDisplayOptions(display);
+    writeDisplayHash(display, false);
+  }, [display, focusNodeId, writeDisplayHash]);
+  useEffect(() => {
+    const onHashChange = () => {
+      // The URL moved under us (Back, or App's own writer landing): a buffered
+      // display write would clobber it.
+      hashWriter.cancel();
+      const next = graphDisplayFromHash(window.location.hash);
+      setDisplay(next);
+      saveGraphDisplayOptions(next);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [hashWriter]);
+  // Never flush on unmount: the operator has left the graph and the buffered
+  // hash would overwrite the view they went to.
+  useEffect(() => () => hashWriter.cancel(), [hashWriter]);
+
   const registry = useQuery({
     queryKey: ["agents"],
     queryFn: api.agents,
@@ -181,7 +368,34 @@ export function Graph({
     queryFn: api.status,
     ...refetchIntervals.secondary,
   });
+  const historicalQ = useQuery({
+    queryKey: ["graph-historical", display.overlay, display.window],
+    queryFn: () =>
+      fetchHistoricalOverlay(
+        display.overlay as Exclude<GraphOverlay, "live">,
+        display.window,
+      ),
+    enabled: display.overlay !== "live",
+    // These are server-side aggregates over the whole window (six
+    // /metrics/breakdown calls for Health), not the live feed — a 30-day
+    // rollup does not move meaningfully inside five seconds, and polling it at
+    // the live cadence is pure load. Short windows still refresh briskly.
+    refetchInterval: HISTORICAL_REFETCH_MS[display.window],
+    retry: false,
+  });
   const now = useNow();
+
+  useEffect(() => {
+    if (display.overlay === "live" || !historicalQ.isError) return;
+    const reason =
+      historicalQ.error instanceof Error
+        ? historicalQ.error.message
+        : "metrics unavailable";
+    setMetricsFallback(
+      `Historical metrics unavailable (${reason}); showing Live instead.`,
+    );
+    commitDisplay({ ...display, overlay: "live" });
+  }, [commitDisplay, display, historicalQ.error, historicalQ.isError]);
 
   const [positioned, setPositioned] = useState<{
     nodes: Node[];
@@ -197,7 +411,7 @@ export function Graph({
   const flowRef = useRef<FlowViewport | null>(null);
   const [flowReady, setFlowReady] = useState(0);
 
-  const { graph, mappingError } = useMemo(() => {
+  const { graph: liveGraph, mappingError } = useMemo(() => {
     if (!registry.data) return { graph: null, mappingError: false };
     try {
       return {
@@ -214,6 +428,12 @@ export function Graph({
       return { graph: null, mappingError: true };
     }
   }, [registry.data, runsQ.data, eventsQ.data, proposalsQ.data, statusQ.data]);
+
+  const graph = useMemo(() => {
+    if (!liveGraph || display.overlay === "live" || !historicalQ.data)
+      return liveGraph;
+    return applyHistoricalOverlay(liveGraph, display.overlay, historicalQ.data);
+  }, [display.overlay, historicalQ.data, liveGraph]);
 
   useEffect(() => {
     if (!graph) return;
@@ -288,6 +508,10 @@ export function Graph({
   const safeMatchIdx = matches.length ? matchIdx % matches.length : 0;
   const currentMatch = matches[safeMatchIdx] ?? null;
   const legend = useMemo(() => (graph ? legendEntries(graph) : null), [graph]);
+  const ramp = useMemo(
+    () => (graph && display.overlay !== "live" ? historicalRamp(graph) : null),
+    [display.overlay, graph],
+  );
 
   const nodes = useMemo(
     () =>
@@ -456,6 +680,48 @@ export function Graph({
         </div>
         <div className="absolute top-4 right-4 z-10 flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-[11px] text-(--text-faint)">
+              Overlay
+              <select
+                aria-label="Graph overlay"
+                value={display.overlay}
+                onChange={(event) => {
+                  setMetricsFallback(null);
+                  commitDisplay({
+                    ...display,
+                    overlay: event.target.value as GraphOverlay,
+                  });
+                }}
+                className="rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) outline-none focus:border-(--accent)"
+              >
+                {GRAPH_OVERLAYS.map((overlay) => (
+                  <option key={overlay} value={overlay}>
+                    {OVERLAY_LABELS[overlay]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-(--text-faint)">
+              Window
+              <select
+                aria-label="Graph time window"
+                value={display.window}
+                disabled={display.overlay === "live"}
+                onChange={(event) =>
+                  commitDisplay({
+                    ...display,
+                    window: event.target.value as GraphWindow,
+                  })
+                }
+                className="rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) outline-none focus:border-(--accent) disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {GRAPH_WINDOWS.map((windowValue) => (
+                  <option key={windowValue} value={windowValue}>
+                    {windowValue}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="relative w-52">
               <input
                 type="text"
@@ -502,7 +768,48 @@ export function Graph({
               </Button>
             )}
           </div>
-          {positioned &&
+          {metricsFallback && (
+            <div
+              role="status"
+              className="max-w-xl rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1.5 text-[11px] text-(--hue-warn)"
+            >
+              {metricsFallback}
+            </div>
+          )}
+          {display.overlay !== "live" && historicalQ.isPending && (
+            <div
+              role="status"
+              className="rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-1.5 text-[11px] text-(--text-faint)"
+            >
+              Loading {OVERLAY_LABELS[display.overlay].toLowerCase()} for{" "}
+              {display.window}…
+            </div>
+          )}
+          {positioned && graph && graph.nodes.length > 0 && ramp ? (
+            <div
+              className="w-56 rounded-md border border-(--border) bg-(--surface-1) px-2.5 py-2"
+              role="img"
+              aria-label={`${OVERLAY_LABELS[display.overlay]} legend from ${ramp.min.formatted} to ${ramp.max.formatted}`}
+            >
+              <div className="mb-1 flex items-center justify-between text-[11px] text-(--text-dim)">
+                <span>{ramp.min.label}</span>
+                <span>{display.window}</span>
+              </div>
+              <div
+                className="h-2 rounded-full"
+                style={{
+                  // Read the ramp off the same function the nodes paint with,
+                  // so the key cannot drift from the canvas.
+                  background: `linear-gradient(90deg, ${historicalColor(ramp.min)}, ${historicalColor(ramp.max)})`,
+                }}
+              />
+              <div className="mt-1 flex justify-between text-[11px] tabular-nums text-(--text-faint)">
+                <span>{ramp.min.formatted}</span>
+                <span>{ramp.max.formatted}</span>
+              </div>
+            </div>
+          ) : (
+            positioned &&
             graph &&
             graph.nodes.length > 0 &&
             legend &&
@@ -548,7 +855,8 @@ export function Graph({
                   </div>
                 ))}
               </div>
-            )}
+            )
+          )}
         </div>
         {positioned && graph && graph.nodes.length > 0 ? (
           <ReactFlow
@@ -627,6 +935,42 @@ export function Graph({
           }
           close={<Button onClick={() => onSelectNode(null)}>Close</Button>}
         >
+          {selected.historical && (
+            <>
+              <Section
+                title={`${OVERLAY_LABELS[selected.historical.mode]} · ${display.window}`}
+              >
+                <KV
+                  k={selected.historical.label}
+                  v={selected.historical.formatted}
+                />
+                <KV k="window" v={display.window} />
+              </Section>
+              {(selected.kind === "agent" || selected.kind === "eventType") && (
+                <>
+                  <Button
+                    onClick={() =>
+                      selected.kind === "agent"
+                        ? onJumpAgent(selected.label)
+                        : onJumpEvents({ type: selected.label })
+                    }
+                  >
+                    {selected.kind === "agent"
+                      ? "Open in Agents"
+                      : "Show in Events"}
+                  </Button>
+                  {/* Neither destination takes a time filter, so say so rather
+                      than hand over a link that quietly shows all time. */}
+                  <div className="mt-1 text-[11px] text-(--text-faint)">
+                    {selected.kind === "agent" ? "Agents" : "Events"} is not
+                    filtered by window — {display.window} applies to the figures
+                    above only.
+                  </div>
+                </>
+              )}
+            </>
+          )}
+
           {selected.kind === "eventType" && (
             <>
               <Section title="Event type">
