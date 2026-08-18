@@ -1,5 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { api, artifactUrl, fetchArtifacts } from "../api";
 import { ArtifactPanel, loadArtifactRaw } from "../components/ArtifactView";
 import { DisplayOptions } from "../components/DisplayOptions";
@@ -27,7 +33,12 @@ import {
 } from "../displayOptions";
 import { EMPTY, formatBytes, formatRelative } from "../format";
 import { hashSearch } from "../hash";
-import { refetchIntervals, useDisplayOptions, useNow } from "../hooks";
+import {
+  refetchIntervals,
+  useDisplayOptions,
+  useListKeys,
+  useNow,
+} from "../hooks";
 import { viewApplies } from "../lib/artifactView";
 import type {
   AdmittedEvent,
@@ -47,7 +58,7 @@ export type ArtifactFilters = {
 
 const COMMON_KINDS = ["report", "log", "transcript", "ci-log"];
 
-function kindsOf(artifact: ArtifactInventoryItem): string[] {
+export function kindsOf(artifact: ArtifactInventoryItem): string[] {
   return [
     ...new Set(
       (artifact.references ?? []).flatMap((reference) => reference.kind ?? []),
@@ -156,7 +167,7 @@ function openArtifactInspector(sha256: string) {
 }
 
 /** The name a downloaded copy gets: short SHA plus the first kind as extension. */
-function downloadName(sha256: string, kinds: string[]): string {
+export function downloadName(sha256: string, kinds: string[]): string {
   return `${sha256.slice(0, 12)}${kinds[0] ? `.${kinds[0]}` : ""}`;
 }
 
@@ -165,7 +176,7 @@ function downloadName(sha256: string, kinds: string[]): string {
  * UTF-8, so a zip or an image comes back as NULs and U+FFFD replacements —
  * rendering that as numbered lines is noise the operator has to scroll past.
  */
-function looksBinary(raw: string): boolean {
+export function looksBinary(raw: string): boolean {
   const sample = raw.slice(0, 4096);
   if (!sample) return false;
   if (sample.includes("\u0000")) return true;
@@ -190,7 +201,7 @@ function containsArtifactHash(
 }
 
 /** The stored bytes as one JSON object, or null — the only shape a view can describe. */
-function parsedObject(raw: string): Record<string, unknown> | null {
+export function parsedObject(raw: string): Record<string, unknown> | null {
   if (!/^\s*\{/.test(raw)) return null;
   try {
     const value: unknown = JSON.parse(raw);
@@ -202,7 +213,7 @@ function parsedObject(raw: string): Record<string, unknown> | null {
   }
 }
 
-function formattedContent(raw: string, kinds: string[]): string {
+export function formattedContent(raw: string, kinds: string[]): string {
   if (kinds.some((kind) => /json/i.test(kind)) || /^\s*[\[{]/.test(raw)) {
     try {
       return JSON.stringify(JSON.parse(raw), null, 2);
@@ -213,7 +224,7 @@ function formattedContent(raw: string, kinds: string[]): string {
   return raw;
 }
 
-function highlightedLine(line: string, search: string): ReactNode {
+export function highlightedLine(line: string, search: string): ReactNode {
   const term = search.trim();
   if (!term) return line || " ";
   const lower = line.toLowerCase();
@@ -238,7 +249,7 @@ function highlightedLine(line: string, search: string): ReactNode {
   return chunks;
 }
 
-function KindBadge({ kind }: { kind: string }) {
+export function KindBadge({ kind }: { kind: string }) {
   return (
     <span
       className="mono inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium"
@@ -258,11 +269,13 @@ export function Artifacts({
   filters,
   onFiltersChange,
   onJumpRun,
+  onOpenFull,
 }: {
   metrics?: StatusView["artifacts"];
   filters: ArtifactFilters;
   onFiltersChange: (filters: ArtifactFilters) => void;
   onJumpRun: (runId: string) => void;
+  onOpenFull?: (digest: string) => void;
 }) {
   const now = useNow();
   const artifactsQ = useQuery({
@@ -412,6 +425,40 @@ export function Artifacts({
     setContentSearch("");
     window.location.hash = withCurrentArtifactQuery("artifacts");
   };
+
+  const openFull = useCallback(
+    (sha256: string) => {
+      if (onOpenFull) {
+        onOpenFull(sha256);
+      } else {
+        window.location.hash = withCurrentArtifactQuery(
+          `artifact/${encodeURIComponent(sha256)}`,
+        );
+      }
+    },
+    [onOpenFull],
+  );
+
+  const selectedIndex = useMemo(
+    () => ordered.findIndex((artifact) => artifact.sha256 === selectedSha),
+    [ordered, selectedSha],
+  );
+
+  useListKeys({
+    count: ordered.length,
+    selected: selectedIndex,
+    onSelect: (index) => {
+      const target = ordered[index];
+      if (target) selectArtifact(target.sha256);
+    },
+    onOpen: () => {
+      if (selectedSha) openFull(selectedSha);
+    },
+    onClose: () => {
+      if (selectedSha) closeInspector();
+      else if (filters.search) onFiltersChange({ ...filters, search: "" });
+    },
+  });
 
   const fallbackMetrics = useMemo(
     () => ({
@@ -793,6 +840,18 @@ export function Artifacts({
           }
           actions={
             <>
+              <Button
+                onClick={() => openFull(selectedSha)}
+                title="Open in full page (o)"
+              >
+                <span>Open in full page</span>
+                <span
+                  aria-hidden="true"
+                  className="mono ml-1 text-(--text-faint) text-xs"
+                >
+                  o
+                </span>
+              </Button>
               <a
                 href={artifactUrl(selectedSha, selectedName)}
                 download={selectedName}
@@ -1031,6 +1090,7 @@ export function Artifacts({
                   schema={producerAgent?.outputSchema}
                   view={parsedArtifact ? producerAgent?.outputView : null}
                   onJumpRun={onJumpRun}
+                  onOpenFull={() => openFull(selectedSha)}
                   raw={artifactRaw}
                   onRawChange={setArtifactRaw}
                   rawFallback={
