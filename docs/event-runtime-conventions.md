@@ -73,7 +73,12 @@ runtime. Existing seams include:
   worker lifecycle functions' injected clocks;
 - `publishOutbox(db, { sink })` and notification transport options;
 - `resolvePiCommand({ which })` and remote-worker `spawnFn` options;
-- explicit `workspaceDir`, `artifactStore`, `env`, and adapter registries; and
+- explicit `workspaceDir`, `artifactStore`, `env`, and adapter registries;
+- the hook registry — `autoApproveChains(db, registry, { hooks, hookTimeoutMs })`
+  and `loadExtensions({ hookRegistry })` take a `createHookRegistry()`
+  instance (`lib/hooks.mjs`; the process-wide `defaultHookRegistry()` is only
+  the default), so tests decide which `approve.before` hooks run and with what
+  timeout; and
 - temporary directories and PATH-local stub CLIs in adapter conformance tests.
 
 Keep defaults in the options destructuring, not in mutable module globals. Do

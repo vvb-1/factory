@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { createAdapterRegistry } from "./adapters/index.mjs";
 import { RUNTIME_ROOT } from "./config.mjs";
+import { openDb } from "./db.mjs";
 import {
   EXTENSION_MANIFEST,
   EXTENSION_SCHEMA,
@@ -22,6 +23,7 @@ import {
   loadedExtensions,
   validateExtensionManifest,
 } from "./extensions.mjs";
+import { createHookRegistry, hookDecisionsFor } from "./hooks.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
 import { validate } from "./schema.mjs";
 
@@ -49,10 +51,17 @@ function policyFor(...dirs) {
 }
 
 /** Load with an empty base pack list so the fixture never collides with the checkout's policy. */
-function load(policy, adapterRegistry = createAdapterRegistry()) {
-  return loadExtensions({ policy, adapterRegistry, packRoots: [] }).then(
-    (result) => ({ ...result, adapterRegistry }),
-  );
+function load(
+  policy,
+  adapterRegistry = createAdapterRegistry(),
+  hookRegistry = createHookRegistry(),
+) {
+  return loadExtensions({
+    policy,
+    adapterRegistry,
+    hookRegistry,
+    packRoots: [],
+  }).then((result) => ({ ...result, adapterRegistry, hookRegistry }));
 }
 
 describe("factory-extension.json schema", () => {
@@ -187,6 +196,9 @@ describe("loadExtensions", () => {
         path: SAMPLE_EXTENSION,
         packs: ["sample-ext"],
         adapters: ["echo"],
+        hooks: [
+          { point: "approve.before", id: "factory/sample:approve-before" },
+        ],
         reserved: [],
         config: {
           namespace: "sample",
@@ -367,15 +379,13 @@ describe("loadExtensions", () => {
     const dir = tempExtension((m) => {
       m.name = "factory/future";
       m.contributes.panels = [{ id: "x" }];
-      m.contributes.hooks = { "approve.before": "./hooks.mjs" };
     });
     const out = await load(policyFor(dir));
-    expect(out.extensions[0].reserved).toEqual(["panels", "hooks"]);
+    expect(out.extensions[0].reserved).toEqual(["panels"]);
     expect(out.extensions[0].adapters).toEqual(["echo"]);
     expect(out.packRoots.map((p) => p.name)).toEqual(["sample-ext"]);
     expect(out.anomalies).toEqual([
       expect.stringMatching(/contributes\.panels is not supported yet/),
-      expect.stringMatching(/contributes\.hooks is not supported yet/),
     ]);
   });
 
@@ -517,6 +527,7 @@ describe("extension config (contributes.config)", () => {
       m.name = "factory/twin";
       m.contributes.packs = [];
       m.contributes.adapters = {};
+      delete m.contributes.hooks;
     });
     const out = await load(policyFor(SAMPLE_EXTENSION, twin));
     expect(out.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
@@ -536,6 +547,213 @@ describe("extension config (contributes.config)", () => {
     );
     expect(out.errors.join("\n")).toMatch(
       /config: missing required property "schema"/,
+    );
+  });
+});
+
+describe("extension hooks (contributes.hooks)", () => {
+  const now = Date.parse("2026-08-19T12:00:00.000Z");
+  const ctx = (labels = [], extra = {}) => ({
+    proposal: { id: "proposal-1", runId: "run-1" },
+    spec: { agent: "dispatch@1", input: { repo: "factory" } },
+    evidence: { ticket: { labels }, escalatePathIntersections: [] },
+    policy: null,
+    repo: "factory",
+    now,
+    ...extra,
+  });
+
+  test("schema: hooks map a known point to a .mjs module; unknown points and other files are violations", () => {
+    const base = { name: "a/b", version: "0.0.1" };
+    expect(
+      validate(EXTENSION_SCHEMA, {
+        ...base,
+        contributes: { hooks: { "approve.before": "./hooks/x.mjs" } },
+      }).valid,
+    ).toBe(true);
+    expect(
+      validate(EXTENSION_SCHEMA, {
+        ...base,
+        contributes: { hooks: { "plan.before": "./hooks/x.mjs" } },
+      }).errors.join(),
+    ).toMatch(/hooks: unknown property "plan.before"/);
+    expect(
+      validate(EXTENSION_SCHEMA, {
+        ...base,
+        contributes: { hooks: { "approve.before": "./hooks/x.js" } },
+      }).errors.join(),
+    ).toMatch(/approve\.before: does not match pattern/);
+    expect(
+      validate(EXTENSION_SCHEMA, {
+        ...base,
+        contributes: { hooks: ["./hooks/x.mjs"] },
+      }).valid,
+    ).toBe(false);
+  });
+
+  test("validate checks hook paths exist and stay inside the extension", () => {
+    const dir = tempExtension((m) => {
+      m.contributes.hooks = { "approve.before": "./hooks/missing.mjs" };
+    });
+    expect(validateExtensionManifest(dir).errors.join("\n")).toMatch(
+      /hooks\["approve\.before"\] ".\/hooks\/missing.mjs" is not a file/,
+    );
+    const escaping = tempExtension((m) => {
+      m.contributes.hooks = { "approve.before": "../escape.mjs" };
+    });
+    expect(validateExtensionManifest(escaping).errors.join("\n")).toMatch(
+      /hooks\["approve\.before"\] "..\/escape.mjs" escapes/,
+    );
+    expect(validateExtensionManifest(SAMPLE_EXTENSION).valid).toBe(true);
+  });
+
+  test("the fixture hook registers after the built-in with source extension:<name> and sees the extension config", async () => {
+    const out = await load({
+      extensions: [{ path: SAMPLE_EXTENSION, config: { greeting: "deny" } }],
+    });
+    expect(out.anomalies).toEqual([]);
+    expect(out.extensions[0].hooks).toEqual([
+      { point: "approve.before", id: "factory/sample:approve-before" },
+    ]);
+    expect(out.hookRegistry.list()).toEqual([
+      {
+        point: "approve.before",
+        id: "factory:escalation-labels",
+        source: "builtin",
+      },
+      {
+        point: "approve.before",
+        id: "factory/sample:approve-before",
+        source: "extension:factory/sample",
+      },
+    ]);
+    // ctx.config is getExtensionConfig("factory/sample") — defaults applied
+    // over the policy values — so greeting: "deny" makes the fixture deny.
+    expect(getExtensionConfig("factory/sample").greeting).toBe("deny");
+    const db = openDb(":memory:");
+    const verdict = out.hookRegistry.run("approve.before", ctx(), { db, now });
+    expect(verdict).toMatchObject({
+      decision: "deny",
+      reason: "sample_greeting_deny",
+      hookId: "factory/sample:approve-before",
+      source: "extension:factory/sample",
+    });
+    // The built-in ran first (allow), then the extension hook (deny); both persisted.
+    expect(
+      hookDecisionsFor(db, "proposal-1").map((r) => [r.hookId, r.decision]),
+    ).toEqual([
+      ["factory:escalation-labels", "allow"],
+      ["factory/sample:approve-before", "deny"],
+    ]);
+    // Built-in first means an escalated ticket is refused before any extension hook runs.
+    expect(
+      out.hookRegistry.run("approve.before", ctx(["ai:escalated"])),
+    ).toMatchObject({ reason: "escalated_or_security" });
+
+    // Reloading with the default config: allow, and the label rule of the fixture.
+    const again = await load(policyFor(SAMPLE_EXTENSION));
+    expect(again.hookRegistry.run("approve.before", ctx())).toMatchObject({
+      decision: "allow",
+    });
+    expect(
+      again.hookRegistry.run("approve.before", ctx(["sample:deny"])),
+    ).toMatchObject({ decision: "deny", reason: "sample_label_deny" });
+  });
+
+  test("a hook module missing default or id disables the extension whole", async () => {
+    for (const [file, why] of [
+      ["./hooks/no-default.mjs", /must export a default function/],
+      ["./hooks/no-id.mjs", /must export a string id/],
+    ]) {
+      const dir = tempExtension((m) => {
+        m.name = "factory/broken";
+        m.contributes.hooks = { "approve.before": file };
+      });
+      const out = await load(policyFor(dir));
+      expect(out.extensions).toEqual([]);
+      expect(out.packRoots).toEqual([]);
+      expect(out.adapterRegistry.has("echo")).toBe(false);
+      expect(out.hookRegistry.list().map((h) => h.id)).toEqual([
+        "factory:escalation-labels",
+      ]);
+      expect(out.anomalies).toHaveLength(1);
+      expect(out.anomalies[0]).toMatch(
+        /factory\/broken@1\.0\.0: hook "approve\.before"/,
+      );
+      expect(out.anomalies[0]).toMatch(why);
+      expect(out.anomalies[0]).toMatch(/\(extension skipped\)/);
+      expect(out.disabled[0]).toMatchObject({
+        name: "factory/broken",
+        reason: expect.stringMatching(why),
+      });
+    }
+    const missing = tempExtension((m) => {
+      m.name = "factory/gone";
+      m.contributes.hooks = { "approve.before": "./hooks/nope.mjs" };
+    });
+    const out = await load(policyFor(missing));
+    expect(out.extensions).toEqual([]);
+    expect(out.anomalies[0]).toMatch(
+      /hooks\["approve\.before"\] .* is not a file/,
+    );
+  });
+
+  test("a hook id another extension (or a built-in) already registered disables the newcomer; reloads replace, never duplicate", async () => {
+    const twin = tempExtension((m) => {
+      m.name = "factory/twin";
+      m.contributes.packs = [];
+      m.contributes.adapters = {};
+      delete m.contributes.config;
+    });
+    const out = await load(policyFor(SAMPLE_EXTENSION, twin));
+    expect(out.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
+    expect(out.anomalies).toEqual([
+      expect.stringMatching(
+        /factory\/twin@1\.0\.0: hook id "factory\/sample:approve-before" is already registered/,
+      ),
+    ]);
+    expect(out.hookRegistry.list().map((h) => h.id)).toEqual([
+      "factory:escalation-labels",
+      "factory/sample:approve-before",
+    ]);
+
+    // Same registry, loaded again: the extension hook is replaced, not doubled.
+    const again = await load(
+      policyFor(SAMPLE_EXTENSION),
+      createAdapterRegistry(),
+      out.hookRegistry,
+    );
+    expect(again.anomalies).toEqual([]);
+    expect(again.hookRegistry.list().map((h) => h.id)).toEqual([
+      "factory:escalation-labels",
+      "factory/sample:approve-before",
+    ]);
+    // And with the extension gone from policy, its hook is gone too.
+    const none = await load(
+      { extensions: [] },
+      createAdapterRegistry(),
+      out.hookRegistry,
+    );
+    expect(none.hookRegistry.list().map((h) => h.id)).toEqual([
+      "factory:escalation-labels",
+    ]);
+
+    // A built-in id cannot be shadowed by an extension.
+    const shadow = tempExtension((m, dir) => {
+      m.name = "factory/shadow";
+      m.contributes.packs = [];
+      m.contributes.adapters = {};
+      delete m.contributes.config;
+      writeFileSync(
+        path.join(dir, "hooks", "shadow.mjs"),
+        'export const id = "factory:escalation-labels";\nexport default () => ({ decision: "allow" });\n',
+      );
+      m.contributes.hooks = { "approve.before": "./hooks/shadow.mjs" };
+    });
+    const shadowed = await load(policyFor(shadow));
+    expect(shadowed.extensions).toEqual([]);
+    expect(shadowed.anomalies[0]).toMatch(
+      /hook id "factory:escalation-labels" is already registered/,
     );
   });
 });

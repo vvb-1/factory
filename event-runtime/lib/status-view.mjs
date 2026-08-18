@@ -5,6 +5,7 @@ import path from "node:path";
 import { storeStats } from "./artifacts.mjs";
 import { artifactsRoot } from "./config.mjs";
 import { usageSpend } from "./db.mjs";
+import { hookDecisionCounts } from "./hooks.mjs";
 import { inboxCounts } from "./inbox.mjs";
 import { ambiguousOpenProposalRuns, openProposals } from "./proposals.mjs";
 import { proposalsPilingUp, scheduleView } from "./schedules.mjs";
@@ -277,6 +278,10 @@ export function statusView(
       orphanBytes: store.orphanBytes,
       ...(store.at ? { at: store.at } : {}),
     },
+    // `approve.before` hook decisions in the trailing 24h, by hook id
+    // (lib/hooks.mjs, WM-842) — allow/deny counts, so an operator can see a
+    // gate that is firing (or a broken extension hook denying everything).
+    hooks: { decisions24h: hookDecisionCounts(db, { now: nowMs }) },
     anomalies: {
       configuration: configAnomalies,
       expiredOpenProposals: expiredOpen.map((p) => p.id),

@@ -22,7 +22,7 @@
  *      registered — while every other extension still loads. `serve`/`work`
  *      never fail to start because a third-party manifest is broken.
  *   3. **Reserved manifest keys are accepted, not rejected.** `connectors`,
- *      `views`, `panels` and `hooks` belong to follow-up tickets; a manifest
+ *      `views` and `panels` belong to follow-up tickets; a manifest
  *      that carries them loads its packs and adapters here and records a
  *      "not supported yet" anomaly for the rest.
  *   4. **Config is declared, validated, defaulted (WM-841).** An extension
@@ -33,6 +33,14 @@
  *      (misconfigured code must not run). `getExtensionConfig(name)` hands the
  *      effective object to that extension's adapters/hooks/panels, and
  *      `loadedExtensions()` is the snapshot `GET /config` publishes.
+ *   5. **Hooks are registered, built-ins first (WM-842).** `contributes.hooks`
+ *      maps a hook point to a module; each is imported and contract-checked
+ *      (`default` function + string `id`, lib/hooks.mjs) before the extension
+ *      is accepted, then registered with source `extension:<name>` and a
+ *      getter for the extension's effective config as the hook's `ctx.config`.
+ *      A module that fails the contract, or an id already registered, disables
+ *      the extension. Each load replaces the extension hooks of the registry
+ *      it is given, so the registry always mirrors the last accepted set.
  *
  * Ordering matters for callers: `adapterRegistry.toMap()` is a snapshot, so
  * `loadExtensions` must run before a CLI takes the map it hands to
@@ -47,6 +55,11 @@ import {
   validateAdapterContract,
 } from "./adapters/index.mjs";
 import { RUNTIME_ROOT } from "./config.mjs";
+import {
+  HOOK_POINTS,
+  defaultHookRegistry,
+  validateHookModule,
+} from "./hooks.mjs";
 import { RegistryError, loadPackRoots, loadRegistry } from "./registry.mjs";
 import { expandHome, reposRoot } from "./repos.mjs";
 import { validate } from "./schema.mjs";
@@ -65,8 +78,12 @@ export const RESERVED_CONTRIBUTIONS = Object.freeze([
   "connectors",
   "views",
   "panels",
-  "hooks",
 ]);
+
+/** The `source` a hook registered by an extension carries (lib/hooks.mjs). */
+export function extensionHookSource(name) {
+  return `extension:${name}`;
+}
 
 /** Policy entry fields `extensions[]` accepts besides `path`. */
 const ENTRY_FIELDS = new Set(["path", "config"]);
@@ -253,6 +270,26 @@ export function validateExtensionManifest(dir) {
       );
     }
   }
+  for (const [point, rel] of Object.entries(contributes.hooks ?? {})) {
+    if (!HOOK_POINTS.includes(point)) {
+      errors.push(
+        `${file}: contributes.hooks key "${point}" is not a hook point (known: ${HOOK_POINTS.join(", ")})`,
+      );
+      continue;
+    }
+    const abs = path.resolve(root, rel);
+    if (!isInside(root, abs)) {
+      errors.push(
+        `${file}: contributes.hooks["${point}"] "${rel}" escapes the extension directory`,
+      );
+      continue;
+    }
+    if (!existsSync(abs) || !statSync(abs).isFile()) {
+      errors.push(
+        `${file}: contributes.hooks["${point}"] "${rel}" is not a file (${abs})`,
+      );
+    }
+  }
   if (contributes.config) {
     const rel = contributes.config.schema;
     const abs = path.resolve(root, rel);
@@ -425,10 +462,11 @@ function packRootFor(extensionRoot, rel) {
  * @param {string} [options.root] - the checkout supplying `config/policy.yaml` (default: reposRoot())
  * @param {object} [options.policy] - an already-parsed policy object; when given, policy.yaml is not read
  * @param {ReturnType<import("./adapters/index.mjs").createAdapterRegistry>} [options.adapterRegistry] - where adapters go; when absent, adapters are validated but not registered
+ * @param {ReturnType<import("./hooks.mjs").createHookRegistry>} [options.hookRegistry] - where hooks go (default: the process-wide `defaultHookRegistry()`); its extension hooks are replaced by this load
  * @param {Array<object>} [options.packRoots] - the policy `packs:` roots the extension packs join (default: loadPackRoots({ root }))
  * @param {string} [options.registryRoot] - the built-in registry root the dry load uses (tests point it at a copy)
  * @returns {Promise<{
- *   extensions: Array<{ name: string, version: string, path: string, packs: string[], adapters: string[], reserved: string[], config: { namespace: string, schema: string, values: object }|null }>,
+ *   extensions: Array<{ name: string, version: string, path: string, packs: string[], adapters: string[], hooks: Array<{ point: string, id: string }>, reserved: string[], config: { namespace: string, schema: string, values: object }|null }>,
  *   packRoots: Array<object>,
  *   anomalies: string[],
  *   disabled: Array<{ name: string|null, version: string|null, path: string, namespace: string|null, reason: string }>,
@@ -440,10 +478,18 @@ export async function loadExtensions({
   root = reposRoot(),
   policy,
   adapterRegistry,
+  hookRegistry = defaultHookRegistry(),
   packRoots,
   registryRoot,
 } = {}) {
   const basePackRoots = packRoots ?? loadPackRoots({ root });
+  // Last load wins for hooks, as it does for `LOADED`: drop what an earlier
+  // load registered from extensions so a removed extension's hook cannot
+  // linger, then re-register the accepted set below in policy order.
+  for (const hook of hookRegistry.list()) {
+    if (hook.source.startsWith(extensionHookSource("")))
+      hookRegistry.unregister(hook.id);
+  }
   const { roots, anomalies } = loadExtensionRoots({ root, policy });
   const extensions = [];
   const accepted = [...basePackRoots];
@@ -538,6 +584,40 @@ export async function loadExtensions({
       skip(`${label}: ${adapterFault}`);
       continue;
     }
+
+    // Hooks: import and contract-check (default function + id); an id the
+    // registry already holds is refused. Registered only once accepted.
+    const hookModules = [];
+    let hookFault = null;
+    for (const [point, rel] of Object.entries(contributes.hooks ?? {})) {
+      const file = path.resolve(dir, rel);
+      let module;
+      try {
+        module = await import(pathToFileURL(file).href);
+      } catch (err) {
+        hookFault = `hook "${point}" failed to import from ${file}: ${err.message}`;
+        break;
+      }
+      let contract;
+      try {
+        contract = validateHookModule(module);
+      } catch (err) {
+        hookFault = `hook "${point}" (${rel}): ${err.message}`;
+        break;
+      }
+      if (
+        hookRegistry.has(contract.id) ||
+        hookModules.some((h) => h.id === contract.id)
+      ) {
+        hookFault = `hook id "${contract.id}" is already registered (extensions may not replace an existing hook)`;
+        break;
+      }
+      hookModules.push({ point, id: contract.id, module });
+    }
+    if (hookFault) {
+      skip(`${label}: ${hookFault}`);
+      continue;
+    }
     if (config && acceptedNamespaces.has(config.namespace)) {
       skip(
         `${label}: config namespace "${config.namespace}" is already used by ${acceptedNamespaces.get(config.namespace)}`,
@@ -552,6 +632,12 @@ export async function loadExtensions({
       adapterRegistry?.register(name, module, { source: manifest.name });
       acceptedAdapterNames.add(name);
     }
+    for (const { point, module } of hookModules) {
+      hookRegistry.register(point, module, {
+        source: extensionHookSource(manifest.name),
+        config: () => getExtensionConfig(manifest.name),
+      });
+    }
     for (const warning of checked.warnings) anomalies.push(warning);
     if (config) acceptedNamespaces.set(config.namespace, manifest.name);
     const { schemaJson, ...publicConfig } = config ?? {};
@@ -561,6 +647,7 @@ export async function loadExtensions({
       path: dir,
       packs: extPackRoots.map((p) => p.name),
       adapters: modules.map((m) => m.name),
+      hooks: hookModules.map(({ point, id }) => ({ point, id })),
       reserved: RESERVED_CONTRIBUTIONS.filter((key) =>
         Object.hasOwn(contributes, key),
       ),

@@ -2,6 +2,7 @@
 import { artifactHead } from "./api-artifacts.mjs";
 import { FACTORY_ROOT } from "./config.mjs";
 import { runUsage } from "./db.mjs";
+import { hookDecisionsFor } from "./hooks.mjs";
 import { IllegalTransition, lifecycleOf } from "./lifecycle.mjs";
 import { archiveDeadLetteredEvent, requeueEvent } from "./planner.mjs";
 import {
@@ -1202,6 +1203,29 @@ export async function handleRunApiRoute({
       if (err instanceof ListQueryError) return send(422, err.body);
       throw err;
     }
+  }
+
+  // One proposal with its `approve.before` audit trail (lib/hooks.mjs,
+  // WM-842): every hook decision recorded for it, oldest first. `expired` is
+  // computed the way the open list computes it.
+  const proposalDetail = url.pathname.match(/^\/proposals\/([^/]+)$/);
+  if (req.method === "GET" && proposalDetail) {
+    const id = decodeURIComponent(proposalDetail[1]);
+    const row = db.query(`SELECT * FROM proposals WHERE id = ?`).get(id);
+    if (!row) return send(404, { error: `unknown proposal ${id}` });
+    const expiresAt =
+      Date.parse(row.created_at) + Number(row.ttl_seconds) * 1000;
+    return send(200, {
+      proposal: proposalView({
+        ...row,
+        spec: row.spec_json ? JSON.parse(row.spec_json) : null,
+        expired:
+          row.status === "open" &&
+          Number.isFinite(expiresAt) &&
+          expiresAt < nowMs,
+      }),
+      hookDecisions: hookDecisionsFor(db, id),
+    });
   }
 
   if (route === "GET /journal") {

@@ -1,6 +1,6 @@
 {
   "title": "factory-extension.json — the manifest of one factory extension (docs/extensions.md)",
-  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `connectors`, `views`, `panels` and `hooks` are reserved keys: the loader accepts them and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs and adapters here. Adapter names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
+  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `connectors`, `views` and `panels` are reserved keys: the loader accepts them and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs and adapters here. Adapter names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
   "type": "object",
   "required": ["name", "version"],
   "additionalProperties": false,
@@ -75,7 +75,16 @@
           }
         },
         "hooks": {
-          "description": "reserved — lifecycle hooks; lands in WM-842"
+          "type": "object",
+          "additionalProperties": false,
+          "description": "lifecycle hooks (docs/extensions.md § Hooks): hook point → relative path to an ES module exporting `id` and a default `(ctx) => { decision, reason? }`; run as a fail-closed waterfall after the built-in hooks, every decision persisted to hook_decisions",
+          "properties": {
+            "approve.before": {
+              "type": "string",
+              "pattern": "\\.mjs$",
+              "description": "evaluated immediately before each chain auto-approval (lib/auto-approval.mjs); a deny keeps the proposal open with reason dispatch_ineligible:<reason> (dispatch) or hook_denied:<reason>"
+            }
+          }
         }
       }
     }

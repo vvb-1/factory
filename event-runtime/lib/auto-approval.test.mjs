@@ -10,6 +10,7 @@ import {
 } from "./auto-approval.mjs";
 import { canonicalJson, hashJson } from "./canonical.mjs";
 import { openDb } from "./db.mjs";
+import { createHookRegistry, hookDecisionsFor } from "./hooks.mjs";
 import { admitEvent } from "./intake.mjs";
 import { planAdmittedEvents } from "./planner.mjs";
 import { lifecycleOf, runState } from "./lifecycle.mjs";
@@ -418,7 +419,7 @@ describe("declared chain command edge characterization (WM-469)", () => {
         mergeCommitSha: "c".repeat(40),
       },
     ],
-  ])("merge-apply@2 auto-approves its %s command edge", (type, input) => {
+  ])("merge-apply@2 auto-approves its %s command edge", async (type, input) => {
     const db = openDb(":memory:");
     const predecessorInput = reviewedMergeInput({ pr: 469, ticket: "WM-469" });
     const candidate = seed(db, {
@@ -430,12 +431,12 @@ describe("declared chain command edge characterization (WM-469)", () => {
       predecessorArtifact: { outcome: "applied" },
     });
 
-    expect(autoMerge(db).approved).toEqual([
+    expect((await autoMerge(db)).approved).toEqual([
       { proposalId: candidate.id, runId: candidate.runId },
     ]);
   });
 
-  test("merge-verify@1 auto-approves factory.merge.requested when repo matches input", () => {
+  test("merge-verify@1 auto-approves factory.merge.requested when repo matches input", async () => {
     const db = openDb(":memory:");
     const candidate = seed(db, {
       id: "merge-verify-command-match",
@@ -446,12 +447,12 @@ describe("declared chain command edge characterization (WM-469)", () => {
       predecessorArtifact: { outcome: "verified" },
     });
 
-    expect(autoMerge(db).approved).toEqual([
+    expect((await autoMerge(db)).approved).toEqual([
       { proposalId: candidate.id, runId: candidate.runId },
     ]);
   });
 
-  test("merge-verify@1 repo mismatch remains chain_command_edge_payload_mismatch", () => {
+  test("merge-verify@1 repo mismatch remains chain_command_edge_payload_mismatch", async () => {
     const db = openDb(":memory:");
     const candidate = seed(db, {
       id: "merge-verify-command-mismatch",
@@ -462,7 +463,7 @@ describe("declared chain command edge characterization (WM-469)", () => {
       predecessorArtifact: { outcome: "verified" },
     });
 
-    expect(autoMerge(db).approved).toEqual([]);
+    expect((await autoMerge(db)).approved).toEqual([]);
     expect(runState(db, candidate.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
       "chain_command_edge_payload_mismatch",
@@ -471,7 +472,7 @@ describe("declared chain command edge characterization (WM-469)", () => {
 });
 
 describe("chain auto approval (WM-357)", () => {
-  test("git-owned policy is an explicit closed allowlist", () => {
+  test("git-owned policy is an explicit closed allowlist", async () => {
     const loaded = loadChainAutoApprovalPolicy();
     expect([...loaded.allowed].sort()).toEqual(
       [...CHAIN_AUTO_APPROVAL_EVENT_TYPES].sort(),
@@ -479,7 +480,7 @@ describe("chain auto approval (WM-357)", () => {
     expect(loaded.reason).toBeNull();
   });
 
-  test("budget, worker cap, and circuit breaker each stop unattended approvals", () => {
+  test("budget, worker cap, and circuit breaker each stop unattended approvals", async () => {
     const runtimePolicy = {
       budget: { per_day_usd: 1 },
       workers: { max: 1 },
@@ -536,7 +537,7 @@ describe("chain auto approval (WM-357)", () => {
 
     const guardedDb = openDb(":memory:");
     const candidate = seed(guardedDb, { id: "guarded" });
-    const result = auto(guardedDb, {
+    const result = await auto(guardedDb, {
       runtimeGuard: () => "circuit_breaker_tripped",
     });
     expect(result.approved).toEqual([]);
@@ -546,7 +547,7 @@ describe("chain auto approval (WM-357)", () => {
     );
   });
 
-  test("eligible chain work and triage proposals advance with an auditable actor and reason", () => {
+  test("eligible chain work and triage proposals advance with an auditable actor and reason", async () => {
     const db = openDb(":memory:");
     const work = seed(db, { id: "work", type: "factory.work.requested" });
     const triage = seed(db, {
@@ -558,11 +559,9 @@ describe("chain auto approval (WM-357)", () => {
       },
     });
 
-    expect(
-      auto(db)
-        .approved.map((row) => row.runId)
-        .sort(),
-    ).toEqual([work.runId, triage.runId].sort());
+    expect((await auto(db)).approved.map((row) => row.runId).sort()).toEqual(
+      [work.runId, triage.runId].sort(),
+    );
     for (const runId of [work.runId, triage.runId]) {
       expect(runState(db, runId)).toBe("QUEUED");
       const approved = lifecycleOf(db, runId).find(
@@ -575,7 +574,7 @@ describe("chain auto approval (WM-357)", () => {
     }
   });
 
-  test("the planner's bounded pass leaves a caller-fabricated chain proposal watched", () => {
+  test("the planner's bounded pass leaves a caller-fabricated chain proposal watched", async () => {
     const db = openDb(":memory:");
     const synthetic = {
       ...registry,
@@ -626,7 +625,7 @@ describe("chain auto approval (WM-357)", () => {
     expect(db.query(`SELECT state FROM runs`).get().state).toBe("PROPOSED");
   });
 
-  test("operator proposals and protected or incomplete merge/ship proposals remain watched", () => {
+  test("operator proposals and protected or incomplete merge/ship proposals remain watched", async () => {
     const db = openDb(":memory:");
     const manual = seed(db, { id: "manual", source: "operator" });
     const mergeInput = {
@@ -668,7 +667,7 @@ describe("chain auto approval (WM-357)", () => {
     });
     const ship = seed(db, { id: "ship", type: "factory.ship-apply.requested" });
 
-    const result = auto(db, {
+    const result = await auto(db, {
       policy: {
         allowed: new Set([
           "factory.merge-apply.requested",
@@ -688,7 +687,7 @@ describe("chain auto approval (WM-357)", () => {
     ).toContain("merge_owner_not_allowed");
   });
 
-  test("terminal merge applies never hold the barrier", () => {
+  test("terminal merge applies never hold the barrier", async () => {
     for (const state of [
       "FAILED",
       "CANCELLED",
@@ -715,14 +714,14 @@ describe("chain auto approval (WM-357)", () => {
         },
       });
 
-      expect(autoMerge(db).approved).toEqual([
+      expect((await autoMerge(db)).approved).toEqual([
         { proposalId: candidate.id, runId: candidate.runId },
       ]);
       expect(runState(db, candidate.runId)).toBe("QUEUED");
     }
   });
 
-  test("failed or missing exact verification does not clear the hold", () => {
+  test("failed or missing exact verification does not clear the hold", async () => {
     for (const [id, options] of [
       ["failed", { verifierState: "FAILED" }],
       ["missing", { includeVerifier: false }],
@@ -750,14 +749,14 @@ describe("chain auto approval (WM-357)", () => {
         },
       });
 
-      expect(autoMerge(db).approved).toEqual([]);
+      expect((await autoMerge(db)).approved).toEqual([]);
       expect(openProposals(db, {})[0].reason).toContain(
         "merge_barrier_unverified",
       );
     }
   });
 
-  test("in-flight merge applies hold with state and age until their own timeout", () => {
+  test("in-flight merge applies hold with state and age until their own timeout", async () => {
     for (const state of ["QUEUED", "LEASED", "RUNNING", "VERIFYING"]) {
       const db = openDb(":memory:");
       const active = seedHistoricalApply(db, {
@@ -782,7 +781,7 @@ describe("chain auto approval (WM-357)", () => {
         },
       });
 
-      expect(autoMerge(db).approved).toEqual([]);
+      expect((await autoMerge(db)).approved).toEqual([]);
       expect(openProposals(db, {})[0].reason).toContain(
         `merge_barrier_active:${active.runId}:state=${state}:age=599s`,
       );
@@ -791,13 +790,13 @@ describe("chain auto approval (WM-357)", () => {
         new Date(now - 600_000).toISOString(),
         active.runId,
       );
-      expect(autoMerge(db).approved).toEqual([
+      expect((await autoMerge(db)).approved).toEqual([
         { proposalId: candidate.id, runId: candidate.runId },
       ]);
     }
   });
 
-  test("active apply and unverified-landed barriers remain unchanged", () => {
+  test("active apply and unverified-landed barriers remain unchanged", async () => {
     const activeDb = openDb(":memory:");
     const active = seedHistoricalApply(activeDb, {
       id: "active-apply",
@@ -817,7 +816,7 @@ describe("chain auto approval (WM-357)", () => {
         summary: "active barrier candidate",
       },
     });
-    expect(autoMerge(activeDb).approved).toEqual([]);
+    expect((await autoMerge(activeDb)).approved).toEqual([]);
     expect(openProposals(activeDb, {})[0].reason).toContain(
       `merge_barrier_active:${active.runId}`,
     );
@@ -840,13 +839,13 @@ describe("chain auto approval (WM-357)", () => {
         summary: "unverified barrier candidate",
       },
     });
-    expect(autoMerge(unverifiedDb).approved).toEqual([]);
+    expect((await autoMerge(unverifiedDb)).approved).toEqual([]);
     expect(openProposals(unverifiedDb, {})[0].reason).toContain(
       "merge_barrier_unverified:event-landed-unverified-landing",
     );
   });
 
-  test("closed triage apply is approved, while unknown actions remain visible and watched", () => {
+  test("closed triage apply is approved, while unknown actions remain visible and watched", async () => {
     const db = openDb(":memory:");
     const valid = seed(db, {
       id: "triage-valid",
@@ -865,7 +864,9 @@ describe("chain auto approval (WM-357)", () => {
       },
     });
 
-    expect(auto(db).approved.map((row) => row.runId)).toEqual([valid.runId]);
+    expect((await auto(db)).approved.map((row) => row.runId)).toEqual([
+      valid.runId,
+    ]);
     expect(runState(db, invalid.runId)).toBe("PROPOSED");
     expect(
       openProposals(db, {}).find((proposal) => proposal.id === invalid.id)
@@ -873,7 +874,7 @@ describe("chain auto approval (WM-357)", () => {
     ).toContain("input_schema_invalid");
   });
 
-  test("dispatch rechecks escalated and path-sensitive tickets before approval", () => {
+  test("dispatch rechecks escalated and path-sensitive tickets before approval", async () => {
     const db = openDb(":memory:");
     const escalated = seed(db, {
       id: "escalated",
@@ -920,7 +921,7 @@ describe("chain auto approval (WM-357)", () => {
             },
           };
 
-    expect(auto(db, { dispatchEligibility }).approved).toEqual([]);
+    expect((await auto(db, { dispatchEligibility })).approved).toEqual([]);
     expect(runState(db, escalated.runId)).toBe("PROPOSED");
     expect(runState(db, sensitive.runId)).toBe("PROPOSED");
     const reasons = openProposals(db, {})
@@ -930,7 +931,7 @@ describe("chain auto approval (WM-357)", () => {
     expect(reasons).toContain("escalate_paths_intersect");
   });
 
-  test("a spoofed chain event without a durable registered predecessor remains watched", () => {
+  test("a spoofed chain event without a durable registered predecessor remains watched", async () => {
     const db = openDb(":memory:");
     const spoofed = seed(db, {
       id: "spoofed",
@@ -938,14 +939,14 @@ describe("chain auto approval (WM-357)", () => {
       trustedPredecessor: false,
     });
 
-    expect(auto(db).approved).toEqual([]);
+    expect((await auto(db)).approved).toEqual([]);
     expect(runState(db, spoofed.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
       "chain_predecessor_or_result_missing",
     );
   });
 
-  test("a mixed merge result approves every selected edge while preserving escalation", () => {
+  test("a mixed merge result approves every selected edge while preserving escalation", async () => {
     const db = openDb(":memory:");
     const mergeInput = {
       repo: "factory",
@@ -1023,7 +1024,7 @@ describe("chain auto approval (WM-357)", () => {
       seedPredecessor: false,
     });
 
-    const result = auto(db, {
+    const result = await auto(db, {
       approvalRegistry: independentMergeRegistry(),
       policy: {
         ...policy,
@@ -1042,7 +1043,7 @@ describe("chain auto approval (WM-357)", () => {
     }
   });
 
-  test("an independent recommendation edge with an empty selector remains watched", () => {
+  test("an independent recommendation edge with an empty selector remains watched", async () => {
     const db = openDb(":memory:");
     const escalation = seed(db, {
       id: "independent-recommendation-empty-selector",
@@ -1061,10 +1062,12 @@ describe("chain auto approval (WM-357)", () => {
     });
 
     expect(
-      auto(db, {
-        approvalRegistry: independentMergeRegistry(),
-        runtimeGuard: () => null,
-      }).approved,
+      (
+        await auto(db, {
+          approvalRegistry: independentMergeRegistry(),
+          runtimeGuard: () => null,
+        })
+      ).approved,
     ).toEqual([]);
     expect(runState(db, escalation.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
@@ -1072,7 +1075,7 @@ describe("chain auto approval (WM-357)", () => {
     );
   });
 
-  test("an independent recommendation edge with a tampered payload remains watched", () => {
+  test("an independent recommendation edge with a tampered payload remains watched", async () => {
     const db = openDb(":memory:");
     const escalation = seed(db, {
       id: "independent-recommendation-tampered-payload",
@@ -1091,10 +1094,12 @@ describe("chain auto approval (WM-357)", () => {
     });
 
     expect(
-      auto(db, {
-        approvalRegistry: independentMergeRegistry(),
-        runtimeGuard: () => null,
-      }).approved,
+      (
+        await auto(db, {
+          approvalRegistry: independentMergeRegistry(),
+          runtimeGuard: () => null,
+        })
+      ).approved,
     ).toEqual([]);
     expect(runState(db, escalation.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
@@ -1102,7 +1107,7 @@ describe("chain auto approval (WM-357)", () => {
     );
   });
 
-  test("a non-independent recommendation edge preserves legacy approval", () => {
+  test("a non-independent recommendation edge preserves legacy approval", async () => {
     const db = openDb(":memory:");
     const escalation = seed(db, {
       id: "legacy-recommendation-edge",
@@ -1118,15 +1123,17 @@ describe("chain auto approval (WM-357)", () => {
     });
 
     expect(
-      auto(db, {
-        approvalRegistry: independentMergeRegistry({ independent: false }),
-        runtimeGuard: () => null,
-      }).approved,
+      (
+        await auto(db, {
+          approvalRegistry: independentMergeRegistry({ independent: false }),
+          runtimeGuard: () => null,
+        })
+      ).approved,
     ).toEqual([{ proposalId: escalation.id, runId: escalation.runId }]);
     expect(runState(db, escalation.runId)).toBe("QUEUED");
   });
 
-  test("a non-independent array sibling remains watched", () => {
+  test("a non-independent array sibling remains watched", async () => {
     const db = openDb(":memory:");
     const mergeInput = {
       repo: "factory",
@@ -1169,15 +1176,17 @@ describe("chain auto approval (WM-357)", () => {
     });
 
     expect(
-      auto(db, {
-        approvalRegistry: independentMergeRegistry({ independent: false }),
-        policy: {
-          ...policy,
-          autoMergeBase: new Set(["develop"]),
-          autoMergeOwners: new Set(["watt-mind"]),
-        },
-        runtimeGuard: () => null,
-      }).approved,
+      (
+        await auto(db, {
+          approvalRegistry: independentMergeRegistry({ independent: false }),
+          policy: {
+            ...policy,
+            autoMergeBase: new Set(["develop"]),
+            autoMergeOwners: new Set(["watt-mind"]),
+          },
+          runtimeGuard: () => null,
+        })
+      ).approved,
     ).toEqual([]);
     expect(runState(db, sibling.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
@@ -1185,7 +1194,7 @@ describe("chain auto approval (WM-357)", () => {
     );
   });
 
-  test("a sibling with a nonempty payload array but empty selector remains watched", () => {
+  test("a sibling with a nonempty payload array but empty selector remains watched", async () => {
     const db = openDb(":memory:");
     const mergeInput = {
       repo: "factory",
@@ -1228,17 +1237,19 @@ describe("chain auto approval (WM-357)", () => {
     });
 
     expect(
-      auto(db, {
-        approvalRegistry: independentMergeRegistry({
-          selectors: { MERGE: "fix" },
-        }),
-        policy: {
-          ...policy,
-          autoMergeBase: new Set(["develop"]),
-          autoMergeOwners: new Set(["watt-mind"]),
-        },
-        runtimeGuard: () => null,
-      }).approved,
+      (
+        await auto(db, {
+          approvalRegistry: independentMergeRegistry({
+            selectors: { MERGE: "fix" },
+          }),
+          policy: {
+            ...policy,
+            autoMergeBase: new Set(["develop"]),
+            autoMergeOwners: new Set(["watt-mind"]),
+          },
+          runtimeGuard: () => null,
+        })
+      ).approved,
     ).toEqual([]);
     expect(runState(db, sibling.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
@@ -1246,7 +1257,7 @@ describe("chain auto approval (WM-357)", () => {
     );
   });
 
-  test("a declared but unselected sibling edge still fails closed", () => {
+  test("a declared but unselected sibling edge still fails closed", async () => {
     const db = openDb(":memory:");
     const fabricated = seed(db, {
       id: "unselected-merge",
@@ -1291,14 +1302,14 @@ describe("chain auto approval (WM-357)", () => {
       predecessorInput: { repo: "factory" },
     });
 
-    expect(auto(db, { runtimeGuard: () => null }).approved).toEqual([]);
+    expect((await auto(db, { runtimeGuard: () => null })).approved).toEqual([]);
     expect(runState(db, fabricated.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
       "chain_edge_not_registered",
     );
   });
 
-  test("a primitive fan-out sibling reconstructs the router's injected item key", () => {
+  test("a primitive fan-out sibling reconstructs the router's injected item key", async () => {
     const db = openDb(":memory:");
     const primitive = seed(db, {
       id: "primitive-independent-item",
@@ -1334,12 +1345,12 @@ describe("chain auto approval (WM-357)", () => {
     };
 
     expect(
-      auto(db, { approvalRegistry, runtimeGuard: () => null }).approved,
+      (await auto(db, { approvalRegistry, runtimeGuard: () => null })).approved,
     ).toEqual([{ proposalId: primitive.id, runId: primitive.runId }]);
     expect(runState(db, primitive.runId)).toBe("QUEUED");
   });
 
-  test("a selected sibling edge with a payload not derived from the artifact fails closed", () => {
+  test("a selected sibling edge with a payload not derived from the artifact fails closed", async () => {
     const db = openDb(":memory:");
     const selectedPlan = {
       pr: 431,
@@ -1383,14 +1394,14 @@ describe("chain auto approval (WM-357)", () => {
       predecessorInput: { repo: "factory" },
     });
 
-    expect(auto(db, { runtimeGuard: () => null }).approved).toEqual([]);
+    expect((await auto(db, { runtimeGuard: () => null })).approved).toEqual([]);
     expect(runState(db, tampered.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
       "chain_edge_not_registered",
     );
   });
 
-  test("an event type absent from the predecessor rule still fails closed", () => {
+  test("an event type absent from the predecessor rule still fails closed", async () => {
     const db = openDb(":memory:");
     const undeclared = seed(db, {
       id: "undeclared-edge",
@@ -1399,14 +1410,14 @@ describe("chain auto approval (WM-357)", () => {
       predecessorRecommendation: "ESCALATE",
     });
 
-    expect(auto(db, { runtimeGuard: () => null }).approved).toEqual([]);
+    expect((await auto(db, { runtimeGuard: () => null })).approved).toEqual([]);
     expect(runState(db, undeclared.runId)).toBe("PROPOSED");
     expect(openProposals(db, {})[0].reason).toContain(
       "chain_edge_not_registered",
     );
   });
 
-  test("a tampered proposal fails closed and duplicate passes do not double-approve", () => {
+  test("a tampered proposal fails closed and duplicate passes do not double-approve", async () => {
     const db = openDb(":memory:");
     const safe = seed(db, { id: "safe" });
     const tampered = seed(db, {
@@ -1419,12 +1430,232 @@ describe("chain auto approval (WM-357)", () => {
       },
     });
 
-    expect(auto(db).approved.map((row) => row.runId)).toEqual([safe.runId]);
-    expect(auto(db).approved).toEqual([]);
+    expect((await auto(db)).approved.map((row) => row.runId)).toEqual([
+      safe.runId,
+    ]);
+    expect((await auto(db)).approved).toEqual([]);
     expect(runState(db, tampered.runId)).toBe("PROPOSED");
     expect(
       openProposals(db, {}).find((proposal) => proposal.id === tampered.id)
         .reason,
     ).toContain("proposal_run_spec_mismatch");
+  });
+  const dispatchSeed = (
+    db,
+    id,
+    { labels = [], intersections = [], ticket = "WM-900" } = {},
+  ) =>
+    seed(db, {
+      id,
+      type: "factory.dispatch.requested",
+      input: { repo: "factory", ticket },
+      approvalPolicy: {
+        source: "chain",
+        mode: "auto",
+        eventType: "factory.dispatch.requested",
+        dispatchEvidence: {
+          ticket: { labels },
+          escalatePathIntersections: intersections,
+        },
+      },
+    });
+  const evidenceFor = (labels, intersections) => () => ({
+    ok: true,
+    evidence: {
+      ticket: { labels },
+      escalatePathIntersections: intersections,
+    },
+  });
+  const hookModule = (id, fn) => ({ id, default: fn });
+  const reasonOf = (db, id) =>
+    openProposals(db, {}).find((proposal) => proposal.id === id)?.reason;
+
+  test("approve.before hooks (WM-842): the built-in escalation hook keeps the old reason and order, and every decision is persisted", async () => {
+    const db = openDb(":memory:");
+    // Both an escalation label and a path intersection: the label refusal
+    // still wins, exactly where the inline check used to run.
+    const both = dispatchSeed(db, "both", {
+      ticket: "WM-901",
+      labels: ["ai:escalated"],
+      intersections: ["src/auth/**"],
+    });
+    const clean = dispatchSeed(db, "clean", { ticket: "WM-902" });
+    const dispatchEligibility = (payload) =>
+      payload.ticket === "WM-901"
+        ? evidenceFor(["ai:escalated"], ["src/auth/**"])()
+        : evidenceFor([], [])();
+    const hooks = createHookRegistry();
+    const result = await auto(db, {
+      dispatchEligibility,
+      hooks,
+      runtimeGuard: () => null,
+    });
+    expect(result.approved).toEqual([
+      { proposalId: clean.id, runId: clean.runId },
+    ]);
+    expect(reasonOf(db, both.id)).toBe(
+      "auto_approval_ineligible:dispatch_ineligible:escalated_or_security",
+    );
+    expect(
+      hookDecisionsFor(db, both.id).map((r) => [
+        r.hookId,
+        r.source,
+        r.decision,
+        r.reason,
+        r.runId,
+      ]),
+    ).toEqual([
+      [
+        "factory:escalation-labels",
+        "builtin",
+        "deny",
+        "escalated_or_security",
+        both.runId,
+      ],
+    ]);
+    expect(
+      hookDecisionsFor(db, clean.id).map((r) => [r.hookId, r.decision]),
+    ).toEqual([["factory:escalation-labels", "allow"]]);
+    expect(hookDecisionsFor(db, clean.id)[0].at).toBe(
+      new Date(now).toISOString(),
+    );
+  });
+
+  test("an extension hook deny keeps a dispatch open as dispatch_ineligible:<reason>, other events as hook_denied:<reason>", async () => {
+    const db = openDb(":memory:");
+    const dispatch = dispatchSeed(db, "gated");
+    const work = seed(db, { id: "work" });
+    const seen = [];
+    const hooks = createHookRegistry();
+    hooks.register(
+      "approve.before",
+      hookModule("acme/gate:no-factory", (ctx) => {
+        seen.push(ctx);
+        return ctx.repo === "factory"
+          ? { decision: "deny", reason: "repo_gated" }
+          : { decision: "allow" };
+      }),
+      { source: "extension:acme/gate", config: () => ({ blocked: true }) },
+    );
+    const result = await auto(db, { hooks, runtimeGuard: () => null });
+    expect(result.approved).toEqual([]);
+    expect(reasonOf(db, dispatch.id)).toBe(
+      "auto_approval_ineligible:dispatch_ineligible:repo_gated",
+    );
+    expect(reasonOf(db, work.id)).toBe(
+      "auto_approval_ineligible:hook_denied:repo_gated",
+    );
+    expect(runState(db, dispatch.runId)).toBe("PROPOSED");
+    expect(runState(db, work.runId)).toBe("PROPOSED");
+    // The hook context: proposal, RunSpec, evidence (dispatch only), policy, repo, clock, config.
+    const dispatchCtx = seen.find((c) => c.proposal.id === dispatch.id);
+    expect(dispatchCtx).toMatchObject({
+      proposal: {
+        id: dispatch.id,
+        runId: dispatch.runId,
+        eventType: "factory.dispatch.requested",
+      },
+      spec: { runId: dispatch.runId, input: { repo: "factory" } },
+      evidence: { ticket: { labels: [] }, escalatePathIntersections: [] },
+      policy: { source: "chain", mode: "auto" },
+      repo: "factory",
+      now,
+      config: { blocked: true },
+    });
+    expect(seen.find((c) => c.proposal.id === work.id).evidence).toBeNull();
+    // Persisted for both, built-in first.
+    expect(
+      hookDecisionsFor(db, dispatch.id).map((r) => [r.hookId, r.decision]),
+    ).toEqual([
+      ["factory:escalation-labels", "allow"],
+      ["acme/gate:no-factory", "deny"],
+    ]);
+  });
+
+  test("a throwing, hanging or malformed hook fails closed as hook_error:<id>", async () => {
+    const db = openDb(":memory:");
+    const throwing = dispatchSeed(db, "throwing");
+    const hooks = createHookRegistry();
+    hooks.register(
+      "approve.before",
+      hookModule("acme/bad:throws", () => {
+        throw new Error("boom");
+      }),
+      { source: "extension:acme/bad" },
+    );
+    expect(
+      (await auto(db, { hooks, runtimeGuard: () => null })).approved,
+    ).toEqual([]);
+    expect(reasonOf(db, throwing.id)).toBe(
+      "auto_approval_ineligible:dispatch_ineligible:hook_error:acme/bad:throws",
+    );
+
+    const hangDb = openDb(":memory:");
+    const hanging = seed(hangDb, { id: "hanging" });
+    const slow = createHookRegistry();
+    slow.register(
+      "approve.before",
+      hookModule("acme/slow:hangs", () => new Promise(() => {})),
+      { source: "extension:acme/slow" },
+    );
+    const started = performance.now();
+    expect(
+      (
+        await auto(hangDb, {
+          hooks: slow,
+          hookTimeoutMs: 20,
+          runtimeGuard: () => null,
+        })
+      ).approved,
+    ).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(reasonOf(hangDb, hanging.id)).toBe(
+      "auto_approval_ineligible:hook_denied:hook_error:acme/slow:hangs",
+    );
+    expect(hookDecisionsFor(hangDb, hanging.id).at(-1)).toMatchObject({
+      decision: "deny",
+      reason: "hook_error:acme/slow:hangs",
+      error: expect.stringMatching(/did not answer within 20ms/),
+    });
+  });
+
+  test("an async hook defers the pass; concurrent passes on one database are serialized, not interleaved", async () => {
+    const db = openDb(":memory:");
+    const safe = seed(db, { id: "safe" });
+    let calls = 0;
+    const hooks = createHookRegistry();
+    hooks.register(
+      "approve.before",
+      hookModule("acme/async:allow", async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { decision: "allow" };
+      }),
+      { source: "extension:acme/async" },
+    );
+    const first = auto(db, { hooks, runtimeGuard: () => null });
+    const second = auto(db, { hooks, runtimeGuard: () => null });
+    // Nothing is decided synchronously once a hook goes async.
+    expect(runState(db, safe.runId)).toBe("PROPOSED");
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.approved).toEqual([{ proposalId: safe.id, runId: safe.runId }]);
+    expect(b.approved).toEqual([]);
+    expect(b.errors).toEqual([]);
+    expect(calls).toBe(1);
+    expect(runState(db, safe.runId)).toBe("QUEUED");
+  });
+
+  test("with only synchronous hooks the pass completes before the promise is returned", () => {
+    const db = openDb(":memory:");
+    const safe = seed(db, { id: "safe" });
+    const pending = auto(db, { runtimeGuard: () => null });
+    expect(typeof pending.then).toBe("function");
+    expect(runState(db, safe.runId)).toBe("QUEUED");
+    // A synchronously completed pass leaves nothing queued: the next call in
+    // the same tick (planAdmittedEvents twice in a row) is eager as well.
+    const later = seed(db, { id: "later" });
+    const second = auto(db, { runtimeGuard: () => null });
+    expect(runState(db, later.runId)).toBe("QUEUED");
+    return Promise.all([pending, second]);
   });
 });
