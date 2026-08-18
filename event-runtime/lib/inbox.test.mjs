@@ -14,6 +14,7 @@ import {
   resolveInboxItem,
 } from "./inbox.mjs";
 import { decisionRequestHash } from "./decision.mjs";
+import { templateFor } from "./decision-templates.mjs";
 
 function decision(
   options = [{ id: "dismiss", label: "Not now", effect: "dismiss" }],
@@ -472,5 +473,196 @@ describe("human inbox ledger (WM-285)", () => {
     expect(getInboxItem(db, "tick-item").resolvedBy).toBe(
       "auto:proposal_decided",
     );
+  });
+});
+
+describe("approving an expired proposal retargets its item (WM-714)", () => {
+  const OLD = "prop-old";
+  const FRESH = "prop-fresh";
+
+  /**
+   * The ledger state WM-391 leaves behind: an approve on an expired proposal
+   * supersedes it and opens a fresh one, so the operator's answer bought a new
+   * question instead of a decision.
+   */
+  function replanned(db, { id = "retarget", kind = "proposal_expired" } = {}) {
+    insertProposal(db, { id: OLD });
+    const refs = { proposalId: OLD, eventSource: "test", eventId: "evt" };
+    const request = templateFor(kind, { producer: "proposal", refs });
+    createInboxItem(
+      db,
+      {
+        kind,
+        title: `DECISION NEEDED proposal ${OLD}: expired undecided`,
+        refs,
+        source: "serve:notify",
+        decision: request,
+        dedupeKey: `${kind}:${OLD}`,
+      },
+      { id },
+    );
+    return {
+      id,
+      request,
+      approve: {
+        schemaVersion: "factory.decision-response/v1",
+        requestHash: decisionRequestHash(request),
+        optionId: "approve",
+        fields: {},
+      },
+      // What the real effect does to the proposals table alongside its result.
+      applyEffect: () => {
+        db.query("UPDATE proposals SET status = 'superseded' WHERE id = ?").run(
+          OLD,
+        );
+        insertProposal(db, { id: FRESH });
+        return {
+          outcome: "applied",
+          detail: "replanned_awaiting_approval",
+          newProposalId: FRESH,
+        };
+      },
+    };
+  }
+
+  test("the item is re-opened against the fresh proposal instead of resolving", () => {
+    const db = openDb(":memory:");
+    const { id, approve, applyEffect } = replanned(db);
+
+    const decided = decideInboxItem(db, id, approve, {
+      now: 2000,
+      applyEffect,
+    });
+    expect(decided.effect).toMatchObject({
+      kind: "approve_proposal",
+      outcome: "applied",
+      detail: "replanned_awaiting_approval",
+      newProposalId: FRESH,
+    });
+
+    const item = decided.item;
+    expect(item.resolvedAt).toBeNull();
+    expect(item.resolvedBy).toBeNull();
+    expect(item.refs.proposalId).toBe(FRESH);
+    // Undecided again: the fresh spec is a question nobody has answered.
+    expect(item.response).toBeNull();
+    expect(item.decidedAt).toBeNull();
+    expect(item.decidedBy).toBeNull();
+    expect(item.decision.question).toContain(FRESH);
+    expect(item.decision.context).toContain("please re-review");
+    expect(item.decision.context).toContain(OLD);
+    // The operator's approve is preserved, not discarded.
+    expect(item.responseHistory).toHaveLength(1);
+    expect(item.responseHistory[0]).toMatchObject({
+      retargetedFrom: OLD,
+      retargetedTo: FRESH,
+      retargetedAt: new Date(2000).toISOString(),
+    });
+    expect(item.responseHistory[0].response).toMatchObject({
+      optionId: "approve",
+      decidedBy: "operator",
+      effect: { detail: "replanned_awaiting_approval", newProposalId: FRESH },
+    });
+    // The fresh request is answerable: its hash binds to what is stored now.
+    expect(getInboxItem(db, id).decision).toEqual(item.decision);
+  });
+
+  test("retry is refused after a retarget and the fresh decision resolves the item", () => {
+    const db = openDb(":memory:");
+    const { id, applyEffect, approve } = replanned(db);
+    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+
+    // The recorded answer was consumed by the retarget, so there is nothing to
+    // replay — the old bug answered `already_applied` on a resolved item.
+    expect(() => retryInboxDecision(db, id)).toThrow(/has not been decided/);
+
+    const retargeted = getInboxItem(db, id);
+    const approveFresh = decideInboxItem(
+      db,
+      id,
+      {
+        schemaVersion: "factory.decision-response/v1",
+        requestHash: decisionRequestHash(retargeted.decision),
+        optionId: "approve",
+        fields: {},
+      },
+      {
+        now: 3000,
+        applyEffect: () => ({ outcome: "applied" }),
+      },
+    );
+    expect(approveFresh.item.resolvedBy).toBe("operator:approve_proposal");
+    expect(approveFresh.item.resolvedAt).toBe(new Date(3000).toISOString());
+    expect(approveFresh.item.responseHistory).toHaveLength(1);
+  });
+
+  test("a retargeted item survives reconcile until the fresh proposal is decided", () => {
+    const db = openDb(":memory:");
+    const { id, applyEffect, approve } = replanned(db);
+    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+
+    // The superseded proposal no longer governs the item; the fresh open one does.
+    expect(
+      db.query("SELECT status FROM proposals WHERE id = ?").get(OLD).status,
+    ).toBe("superseded");
+    expect(reconcileInbox(db, { now: 4000 })).toEqual([]);
+    expect(getInboxItem(db, id).resolvedAt).toBeNull();
+
+    db.query("UPDATE proposals SET status = 'approved' WHERE id = ?").run(
+      FRESH,
+    );
+    expect(reconcileInbox(db, { now: 5000 })).toEqual([
+      { id, resolvedBy: "auto:proposal_decided" },
+    ]);
+  });
+
+  test("the serve tick leaves a retargeted item open", async () => {
+    const { tick } = await import("../cli.mjs");
+    const db = openDb(":memory:");
+    const { id, applyEffect, approve } = replanned(db);
+    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    const noop = () => {};
+    await tick({
+      db,
+      now: 9000,
+      lastPrune: 9000,
+      subsystems: {
+        "tick emit": noop,
+        plan: noop,
+        "auto-approve": noop,
+        announce: noop,
+        notify: noop,
+        reap: noop,
+        "announce-after": noop,
+        outbox: noop,
+        GC: noop,
+        chains: noop,
+      },
+    });
+    expect(getInboxItem(db, id).resolvedAt).toBeNull();
+  });
+
+  test("the dedupe key follows the retarget so the fresh proposal cannot stack a second item", () => {
+    const db = openDb(":memory:");
+    const { id, applyEffect, approve } = replanned(db);
+    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    expect(getInboxItem(db, id).dedupeKey).toBe(`proposal_expired:${FRESH}`);
+
+    const refs = { proposalId: FRESH, eventSource: "test", eventId: "evt" };
+    const again = createInboxItem(db, {
+      kind: "proposal_expired",
+      title: `DECISION NEEDED proposal ${FRESH}: expired undecided`,
+      refs,
+      source: "serve:notify",
+      decision: templateFor("proposal_expired", {
+        producer: "proposal",
+        refs,
+      }),
+      dedupeKey: `proposal_expired:${FRESH}`,
+    });
+    expect(again.id).toBe(id);
+    expect(db.query("SELECT COUNT(*) AS n FROM inbox_items").get().n).toBe(1);
+    // Supersession does not lose the retarget the operator already paid for.
+    expect(again.responseHistory).toHaveLength(1);
   });
 });

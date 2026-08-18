@@ -167,16 +167,34 @@ const BUILDERS = {
 };
 
 /**
+ * The operator-facing note for a proposal that expired and was re-planned
+ * rather than approved (WM-714). The answer they gave bought a fresh question:
+ * the spec on offer now is not the one they read.
+ */
+export function replannedProposalContext(previousProposalId, proposalId) {
+  const previous = previousProposalId ?? "the expired proposal";
+  return `Approving ${previous} did not start a run: it had already expired, so the runtime re-planned against the current registry — re-planned after expiry; spec changed — please re-review. Proposal ${proposalId} carries the new spec and is still undecided.`;
+}
+
+/**
  * Return a new request for one producer. `kind` is retained in the signature
  * because callers naturally have the inbox kind; `producer` selects the
- * template when several producers share a kind.
+ * template when several producers share a kind. `context` is the optional §2.1
+ * free-text preamble; omitted rather than serialised when absent.
  */
-export function templateFor(kind, { producer, refs = {} } = {}) {
+export function templateFor(kind, { producer, refs = {}, context } = {}) {
   const selected = producer ?? String(kind ?? "").toLowerCase();
   const builder = BUILDERS[selected];
   if (!builder)
     throw new Error(`unknown decision template producer: ${selected}`);
-  return builder(refs);
+  const request = builder(refs);
+  if (context !== undefined) {
+    if (typeof context !== "string" || context.trim() === "") {
+      throw new Error("decision template context must be a non-empty string");
+    }
+    request.context = context;
+  }
+  return request;
 }
 
 export default templateFor;
