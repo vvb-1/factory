@@ -803,7 +803,7 @@ export function Graph({
                   background: `linear-gradient(90deg, ${historicalColor(ramp.min)}, ${historicalColor(ramp.max)})`,
                 }}
               />
-              <div className="mt-1 flex justify-between text-[10px] tabular-nums text-(--text-faint)">
+              <div className="mt-1 flex justify-between text-[11px] tabular-nums text-(--text-faint)">
                 <span>{ramp.min.formatted}</span>
                 <span>{ramp.max.formatted}</span>
               </div>
