@@ -1312,16 +1312,24 @@ export function Overview({
           now={now}
           lastDecision={lastDecision}
           runtimeLabel={feedsUnscoped ? "Runtime · factory-wide" : "Runtime"}
-          connected={connected && !ackInbox.isPending}
+          connected={connected}
+          ackPending={ackInbox.isPending}
+          isPending={inbox.isPending || status.isPending}
           onOpenItem={(id) => onNavigate(`inbox/${id}`)}
           onAck={(id) => ackInbox.mutate(id)}
+          onMore={() => onNavigate("inbox")}
         />
       </Suspense>
 
-      {/* Superseded by the Runtime group above. Kept temporarily while the
-          old action dialogs are removed in the follow-up anomaly-action work. */}
-      {hasAnomalies && false ? (
-        <div
+      {/*
+        Band A: the anomaly remediation deck (WM-205). Needs-you above surfaces
+        these same anomalies as one-click jumps, but every remediation verb
+        (archive, requeue, release lease, reject) still lives only here. It stays
+        until those actions move onto the Runtime rows.
+      */}
+      {hasAnomalies ? (
+        <section
+          aria-label="Anomalies"
           className="mb-5 rounded-lg border p-3"
           style={{
             borderColor: "var(--hue-warn)",
@@ -1639,7 +1647,7 @@ export function Overview({
               requeue.error
             }
           />
-        </div>
+        </section>
       ) : null}
 
       {/* Band B: Unified Stage Cards (WM-205) */}
