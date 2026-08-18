@@ -1,12 +1,6 @@
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
-import * as actions from "../lib/adapters/actions.mjs";
-import * as agy from "../lib/adapters/agy.mjs";
-import * as claude from "../lib/adapters/claude.mjs";
-import * as command from "../lib/adapters/command.mjs";
-import * as cursor from "../lib/adapters/cursor.mjs";
-import * as fake from "../lib/adapters/fake.mjs";
-import * as pi from "../lib/adapters/pi.mjs";
+import { createAdapterRegistry } from "../lib/adapters/index.mjs";
 import {
   dbPath,
   ensureHome,
@@ -53,8 +47,11 @@ export default async function work(args) {
   if (!Number.isInteger(pollMs) || pollMs < 25 || pollMs > 5_000) {
     fail("work: --poll-ms must be an integer between 25 and 5000");
   }
-  const adapters = { actions, agy, claude, command, cursor, fake, pi };
-  if (adapterOverride && !adapters[adapterOverride]) {
+  // Built-ins only for now; the registry validates the contract and wraps
+  // every adapter in the sandbox seam (lib/adapters/index.mjs, WM-837).
+  const adapterRegistry = createAdapterRegistry();
+  const adapters = adapterRegistry.toMap();
+  if (adapterOverride && !adapterRegistry.has(adapterOverride)) {
     fail(
       `work: unknown --adapter-override "${adapterOverride}" (have: ${Object.keys(adapters).join(", ")})`,
     );

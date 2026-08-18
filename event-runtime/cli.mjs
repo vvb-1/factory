@@ -2,12 +2,16 @@
 /** Event-runtime CLI argument routing and command dispatch. */
 import { COMMANDS } from "./cli/commands.mjs";
 import { USAGE as BASE_USAGE } from "./cli/usage.mjs";
+import { createAdapterRegistry } from "./lib/adapters/index.mjs";
 import { API_HOST, DEFAULT_PORT } from "./lib/config.mjs";
 import { decisionRequestHash } from "./lib/decision.mjs";
 
 const USAGE = BASE_USAGE.replace(
   "  inbox                          open items waiting on the human",
   "  inbox                          open items waiting on the human (? = decision pending)\n  decide <item-id> <option-id> [--field key=value]...\n                                 answer an inbox decision through the control API",
+).replace(
+  "  agents                         registered agent definitions and event routing",
+  "  agents                         registered agent definitions and event routing\n  adapters                       registered harness adapters: name, source, sandbox support (local, no serve needed)",
 );
 
 // Preserve the small programmatic surface used by runtime tests and tooling.
@@ -126,10 +130,33 @@ export async function decideCommand(args) {
   return result;
 }
 
+/**
+ * Read-only listing of the adapter registry (WM-837): the same registry
+ * `work` and `serve` build, so what this prints is what a worker would
+ * execute with. Local — it needs no running serve.
+ */
+export function adaptersCommand(args = []) {
+  const registry = createAdapterRegistry();
+  const rows = registry.list();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify({ adapters: rows }, null, 2));
+    return rows;
+  }
+  const width = Math.max(8, ...rows.map((row) => row.name.length + 3));
+  console.log(`${"ADAPTER".padEnd(width)}${"SOURCE".padEnd(12)}SANDBOX`);
+  for (const row of rows) {
+    console.log(
+      `${row.name.padEnd(width)}${row.source.padEnd(12)}${row.sandboxSupport}`,
+    );
+  }
+  return rows;
+}
+
 export async function dispatch(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (command === "decide") return decideCommand(args);
   if (command === "inbox") return inboxCommand(args);
+  if (command === "adapters") return adaptersCommand(args);
   if (!Object.hasOwn(COMMANDS, command)) {
     console.error(USAGE);
     process.exit(1);
