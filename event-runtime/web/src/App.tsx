@@ -113,6 +113,9 @@ const PullRequest = lazy(() =>
 const Workers = lazy(() =>
   import("./views/Workers").then((m) => ({ default: m.Workers })),
 );
+const Settings = lazy(() =>
+  import("./views/Settings").then((m) => ({ default: m.Settings })),
+);
 const Inbox = lazy(() =>
   import("./views/Inbox").then((m) => ({ default: m.Inbox })),
 );
@@ -239,6 +242,7 @@ export function App() {
     ? workerHealthFromHash
     : null;
   const focusGraphNode = view === "graph" ? (route[1] ?? null) : null;
+  const focusSettingsSection = view === "settings" ? (route[1] ?? null) : null;
   // `#/chain/:correlationId[/:nodeId]` — the chain trace (WM-527); node
   // selection rides the hash so a pasted link lands on the same node.
   const chainId = view === "chain" ? (route[1] ?? null) : null;
@@ -413,6 +417,7 @@ export function App() {
             title: `${busyWorkers} worker${busyWorkers === 1 ? "" : "s"} busy`,
           },
     graph: { count: 0, hue: "var(--accent)" },
+    settings: { count: 0, hue: "var(--accent)" },
   };
 
   const env = health.data?.env;
@@ -949,6 +954,19 @@ export function App() {
                 onInject={() => setInjectOpen(true)}
                 rejumpEpoch={rejumpEpoch}
               />
+            ) : view === "settings" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading settings…
+                  </div>
+                }
+              >
+                <Settings
+                  focusSectionId={focusSettingsSection}
+                  onSelectSection={(id) => navigate(hashPath("settings", id))}
+                />
+              </Suspense>
             ) : (
               <Overview
                 connected={connected}
