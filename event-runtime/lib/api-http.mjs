@@ -93,8 +93,7 @@ export function isLoopbackHost(hostHeader) {
     lower === "localhost" ||
     lower.endsWith(".localhost") ||
     lower === "0.0.0.0" ||
-    lower === "::1" ||
-    lower.endsWith(".local")
+    lower === "::1"
   );
 }
 
@@ -110,8 +109,7 @@ export function isLoopbackOrigin(originHeader) {
       host === "localhost" ||
       host.endsWith(".localhost") ||
       host === "0.0.0.0" ||
-      host === "::1" ||
-      host.endsWith(".local")
+      host === "::1"
     );
   } catch {
     return false;

@@ -92,10 +92,11 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
     expect(isLoopbackHost("localhost")).toBe(true);
     expect(isLoopbackHost("localhost:7381")).toBe(true);
     expect(isLoopbackHost("app.localhost:7381")).toBe(true);
-    expect(isLoopbackHost("my-mac.local:7381")).toBe(true);
     expect(isLoopbackHost("[::1]")).toBe(true);
     expect(isLoopbackHost("[::1]:7381")).toBe(true);
 
+    expect(isLoopbackHost("my-mac.local")).toBe(false);
+    expect(isLoopbackHost("device.local:7381")).toBe(false);
     expect(isLoopbackHost("evil.com")).toBe(false);
     expect(isLoopbackHost("evil.com:7381")).toBe(false);
     expect(isLoopbackHost("192.168.1.100")).toBe(false);
@@ -112,9 +113,10 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
     expect(isLoopbackOrigin("http://localhost:7382")).toBe(true);
     expect(isLoopbackOrigin("http://localhost")).toBe(true);
     expect(isLoopbackOrigin("http://app.localhost:7382")).toBe(true);
-    expect(isLoopbackOrigin("http://my-mac.local:7382")).toBe(true);
     expect(isLoopbackOrigin("http://[::1]:7382")).toBe(true);
 
+    expect(isLoopbackOrigin("http://my-mac.local:7382")).toBe(false);
+    expect(isLoopbackOrigin("http://attacker.local")).toBe(false);
     expect(isLoopbackOrigin("http://evil.com")).toBe(false);
     expect(isLoopbackOrigin("https://evil.com:7382")).toBe(false);
     expect(isLoopbackOrigin("http://192.168.1.100:7382")).toBe(false);
@@ -126,6 +128,15 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
 
   test("rejects request with non-loopback Host header", async () => {
     const res = await rawRequest({ host: "attacker.com", path: "/health" });
+    expect(res.status).toBe(403);
+    expect(res.json?.error).toBe("invalid_host");
+  });
+
+  test("rejects request with an mDNS .local Host header", async () => {
+    const res = await rawRequest({
+      host: "device.local:7381",
+      path: "/health",
+    });
     expect(res.status).toBe(403);
     expect(res.json?.error).toBe("invalid_host");
   });
@@ -153,6 +164,20 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
       headers: {
         "content-type": "application/json",
         origin: "http://evil.com",
+      },
+      body: JSON.stringify(envelope()),
+    });
+    expect(res.status).toBe(403);
+    expect(res.json?.error).toBe("cross_origin_rejected");
+  });
+
+  test("rejects mutating request carrying an mDNS .local Origin header", async () => {
+    const res = await rawRequest({
+      method: "POST",
+      path: "/replay",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://attacker.local:7382",
       },
       body: JSON.stringify(envelope()),
     });
