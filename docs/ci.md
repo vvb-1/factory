@@ -14,7 +14,7 @@ The lock is intentionally host-local rather than a GitHub Actions `concurrency` 
 
 Do not add more lock lanes unless the `shadow` label is moved to multiple physical hosts and the lock path is scoped per host.
 
-`Fast unit tests` deliberately runs outside this lock. Five shadow-runner measurements made while another `Verify` held the lock are recorded in the WM-773 handoff; all five were green and below the three-minute stability threshold. Keep its command bounded to `event-runtime/lib`, `--timeout 20000`, and `--max-concurrency=4`; broadening that job requires repeating the overlap measurements before assuming it is safe.
+`Fast unit tests` deliberately runs outside this lock. Five shadow-runner measurements made while another verification job held the lock are recorded in the WM-773 handoff; all five were green and below the three-minute stability threshold. The first ready-head measurement was [job 95742407011](https://github.com/watt-mind/factory/actions/runs/32146787946/job/95742407011): 36 seconds job wall time and 30 seconds for the test step. Keep its command bounded to `event-runtime/lib`, `--timeout 20000`, and `--max-concurrency=4`; broadening that job requires repeating the overlap measurements before assuming it is safe.
 
 ## Draft pull requests
 
