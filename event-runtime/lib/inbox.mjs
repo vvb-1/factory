@@ -120,7 +120,8 @@ export function itemView(row) {
     ackedAt: row.acked_at ?? null,
     resolvedAt: row.resolved_at ?? null,
     resolvedBy: row.resolved_by ?? null,
-    delivery,
+    resolvedReason: row.resolved_reason ?? null,
+    delivery: parseObject(row.delivery_json),
     decision: parseNullableObject(row.decision_json),
     response: parseNullableObject(row.response_json),
     responseHistory: Array.isArray(responseHistory) ? responseHistory : [],
@@ -628,9 +629,10 @@ export function ackInboxItem(db, id, { now = Date.now() } = {}) {
 export function resolveInboxItem(
   db,
   id,
-  { now = Date.now(), resolvedBy = "operator" } = {},
+  { now = Date.now(), resolvedBy = "operator", reason } = {},
 ) {
   requiredString(resolvedBy, "resolvedBy");
+  const resolvedReason = optionalString(reason, "reason");
   if (
     resolvedBy !== "operator" &&
     !resolvedBy.startsWith("auto:") &&
@@ -672,9 +674,11 @@ export function resolveInboxItem(
   }
   db.query(
     `UPDATE inbox_items
-     SET resolved_at = COALESCE(resolved_at, ?), resolved_by = COALESCE(resolved_by, ?)
+     SET resolved_at = COALESCE(resolved_at, ?),
+         resolved_by = COALESCE(resolved_by, ?),
+         resolved_reason = COALESCE(resolved_reason, ?)
      WHERE id = ?`,
-  ).run(resolvedAt, resolvedBy, id);
+  ).run(resolvedAt, resolvedBy, resolvedReason, id);
   return getInboxItem(db, id);
 }
 

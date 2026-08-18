@@ -289,11 +289,12 @@ export const api = {
       {},
     ),
   // Resolve = "dealt with"; idempotent on the ledger, 404 unknown item.
-  resolveInbox: (id: string, reason?: string) =>
+  // A non-empty reason is required (WM-604) — the API rejects blanks with 422.
+  resolveInbox: (id: string, reason: string) =>
     call<{ item: InboxItem }>(
       "POST",
       `/inbox/${encodeURIComponent(id)}/resolve`,
-      reason ? { reason } : {},
+      { reason },
     ),
   // The schedule registry: recurring loops, cadence, timing, and health.
   schedules: () => call<{ schedules: ScheduleItem[] }>("GET", "/schedules"),

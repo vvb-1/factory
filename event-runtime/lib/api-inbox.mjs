@@ -70,7 +70,14 @@ export async function handleInboxApiRoute({
     ) {
       return send(422, { error: "body must be an object" });
     }
-    if (
+    if (verb === "resolve") {
+      if (
+        typeof parsed.value.reason !== "string" ||
+        parsed.value.reason.trim() === ""
+      ) {
+        return send(422, { error: "reason must be a non-empty string" });
+      }
+    } else if (
       parsed.value.reason !== undefined &&
       typeof parsed.value.reason !== "string"
     ) {
@@ -80,7 +87,11 @@ export async function handleInboxApiRoute({
       const item =
         verb === "ack"
           ? ackInboxItem(db, id, { now: nowMs })
-          : resolveInboxItem(db, id, { now: nowMs, resolvedBy: actor });
+          : resolveInboxItem(db, id, {
+              now: nowMs,
+              resolvedBy: actor,
+              reason: parsed.value.reason.trim(),
+            });
       return send(200, { item });
     } catch (err) {
       const status = String(err.message).startsWith("unknown inbox item")
