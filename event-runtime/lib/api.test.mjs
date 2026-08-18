@@ -38,6 +38,7 @@ import { cpSync } from "node:fs";
 import { emitDueTicks } from "./schedules.mjs";
 import { createInboxItem } from "./inbox.mjs";
 import { decisionRequestHash } from "./decision.mjs";
+import { hashJson } from "./canonical.mjs";
 import { spawnTracked } from "./test-helpers-process.mjs";
 
 describe("inbox decision API (WM-390)", () => {
@@ -139,6 +140,102 @@ describe("inbox decision API (WM-390)", () => {
       });
       expect(retry.status).toBe(409);
       expect((await retry.json()).error).toBe("not_decided");
+    } finally {
+      s.close();
+    }
+  });
+
+  test("authorise admits an inbox-sourced dispatch through the ordinary intake", async () => {
+    const nowMs = Date.parse("2026-08-18T12:00:00.000Z");
+    const testRegistry = { ...registry, agents: new Map(registry.agents) };
+    testRegistry.agents.set("dispatch@1", {
+      ...registry.agents.get("dispatch@1"),
+      // Keep this API/intake proof local: worktree dispatch eligibility is
+      // independently covered by dispatch tests and requires live Linear.
+      workspace: { type: "ephemeral" },
+    });
+    const s = await makeServer({
+      now: () => nowMs,
+      registry: testRegistry,
+      inboxLinear: {
+        get: () => ({ description: "## Owned Paths\n- src/feature/**\n" }),
+      },
+    });
+    const authorise = {
+      schemaVersion: "factory.decision-request/v1",
+      question: "May the agent proceed?",
+      options: [
+        {
+          id: "authorise",
+          label: "Authorise",
+          effect: "authorise",
+          scope: {
+            paths: ["src/feature/**"],
+            summary: "Implement the approved feature",
+          },
+        },
+      ],
+    };
+    try {
+      createInboxItem(
+        s.db,
+        {
+          kind: "ESCALATED",
+          title: "Authorise dispatch",
+          refs: { issue: "WM-313", repo: "factory", runId: "run_refused" },
+          decision: authorise,
+        },
+        { id: "api_authorise" },
+      );
+      const res = await fetch(s.url("/inbox/api_authorise/decide"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(authorise),
+          optionId: "authorise",
+          fields: {},
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        item: { resolvedBy: "operator:authorise" },
+        effect: { outcome: "applied", detail: "dispatched" },
+      });
+      const admitted = s.db
+        .query(
+          "SELECT source, event_id, correlation_id, envelope_json FROM events WHERE source = 'inbox'",
+        )
+        .get();
+      expect(admitted).toMatchObject({
+        source: "inbox",
+        event_id: "api_authorise",
+        correlation_id: "api_authorise",
+      });
+      expect(s.onEvents).toContain("admitted");
+      const envelope = JSON.parse(admitted.envelope_json);
+      expect(envelope.payload.humanDecision).toMatchObject({
+        schemaVersion: "factory.human-decision/v1",
+        inboxItemId: "api_authorise",
+        authorisation: {
+          ticket: "WM-313",
+          repo: "factory",
+          refusedRunId: "run_refused",
+        },
+      });
+      expect(
+        planAdmittedEvents(s.db, testRegistry, {
+          now: nowMs,
+          policyVersion: PV,
+        }),
+      ).toMatchObject({ planned: 1, failed: 0 });
+      const spec = JSON.parse(
+        s.db.query("SELECT spec_json FROM runs").get().spec_json,
+      );
+      expect(spec.input.humanDecision.inboxItemId).toBe("api_authorise");
+      expect(spec.inputHash).not.toBe(
+        hashJson({ repo: "factory", ticket: "WM-313" }),
+      );
     } finally {
       s.close();
     }
