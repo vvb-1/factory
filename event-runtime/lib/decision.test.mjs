@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   DECISION_REQUEST_SCHEMA,
   DECISION_RESPONSE_SCHEMA,
@@ -10,6 +11,13 @@ import {
   validateDecisionResponse,
 } from "./decision.mjs";
 import { validate } from "./schema.mjs";
+
+const SHARED_CASES = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/decision-cases.json", import.meta.url),
+    "utf8",
+  ),
+).cases;
 
 const EXAMPLE_REQUEST = {
   schemaVersion: "factory.decision-request/v1",
@@ -609,6 +617,20 @@ describe("decisionRequestHash", () => {
     expect(decisionRequestHash(RESPONSE_REQUEST)).toMatch(
       /^sha256:[a-f0-9]{64}$/,
     );
+  });
+
+  test("matches every shared browser fixture", () => {
+    for (const fixture of SHARED_CASES) {
+      expect(decisionRequestHash(fixture.request), fixture.name).toBe(
+        fixture.hash,
+      );
+      for (const response of fixture.responses) {
+        expect(
+          validateDecisionResponse(response.value, fixture.request).valid,
+          `${fixture.name}/${response.name}`,
+        ).toBe(response.valid);
+      }
+    }
   });
 });
 

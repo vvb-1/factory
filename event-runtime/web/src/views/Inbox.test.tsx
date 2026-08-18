@@ -506,6 +506,40 @@ describe("Inbox view", () => {
     expect(view.getByText("decide X")).toBeTruthy();
   });
 
+  test("marks undecided rows and replaces ack/resolve with the decision card", async () => {
+    ledger = [
+      item({
+        id: "inbox_decision",
+        kind: "decision_needed",
+        title: "DECISION NEEDED choose a recovery",
+        decision: {
+          schemaVersion: "factory.decision-request/v1",
+          question: "Which recovery should run?",
+          options: [
+            { id: "retry", label: "Try again", effect: "dismiss" },
+            { id: "dismiss", label: "Not now", effect: "dismiss" },
+          ],
+        },
+        response: null,
+      }),
+    ];
+    const { view } = renderInbox({ focusItemId: "inbox_decision" });
+    await waitFor(() => view.getByText("Which recovery should run?"));
+    expect(view.getByLabelText("Decision required").textContent).toBe("?");
+    expect(view.queryByRole("button", { name: /^Ack/ })).toBeNull();
+    expect(view.queryByRole("button", { name: /Resolve…/ })).toBeNull();
+    const card = view.getByRole("region", { name: "Decision" });
+    fireEvent.keyDown(card, { key: "2" });
+    expect(view.getByRole("tab", { selected: true }).textContent).toContain(
+      "Open",
+    );
+    expect(
+      within(card)
+        .getAllByRole("button", { name: /Not now/ })[0]
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
   test("a acks the selected item and the ledger, not the UI, flips its status", async () => {
     const { view } = renderInbox({ focusItemId: "inbox_open_1" });
     await waitFor(() => view.getByRole("button", { name: /^Ack/ }));
