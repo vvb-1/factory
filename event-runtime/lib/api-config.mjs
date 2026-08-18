@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { FACTORY_ROOT } from "./config.mjs";
+import { loadedExtensions } from "./extensions.mjs";
 import { reposView } from "./repos.mjs";
 import { loadNodesConfig, nodesConfigPath } from "./workers-remote.mjs";
 
@@ -99,6 +100,77 @@ function entriesForSchedule(schedule) {
   ];
 }
 
+/** Keys whose values are never published, wherever they sit in a config object. */
+const SECRET_KEY = /token|secret|key|password/i;
+const REDACTED = "[redacted]";
+
+/**
+ * Mask secret-looking keys at any depth. Empty and null values stay as they
+ * are (there is nothing to hide and "unset" is what the operator needs to see).
+ */
+export function redactSecrets(value) {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, inner]) => [
+      key,
+      SECRET_KEY.test(key) &&
+      inner !== null &&
+      inner !== "" &&
+      inner !== undefined
+        ? REDACTED
+        : redactSecrets(inner),
+    ]),
+  );
+}
+
+/**
+ * Extension config (WM-841): one row per extension the loader saw — accepted
+ * ones with their namespace, schema and effective (defaulted, validated,
+ * redacted) values; disabled ones with the anomaly that disabled them.
+ */
+function extensionsSection({ extensions = [], disabled = [] } = {}) {
+  const items = [
+    ...extensions.map((ext) => ({
+      name: ext.name,
+      version: ext.version,
+      path: ext.path,
+      namespace: ext.config?.namespace ?? null,
+      reload: "restart",
+      schema: ext.config?.schemaJson ?? null,
+      values: ext.config ? redactSecrets(ext.config.values) : null,
+      anomaly: null,
+    })),
+    ...disabled.map((ext) => ({
+      name: ext.name,
+      version: ext.version,
+      path: ext.path,
+      namespace: ext.namespace ?? null,
+      reload: "restart",
+      schema: null,
+      values: null,
+      anomaly: ext.reason,
+    })),
+  ];
+  return {
+    id: "extensions",
+    title: "Extensions",
+    source: source("config/policy.yaml", "yaml"),
+    reload: "restart",
+    entries: items.map((item) => ({
+      key: item.namespace ?? item.name ?? item.path,
+      value: item.values,
+      reload: "restart",
+      note: item.anomaly
+        ? `${item.name ?? item.path}: disabled — ${item.anomaly}`
+        : item.namespace
+          ? `${item.name}@${item.version}`
+          : `${item.name}@${item.version} declares no config`,
+    })),
+    extensions: items,
+  };
+}
+
 function edgeSummary(edges) {
   const rules = Object.values(edges ?? {});
   return {
@@ -146,6 +218,8 @@ export function configView({
   root = FACTORY_ROOT,
   now = Date.now(),
   registryLoadedAt,
+  // What loadExtensions() accepted/disabled in this process (tests pass their own).
+  extensions = loadedExtensions(),
 } = {}) {
   const policy = readYaml(path.join(root, "config", "policy.yaml"));
   const schedule = readYaml(path.join(root, "config", "schedule.yaml"));
@@ -199,6 +273,7 @@ export function configView({
         reload: "restart",
         entries: entriesForRegistry(registry),
       },
+      extensionsSection(extensions),
     ],
   };
 }

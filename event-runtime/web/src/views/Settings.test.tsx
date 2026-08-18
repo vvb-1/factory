@@ -69,6 +69,55 @@ const fixture: ConfigView = {
         { key: "schedules", value: 1 },
       ],
     },
+    {
+      id: "extensions",
+      title: "Extensions",
+      source: { file: "config/policy.yaml", kind: "yaml" },
+      reload: "restart",
+      entries: [
+        {
+          key: "mobile",
+          value: { simulator: "iPhone-16", apiToken: "[redacted]" },
+          reload: "restart",
+          note: "wattmind/mobile@1.0.0",
+        },
+        {
+          key: "broken",
+          value: null,
+          reload: "restart",
+          note: "wattmind/broken: disabled — config does not match ./config.schema.json — $.maxParallel: above maximum 4",
+        },
+      ],
+      extensions: [
+        {
+          name: "wattmind/mobile",
+          version: "1.0.0",
+          path: "/ext/mobile",
+          namespace: "mobile",
+          reload: "restart",
+          schema: {
+            type: "object",
+            properties: {
+              simulator: { type: "string", description: "simulator name" },
+              apiToken: { type: "string" },
+            },
+          },
+          values: { simulator: "iPhone-16", apiToken: "[redacted]" },
+          anomaly: null,
+        },
+        {
+          name: "wattmind/broken",
+          version: "2.0.0",
+          path: "/ext/broken",
+          namespace: "broken",
+          reload: "restart",
+          schema: null,
+          values: null,
+          anomaly:
+            "wattmind/broken@2.0.0: config does not match ./config.schema.json — $.maxParallel: above maximum 4",
+        },
+      ],
+    },
   ],
 };
 
@@ -159,5 +208,51 @@ describe("Settings", () => {
     fireEvent.click(view.getByRole("button", { name: /Policy\s*3/ }));
     expect(await view.findByText("notify")).toBeTruthy();
     expect(view.getByText("—")).toBeTruthy();
+  });
+
+  test("renders the Extensions section: namespace, effective values, and the anomaly of a disabled extension", async () => {
+    stubConfig();
+    const view = renderWithClient(<StatefulSettings initial="extensions" />);
+    await view.findByRole("heading", { name: "Extensions" });
+    expect(
+      view
+        .getByRole("button", { name: /Extensions\s*2/ })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+
+    // A loaded extension: name, namespace, and its redacted effective values.
+    expect(view.getByText("wattmind/mobile")).toBeTruthy();
+    expect(view.getByText("mobile")).toBeTruthy();
+    expect(view.getByText("simulator")).toBeTruthy();
+    expect(view.getByText("iPhone-16")).toBeTruthy();
+    expect(view.getByText("[redacted]")).toBeTruthy();
+    expect(view.getByText("simulator name")).toBeTruthy();
+    expect(view.getAllByText("restart").length).toBeGreaterThan(0);
+
+    // A disabled one: its anomaly, and no values table.
+    const disabled = view.getByText(/disabled/);
+    expect(disabled.textContent).toContain("$.maxParallel: above maximum 4");
+    expect(view.queryByText("wattmind/broken")).toBeTruthy();
+    // Nothing is editable: read-only inventory.
+    expect(
+      view.container.querySelectorAll("input, select, textarea").length,
+    ).toBe(1);
+  });
+
+  test("searches extension values like any other section", async () => {
+    stubConfig();
+    const view = renderWithClient(<StatefulSettings initial="repos" />);
+    await view.findByText("factory.tools.base");
+    act(() =>
+      changeInput(
+        view.getByRole("combobox", { name: "Search settings" }),
+        "iphone",
+      ),
+    );
+    await waitFor(() =>
+      expect(view.getByRole("heading", { name: "Extensions" })).toBeTruthy(),
+    );
+    expect(view.getByText("iPhone-16")).toBeTruthy();
+    expect(view.queryByText("wattmind/broken")).toBeNull();
   });
 });

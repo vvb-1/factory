@@ -16,8 +16,10 @@ import {
   EXTENSION_SCHEMA,
   ExtensionError,
   RESERVED_CONTRIBUTIONS,
+  getExtensionConfig,
   loadExtensionRoots,
   loadExtensions,
+  loadedExtensions,
   validateExtensionManifest,
 } from "./extensions.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
@@ -186,6 +188,15 @@ describe("loadExtensions", () => {
         packs: ["sample-ext"],
         adapters: ["echo"],
         reserved: [],
+        config: {
+          namespace: "sample",
+          schema: "./config.schema.json",
+          values: {
+            greeting: "hello",
+            maxParallel: 1,
+            limits: { timeoutSeconds: 30 },
+          },
+        },
       },
     ]);
     expect(out.packRoots).toEqual([
@@ -388,6 +399,144 @@ describe("loadExtensions", () => {
       /"extensions" must be an array/,
     );
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("extension config (contributes.config)", () => {
+  const withValues = (config) => ({
+    extensions: [{ path: SAMPLE_EXTENSION, config }],
+  });
+
+  test("valid values are validated against the schema and defaults fill the gaps", async () => {
+    const out = await load(
+      withValues({
+        greeting: "hey",
+        apiToken: "t0k3n",
+        limits: { retries: 2 },
+      }),
+    );
+    expect(out.anomalies).toEqual([]);
+    expect(out.extensions[0].config).toEqual({
+      namespace: "sample",
+      schema: "./config.schema.json",
+      values: {
+        greeting: "hey",
+        maxParallel: 1,
+        apiToken: "t0k3n",
+        limits: { retries: 2, timeoutSeconds: 30 },
+      },
+    });
+    // The effective object is what adapters/hooks/panels read, by extension name.
+    expect(getExtensionConfig("factory/sample")).toEqual(
+      out.extensions[0].config.values,
+    );
+    expect(getExtensionConfig("nobody/here")).toBeUndefined();
+    expect(loadedExtensions().extensions[0].name).toBe("factory/sample");
+    expect(loadedExtensions().disabled).toEqual([]);
+  });
+
+  test("an invalid value disables the extension whole and names the failing path", async () => {
+    const out = await load(withValues({ maxParallel: 9, bogus: true }));
+    expect(out.extensions).toEqual([]);
+    expect(out.packRoots).toEqual([]);
+    expect(out.adapterRegistry.has("echo")).toBe(false);
+    expect(out.anomalies).toHaveLength(1);
+    expect(out.anomalies[0]).toMatch(
+      /factory\/sample@1\.0\.0: config does not match \.\/config\.schema\.json — \$\.maxParallel: above maximum 4; \$: unknown property "bogus" \(extension skipped\)/,
+    );
+    expect(getExtensionConfig("factory/sample")).toBeUndefined();
+    expect(loadedExtensions().disabled).toEqual([
+      {
+        name: "factory/sample",
+        version: "1.0.0",
+        path: SAMPLE_EXTENSION,
+        namespace: "sample",
+        reason: expect.stringMatching(/\$\.maxParallel: above maximum 4/),
+      },
+    ]);
+  });
+
+  test("a wrong-typed policy config entry is an entry anomaly, like any other bad field", () => {
+    const out = loadExtensionRoots({
+      policy: { extensions: [{ path: "x", config: "nope" }] },
+    });
+    expect(out.roots).toEqual([]);
+    expect(out.anomalies[0]).toMatch(
+      /config must be an object \(entry skipped\)/,
+    );
+  });
+
+  test("values without a declared schema, and a schema that is missing, escaping or unsupported, disable the extension", async () => {
+    const undeclared = tempExtension((m) => {
+      m.name = "factory/undeclared";
+      delete m.contributes.config;
+    });
+    const missing = tempExtension((m) => {
+      m.name = "factory/missing";
+      m.contributes.config.schema = "./nope.json";
+    });
+    const escaping = tempExtension((m) => {
+      m.name = "factory/escaping";
+      m.contributes.config.schema = "../config.schema.json";
+    });
+    const unsupported = tempExtension((m, dir) => {
+      m.name = "factory/unsupported";
+      writeFileSync(
+        path.join(dir, "config.schema.json"),
+        JSON.stringify({ type: "object", anyOf: [] }),
+      );
+    });
+    const out = await loadExtensions({
+      policy: {
+        extensions: [
+          { path: undeclared, config: { greeting: "x" } },
+          { path: missing },
+          { path: escaping },
+          { path: unsupported },
+        ],
+      },
+      packRoots: [],
+    });
+    expect(out.extensions).toEqual([]);
+    expect(out.anomalies).toEqual([
+      expect.stringMatching(
+        /factory\/undeclared@1\.0\.0: policy.yaml gives config values but the manifest declares no contributes\.config/,
+      ),
+      expect.stringMatching(
+        /contributes\.config\.schema ".\/nope.json" is not a file/,
+      ),
+      expect.stringMatching(
+        /contributes\.config\.schema "..\/config.schema.json" escapes/,
+      ),
+      expect.stringMatching(/unsupported schema keyword "anyOf"/),
+    ]);
+  });
+
+  test("two extensions may not share a config namespace", async () => {
+    const twin = tempExtension((m, dir) => {
+      m.name = "factory/twin";
+      m.contributes.packs = [];
+      m.contributes.adapters = {};
+    });
+    const out = await load(policyFor(SAMPLE_EXTENSION, twin));
+    expect(out.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
+    expect(out.anomalies[0]).toMatch(
+      /config namespace "sample" is already used by factory\/sample/,
+    );
+  });
+
+  test("validate refuses a manifest whose config key is malformed", () => {
+    const bad = tempExtension((m) => {
+      m.contributes.config = { namespace: "Bad Space" };
+    });
+    const out = validateExtensionManifest(bad);
+    expect(out.valid).toBe(false);
+    expect(out.errors.join("\n")).toMatch(
+      /config\.namespace: does not match pattern/,
+    );
+    expect(out.errors.join("\n")).toMatch(
+      /config: missing required property "schema"/,
+    );
   });
 });
 

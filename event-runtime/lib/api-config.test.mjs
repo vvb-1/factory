@@ -5,9 +5,18 @@ import {
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { configView } from "./api-config.mjs";
+import { configView, redactSecrets } from "./api-config.mjs";
 import { makeServer as makeApiServer } from "./api-test-helpers.mjs";
+import { RUNTIME_ROOT } from "./config.mjs";
+import { loadExtensions } from "./extensions.mjs";
 import { reposView } from "./repos.mjs";
+
+const SAMPLE_EXTENSION = path.join(
+  RUNTIME_ROOT,
+  "test-support",
+  "extensions",
+  "sample",
+);
 
 const makeServer = async (...args) => {
   const result = await makeApiServer(...args);
@@ -139,12 +148,14 @@ describe("GET /config view", () => {
       "nodes",
       "schedule",
       "registry",
+      "extensions",
     ]);
     expect(view.sections.map((section) => section.reload)).toEqual([
       "hot",
       "hot",
       "cli-only",
       "cli-only",
+      "restart",
       "restart",
     ]);
     expect(
@@ -204,5 +215,158 @@ describe("GET /config view", () => {
       harness: "pi",
     });
     expect(wire).not.toContain("do-not-publish");
+  });
+
+  test("publishes extension config: namespace, effective values, schema, and disabled reasons", () => {
+    const view = configView({
+      root: fixtureRoot(),
+      registry: registry(),
+      repos: () => new Map(),
+      policyVersion: "git:test",
+      now: 0,
+      extensions: {
+        extensions: [
+          {
+            name: "factory/sample",
+            version: "1.0.0",
+            path: "/ext/sample",
+            config: {
+              namespace: "sample",
+              schema: "./config.schema.json",
+              schemaJson: { type: "object", properties: {} },
+              values: {
+                greeting: "hello",
+                apiToken: "super-secret-value",
+                limits: { timeoutSeconds: 30, signingKey: "k" },
+              },
+            },
+          },
+          {
+            name: "factory/plain",
+            version: "0.1.0",
+            path: "/ext/plain",
+            config: null,
+          },
+        ],
+        disabled: [
+          {
+            name: "factory/broken",
+            version: "2.0.0",
+            path: "/ext/broken",
+            namespace: "broken",
+            reason:
+              "factory/broken@2.0.0: config does not match ./config.schema.json — $.maxParallel: above maximum 4",
+          },
+        ],
+      },
+    });
+    const section = view.sections.find((s) => s.id === "extensions");
+    expect(section.title).toBe("Extensions");
+    expect(section.source).toEqual({
+      file: "config/policy.yaml",
+      kind: "yaml",
+    });
+    expect(section.reload).toBe("restart");
+    expect(section.extensions).toEqual([
+      {
+        name: "factory/sample",
+        version: "1.0.0",
+        path: "/ext/sample",
+        namespace: "sample",
+        reload: "restart",
+        schema: { type: "object", properties: {} },
+        values: {
+          greeting: "hello",
+          apiToken: "[redacted]",
+          limits: { timeoutSeconds: 30, signingKey: "[redacted]" },
+        },
+        anomaly: null,
+      },
+      {
+        name: "factory/plain",
+        version: "0.1.0",
+        path: "/ext/plain",
+        namespace: null,
+        reload: "restart",
+        schema: null,
+        values: null,
+        anomaly: null,
+      },
+      {
+        name: "factory/broken",
+        version: "2.0.0",
+        path: "/ext/broken",
+        namespace: "broken",
+        reload: "restart",
+        schema: null,
+        values: null,
+        anomaly: expect.stringMatching(/\$\.maxParallel: above maximum 4/),
+      },
+    ]);
+    // Entries mirror the same rows so search and generic rendering keep working.
+    expect(section.entries.map((e) => e.key)).toEqual([
+      "sample",
+      "factory/plain",
+      "broken",
+    ]);
+    expect(section.entries[0].value.apiToken).toBe("[redacted]");
+    expect(section.entries[2].note).toMatch(/disabled/);
+    expect(JSON.stringify(view)).not.toContain("super-secret-value");
+  });
+
+  test("defaults to the extensions the process loaded (lib/extensions.mjs snapshot)", async () => {
+    await loadExtensions({
+      policy: {
+        extensions: [
+          {
+            path: SAMPLE_EXTENSION,
+            config: { apiToken: "shh", greeting: "yo" },
+          },
+        ],
+      },
+      packRoots: [],
+    });
+    const view = configView({
+      root: fixtureRoot(),
+      registry: registry(),
+      repos: () => new Map(),
+      policyVersion: "git:test",
+      now: 0,
+    });
+    const section = view.sections.find((s) => s.id === "extensions");
+    expect(section.extensions).toHaveLength(1);
+    expect(section.extensions[0].namespace).toBe("sample");
+    expect(section.extensions[0].values).toEqual({
+      greeting: "yo",
+      maxParallel: 1,
+      apiToken: "[redacted]",
+      limits: { timeoutSeconds: 30 },
+    });
+    expect(section.extensions[0].schema.properties.greeting.default).toBe(
+      "hello",
+    );
+    expect(JSON.stringify(view)).not.toContain("shh");
+  });
+
+  test("redactSecrets masks token/secret/key/password keys at any depth and leaves the rest", () => {
+    expect(
+      redactSecrets({
+        host: "api.example",
+        API_TOKEN: "a",
+        nested: { password: "b", list: [{ secretThing: "c", ok: 1 }] },
+        privateKey: "",
+        monkey: null,
+      }),
+    ).toEqual({
+      host: "api.example",
+      API_TOKEN: "[redacted]",
+      nested: {
+        password: "[redacted]",
+        list: [{ secretThing: "[redacted]", ok: 1 }],
+      },
+      privateKey: "",
+      monkey: null,
+    });
+    expect(redactSecrets("plain")).toBe("plain");
   });
 });
