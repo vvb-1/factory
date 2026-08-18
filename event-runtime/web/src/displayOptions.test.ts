@@ -396,10 +396,19 @@ describe("state transitions & custom columns (WM-214)", () => {
 describe("persistence", () => {
   test("graph overlay and window round-trip tolerantly", () => {
     saveGraphDisplayOptions({ overlay: "health", window: "7d" });
-    expect(loadGraphDisplayOptions()).toEqual({ overlay: "health", window: "7d" });
+    expect(loadGraphDisplayOptions()).toEqual({
+      overlay: "health",
+      window: "7d",
+    });
 
-    localStorage.setItem("evrt-display-graph", JSON.stringify({ overlay: "unknown", window: "forever" }));
-    expect(loadGraphDisplayOptions()).toEqual({ overlay: "live", window: "24h" });
+    localStorage.setItem(
+      "evrt-display-graph",
+      JSON.stringify({ overlay: "unknown", window: "forever" }),
+    );
+    expect(loadGraphDisplayOptions()).toEqual({
+      overlay: "live",
+      window: "24h",
+    });
   });
 
   test("round-trips through localStorage with customColumns", () => {

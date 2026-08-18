@@ -15,7 +15,13 @@ import { extractRowValue } from "./pathExtractor";
 /** Graph-specific display state (WM-291). Kept beside the table display
  * options so every operator display preference uses the same tolerant
  * localStorage boundary. */
-export const GRAPH_OVERLAYS = ["live", "activity", "health", "cost", "latency"] as const;
+export const GRAPH_OVERLAYS = [
+  "live",
+  "activity",
+  "health",
+  "cost",
+  "latency",
+] as const;
 export const GRAPH_WINDOWS = ["1h", "24h", "7d", "30d"] as const;
 export type GraphOverlay = (typeof GRAPH_OVERLAYS)[number];
 export type GraphWindow = (typeof GRAPH_WINDOWS)[number];
@@ -25,25 +31,38 @@ export interface GraphDisplayOptions {
   window: GraphWindow;
 }
 
-export const DEFAULT_GRAPH_DISPLAY: GraphDisplayOptions = { overlay: "live", window: "24h" };
+export const DEFAULT_GRAPH_DISPLAY: GraphDisplayOptions = {
+  overlay: "live",
+  window: "24h",
+};
 const GRAPH_DISPLAY_STORAGE_KEY = "evrt-display-graph";
 
 export function isGraphOverlay(value: unknown): value is GraphOverlay {
-  return typeof value === "string" && (GRAPH_OVERLAYS as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (GRAPH_OVERLAYS as readonly string[]).includes(value)
+  );
 }
 
 export function isGraphWindow(value: unknown): value is GraphWindow {
-  return typeof value === "string" && (GRAPH_WINDOWS as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (GRAPH_WINDOWS as readonly string[]).includes(value)
+  );
 }
 
 export function loadGraphDisplayOptions(): GraphDisplayOptions {
   try {
-    const parsed = JSON.parse(localStorage.getItem(GRAPH_DISPLAY_STORAGE_KEY) ?? "null") as
-      | Record<string, unknown>
-      | null;
+    const parsed = JSON.parse(
+      localStorage.getItem(GRAPH_DISPLAY_STORAGE_KEY) ?? "null",
+    ) as Record<string, unknown> | null;
     return {
-      overlay: isGraphOverlay(parsed?.overlay) ? parsed.overlay : DEFAULT_GRAPH_DISPLAY.overlay,
-      window: isGraphWindow(parsed?.window) ? parsed.window : DEFAULT_GRAPH_DISPLAY.window,
+      overlay: isGraphOverlay(parsed?.overlay)
+        ? parsed.overlay
+        : DEFAULT_GRAPH_DISPLAY.overlay,
+      window: isGraphWindow(parsed?.window)
+        ? parsed.window
+        : DEFAULT_GRAPH_DISPLAY.window,
     };
   } catch {
     return { ...DEFAULT_GRAPH_DISPLAY };

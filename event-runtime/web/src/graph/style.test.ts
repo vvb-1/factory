@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { EDGE_STYLES, NODE_STYLES, historicalColor, historicalRamp, legendEntries, nodeStyleKey } from "./style";
-import type { CapabilityGraph, GraphNode } from "./model";
+import {
+  EDGE_STYLES,
+  NODE_STYLES,
+  historicalColor,
+  historicalRamp,
+  historicalStroke,
+  legendEntries,
+  nodeStyleKey,
+} from "./style";
+import type {
+  CapabilityGraph,
+  GraphNode,
+  HistoricalOverlayValue,
+} from "./model";
 
 const agent = (ref: string, mutating: boolean): GraphNode => ({
   id: `agent:${ref}`,
@@ -148,23 +160,160 @@ describe("legendEntries", () => {
 });
 
 describe("historical ramps", () => {
+  const value = (
+    over: Partial<HistoricalOverlayValue> = {},
+  ): HistoricalOverlayValue => ({
+    mode: "activity",
+    value: 5,
+    intensity: 0.5,
+    formatted: "5",
+    label: "runs",
+    faint: false,
+    noData: false,
+    ...over,
+  });
+
   test("uses theme variables for sequential and health ramps", () => {
-    expect(historicalColor({ mode: "activity", value: 5, intensity: 0.5, formatted: "5", label: "runs", faint: false }))
-      .toContain("var(--accent)");
-    expect(historicalColor({ mode: "health", value: 0.5, intensity: 0.5, formatted: "50%", label: "failure rate", faint: false }))
-      .toBe("color-mix(in oklch, var(--hue-err) 50%, var(--hue-ok))");
+    expect(historicalColor(value())).toContain("var(--accent)");
+    expect(
+      historicalStroke(
+        value({
+          mode: "health",
+          value: 0.5,
+          intensity: 0.5,
+          formatted: "50%",
+          label: "failure rate",
+        }),
+      ),
+    ).toBe("color-mix(in oklch, var(--hue-err) 50%, var(--hue-ok))");
+  });
+
+  // WM-291 review D4: the node background sits under body text on `var(--text)`.
+  // A full-strength `--accent` or `--hue-err` fill leaves near-black text on
+  // dark blue. theme.css tints row backgrounds at 6-14%; the ramp's ceiling
+  // must stay in that neighbourhood while still reading as a gradient.
+  describe("node background stays a tint", () => {
+    const outerPct = (css: string) => {
+      const match = /\s(\d+)%, var\(--surface-1\)\)$/.exec(css);
+      expect(match).not.toBeNull();
+      return Number(match![1]);
+    };
+
+    test("caps the hottest sequential cell well below a full fill", () => {
+      expect(historicalColor(value({ intensity: 1 }))).toBe(
+        "color-mix(in oklch, var(--accent) 22%, var(--surface-1))",
+      );
+      expect(
+        outerPct(historicalColor(value({ intensity: 1 }))),
+      ).toBeLessThanOrEqual(25);
+    });
+
+    test("caps the hottest health cell too, and keeps the hue ramp inside it", () => {
+      const worst = historicalColor(
+        value({ mode: "health", intensity: 1, formatted: "100%" }),
+      );
+      const best = historicalColor(
+        value({ mode: "health", intensity: 0, formatted: "0%" }),
+      );
+      expect(worst).toBe(
+        "color-mix(in oklch, color-mix(in oklch, var(--hue-err) 100%, var(--hue-ok)) 22%, var(--surface-1))",
+      );
+      expect(best).toBe(
+        "color-mix(in oklch, color-mix(in oklch, var(--hue-err) 0%, var(--hue-ok)) 5%, var(--surface-1))",
+      );
+      expect(outerPct(worst)).toBeLessThanOrEqual(25);
+    });
+
+    test("every cell across the ramp is a surface tint, and the ramp still moves", () => {
+      const strengths = [0, 0.25, 0.5, 0.75, 1].map((intensity) =>
+        outerPct(historicalColor(value({ intensity }))),
+      );
+      expect(strengths.every((pct) => pct <= 25)).toBe(true);
+      // Monotonic and actually distinguishable end to end.
+      expect(strengths).toEqual([...strengths].sort((a, b) => a - b));
+      expect(strengths[4]! - strengths[0]!).toBeGreaterThanOrEqual(10);
+    });
+
+    test("a no-data node takes no ramp colour at all", () => {
+      expect(
+        historicalColor(
+          value({ mode: "health", intensity: 0, noData: true, formatted: "—" }),
+        ),
+      ).toBe("var(--surface-1)");
+    });
+  });
+
+  test("edge strokes keep full saturation — a 1.5px line carries no text", () => {
+    expect(historicalStroke(value({ mode: "health", intensity: 1 }))).toBe(
+      "color-mix(in oklch, var(--hue-err) 100%, var(--hue-ok))",
+    );
   });
 
   test("finds the visible min and max for the legend", () => {
-    const low = { mode: "cost", value: 0, intensity: 0, formatted: "$0.000", label: "spend", faint: false } as const;
-    const high = { mode: "cost", value: 4, intensity: 1, formatted: "$4.00", label: "spend", faint: false } as const;
+    const low = value({
+      mode: "cost",
+      value: 0,
+      intensity: 0,
+      formatted: "$0.000",
+      label: "spend",
+    });
+    const high = value({
+      mode: "cost",
+      value: 4,
+      intensity: 1,
+      formatted: "$4.00",
+      label: "spend",
+    });
     const graph: CapabilityGraph = {
       nodes: [
-        { id: "event:a", kind: "eventType", label: "a", adapter: "claude", scope: [], ttl: null, historical: low },
+        {
+          id: "event:a",
+          kind: "eventType",
+          label: "a",
+          adapter: "claude",
+          scope: [],
+          ttl: null,
+          historical: low,
+        },
         { ...agent("a@1", false), historical: high },
       ],
       edges: [],
     };
     expect(historicalRamp(graph)).toEqual({ min: low, max: high });
+  });
+
+  test("no-data nodes stay out of the legend ramp", () => {
+    const missing = value({
+      mode: "cost",
+      value: 0,
+      intensity: 0,
+      formatted: "—",
+      noData: true,
+      faint: true,
+      label: "spend",
+    });
+    const spent = value({
+      mode: "cost",
+      value: 4,
+      intensity: 1,
+      formatted: "$4.00",
+      label: "spend",
+    });
+    const graph: CapabilityGraph = {
+      nodes: [
+        {
+          id: "event:a",
+          kind: "eventType",
+          label: "a",
+          adapter: "claude",
+          scope: [],
+          ttl: null,
+          historical: missing,
+        },
+        { ...agent("a@1", false), historical: spent },
+      ],
+      edges: [],
+    };
+    expect(historicalRamp(graph)).toEqual({ min: spent, max: spent });
   });
 });

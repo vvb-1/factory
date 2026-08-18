@@ -20,7 +20,8 @@ const searchCurrentOf = (data: NodeProps["data"]) =>
   Boolean((data as { searchCurrent?: boolean }).searchCurrent);
 
 function materialState(node: GraphNode): string {
-  if (node.historical) return `${node.historical.label} ${node.historical.formatted}`;
+  if (node.historical)
+    return `${node.historical.label} ${node.historical.formatted}`;
   switch (node.kind) {
     case "eventType": {
       const admitted = node.admittedCount ?? 0;
@@ -83,7 +84,9 @@ export function Shell({
       style={{
         width: 236,
         height: 92,
-        background: historical ? historicalColor(historical) : "var(--surface-1)",
+        background: historical
+          ? historicalColor(historical)
+          : "var(--surface-1)",
         border: `1px ${dashed ? "dashed" : "solid"} ${selected ? accent : "var(--border)"}`,
         boxShadow: selected ? `0 0 0 1px ${accent}` : "none",
         borderLeft: `3px solid ${accent}`,
@@ -146,37 +149,43 @@ export function EventTypeNode({ data, selected }: NodeProps) {
         {node.historical ? (
           <span
             className="rounded px-1 text-[11px] font-semibold tabular-nums"
-            style={{ color: "var(--text)", background: "color-mix(in oklch, var(--surface-0) 75%, transparent)" }}
+            style={{
+              color: "var(--text)",
+              background:
+                "color-mix(in oklch, var(--surface-0) 75%, transparent)",
+            }}
           >
             {node.historical.formatted}
           </span>
-        ) : hasCounts && (
-          <span className="flex items-center gap-1">
-            {admitted > 0 && (
-              <span
-                className="rounded px-1 text-[11px] font-medium"
-                style={{
-                  color: "var(--hue-info)",
-                  background:
-                    "color-mix(in oklch, var(--hue-info) 12%, transparent)",
-                }}
-              >
-                {admitted} admitted
-              </span>
-            )}
-            {planned > 0 && (
-              <span
-                className="rounded px-1 text-[11px] font-medium"
-                style={{
-                  color: "var(--hue-ok)",
-                  background:
-                    "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
-                }}
-              >
-                {planned} planned
-              </span>
-            )}
-          </span>
+        ) : (
+          hasCounts && (
+            <span className="flex items-center gap-1">
+              {admitted > 0 && (
+                <span
+                  className="rounded px-1 text-[11px] font-medium"
+                  style={{
+                    color: "var(--hue-info)",
+                    background:
+                      "color-mix(in oklch, var(--hue-info) 12%, transparent)",
+                  }}
+                >
+                  {admitted} admitted
+                </span>
+              )}
+              {planned > 0 && (
+                <span
+                  className="rounded px-1 text-[11px] font-medium"
+                  style={{
+                    color: "var(--hue-ok)",
+                    background:
+                      "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
+                  }}
+                >
+                  {planned} planned
+                </span>
+              )}
+            </span>
+          )
         )}
       </div>
       <div className="mono truncate text-[12px]" title={node.label}>
@@ -223,7 +232,11 @@ export function AgentNode({ data, selected }: NodeProps) {
           {node.historical && (
             <span
               className="rounded px-1 text-[11px] font-semibold tabular-nums"
-              style={{ color: "var(--text)", background: "color-mix(in oklch, var(--surface-0) 75%, transparent)" }}
+              style={{
+                color: "var(--text)",
+                background:
+                  "color-mix(in oklch, var(--surface-0) 75%, transparent)",
+              }}
             >
               {node.historical.formatted}
             </span>
