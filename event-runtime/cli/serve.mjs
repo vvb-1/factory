@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createAdapterRegistry } from "../lib/adapters/index.mjs";
+import { loadExtensions } from "../lib/extensions.mjs";
 import {
   API_HOST,
   DEFAULT_PORT,
@@ -304,9 +305,12 @@ export default async function serve(args) {
     fail(`serve: invalid port "${rawPort}" (must be integer 1-65535)`);
   }
   const adapterOverride = flagValue(args, "--adapter-override") ?? undefined;
-  // Built-ins only for now; the registry validates the contract and wraps
-  // every adapter in the sandbox seam (lib/adapters/index.mjs, WM-837).
+  // Built-ins first, then allow-listed extensions (lib/extensions.mjs,
+  // WM-838) — before toMap(), which is a snapshot. The registry validates the
+  // contract and wraps every adapter in the sandbox seam (WM-837); a broken
+  // extension is a configuration anomaly on /status, never a failed start.
   const adapterRegistry = createAdapterRegistry();
+  const extensions = await loadExtensions({ adapterRegistry });
   const adapters = adapterRegistry.toMap();
   if (adapterOverride && !adapterRegistry.has(adapterOverride)) {
     fail(
@@ -323,7 +327,8 @@ export default async function serve(args) {
   }
 
   const db = openDb();
-  const registry = loadRegistry();
+  const registry = loadRegistry({ packRoots: extensions.packRoots });
+  registry.anomalies.push(...extensions.anomalies);
   const pv = policyVersion();
   const owner = newWorkerId();
 

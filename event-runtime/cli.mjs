@@ -5,13 +5,17 @@ import { USAGE as BASE_USAGE } from "./cli/usage.mjs";
 import { createAdapterRegistry } from "./lib/adapters/index.mjs";
 import { API_HOST, DEFAULT_PORT } from "./lib/config.mjs";
 import { decisionRequestHash } from "./lib/decision.mjs";
+import {
+  loadExtensions,
+  validateExtensionManifest,
+} from "./lib/extensions.mjs";
 
 const USAGE = BASE_USAGE.replace(
   "  inbox                          open items waiting on the human",
   "  inbox                          open items waiting on the human (? = decision pending)\n  decide <item-id> <option-id> [--field key=value]...\n                                 answer an inbox decision through the control API",
 ).replace(
   "  agents                         registered agent definitions and event routing",
-  "  agents                         registered agent definitions and event routing\n  adapters                       registered harness adapters: name, source, sandbox support (local, no serve needed)",
+  "  agents                         registered agent definitions and event routing\n  adapters                       registered harness adapters: name, source, sandbox support (local, no serve needed)\n  extensions list [--json]       allow-listed extensions (policy.yaml extensions:): name, version, path, contribution counts\n  extensions validate <path>     validate a factory-extension.json without loading it",
 );
 
 // Preserve the small programmatic surface used by runtime tests and tooling.
@@ -135,8 +139,10 @@ export async function decideCommand(args) {
  * `work` and `serve` build, so what this prints is what a worker would
  * execute with. Local — it needs no running serve.
  */
-export function adaptersCommand(args = []) {
+export async function adaptersCommand(args = []) {
   const registry = createAdapterRegistry();
+  const loaded = await loadExtensions({ adapterRegistry: registry });
+  for (const anomaly of loaded.anomalies) console.error(`anomaly: ${anomaly}`);
   const rows = registry.list();
   if (args.includes("--json")) {
     console.log(JSON.stringify({ adapters: rows }, null, 2));
@@ -152,11 +158,75 @@ export function adaptersCommand(args = []) {
   return rows;
 }
 
+/**
+ * `extensions list` — the allow-listed extensions the loader accepts (WM-838),
+ * with their contribution counts; faults print as anomalies on stderr, exactly
+ * as /status would report them, and the command still exits 0 because a
+ * broken third-party extension is a configuration anomaly, not a CLI failure.
+ * `extensions validate <path>` — validate one manifest (schema, path
+ * existence, adapter names) without loading a pack or importing an adapter;
+ * exit 1 when it does not validate. Both are local — no serve needed.
+ */
+export async function extensionsCommand(args = []) {
+  const [sub, ...rest] = args;
+  if (sub === "validate") {
+    const target = rest.find((a) => !a.startsWith("--"));
+    if (!target) {
+      console.error("usage: extensions validate <path>");
+      process.exit(1);
+    }
+    const out = validateExtensionManifest(target);
+    for (const warning of out.warnings) console.error(`warning: ${warning}`);
+    if (!out.valid) {
+      for (const error of out.errors) console.error(`error: ${error}`);
+      process.exit(1);
+    }
+    const contributes = out.manifest.contributes ?? {};
+    const packs = (contributes.packs ?? []).length;
+    const adapters = Object.keys(contributes.adapters ?? {}).length;
+    console.log(
+      `${out.manifest.name}@${out.manifest.version}: valid (${packs} pack${packs === 1 ? "" : "s"}, ${adapters} adapter${adapters === 1 ? "" : "s"})`,
+    );
+    return out;
+  }
+  if (sub === "list" || sub === undefined) {
+    const loaded = await loadExtensions();
+    if (rest.includes("--json") || args.includes("--json")) {
+      console.log(
+        JSON.stringify(
+          { extensions: loaded.extensions, anomalies: loaded.anomalies },
+          null,
+          2,
+        ),
+      );
+      return loaded;
+    }
+    for (const anomaly of loaded.anomalies)
+      console.error(`anomaly: ${anomaly}`);
+    const width = Math.max(
+      10,
+      ...loaded.extensions.map((ext) => ext.name.length + 2),
+    );
+    console.log(
+      `${"EXTENSION".padEnd(width)}${"VERSION".padEnd(10)}${"PACKS".padEnd(7)}${"ADAPTERS".padEnd(10)}PATH`,
+    );
+    for (const ext of loaded.extensions) {
+      console.log(
+        `${ext.name.padEnd(width)}${ext.version.padEnd(10)}${String(ext.packs.length).padEnd(7)}${String(ext.adapters.length).padEnd(10)}${ext.path}`,
+      );
+    }
+    return loaded;
+  }
+  console.error("usage: extensions list [--json] | extensions validate <path>");
+  process.exit(1);
+}
+
 export async function dispatch(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   if (command === "decide") return decideCommand(args);
   if (command === "inbox") return inboxCommand(args);
   if (command === "adapters") return adaptersCommand(args);
+  if (command === "extensions") return extensionsCommand(args);
   if (!Object.hasOwn(COMMANDS, command)) {
     console.error(USAGE);
     process.exit(1);

@@ -1,0 +1,10 @@
+{
+  "name": "factory/sample",
+  "version": "1.0.0",
+  "description": "Test fixture: one pack (a copy of test-support/packs/sample under the sample-ext namespace) and one trivial adapter.",
+  "factory": { "min": "0.1.0" },
+  "contributes": {
+    "packs": ["./pack"],
+    "adapters": { "echo": "./adapters/echo.mjs" }
+  }
+}

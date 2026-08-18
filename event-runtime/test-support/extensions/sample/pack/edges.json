@@ -1,0 +1,6 @@
+{
+  "sample-ext/echo@1": {
+    "recommendationField": "message",
+    "edges": {}
+  }
+}

@@ -1,0 +1,482 @@
+import { tmpDir } from "../test-support/tmp.mjs?file=event-runtime-lib-extensions-test-mjs";
+import { describe, expect, test } from "bun:test";
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createAdapterRegistry } from "./adapters/index.mjs";
+import { RUNTIME_ROOT } from "./config.mjs";
+import {
+  EXTENSION_MANIFEST,
+  EXTENSION_SCHEMA,
+  ExtensionError,
+  RESERVED_CONTRIBUTIONS,
+  loadExtensionRoots,
+  loadExtensions,
+  validateExtensionManifest,
+} from "./extensions.mjs";
+import { getAgent, loadRegistry } from "./registry.mjs";
+import { validate } from "./schema.mjs";
+
+const SAMPLE_EXTENSION = path.join(
+  RUNTIME_ROOT,
+  "test-support",
+  "extensions",
+  "sample",
+);
+const SAMPLE_PACK = path.join(RUNTIME_ROOT, "test-support", "packs", "sample");
+
+/** A writable copy of the fixture, optionally with its manifest rewritten. */
+function tempExtension(mutate = () => {}) {
+  const dir = tmpDir("event-extension-");
+  cpSync(SAMPLE_EXTENSION, dir, { recursive: true });
+  const manifestFile = path.join(dir, EXTENSION_MANIFEST);
+  const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+  const next = mutate(manifest, dir) ?? manifest;
+  writeFileSync(manifestFile, JSON.stringify(next, null, 2));
+  return dir;
+}
+
+function policyFor(...dirs) {
+  return { extensions: dirs.map((p) => ({ path: p })) };
+}
+
+/** Load with an empty base pack list so the fixture never collides with the checkout's policy. */
+function load(policy, adapterRegistry = createAdapterRegistry()) {
+  return loadExtensions({ policy, adapterRegistry, packRoots: [] }).then(
+    (result) => ({ ...result, adapterRegistry }),
+  );
+}
+
+describe("factory-extension.json schema", () => {
+  test("accepts the decided manifest shape and rejects bad names/versions", () => {
+    const ok = {
+      name: "wattmind/mobile",
+      version: "1.0.0",
+      factory: { min: "0.x" },
+      contributes: {
+        packs: ["./pack"],
+        adapters: { argent: "./adapters/argent.mjs" },
+      },
+    };
+    expect(validate(EXTENSION_SCHEMA, ok)).toEqual({ valid: true, errors: [] });
+    expect(
+      validate(EXTENSION_SCHEMA, { ...ok, name: "Mobile" }).errors.join(),
+    ).toMatch(/\$\.name: does not match pattern/);
+    expect(
+      validate(EXTENSION_SCHEMA, { ...ok, version: "1.0" }).errors.join(),
+    ).toMatch(/\$\.version: does not match pattern/);
+    expect(
+      validate(EXTENSION_SCHEMA, {
+        ...ok,
+        contributes: { adapters: { argent: "./argent.js" } },
+      }).errors.join(),
+    ).toMatch(/adapters\.argent: does not match pattern/);
+    expect(
+      validate(EXTENSION_SCHEMA, { ...ok, extra: 1 }).errors.join(),
+    ).toMatch(/unknown property "extra"/);
+    expect(
+      validate(EXTENSION_SCHEMA, {
+        ...ok,
+        contributes: { widgets: [] },
+      }).errors.join(),
+    ).toMatch(/unknown property "widgets"/);
+  });
+
+  test("reserved contribution keys are accepted by the schema", () => {
+    for (const key of RESERVED_CONTRIBUTIONS) {
+      const manifest = {
+        name: "a/b",
+        version: "0.0.1",
+        contributes: { [key]: { anything: true } },
+      };
+      expect(validate(EXTENSION_SCHEMA, manifest).valid).toBe(true);
+    }
+  });
+});
+
+describe("loadExtensionRoots", () => {
+  test("absent block is empty; non-array fails closed; bad entries are anomalies", () => {
+    expect(loadExtensionRoots({ policy: {} })).toEqual({
+      roots: [],
+      anomalies: [],
+    });
+    expect(() =>
+      loadExtensionRoots({ policy: { extensions: { path: "x" } } }),
+    ).toThrow(ExtensionError);
+    const root = tmpDir("event-extension-policy-");
+    const out = loadExtensionRoots({
+      root,
+      policy: {
+        extensions: [
+          "just-a-string",
+          { path: "" },
+          { path: "vendor/one", name: "nope" },
+          { path: "vendor/one" },
+          { path: "vendor/one" },
+          { path: "~/ext" },
+        ],
+      },
+    });
+    expect(out.roots.map((r) => r.path)).toEqual([
+      path.join(root, "vendor", "one"),
+      path.join(os.homedir(), "ext"),
+    ]);
+    expect(out.anomalies).toHaveLength(4);
+    expect(out.anomalies[0]).toMatch(/extensions\[0\] must be an object/);
+    expect(out.anomalies[1]).toMatch(/extensions\[1\]\.path must be/);
+    expect(out.anomalies[2]).toMatch(/unknown field "name"/);
+    expect(out.anomalies[3]).toMatch(/duplicate extension path/);
+  });
+
+  test("reads policy.yaml under root/config when no policy object is given", () => {
+    const root = tmpDir("event-extension-policy-");
+    mkdirSync(path.join(root, "config"));
+    writeFileSync(
+      path.join(root, "config", "policy.yaml"),
+      "extensions:\n  - path: ext/one\n",
+    );
+    expect(loadExtensionRoots({ root }).roots).toEqual([
+      { path: path.join(root, "ext", "one"), index: 0 },
+    ]);
+  });
+});
+
+describe("validateExtensionManifest", () => {
+  test("the fixture is valid and reports no warnings", () => {
+    const out = validateExtensionManifest(SAMPLE_EXTENSION);
+    expect(out.valid).toBe(true);
+    expect(out.warnings).toEqual([]);
+    expect(out.manifest.name).toBe("factory/sample");
+  });
+
+  test("checks that contributed paths exist and stay inside the extension", () => {
+    const dir = tempExtension((m) => {
+      m.contributes.packs.push("./missing", "../escape");
+      m.contributes.adapters["bad-path"] = "./adapters/nope.mjs";
+      m.contributes.adapters["Bad Name"] = "./adapters/echo.mjs";
+    });
+    const out = validateExtensionManifest(dir);
+    expect(out.valid).toBe(false);
+    expect(out.errors.join("\n")).toMatch(
+      /packs\[1\] ".\/missing" has no pack.json/,
+    );
+    expect(out.errors.join("\n")).toMatch(/packs\[2\] "..\/escape" escapes/);
+    expect(out.errors.join("\n")).toMatch(
+      /adapters\.bad-path .* is not a file/,
+    );
+    expect(out.errors.join("\n")).toMatch(/key "Bad Name" must match/);
+  });
+});
+
+describe("loadExtensions", () => {
+  test("happy path: packs join the registry, adapters register with the extension as source", async () => {
+    const out = await load(policyFor(SAMPLE_EXTENSION));
+    expect(out.anomalies).toEqual([]);
+    expect(out.extensions).toEqual([
+      {
+        name: "factory/sample",
+        version: "1.0.0",
+        path: SAMPLE_EXTENSION,
+        packs: ["sample-ext"],
+        adapters: ["echo"],
+        reserved: [],
+      },
+    ]);
+    expect(out.packRoots).toEqual([
+      {
+        kind: "fs",
+        name: "sample-ext",
+        path: path.join(SAMPLE_EXTENSION, "pack"),
+      },
+    ]);
+    // Adapters go through the registry: contract-checked, sandbox-guarded, sourced.
+    const entry = out.adapterRegistry.list().find((row) => row.name === "echo");
+    expect(entry).toEqual({
+      name: "echo",
+      source: "factory/sample",
+      sandboxSupport: "unsupported",
+    });
+    const result = await out.adapterRegistry
+      .get("echo")
+      .execute({ spec: { input: { hello: "world" } }, def: {} });
+    expect(result).toEqual({ ok: true, echoed: { hello: "world" } });
+    // Packs go through the existing pack loader, namespaced as pack.json says.
+    const registry = loadRegistry({ packRoots: out.packRoots });
+    expect(getAgent(registry, "sample-ext/echo@1").pack).toBe("sample-ext");
+    expect(registry.eventTypes["sample-ext.echo.requested"].adapter).toBe(
+      "echo",
+    );
+  });
+
+  test("policy packs come first in packRoots and an extension pack may not reuse their name", async () => {
+    const samplePack = {
+      kind: "fs",
+      name: "sample",
+      path: SAMPLE_PACK,
+      namespace: "sample",
+    };
+    const clash = tempExtension((m, dir) => {
+      writeFileSync(
+        path.join(dir, "pack", "pack.json"),
+        JSON.stringify({ name: "sample", version: "1.0.0", namespace: "x" }),
+      );
+    });
+    const out = await loadExtensions({
+      policy: policyFor(clash, SAMPLE_EXTENSION),
+      adapterRegistry: createAdapterRegistry(),
+      packRoots: [samplePack],
+    });
+    expect(out.packRoots.map((p) => p.name)).toEqual(["sample", "sample-ext"]);
+    expect(out.anomalies).toHaveLength(1);
+    expect(out.anomalies[0]).toMatch(
+      /pack name "sample" is already configured.*extension skipped/,
+    );
+  });
+
+  test("a missing or malformed manifest is an anomaly and other extensions still load", async () => {
+    const empty = tmpDir("event-extension-empty-");
+    const badJson = tmpDir("event-extension-badjson-");
+    writeFileSync(path.join(badJson, EXTENSION_MANIFEST), "{ nope");
+    const badSchema = tempExtension((m) => {
+      m.name = "NoSlash";
+    });
+    const out = await load(
+      policyFor(empty, badJson, badSchema, SAMPLE_EXTENSION),
+    );
+    expect(out.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
+    expect(out.anomalies).toHaveLength(3);
+    expect(out.anomalies[0]).toMatch(
+      new RegExp(`extension ${empty}: missing ${EXTENSION_MANIFEST}.*skipped`),
+    );
+    expect(out.anomalies[1]).toMatch(/invalid JSON/);
+    expect(out.anomalies[2]).toMatch(/\$\.name: does not match pattern/);
+    expect(out.adapterRegistry.has("echo")).toBe(true);
+  });
+
+  test("a duplicate pack namespace/agent is refused by the registry rules and skips the extension", async () => {
+    const twin = tempExtension((m) => {
+      m.name = "factory/twin";
+      m.contributes.adapters = { "echo-two": "./adapters/echo.mjs" };
+    });
+    const out = await load(policyFor(SAMPLE_EXTENSION, twin));
+    expect(out.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
+    expect(out.packRoots.map((p) => p.name)).toEqual(["sample-ext"]);
+    expect(out.anomalies).toHaveLength(1);
+    // The twin's pack.json still says "sample-ext": the pack-name check fires first.
+    expect(out.anomalies[0]).toMatch(
+      /pack name "sample-ext" is already configured/,
+    );
+    // Nothing of a skipped extension is registered — not even its good adapter.
+    expect(out.adapterRegistry.has("echo-two")).toBe(false);
+
+    // Same namespace under a different pack name: the registry's own duplicate
+    // agent ref rule fires and names both packs.
+    const renamed = tempExtension((m, dir) => {
+      m.name = "factory/renamed";
+      m.contributes.adapters = {};
+      writeFileSync(
+        path.join(dir, "pack", "pack.json"),
+        JSON.stringify({
+          name: "sample-renamed",
+          version: "1.0.0",
+          namespace: "sample-ext",
+        }),
+      );
+    });
+    const again = await load(policyFor(SAMPLE_EXTENSION, renamed));
+    expect(again.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
+    expect(again.anomalies[0]).toMatch(
+      /duplicate agent ref "sample-ext\/echo@1" from packs "sample-ext" and "sample-renamed".*skipped/,
+    );
+  });
+
+  test("a mutating agent in an extension pack is refused like any configured pack", async () => {
+    const mutating = tempExtension((m, dir) => {
+      m.name = "factory/mutating";
+      m.contributes.adapters = {};
+      const defFile = path.join(dir, "pack", "agents", "echo.json");
+      const def = JSON.parse(readFileSync(defFile, "utf8"));
+      def.mutating = true;
+      writeFileSync(defFile, JSON.stringify(def));
+    });
+    const out = await load(policyFor(mutating));
+    expect(out.extensions).toEqual([]);
+    expect(out.anomalies[0]).toMatch(/may not declare mutating: true/);
+  });
+
+  test("a bad adapter skips the whole extension: contract failure, import failure, and name collisions", async () => {
+    const noSandbox = tempExtension((m, dir) => {
+      m.name = "factory/no-sandbox";
+      writeFileSync(
+        path.join(dir, "adapters", "echo.mjs"),
+        "export async function execute() { return {}; }\n",
+      );
+    });
+    const syntaxError = tempExtension((m, dir) => {
+      m.name = "factory/syntax";
+      writeFileSync(
+        path.join(dir, "adapters", "echo.mjs"),
+        "export const = ;\n",
+      );
+    });
+    const shadowsBuiltin = tempExtension((m) => {
+      m.name = "factory/shadow";
+      m.contributes.packs = [];
+      m.contributes.adapters = { fake: "./adapters/echo.mjs" };
+    });
+    const out = await load(
+      policyFor(noSandbox, syntaxError, shadowsBuiltin, SAMPLE_EXTENSION),
+    );
+    expect(out.extensions.map((e) => e.name)).toEqual(["factory/sample"]);
+    expect(out.packRoots.map((p) => p.name)).toEqual(["sample-ext"]);
+    expect(out.anomalies).toHaveLength(3);
+    expect(out.anomalies[0]).toMatch(
+      /adapter "echo" does not satisfy the adapter contract \(SANDBOX_SUPPORT\).*skipped/,
+    );
+    expect(out.anomalies[1]).toMatch(/adapter "echo" failed to import/);
+    expect(out.anomalies[2]).toMatch(
+      /adapter "fake" is already registered.*may not replace/,
+    );
+    // The built-in survived untouched and the fixture's echo won the name.
+    expect(
+      out.adapterRegistry.list().find((r) => r.name === "fake").source,
+    ).toBe("builtin");
+    expect(
+      out.adapterRegistry.list().find((r) => r.name === "echo").source,
+    ).toBe("factory/sample");
+  });
+
+  test("reserved keys load the rest and record a not-supported-yet anomaly", async () => {
+    const dir = tempExtension((m) => {
+      m.name = "factory/future";
+      m.contributes.panels = [{ id: "x" }];
+      m.contributes.hooks = { "approve.before": "./hooks.mjs" };
+    });
+    const out = await load(policyFor(dir));
+    expect(out.extensions[0].reserved).toEqual(["panels", "hooks"]);
+    expect(out.extensions[0].adapters).toEqual(["echo"]);
+    expect(out.packRoots.map((p) => p.name)).toEqual(["sample-ext"]);
+    expect(out.anomalies).toEqual([
+      expect.stringMatching(/contributes\.panels is not supported yet/),
+      expect.stringMatching(/contributes\.hooks is not supported yet/),
+    ]);
+  });
+
+  test("without an adapter registry, adapters are validated but nothing is registered", async () => {
+    const out = await loadExtensions({
+      policy: policyFor(SAMPLE_EXTENSION),
+      packRoots: [],
+    });
+    expect(out.extensions[0].adapters).toEqual(["echo"]);
+    expect(out.anomalies).toEqual([]);
+  });
+
+  test("an unreadable policy.yaml extensions block fails closed", async () => {
+    const root = tmpDir("event-extension-policy-");
+    mkdirSync(path.join(root, "config"));
+    writeFileSync(
+      path.join(root, "config", "policy.yaml"),
+      "extensions:\n  path: nope\n",
+    );
+    await expect(loadExtensions({ root, packRoots: [] })).rejects.toThrow(
+      /"extensions" must be an array/,
+    );
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("cli extensions", () => {
+  const run = (...args) =>
+    Bun.spawnSync({
+      cmd: [process.execPath, "event-runtime/cli.mjs", "extensions", ...args],
+      cwd: path.dirname(RUNTIME_ROOT),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, FACTORY_REPOS_ROOT: undefined },
+    });
+
+  test("validate <path> checks a manifest without loading it", () => {
+    const ok = run("validate", SAMPLE_EXTENSION);
+    expect(ok.exitCode).toBe(0);
+    expect(ok.stdout.toString()).toMatch(
+      /factory\/sample@1\.0\.0: valid \(1 pack, 1 adapter\)/,
+    );
+
+    const bad = tempExtension((m) => {
+      m.version = "one";
+    });
+    const failed = run("validate", bad);
+    expect(failed.exitCode).toBe(1);
+    expect(failed.stderr.toString()).toMatch(
+      /\$\.version: does not match pattern/,
+    );
+
+    const usage = run("validate");
+    expect(usage.exitCode).toBe(1);
+    expect(usage.stderr.toString()).toMatch(
+      /usage: extensions validate <path>/,
+    );
+  });
+
+  test("list prints name, version, path and contribution counts from a policy root", () => {
+    const root = tmpDir("event-extension-cli-");
+    mkdirSync(path.join(root, "config"));
+    const broken = tmpDir("event-extension-cli-broken-");
+    // The dry pack load reads the model-tier map from the same policy, so the
+    // temp policy carries the checkout's `models:` block alongside `extensions:`.
+    const { models } = Bun.YAML.parse(
+      readFileSync(
+        path.join(path.dirname(RUNTIME_ROOT), "config", "policy.yaml"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(root, "config", "policy.yaml"),
+      Bun.YAML.stringify({
+        models,
+        extensions: [{ path: SAMPLE_EXTENSION }, { path: broken }],
+      }),
+    );
+    const out = Bun.spawnSync({
+      cmd: [process.execPath, "event-runtime/cli.mjs", "extensions", "list"],
+      cwd: path.dirname(RUNTIME_ROOT),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, FACTORY_REPOS_ROOT: root },
+    });
+    expect(out.exitCode).toBe(0);
+    const text = out.stdout.toString();
+    expect(text).toMatch(/EXTENSION\s+VERSION\s+PACKS\s+ADAPTERS\s+PATH/);
+    expect(text).toMatch(
+      new RegExp(
+        `factory/sample\\s+1\\.0\\.0\\s+1\\s+1\\s+${SAMPLE_EXTENSION}`,
+      ),
+    );
+    expect(out.stderr.toString()).toMatch(
+      new RegExp(`anomaly: extension ${broken}: missing ${EXTENSION_MANIFEST}`),
+    );
+
+    const json = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "event-runtime/cli.mjs",
+        "extensions",
+        "list",
+        "--json",
+      ],
+      cwd: path.dirname(RUNTIME_ROOT),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, FACTORY_REPOS_ROOT: root },
+    });
+    const parsed = JSON.parse(json.stdout.toString());
+    expect(parsed.extensions[0].name).toBe("factory/sample");
+    expect(parsed.anomalies).toHaveLength(1);
+  });
+});
