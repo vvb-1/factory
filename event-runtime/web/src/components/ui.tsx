@@ -2366,12 +2366,14 @@ export function Dialog({
   children,
   wide,
   extraWide,
+  footer,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
   extraWide?: boolean;
+  footer?: ReactNode;
 }) {
   useFocusReturn();
   const titleId = useId();
@@ -2406,12 +2408,24 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[85vh] overflow-y-auto rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 sm:p-5 shadow-2xl outline-none`}
+        className={`${extraWide ? "w-[920px] max-w-[95vw]" : wide ? "w-[720px]" : "w-[480px]"} max-h-[85vh] ${footer ? "flex flex-col" : "overflow-y-auto"} rounded-lg border border-(--border-strong) bg-(--surface-1) p-4 sm:p-5 shadow-2xl outline-none`}
       >
-        <div id={titleId} className="display mb-3 text-[15px] font-semibold">
+        <div
+          id={titleId}
+          className={`display mb-3 text-[15px] font-semibold ${footer ? "shrink-0" : ""}`}
+        >
           {title}
         </div>
-        {children}
+        {footer ? (
+          <>
+            <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+            <div className="mt-3 flex shrink-0 justify-end gap-2 border-t border-(--border) pt-3">
+              {footer}
+            </div>
+          </>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );

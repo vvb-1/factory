@@ -1377,4 +1377,60 @@ describe("Dialog (WM-270)", () => {
     expect(r.getByRole("dialog", { name: "Parent dialog" })).toBeTruthy();
     expect(modal.depth).toBe(1);
   });
+
+  test("renders pinned footer with action buttons and scrollable body (WM-829)", () => {
+    let submitted = false;
+    let closed = false;
+    const r = render(
+      <Dialog
+        title="Pinned Dialog"
+        onClose={() => {
+          closed = true;
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                closed = true;
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                submitted = true;
+              }}
+            >
+              Confirm
+            </button>
+          </>
+        }
+      >
+        <div>Long modal body content</div>
+      </Dialog>,
+    );
+
+    const dialog = r.getByRole("dialog", { name: "Pinned Dialog" });
+    expect(dialog.className).toContain("flex flex-col");
+
+    const header = r.getByText("Pinned Dialog");
+    expect(header.className).toContain("shrink-0");
+
+    const bodyContent = r.getByText("Long modal body content");
+    expect(bodyContent.parentElement?.className).toContain(
+      "flex-1 overflow-y-auto",
+    );
+
+    const cancelButton = r.getByRole("button", { name: "Cancel" });
+    const confirmButton = r.getByRole("button", { name: "Confirm" });
+    expect(cancelButton.parentElement?.className).toContain("border-t");
+
+    fireEvent.click(confirmButton);
+    expect(submitted).toBe(true);
+
+    fireEvent.click(cancelButton);
+    expect(closed).toBe(true);
+  });
 });
