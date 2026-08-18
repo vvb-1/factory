@@ -329,6 +329,8 @@ describe("Artifact rows inspect on click, download on demand (WM-699)", () => {
     expect(download.getAttribute("href")).toContain(
       `/api/artifacts/${SHA_A}?name=`,
     );
+    expect(download.classList.contains("h-6")).toBe(true);
+    expect(download.classList.contains("w-6")).toBe(true);
 
     fireEvent.click(download);
     expect(window.location.hash).not.toContain(SHA_A);
