@@ -289,6 +289,30 @@ describe("HoverCard", () => {
     }
   });
 
+  test("ArrowDown and ArrowUp inside the open panel do not reach a window list-keys listener", async () => {
+    const r = render(<Fixture />);
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const action = await waitFor(() =>
+      r.getByRole("button", { name: /Open in Agents/ }),
+    );
+    expect(document.activeElement).toBe(action);
+
+    // Registered only once the card is open, so a leak from the panel cannot be
+    // mistaken for the trigger-side one the previous test already covers.
+    const listKeys = mock((_e: KeyboardEvent) => {});
+    window.addEventListener("keydown", listKeys);
+    try {
+      fireEvent.keyDown(action, { key: "ArrowDown" });
+      fireEvent.keyDown(action, { key: "ArrowUp" });
+      expect(listKeys).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", listKeys);
+    }
+  });
+
   test("Escape closes the card and restores focus to the trigger", async () => {
     const r = render(<Fixture />);
     const trigger = triggerOf(r.container);
