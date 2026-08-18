@@ -31,7 +31,7 @@ function signalTracked(entry, signal) {
     }
     return true;
   } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
+    if (error?.code !== "ESRCH" && error?.code !== "EPERM") throw error;
     return false;
   }
 }
@@ -45,7 +45,7 @@ function isAlive(entry) {
     }
     return true;
   } catch (error) {
-    return error?.code !== "ESRCH";
+    return error?.code !== "ESRCH" && error?.code !== "EPERM";
   }
 }
 
