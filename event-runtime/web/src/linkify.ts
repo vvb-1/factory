@@ -4,7 +4,8 @@ export type LinkifiedPart =
 
 const CANDIDATE = /https?:\/\/[^\s<>"']+|[A-Z]{2,5}-\d+/g;
 const TRAILING_PUNCTUATION = /[.,!?;:\]\}]+$/;
-const GITHUB_PR = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/;
+const GITHUB_PR =
+  /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/;
 const LINEAR_ISSUE_ROOT = "https://linear.app/watt-mind/issue";
 
 function splitTrailingPunctuation(candidate: string): [string, string] {

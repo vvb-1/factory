@@ -172,7 +172,10 @@ describe("RunTrace links and usage (WM-546)", () => {
       <RunTrace runId="run_trace_links" state="COMPLETED" variant="full" />,
       {
         apiMocks: {
-          trace: async () => ({ head: trace[trace.length - 1].seq, entries: trace }),
+          trace: async () => ({
+            head: trace[trace.length - 1].seq,
+            entries: trace,
+          }),
         },
       },
     );
@@ -184,18 +187,26 @@ describe("RunTrace links and usage (WM-546)", () => {
     expect(prLink.getAttribute("title")).toBe(prUrl);
     expect(prLink.getAttribute("target")).toBe("_blank");
     expect(prLink.getAttribute("rel")).toBe("noopener");
-    expect(r.getByRole("link", { name: genericUrl }).getAttribute("href")).toBe(genericUrl);
+    expect(r.getByRole("link", { name: genericUrl }).getAttribute("href")).toBe(
+      genericUrl,
+    );
     expect(r.getByRole("link", { name: "WM-546" }).getAttribute("href")).toBe(
       "https://linear.app/watt-mind/issue/WM-546",
     );
 
     fireEvent.click(r.getByText("input"));
-    expect(await r.findByText(/open https:\/\/github\.com\/watt-mind\/factory\/pull\/486/)).toBeTruthy();
+    expect(
+      await r.findByText(
+        /open https:\/\/github\.com\/watt-mind\/factory\/pull\/486/,
+      ),
+    ).toBeTruthy();
     expect(r.getAllByRole("link")).toHaveLength(3);
   });
 
   test("formats missing zero token counts with a real cost without placeholders", async () => {
-    expect(formatUsageSummary(undefined, undefined, 0.7657)).toBe("tokens n/a · $0.77");
+    expect(formatUsageSummary(undefined, undefined, 0.7657)).toBe(
+      "tokens n/a · $0.77",
+    );
     expect(formatUsageSummary(0, 0, 0.7657)).toBe("tokens n/a · $0.77");
     expect(formatUsageSummary(12, 34, 0.0123)).toBe("12 in · 34 out · $0.01");
 

@@ -131,7 +131,10 @@ function useTraceFeed(runId: string, live: boolean) {
   };
 }
 
-function renderLinkifiedText(text: string, keyPrefix: string): React.ReactNode[] {
+function renderLinkifiedText(
+  text: string,
+  keyPrefix: string,
+): React.ReactNode[] {
   return linkifyText(text).map((part, index) => {
     if (part.kind === "text") return part.text;
     return (
@@ -158,7 +161,12 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
 
   while ((match = tokenRegex.exec(text)) !== null) {
     if (match.index > lastIdx) {
-      nodes.push(...renderLinkifiedText(text.slice(lastIdx, match.index), `text-${lastIdx}`));
+      nodes.push(
+        ...renderLinkifiedText(
+          text.slice(lastIdx, match.index),
+          `text-${lastIdx}`,
+        ),
+      );
     }
     const full = match[0];
     if (match[1]) {
@@ -216,8 +224,10 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
 
 function usageTokenCounts(usage?: Record<string, number>) {
   return {
-    inputTokens: usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens,
-    outputTokens: usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens,
+    inputTokens:
+      usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens,
+    outputTokens:
+      usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens,
   };
 }
 
@@ -226,9 +236,15 @@ function hasUsableTokenCounts(
   outputTokens: number | null | undefined,
   costUSD: number | null | undefined,
 ): boolean {
-  const hasInput = typeof inputTokens === "number" && Number.isFinite(inputTokens);
-  const hasOutput = typeof outputTokens === "number" && Number.isFinite(outputTokens);
-  const zeroWithCost = typeof costUSD === "number" && costUSD > 0 && inputTokens === 0 && outputTokens === 0;
+  const hasInput =
+    typeof inputTokens === "number" && Number.isFinite(inputTokens);
+  const hasOutput =
+    typeof outputTokens === "number" && Number.isFinite(outputTokens);
+  const zeroWithCost =
+    typeof costUSD === "number" &&
+    costUSD > 0 &&
+    inputTokens === 0 &&
+    outputTokens === 0;
   return hasInput && hasOutput && !zeroWithCost;
 }
 
@@ -723,7 +739,9 @@ function TraceBody({
       p.numTurns != null ? `${p.numTurns} turns` : null,
       p.durationMs != null ? `${(p.durationMs / 1000).toFixed(1)}s` : null,
       formatUsageSummary(inputTokens, outputTokens, p.costUSD),
-    ].filter(Boolean).join(" · ");
+    ]
+      .filter(Boolean)
+      .join(" · ");
     return (
       <div className="min-w-0 flex-1 text-(--text-faint)">
         {summary}
