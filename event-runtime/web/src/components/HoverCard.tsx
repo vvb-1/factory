@@ -39,11 +39,16 @@ export const TRIGGER_GAP = 8;
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+/** Never squeeze the panel below this; scroll it instead. */
+export const MIN_PANEL_HEIGHT = 120;
+
 export interface HoverCardPlacement {
   /** Anchor y: the panel's top edge below, or its bottom edge above. */
   top: number;
   left: number;
   placeAbove: boolean;
+  /** Room on the chosen side, so a tall card scrolls instead of overflowing. */
+  maxHeight: number;
 }
 
 /**
@@ -72,7 +77,13 @@ export function computeHoverCardPosition(
   const top = placeAbove
     ? trigger.top - TRIGGER_GAP
     : trigger.bottom + TRIGGER_GAP;
-  return { top, left, placeAbove };
+  const room = (placeAbove ? spaceAbove : spaceBelow) - TRIGGER_GAP;
+  return {
+    top,
+    left,
+    placeAbove,
+    maxHeight: Math.max(MIN_PANEL_HEIGHT, room - VIEWPORT_MARGIN),
+  };
 }
 
 /** Reads the OS motion preference; false wherever `matchMedia` is missing. */
@@ -150,6 +161,7 @@ export function HoverCard({
     top: 0,
     left: 0,
     placeAbove: false,
+    maxHeight: HOVER_CARD_HEIGHT,
   });
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -253,7 +265,12 @@ export function HoverCard({
 
   useEffect(() => clearTimer, [clearTimer]);
 
-  // Escape anywhere closes; focus only returns when it was ours to return.
+  /**
+   * Escape anywhere closes the card. When focus is inside it, the operator
+   * meant *this* layer: swallow the key so an enclosing dialog does not close
+   * behind it. A card merely left open under the pointer swallows nothing —
+   * Escape there belongs to whatever the operator is actually working in.
+   */
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -263,10 +280,12 @@ export function HoverCard({
         (panelRef.current?.contains(active as Node) ?? false) ||
         (wrapperRef.current?.contains(active as Node) ?? false);
       close();
-      if (inside) restoreFocus();
+      if (!inside) return;
+      e.stopPropagation();
+      restoreFocus();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open, close, restoreFocus]);
 
   // The panel is pinned to viewport coordinates, so any scroll that is not the
@@ -365,6 +384,8 @@ export function HoverCard({
                 : undefined,
               left: `${placement.left}px`,
               width: `${width}px`,
+              maxHeight: `${placement.maxHeight}px`,
+              overflowY: "auto",
               zIndex: 9999,
             }}
             className={`rounded-lg border border-(--border-strong) bg-(--surface-1) p-3.5 shadow-xl text-[12px] text-(--text) select-text outline-none${motion} ${panelClassName ?? ""}`}

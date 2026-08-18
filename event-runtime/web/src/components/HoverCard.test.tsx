@@ -13,6 +13,7 @@ import {
   HoverCard,
   HOVER_CARD_HEIGHT,
   HOVER_CARD_WIDTH,
+  MIN_PANEL_HEIGHT,
   OPEN_MS,
   prefersReducedMotion,
   VIEWPORT_MARGIN,
@@ -89,7 +90,12 @@ describe("computeHoverCardPosition", () => {
       viewport,
       size,
     );
-    expect(p).toEqual({ top: 126, left: 200, placeAbove: false });
+    expect(p).toEqual({
+      top: 126,
+      left: 200,
+      placeAbove: false,
+      maxHeight: 762,
+    });
   });
 
   test("clamps a right-edge trigger inside the viewport margin", () => {
@@ -130,6 +136,33 @@ describe("computeHoverCardPosition", () => {
       size,
     );
     expect(p.placeAbove).toBe(false);
+  });
+
+  test("caps the height to the room on the chosen side", () => {
+    const below = computeHoverCardPosition(
+      { top: 100, bottom: 118, left: 200 },
+      { width: 1440, height: 400 },
+      size,
+    );
+    expect(below.placeAbove).toBe(false);
+    expect(below.top + below.maxHeight).toBe(400 - VIEWPORT_MARGIN);
+
+    const above = computeHoverCardPosition(
+      { top: 260, bottom: 278, left: 200 },
+      { width: 1440, height: 300 },
+      size,
+    );
+    expect(above.placeAbove).toBe(true);
+    expect(above.top - above.maxHeight).toBe(VIEWPORT_MARGIN);
+  });
+
+  test("never squeezes the panel below a readable minimum", () => {
+    const p = computeHoverCardPosition(
+      { top: 10, bottom: 28, left: 200 },
+      { width: 1440, height: 60 },
+      size,
+    );
+    expect(p.maxHeight).toBe(MIN_PANEL_HEIGHT);
   });
 });
 
@@ -266,6 +299,42 @@ describe("HoverCard", () => {
 
     await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
     expect(document.activeElement).toBe(trigger);
+  });
+
+  test("Escape from inside the card does not also reach an enclosing layer", async () => {
+    const outer = mock((_e: KeyboardEvent) => {});
+    window.addEventListener("keydown", outer);
+    try {
+      const r = render(<Fixture />);
+      const trigger = triggerOf(r.container);
+      trigger.focus();
+      fireEvent.focus(trigger);
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+      fireEvent.keyDown(trigger, { key: "Escape" });
+
+      await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+      expect(outer).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", outer);
+    }
+  });
+
+  test("Escape with focus elsewhere closes the card but lets the key through", async () => {
+    const outer = mock((_e: KeyboardEvent) => {});
+    window.addEventListener("keydown", outer);
+    try {
+      const r = render(<Fixture />);
+      fireEvent.mouseEnter(triggerOf(r.container));
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+      fireEvent.keyDown(document.body, { key: "Escape" });
+
+      await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+      expect(outer).toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", outer);
+    }
   });
 
   test("a scroll in a surrounding container dismisses the card", async () => {
