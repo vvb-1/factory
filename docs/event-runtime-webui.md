@@ -134,6 +134,58 @@ Projects (§10.14). Eight of them own a nav-rail entry; the full-page run view
 is reached from Runs, not from the rail. All nine are still thin projections
 of existing endpoints.
 
+### 4.0 Adding a view — the view registry (WM-839)
+
+Every page is one declaration in `src/views/registry.ts` (`VIEWS`), and
+that entry is the only thing to add for a new page. From it the shell
+derives the nav rail (`NAV` in `nav.ts` is a projection of `VIEWS` — same
+objects, chorded entries only), the `g` chord, the ⌘K "Go to" action, the
+lazy import and its Suspense fallback, the hash-route resolve (`#/<key>` →
+that view, `route[1..]` → its `params`), the page title and which rail entry
+is `aria-current`.
+
+```ts
+{
+  key: "widgets",            // #/widgets — first hash segment and rail identity
+  label: "Widgets",          // rail label / page title
+  go: "u",                   // `g u` chord; omit for drill-in routes off the rail
+  group: "machinery",        // rail group; omit with `go` for drill-ins
+  params: [":id"],           // documented focus params: #/widgets/:id
+  load: load(                // lazy import + adapter: shell slice → the view's props
+    () => import("./Widgets"),
+    "Widgets",
+    ({ params, navigate, shell }) => ({
+      connected: shell.connected,
+      focusId: params[0] ?? null,
+      onSelect: (id) => navigate(hashPath("widgets", id)),
+    }),
+  ),
+}
+```
+
+That is the whole change: no `lazy()` in `App.tsx`, no render branch, no
+palette or chord edit. The view itself stays a plain component with its own
+explicit props; the adapter in the entry maps `ViewProps` (`params`, `hash`,
+`navigate`, and the shell's cross-view `jump` callbacks and shared state) onto
+them, so nothing outside the entry has to know the view exists. Drill-in
+routes reached from a parent view (`#/run/:id`, `#/prs/:n`, `#/chain/:id`,
+`#/artifact/:digest`) omit `go`/`group` and set `parent` (which rail entry
+stays current) and, where an id-less URL should show the list, `fallback`.
+Unknown first segments render Overview.
+
+Chord suffixes are checked by `views/registry.test.ts`: keys and chords must
+be unique, and a chord may not be a reserved suffix
+(`RESERVED_GO_SUFFIXES`: `a`/`x` list verbs that would double-fire under the
+chord, `i` and `0`–`9` context chords, `h` for Projects' `g h`). The chord
+rationale for the current rail is the header comment of `registry.ts`.
+
+Chunking: `load` is a dynamic `import()`, so each view stays its own Vite
+chunk. Overview, Runs and Events are the first-paint exceptions — they are
+imported statically by the registry and declared with `component` so the
+entry chunk (budgeted in `vite.config.ts`) renders them without a Suspense
+flash. Do not add `component` to a new view unless it is a first-paint
+surface; that is a budget decision, not routine growth.
+
 Layout is Linear's three-zone shape: a narrow left nav rail, a dense list,
 and a right-side detail panel that opens without leaving the list. The panel
 is `DetailPane` in `src/components/ui.tsx` — hand-rolled, not a shadcn
