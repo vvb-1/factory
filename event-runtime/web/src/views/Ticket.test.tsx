@@ -162,22 +162,36 @@ describe("Ticket journey view", () => {
     const view = renderTicket(data);
     await view.findByRole("heading", { name: "WM-542" });
     expect(view.getAllByText("—").length).toBeGreaterThan(0);
-    expect(view.getByText("Owned paths overlap — WM-544")).toBeTruthy();
+    // The blocking reason names the ticket in the way; it linkifies inline, so
+    // the text is now split across the anchor rather than one text node.
+    const reason = view.getByText("Blocking reason")
+      .nextElementSibling as HTMLElement;
+    expect(reason.textContent).toBe("Owned paths overlap — WM-544");
+    expect(
+      within(reason).getByRole("link", { name: "WM-544" }).getAttribute("href"),
+    ).toBe("#/tickets/WM-544");
     expect(view.getByText(/Waiting: Owned paths overlap/)).toBeTruthy();
     expect(view.container.textContent).not.toContain("$0.00");
   });
 
-  test("unknown ids render an inline no-activity notice instead of a blank page", async () => {
-    const data = source();
-    data.ticket.id = "WM-999";
-    data.ticket.title = null;
-    data.ticket.state = null;
-    data.ticket.createdAt = null;
-    data.ticket.url = "https://linear.app/watt-mind/issue/WM-999";
-    data.activity = false;
-    data.events = [];
-    data.proposals = [];
-    data.runs = [];
+  /** An id Linear never heard of: no title, no state, no runtime activity. */
+  function unindexed(id: string): TicketJourneySource {
+    return {
+      ticket: {
+        id,
+        title: null,
+        state: null,
+        createdAt: null,
+        url: `https://linear.app/watt-mind/issue/${id}`,
+      },
+      activity: false,
+      events: [],
+      proposals: [],
+      runs: [],
+    };
+  }
+
+  function renderId(id: string, data: TicketJourneySource) {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify(data), {
         status: 200,
@@ -185,14 +199,48 @@ describe("Ticket journey view", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false, refetchInterval: false } },
     });
-    const view = render(
+    return render(
       <QueryClientProvider client={client}>
-        <Ticket ticketId="WM-999" onNavigate={() => {}} />
+        <Ticket ticketId={id} onNavigate={() => {}} />
       </QueryClientProvider>,
     );
+  }
+
+  test("an unindexed id reads as unknown or external, with a direct Linear link", async () => {
+    const view = renderId("WM-999", unindexed("WM-999"));
     await waitFor(() =>
       expect(view.getByRole("status").textContent).toContain(
-        "no runtime activity for WM-999",
+        "Unknown or external ticket",
+      ),
+    );
+    expect(view.getByRole("status").textContent).toContain("WM-999");
+    expect(
+      view.getByRole("link", { name: "Open in Linear ↗" }).getAttribute("href"),
+    ).toBe("https://linear.app/watt-mind/issue/WM-999");
+  });
+
+  test("a ticket from a team this factory does not run reads the same way", async () => {
+    const view = renderId("FOO-12", unindexed("FOO-12"));
+    await waitFor(() =>
+      expect(view.getByRole("status").textContent).toContain(
+        "Unknown or external ticket",
+      ),
+    );
+    expect(
+      view.getByRole("link", { name: "Open in Linear ↗" }).getAttribute("href"),
+    ).toBe("https://linear.app/watt-mind/issue/FOO-12");
+  });
+
+  test("a ticket Linear knows but nothing has run keeps the no-activity notice", async () => {
+    const data = source();
+    data.activity = false;
+    data.events = [];
+    data.proposals = [];
+    data.runs = [];
+    const view = renderId("WM-542", data);
+    await waitFor(() =>
+      expect(view.getByRole("status").textContent).toContain(
+        "no runtime activity for WM-542",
       ),
     );
   });

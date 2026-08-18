@@ -23,30 +23,16 @@ import {
   type JourneyProposal,
   type JourneyRun,
   type SubjectJourney,
-  type TicketJourneySource,
   type TimelineItem,
 } from "../subjectJourney";
 import { StateBadge, STATE_HUES } from "../components/ui";
+import {
+  fetchTicketJourney,
+  isUnindexedTicket,
+  TicketText,
+} from "../components/TicketHoverCard";
 import type { AdmittedEvent, Proposal, RunDetail, RunListItem } from "../types";
 import { Button as PrimitiveButton } from "../components/ui";
-
-async function fetchTicketJourney(
-  ticketId: string,
-): Promise<TicketJourneySource> {
-  const response = await fetch(
-    `/api/runs?ticket=${encodeURIComponent(ticketId)}`,
-  );
-  if (!response.ok) {
-    let message = `HTTP ${response.status}`;
-    try {
-      message = (await response.json()).error ?? message;
-    } catch {
-      // Keep the HTTP status when the control API did not return JSON.
-    }
-    throw new Error(message);
-  }
-  return response.json();
-}
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -123,7 +109,9 @@ function TimelineRow({ item, last }: { item: TimelineItem; last: boolean }) {
         </SourceLink>
         {item.detail && (
           <div className="mt-0.5 break-words text-sm text-(--text-faint)">
-            {item.detail}
+            {/* The label above is already a link, so only the detail line can
+                carry ticket links without nesting anchors. */}
+            <TicketText text={item.detail} />
           </div>
         )}
       </div>
@@ -434,7 +422,11 @@ function JourneyLayout({
                 <div>
                   <dt className="text-(--text-faint)">Blocking reason</dt>
                   <dd className="mt-1 break-words text-(--text-dim)">
-                    {journey.blockingReason ?? "—"}
+                    {journey.blockingReason ? (
+                      <TicketText text={journey.blockingReason} />
+                    ) : (
+                      "—"
+                    )}
                   </dd>
                 </div>
                 {journey.nextVisit && (
@@ -453,7 +445,7 @@ function JourneyLayout({
                 <div className="border-t border-(--border) pt-3">
                   <dt className="text-(--text-faint)">Next action</dt>
                   <dd className="mt-1 break-words font-medium text-(--text)">
-                    {journey.nextAction}
+                    <TicketText text={journey.nextAction} />
                   </dd>
                 </div>
               </dl>
@@ -528,6 +520,46 @@ export function Ticket({
         >
           Cannot load {normalized}:{" "}
           {(query.error as Error)?.message ?? "control API unavailable"}
+        </div>
+      </div>
+    );
+  }
+
+  // An id nothing in the runtime has ever named — a typo, another workspace's
+  // ticket, or a team this factory does not dispatch. The journey chrome would
+  // be a page of dashes, so say what happened and offer the one link that can
+  // still answer the question.
+  if (isUnindexedTicket(query.data)) {
+    return (
+      <div className="p-8">
+        <div
+          role="status"
+          className="mx-auto max-w-lg rounded-lg border border-dashed border-(--border-strong) bg-(--surface-1) p-8 text-center"
+        >
+          <div className="text-[13px] font-medium text-(--text)">
+            Unknown or external ticket
+          </div>
+          <div className="mt-1.5 text-[12px] text-(--text-dim)">
+            <span className="mono">{normalized}</span> is not in this factory's
+            index: no run, event, or proposal has ever named it.
+          </div>
+          <div className="mt-4 flex flex-wrap justify-center gap-4 text-[12px]">
+            <a
+              href={query.data.ticket.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-(--accent) hover:underline"
+            >
+              Open in Linear ↗
+            </a>
+            <button
+              type="button"
+              onClick={() => onNavigate("")}
+              className="text-(--accent) hover:underline"
+            >
+              Choose another ticket
+            </button>
+          </div>
         </div>
       </div>
     );
