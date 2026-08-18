@@ -520,6 +520,76 @@ describe("merge-scan required-context resolution (WM-433)", () => {
   });
 });
 
+describe("format and lint mechanical merge fixes (WM-769)", () => {
+  const scanPrompt = readFileSync(
+    registry.agents.get("merge-scan@2").promptPath,
+    "utf8",
+  );
+  const fixPrompt = readFileSync(
+    registry.agents.get("merge-fix@1").promptPath,
+    "utf8",
+  );
+  const reviewerSource = readFileSync(
+    path.join(process.cwd(), "shared/agents/factory-merge-reviewer.md"),
+    "utf8",
+  );
+
+  test("scan fixtures route prettier and eslint-only Verify failures to format_and_lint", () => {
+    expect(scanPrompt).toContain("Formatting check (prettier)");
+    expect(scanPrompt).toContain("`Lint`");
+    expect(scanPrompt).toMatch(/eslint\s+diagnostics/);
+    expect(scanPrompt).toMatch(
+      /FIX, finding exactly `format_and_lint`[\s\S]*never ESCALATE[\s\S]*never a review FIX/,
+    );
+    expect(scanPrompt).toMatch(
+      /Mixed failures use their\s+ordinary finding instead/,
+    );
+  });
+
+  test("merge-fix formats only PR-changed files and re-verifies before a fresh scan", () => {
+    expect(fixPrompt).toContain(
+      "git diff --name-only --diff-filter=ACMR -z origin/<base>...HEAD",
+    );
+    expect(fixPrompt).toContain("bunx prettier --write --ignore-unknown");
+    expect(fixPrompt).toContain("bunx eslint --fix --no-warn-ignored");
+    expect(fixPrompt).toMatch(
+      /pass\s+that NUL-delimited set, and no repository-wide path/i,
+    );
+    expect(fixPrompt).toMatch(
+      /Re-run the\s+ticket's exact Verification Command,[\s\S]*next independent\s+scan establish green/,
+    );
+    expect(fixPrompt).toMatch(
+      /After every rebase,[\s\S]*changed-file-only prettier and eslint/,
+    );
+  });
+
+  test("format_and_lint uses a non-round marker and fast-lane re-evaluation", () => {
+    const marker =
+      "factory-merge-fix mechanical=format_and_lint finding=<findingHash>";
+    expect(scanPrompt).toContain(marker.replace("findingHash", "hash"));
+    expect(fixPrompt).toContain(marker);
+    expect(scanPrompt).toMatch(
+      /does not\s+consume or increment `max_fix_rounds`/,
+    );
+    expect(fixPrompt).toMatch(/does not consume a\s+`max_fix_rounds` round/);
+    expect(scanPrompt).toMatch(
+      /auto-fix then re-evaluate every lane criterion/,
+    );
+  });
+
+  test("the reviewer emits the distinct mechanical tag for prettier/eslint-only findings", () => {
+    expect(reviewerSource).toMatch(
+      /verdict `FIX`, canonical\s+finding `format_and_lint`, and tag the finding `mechanical`/,
+    );
+    expect(reviewerSource).toMatch(
+      /This tag is\s+distinct from `fix-in-branch`/,
+    );
+    expect(reviewerSource).toMatch(
+      /Do not use it when any\s+behavioral test, typecheck, build, or code-review finding also blocks/,
+    );
+  });
+});
+
 describe("merge-scan repository workspace and result contract (WM-425)", () => {
   test("the definition and prompt declare the pinned repository contract", () => {
     const def = registry.agents.get("merge-scan@2");

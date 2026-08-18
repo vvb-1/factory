@@ -10,14 +10,34 @@ isolated worktree for the ticket. This is not a general implementation run.
    security/product/policy judgment is involved. Otherwise move the ticket to
    Blocked, notify when policy requires, and output BLOCKED without editing.
    Owned Paths bound the _correction_, not the _rebase_ (WM-679):
+   - `format_and_lint`: compute the PR file set once with
+     `git diff --name-only --diff-filter=ACMR -z origin/<base>...HEAD`. Pass
+     that NUL-delimited set, and no repository-wide path, to both fixers:
+
+     ```sh
+     changed=$(mktemp)
+     git diff --name-only --diff-filter=ACMR -z origin/<base>...HEAD >"$changed"
+     xargs -0 -r bunx prettier --write --ignore-unknown <"$changed"
+     xargs -0 -r bunx eslint --fix --no-warn-ignored <"$changed"
+     rm -f "$changed"
+     ```
+
+     Do not make judgment-based source edits under this finding. Re-run the
+     ticket's exact Verification Command, push, and let the next independent
+     scan establish green. This deterministic correction does not consume a
+     `max_fix_rounds` round.
+
    - `rebase_onto_base` / `rerun_ci_at_head`: rebase the head branch onto the
      current base. Resolve conflicts faithfully to both sides, reading the
      surrounding code; the files git reports as conflicting are in scope for
      the resolution regardless of the ticket's Owned Paths, because a rebase
      touches what the base touched. Never `git stash` or `--autostash`. If a
      hunk is genuinely ambiguous — two real behaviours, no way to keep both —
-     that is the one case to BLOCK with the hunk named. Then re-run
-     verification and push with `--force-with-lease`.
+     that is the one case to BLOCK with the hunk named. After every rebase,
+     run the same changed-file-only prettier and eslint commands described for
+     `format_and_lint`, then re-run verification and push with
+     `--force-with-lease`. Formatting drift after a rebase is predictable, so
+     never push the rebased branch before this hygiene step.
    - A finding that names an Owned Paths deviation (an expectation outside the
      ticket's paths that the PR's own change invalidated): make that one
      correction, and record the deviation on the ticket in your comment.
@@ -28,9 +48,13 @@ isolated worktree for the ticket. This is not a general implementation run.
    update a falsifiable regression test where the finding is a code change (a
    pure rebase adds none), and run the ticket's exact Verification Command.
    Never weaken or skip it.
-4. Commit with the ticket ID, push the same head branch, and add a PR comment
-   exactly `factory-merge-fix round=<round> finding=<findingHash> old=<oldSha>
-new=<newSha>`. Do not merge, approve, mark Done, or delete anything.
+4. Commit with the ticket ID and push the same head branch. For ordinary
+   findings, add a PR comment exactly
+   `factory-merge-fix round=<round> finding=<findingHash> old=<oldSha>
+new=<newSha>`. For `format_and_lint`, use the non-round marker exactly
+   `factory-merge-fix mechanical=format_and_lint finding=<findingHash>
+old=<oldSha> new=<newSha>`. Do not merge, approve, mark Done, or delete
+   anything.
 5. Return UPDATED with the new 40-hex head SHA. Completion chains to a wholly
    new merge-scan run. You are forbidden to declare your own update mergeable.
 
