@@ -145,7 +145,7 @@ describe("registry", () => {
     // both changes are registry inputs to the same merged-view digest,
     // hence one combined regeneration here.
     const expected =
-      "sha256:PLACEHOLDER_WILL_BE_COMPUTED";
+      "sha256:065ec74d0146e2e98a10d9f907e22bd78d4417523c78d6b3d647ba39e6123ca0";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 

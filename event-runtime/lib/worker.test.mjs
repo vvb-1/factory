@@ -47,6 +47,7 @@ import {
   createReloadWatcher,
   DEFAULT_MAX_ENVIRONMENT_RETRIES,
   defaultLocksDir,
+  defaultReturnHandoffTicket,
   dispatchLockPath,
   DYNAMIC_DEADLINE_ADAPTERS,
   executeClaimed,
@@ -5209,5 +5210,119 @@ describe("handoff verification gate (WM-718)", () => {
     expect(c.calls.comments[0].body).toContain(
       "- Owned Paths deviations: none",
     );
+  });
+});
+
+// The describe block above only exercises the handoff gate through mocked
+// hooks (claimTicket/returnHandoffTicket/etc all stubbed by `dispatch()`).
+// `defaultReturnHandoffTicket` is the one production path none of that
+// touches, and it has a real bug shape: the combined
+// state+unassign+removes+add-label Linear call can fail on the label half
+// alone (WM-718 F2). These tests drive the real function with a `runCli`
+// stub that fails on cue, never mocking the function itself.
+describe("defaultReturnHandoffTicket (WM-718 F2)", () => {
+  const COMBINED_ARGS = [
+    "state",
+    "WM-9001",
+    "Todo",
+    "--unassign",
+    "--add",
+    "ai:agent-ready",
+    "--remove",
+    "ai:in-progress",
+    "--remove",
+    "ai:needs-review",
+  ];
+  const BASE_ARGS = [
+    "state",
+    "WM-9001",
+    "Todo",
+    "--unassign",
+    "--remove",
+    "ai:in-progress",
+    "--remove",
+    "ai:needs-review",
+  ];
+
+  test("retries as two separate calls and restores ai:agent-ready when the combined call fails", () => {
+    const calls = [];
+    const runCli = (args) => {
+      calls.push(args);
+      if (calls.length === 1) throw new Error("linear: rate limited");
+      return "";
+    };
+    const result = defaultReturnHandoffTicket({
+      ticket: "WM-9001",
+      body: "handoff refused",
+      fetchTicket: () => ({ state: { name: "In Review" } }),
+      runCli,
+    });
+    expect(result).toEqual({
+      ok: true,
+      agentReadyRestored: true,
+      warning: null,
+    });
+    // The first (failed) combined attempt, then the state move split from
+    // the label add, then the comment — never a silent drop of the label.
+    expect(calls).toEqual([
+      COMBINED_ARGS,
+      BASE_ARGS,
+      ["labels", "WM-9001", "--add", "ai:agent-ready"],
+      ["comment", "WM-9001", "handoff refused"],
+    ]);
+  });
+
+  test("surfaces the failure loudly when the label restore also fails", () => {
+    const calls = [];
+    const runCli = (args) => {
+      calls.push([...args]);
+      if (args[0] === "state" && args.includes("--add")) {
+        throw new Error("combined call failed");
+      }
+      if (args[0] === "labels") {
+        throw new Error("labels endpoint down");
+      }
+      return "";
+    };
+    const loud = [];
+    const originalConsoleError = console.error;
+    console.error = (...args) => loud.push(args.join(" "));
+    let result;
+    try {
+      result = defaultReturnHandoffTicket({
+        ticket: "WM-9001",
+        body: "handoff refused",
+        fetchTicket: () => ({ state: { name: "In Progress" } }),
+        runCli,
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+    // Never silent: the run's own return value says so...
+    expect(result.ok).toBe(true);
+    expect(result.agentReadyRestored).toBe(false);
+    expect(result.warning).toContain("labels endpoint down");
+    // ...the worker's own log says so...
+    expect(
+      loud.some((line) => line.includes("ai:agent-ready NOT restored")),
+    ).toBe(true);
+    // ...and the ticket itself still moved to Todo (unassigned, un-labeled)
+    // rather than being stranded In Progress/In Review.
+    expect(calls).toContainEqual(BASE_ARGS);
+    const commentCall = calls.find((c) => c[0] === "comment");
+    expect(commentCall).toBeDefined();
+    expect(commentCall[2]).toContain("ai:agent-ready NOT restored");
+  });
+
+  test("is a no-op when the ticket already left In Progress/In Review", () => {
+    const calls = [];
+    const result = defaultReturnHandoffTicket({
+      ticket: "WM-9001",
+      body: "handoff refused",
+      fetchTicket: () => ({ state: { name: "Done" } }),
+      runCli: (args) => (calls.push(args), ""),
+    });
+    expect(result).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 });

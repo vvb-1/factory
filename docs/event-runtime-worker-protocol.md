@@ -389,7 +389,9 @@ agent, the spec is fine).
 On pass and on failure alike the worker posts a **worker-authored**
 `## Handoff verification (worker-observed)` comment on the ticket: the
 command it ran, the exit code, the last 40 lines of output, the web-build
-result, the file count against `origin/<base>`, and the Owned Paths deviations.
+result, the file count against `origin/<base>`, the Owned Paths deviations,
+and — when known — the ticket's description hash at claim time, so a reader
+can tell whether the ticket was amended after the agent claimed it.
 The agent's own `artifact.verification` claim is quoted below it labelled
 `agent-reported`; it never becomes the Verification line. On pass the accepted
 result's `verification.checks` gains `repo_verify_passed`,
