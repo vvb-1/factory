@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { keyGuard } from "../hooks";
+import { goPrefixActive } from "../goSequence";
 import {
   ApiError,
   decideInboxItem,
@@ -190,18 +192,28 @@ export function DecisionCard({
   const update = (id: string, value: unknown) =>
     setValues((previous) => ({ ...previous, [id]: value }));
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement;
-    if (target.closest("input, textarea, select, [contenteditable=true]"))
-      return;
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const number = Number(event.key);
-    if (number < 1 || number > 6 || !options[number - 1]) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setSelected(options[number - 1].id);
-    setMessage(null);
-  };
+  // While an undecided card is on screen the number keys 1–6 pick its options
+  // from anywhere in the view — the operator arrives via the list row, not by
+  // focusing the card. Capture phase on window so the Inbox status-tab
+  // binding (bubble phase on window) never sees them; text fields, modifiers
+  // and the `g` prefix still win.
+  const undecided = !currentResponse;
+  useEffect(() => {
+    if (!undecided) return;
+    function onKey(event: KeyboardEvent) {
+      if (keyGuard(event) || goPrefixActive()) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const number = Number(event.key);
+      if (number < 1 || number > 6 || !options[number - 1]) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSelected(options[number - 1].id);
+      setMessage(null);
+    }
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
+  }, [undecided, options]);
 
   if (currentResponse) {
     if ("superseded" in currentResponse) {
@@ -234,7 +246,14 @@ export function DecisionCard({
     const fieldsById = new Map(
       (currentRequest.fields ?? []).map((field) => [field.id, field]),
     );
-    const failed = currentResponse.effect?.outcome === "failed";
+    // Anything the runtime did not apply is retryable (the server's own rule
+    // for /decide/retry is "not already applied"), so gate on that rather
+    // than the single "failed" value — WM-390's stub still answers
+    // "unsupported" for most effects until WM-391 lands.
+    const failed =
+      currentResponse.effect !== undefined &&
+      currentResponse.effect !== null &&
+      currentResponse.effect.outcome !== "applied";
     return (
       <section
         aria-label="Decision record"
@@ -299,9 +318,7 @@ export function DecisionCard({
   return (
     <section
       aria-label="Decision"
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      className="rounded-md border border-(--border) bg-(--surface-0) p-3 outline-none focus-visible:ring-2 focus-visible:ring-(--accent)"
+      className="rounded-md border border-(--border) bg-(--surface-0) p-3"
     >
       <h2 className="text-[14px] font-semibold text-(--text)">
         {currentRequest.question}

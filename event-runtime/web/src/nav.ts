@@ -3,9 +3,10 @@
 // `g y` (the last sound in "artifact") so it does not compete with list `k`.
 // Workers keeps its natural `g w`: `w` is no view's list verb. Inbox takes
 // `g n` ("needs you"): `n` is no view's list verb either, and `g i` is the
-// In-flight context chord (WM-235). Number keys 1–6 belong to a focused
-// DecisionCard; it stops propagation there so Inbox's 1–4 status tabs keep
-// their existing binding everywhere else.
+// In-flight context chord (WM-235). Number keys 1–6 belong to an undecided
+// DecisionCard whenever one is on screen (capture-phase window listener, so
+// Inbox's 1–4 status tabs never see them); with no open card the tabs keep
+// their existing binding.
 export const NAV = [
   { key: "overview", label: "Overview", go: "o" },
   { key: "inbox", label: "Inbox", go: "n" },

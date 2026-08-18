@@ -246,7 +246,7 @@ describe("DecisionCard", () => {
     expect(view.getByText("The scope changed. Continue?")).toBeTruthy();
   });
 
-  test("number keys select only from card focus, not from a text field", () => {
+  test("number keys select from anywhere in the view, beat the view's own bubble-phase bindings, and never from a text field", () => {
     const view = render(
       <DecisionCard
         itemId="inbox_decision"
@@ -254,15 +254,45 @@ describe("DecisionCard", () => {
         apiCalls={apiCalls}
       />,
     );
-    const card = view.getByRole("region", { name: "Decision" });
-    const optionButtons = view
-      .getByRole("group", { name: "Options" })
-      .querySelectorAll("button");
-    fireEvent.keyDown(card, { key: "2" });
-    expect(optionButtons[1].getAttribute("aria-pressed")).toBe("true");
-    const text = view.getByLabelText("Anything I should know before I start");
-    fireEvent.keyDown(text, { key: "3" });
-    expect(optionButtons[1].getAttribute("aria-pressed")).toBe("true");
+    // Stand-in for Inbox's status-tab listener (bubble phase on window): with
+    // an undecided card open it must not see the number keys.
+    const tabListener = mock(() => {});
+    window.addEventListener("keydown", tabListener);
+    try {
+      const optionButtons = view
+        .getByRole("group", { name: "Options" })
+        .querySelectorAll("button");
+      fireEvent.keyDown(document.body, { key: "2" });
+      expect(optionButtons[1].getAttribute("aria-pressed")).toBe("true");
+      expect(tabListener).not.toHaveBeenCalled();
+      const text = view.getByLabelText("Anything I should know before I start");
+      fireEvent.keyDown(text, { key: "3" });
+      expect(optionButtons[1].getAttribute("aria-pressed")).toBe("true");
+      expect(tabListener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", tabListener);
+    }
+  });
+
+  test("an unapplied effect (WM-390's `unsupported` stub) is retryable, not just `failed`", () => {
+    const view = render(
+      <DecisionCard
+        itemId="inbox_decision"
+        request={request}
+        response={{
+          schemaVersion: "factory.decision-response/v1" as const,
+          requestHash: decisionRequestHash(request),
+          optionId: "authorise",
+          fields: { paths: ["pi"], confirm: true },
+          decidedBy: "operator",
+          decidedAt: "2026-08-16T12:41:07.000Z",
+          effect: { kind: "authorise", outcome: "unsupported" },
+        }}
+        apiCalls={apiCalls}
+      />,
+    );
+    expect(view.getByText(/Effect unsupported/)).toBeTruthy();
+    expect(view.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
   test("shows a failed effect and retries it before refetching the record", async () => {
