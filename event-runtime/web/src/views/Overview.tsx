@@ -3,7 +3,13 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard, refetchIntervals, useNow, useRequeuePoll } from "../hooks";
-import type { JournalEntry, EventFocus, Proposal, RunState, StatusView } from "../types";
+import type {
+  JournalEntry,
+  EventFocus,
+  Proposal,
+  RunState,
+  StatusView,
+} from "../types";
 import type { OperatorContext } from "../context";
 import { scopedCount, scopedTally } from "../context";
 import { EMPTY, formatBytes, formatRelative } from "../format";
@@ -47,7 +53,9 @@ export function SectionTitle({
     </span>
   );
   const metaNode = meta != null && (
-    <span className="ml-auto text-right text-[11px] text-(--text-faint)">{meta}</span>
+    <span className="ml-auto text-right text-[11px] text-(--text-faint)">
+      {meta}
+    </span>
   );
 
   if (collapsible) {
@@ -95,7 +103,10 @@ export function SegmentMeter({
   segments: Segment[];
   onSegment?: (key: string) => void;
 }) {
-  const total = segments.reduce((acc, s) => acc + (s.value > 0 ? s.value : 0), 0);
+  const total = segments.reduce(
+    (acc, s) => acc + (s.value > 0 ? s.value : 0),
+    0,
+  );
 
   if (total === 0) {
     return (
@@ -175,7 +186,9 @@ export function StatLegendItem({
       }`}
     >
       <StateIcon state={token} />
-      <span className={lit ? "" : "group-hover:text-(--text) group-hover:underline"}>
+      <span
+        className={lit ? "" : "group-hover:text-(--text) group-hover:underline"}
+      >
         {label.split(" · ").pop()}
       </span>
       <span
@@ -184,7 +197,9 @@ export function StatLegendItem({
       >
         {value}
       </span>
-      {factoryWide && <span className="text-[10px] text-(--text-faint)">(all)</span>}
+      {factoryWide && (
+        <span className="text-[10px] text-(--text-faint)">(all)</span>
+      )}
     </button>
   );
 }
@@ -210,7 +225,9 @@ export function StageCard({
   className?: string;
 }) {
   return (
-    <section className={`rounded-lg border border-(--border) bg-(--surface-1) p-3.5 ${className}`}>
+    <section
+      className={`rounded-lg border border-(--border) bg-(--surface-1) p-3.5 ${className}`}
+    >
       <SectionTitle
         title={index != null ? `${index}. ${title}` : title}
         meta={
@@ -316,7 +333,15 @@ export function groupJournalEntries(entries: JournalEntry[]): ActivityGroup[] {
 
 const DUPLICATE_STATE_REASONS: Partial<Record<string, Set<string>>> = {
   RUNNING: new Set(["run", "running", "start", "started"]),
-  COMPLETED: new Set(["complete", "completed", "ok", "success", "succeeded", "exit_0", "exit 0"]),
+  COMPLETED: new Set([
+    "complete",
+    "completed",
+    "ok",
+    "success",
+    "succeeded",
+    "exit_0",
+    "exit 0",
+  ]),
   FAILED: new Set(["fail", "failed"]),
   QUEUED: new Set(["queue", "queued"]),
   LEASED: new Set(["lease", "leased"]),
@@ -333,8 +358,9 @@ export function formatActivityGroup(group: ActivityGroup): {
 } {
   const normalizedReason = group.reason?.trim().toLowerCase() ?? null;
   const reason =
-    normalizedReason && !DUPLICATE_STATE_REASONS[group.to]?.has(normalizedReason)
-      ? group.reason?.trim() ?? null
+    normalizedReason &&
+    !DUPLICATE_STATE_REASONS[group.to]?.has(normalizedReason)
+      ? (group.reason?.trim() ?? null)
       : null;
   return {
     steps: group.count > 1 ? `+${group.count} steps` : null,
@@ -383,19 +409,26 @@ export function groupDeadLetters(deadLetters: DeadLetter[]): DeadLetterGroup[] {
     const key = JSON.stringify([event.source, errorMessage]);
     const group = groups.get(key);
     if (group) group.events.push(event);
-    else groups.set(key, { source: event.source, errorMessage, events: [event] });
+    else
+      groups.set(key, { source: event.source, errorMessage, events: [event] });
   }
   return [...groups.values()];
 }
 
 /** Remove a kind prefix when the adjacent badge already communicates it. */
-export function stripAnomalyKindPrefix(kind: AnomalyKind, text: string): string {
+export function stripAnomalyKindPrefix(
+  kind: AnomalyKind,
+  text: string,
+): string {
   const label = kind.replaceAll("_", "-");
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const colonPrefix = new RegExp(`^${escaped}\\s*:\\s*`, "i");
   if (colonPrefix.test(text)) return text.replace(colonPrefix, "");
 
-  const inflectedPrefix = new RegExp(`^${escaped}ed\\s*\\(([^)]*)\\)\\s*:?\\s*`, "i");
+  const inflectedPrefix = new RegExp(
+    `^${escaped}ed\\s*\\(([^)]*)\\)\\s*:?\\s*`,
+    "i",
+  );
   const match = text.match(inflectedPrefix);
   if (!match) return text;
   const remainder = text.slice(match[0].length);
@@ -425,20 +458,33 @@ export function buildAnomalyRows(
     rows.push({
       kind: "schedule",
       text: `stopped schedule ${schedule.loop}: ${schedule.error ? `error: ${schedule.error}` : `${schedule.intervalsLate} intervals late`}`,
-      links: [{ label: "View schedules", go: () => callbacks.onNavigate("schedules") }],
+      links: [
+        {
+          label: "View schedules",
+          go: () => callbacks.onNavigate("schedules"),
+        },
+      ],
     });
   }
   for (const proposal of anomalies.proposalsPilingUp ?? []) {
     rows.push({
       kind: "proposal",
       text: `proposals piling up for schedule ${proposal.loop}: ${proposal.count} open proposals (threshold ${proposal.threshold})`,
-      links: [{ label: "View proposals", go: () => callbacks.onNavigate("proposals") }],
+      links: [
+        {
+          label: "View proposals",
+          go: () => callbacks.onNavigate("proposals"),
+        },
+      ],
     });
   }
   for (const warning of anomalies.configuration ?? []) {
     rows.push({
       kind: "configuration",
-      text: stripAnomalyKindPrefix("configuration", `configuration: ${warning}`),
+      text: stripAnomalyKindPrefix(
+        "configuration",
+        `configuration: ${warning}`,
+      ),
       links: [],
     });
   }
@@ -449,7 +495,9 @@ export function buildAnomalyRows(
       text: `expired open proposal ${id}`,
       proposalId: id,
       proposal: proposalsById.get(id),
-      links: [{ label: "View proposal", go: () => callbacks.onJumpProposal(id) }],
+      links: [
+        { label: "View proposal", go: () => callbacks.onJumpProposal(id) },
+      ],
       dismissProposalId: id,
     });
   }
@@ -457,7 +505,9 @@ export function buildAnomalyRows(
     rows.push({
       kind: "lease",
       text: `stale leases: ${anomalies.staleLeases}`,
-      links: [{ label: "View leased runs", go: () => callbacks.onJumpRuns("LEASED") }],
+      links: [
+        { label: "View leased runs", go: () => callbacks.onJumpRuns("LEASED") },
+      ],
     });
   }
   if (anomalies.unpublishedOutbox > 0) {
@@ -467,7 +517,10 @@ export function buildAnomalyRows(
       links: [
         {
           label: "View outbox",
-          go: () => document.getElementById("outbox")?.scrollIntoView({ block: "start" }),
+          go: () =>
+            document
+              .getElementById("outbox")
+              ?.scrollIntoView({ block: "start" }),
         },
       ],
     });
@@ -480,9 +533,24 @@ export function buildAnomalyRows(
         group.events.length > 1
           ? `${group.events.length} dead-lettered · ${group.source} · ${group.errorMessage}`
           : `${group.source} · ${group.errorMessage}`,
-      links: [{ label: "View event", go: () => callbacks.onJumpEvents({ source: first.source, eventId: first.eventId }) }],
-      requeue: group.events.length === 1 ? { source: first.source, eventId: first.eventId } : undefined,
-      archive: group.events.length === 1 ? { source: first.source, eventId: first.eventId } : undefined,
+      links: [
+        {
+          label: "View event",
+          go: () =>
+            callbacks.onJumpEvents({
+              source: first.source,
+              eventId: first.eventId,
+            }),
+        },
+      ],
+      requeue:
+        group.events.length === 1
+          ? { source: first.source, eventId: first.eventId }
+          : undefined,
+      archive:
+        group.events.length === 1
+          ? { source: first.source, eventId: first.eventId }
+          : undefined,
       deadLetterGroup: group,
     });
   }
@@ -502,7 +570,10 @@ export function buildAnomalyRows(
       kind: "ambiguous",
       text: `ambiguous open proposals: ${a.count} proposals target run ${a.runId}`,
       links: [
-        { label: "View proposals", go: () => callbacks.onNavigate("proposals") },
+        {
+          label: "View proposals",
+          go: () => callbacks.onNavigate("proposals"),
+        },
         { label: "View run", go: () => callbacks.onJumpRun(a.runId) },
       ],
     });
@@ -521,7 +592,9 @@ export function buildAnomalyRows(
     rows.push({
       kind: "capacity",
       text: `${s?.runs.byState?.QUEUED ?? 0} queued runs and no live worker available to claim them`,
-      links: [{ label: "View workers", go: () => callbacks.onNavigate("workers") }],
+      links: [
+        { label: "View workers", go: () => callbacks.onNavigate("workers") },
+      ],
     });
   }
 
@@ -573,14 +646,22 @@ function RecentOutcomesStrip({
   now: number;
   onJumpRun: (runId: string) => void;
 }) {
-  const terminalStates = new Set(["COMPLETED", "FAILED", "REFUSED", "TIMED_OUT", "CANCELLED"]);
+  const terminalStates = new Set([
+    "COMPLETED",
+    "FAILED",
+    "REFUSED",
+    "TIMED_OUT",
+    "CANCELLED",
+  ]);
   const outcomes = entries.filter((e) => terminalStates.has(e.to)).slice(0, 48);
 
   if (outcomes.length === 0) return null;
 
   // Chronological left-to-right (oldest -> newest at right)
   const chrono = outcomes.slice().reverse();
-  const completed = outcomes.filter((outcome) => outcome.to === "COMPLETED").length;
+  const completed = outcomes.filter(
+    (outcome) => outcome.to === "COMPLETED",
+  ).length;
   const failed = outcomes.filter((outcome) => outcome.to === "FAILED").length;
 
   return (
@@ -619,7 +700,10 @@ function RecentOutcomesStrip({
             );
           })}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 text-[11px] text-(--text-faint)" aria-label={`${completed} completed, ${failed} failed`}>
+        <div
+          className="flex shrink-0 items-center gap-1.5 text-[11px] text-(--text-faint)"
+          aria-label={`${completed} completed, ${failed} failed`}
+        >
           <span className="text-(--hue-ok)">●</span>
           <span>{completed} completed</span>
           <span>·</span>
@@ -636,7 +720,11 @@ function RecentOutcomesStrip({
  * then each 2 s poll asks only for `since=<last head>` and prepends what is
  * new — an append-only log consumed incrementally, capped at FEED_CAP shown.
  */
-function useJournalFeed(): { entries: JournalEntry[]; isPending: boolean; isError: boolean } {
+function useJournalFeed(): {
+  entries: JournalEntry[];
+  isPending: boolean;
+  isError: boolean;
+} {
   const headRef = useRef(0);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const query = useQuery({
@@ -662,7 +750,14 @@ function useJournalFeed(): { entries: JournalEntry[]; isPending: boolean; isErro
   };
 }
 
-const ATTENTION_KEYS = new Set(["human_needed", "dead_lettered", "FAILED", "TIMED_OUT", "expired", "stale"]);
+const ATTENTION_KEYS = new Set([
+  "human_needed",
+  "dead_lettered",
+  "FAILED",
+  "TIMED_OUT",
+  "expired",
+  "stale",
+]);
 
 /**
  * Overview (webui spec §4.1 + doc §10.4, pipeline OPS-360, WM-205) — the unified StageCard dashboard:
@@ -699,14 +794,22 @@ export function Overview({
   const now = useNow();
   const queryClient = useQueryClient();
   const pollRequeue = useRequeuePoll(onJumpProposal);
-  const [rejectingProposalId, setRejectingProposalId] = useState<string | null>(null);
+  const [rejectingProposalId, setRejectingProposalId] = useState<string | null>(
+    null,
+  );
   const [rejectReason, setRejectReason] = useState("");
-  const [expandedDeadLetterGroups, setExpandedDeadLetterGroups] = useState<Set<string>>(new Set());
+  const [expandedDeadLetterGroups, setExpandedDeadLetterGroups] = useState<
+    Set<string>
+  >(new Set());
   const [bulkDeadLetterAction, setBulkDeadLetterAction] = useState<{
     action: "archive" | "requeue";
     group: DeadLetterGroup;
   } | null>(null);
-  const status = useQuery({ queryKey: ["status"], queryFn: api.status, ...refetchIntervals.primary });
+  const status = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    ...refetchIntervals.primary,
+  });
   const outbox = useQuery({
     queryKey: ["outbox"],
     queryFn: () => api.outbox(15),
@@ -732,7 +835,8 @@ export function Overview({
   const feed = useJournalFeed();
 
   const requeue = useMutation({
-    mutationFn: ({ source, eventId }: { source: string; eventId: string }) => api.requeue(source, eventId),
+    mutationFn: ({ source, eventId }: { source: string; eventId: string }) =>
+      api.requeue(source, eventId),
     onSuccess: async (_, { source, eventId }) => {
       await queryClient.invalidateQueries({ queryKey: ["status"] });
       notify(`Requeued event ${eventId}`, "ok");
@@ -747,8 +851,11 @@ export function Overview({
         | { kind: "archive"; source: string; eventId: string }
         | { kind: "release"; workerId: string; runId: string },
     ) => {
-      if (target.kind === "archive") return api.archive(target.source, target.eventId).then(() => undefined);
-      return api.releaseWorker(target.workerId, target.runId).then(() => undefined);
+      if (target.kind === "archive")
+        return api.archive(target.source, target.eventId).then(() => undefined);
+      return api
+        .releaseWorker(target.workerId, target.runId)
+        .then(() => undefined);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["status"] });
@@ -773,7 +880,9 @@ export function Overview({
         ),
       );
       return {
-        succeeded: group.events.filter((_, index) => results[index]?.status === "fulfilled"),
+        succeeded: group.events.filter(
+          (_, index) => results[index]?.status === "fulfilled",
+        ),
         failed: results.filter((result) => result.status === "rejected").length,
       };
     },
@@ -786,10 +895,15 @@ export function Overview({
           "err",
         );
       } else {
-        notify(`${action === "archive" ? "Archived" : "Requeued"} ${group.events.length} events`, "ok");
+        notify(
+          `${action === "archive" ? "Archived" : "Requeued"} ${group.events.length} events`,
+          "ok",
+        );
       }
       if (action === "requeue") {
-        await Promise.all(succeeded.map((event) => pollRequeue(event.source, event.eventId)));
+        await Promise.all(
+          succeeded.map((event) => pollRequeue(event.source, event.eventId)),
+        );
       }
     },
     onError: () => queryClient.invalidateQueries({ queryKey: ["status"] }),
@@ -798,7 +912,8 @@ export function Overview({
   const reject = useMutation({
     mutationFn: ({ proposalId, why }: { proposalId: string; why: string }) => {
       const trimmed = why.trim();
-      if (!trimmed) return Promise.reject(new Error("Rejection reason required"));
+      if (!trimmed)
+        return Promise.reject(new Error("Rejection reason required"));
       return api.reject(proposalId, trimmed);
     },
     onSuccess: async (_, { proposalId }) => {
@@ -825,7 +940,13 @@ export function Overview({
   };
 
   const submitReject = () => {
-    if (!rejectingProposalId || !rejectReason.trim() || reject.isPending || !connected) return;
+    if (
+      !rejectingProposalId ||
+      !rejectReason.trim() ||
+      reject.isPending ||
+      !connected
+    )
+      return;
     reject.mutate({ proposalId: rejectingProposalId, why: rejectReason });
   };
 
@@ -851,7 +972,17 @@ export function Overview({
       s,
       now,
     );
-  }, [anomalies, proposalsById, onJumpProposal, onJumpRuns, onJumpEvents, onJumpRun, onNavigate, s, now]);
+  }, [
+    anomalies,
+    proposalsById,
+    onJumpProposal,
+    onJumpRuns,
+    onJumpEvents,
+    onJumpRun,
+    onNavigate,
+    s,
+    now,
+  ]);
 
   const hasAnomalies = anomalyRows.length > 0;
   const deadLetterEventCount = anomalies?.deadLettered.length ?? 0;
@@ -872,7 +1003,8 @@ export function Overview({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey || goPrefixActive()) return;
+      if (keyGuard(e) || e.metaKey || e.ctrlKey || e.altKey || goPrefixActive())
+        return;
 
       if ("12345".includes(e.key)) {
         e.preventDefault();
@@ -887,16 +1019,27 @@ export function Overview({
       );
       if (e.key === "." && anomalyRows.length > 0) {
         e.preventDefault();
-        anomalyRowRefs.current[(focusedIndex + 1) % anomalyRows.length]?.focus();
+        anomalyRowRefs.current[
+          (focusedIndex + 1) % anomalyRows.length
+        ]?.focus();
         return;
       }
 
       if (e.key === "r") {
         const focused = anomalyRows[focusedIndex];
-        if (!focused?.deadLetterGroup || !connected || requeue.isPending || bulkDeadLetter.isPending) return;
+        if (
+          !focused?.deadLetterGroup ||
+          !connected ||
+          requeue.isPending ||
+          bulkDeadLetter.isPending
+        )
+          return;
         e.preventDefault();
         if (focused.deadLetterGroup.events.length > 1) {
-          setBulkDeadLetterAction({ action: "requeue", group: focused.deadLetterGroup });
+          setBulkDeadLetterAction({
+            action: "requeue",
+            group: focused.deadLetterGroup,
+          });
         } else if (focused.requeue) {
           requeue.mutate(focused.requeue);
         }
@@ -905,10 +1048,29 @@ export function Overview({
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [anomalyRows, bulkDeadLetter.isPending, connected, onJumpEvents, onJumpRuns, onNavigate, requeue]);
+  }, [
+    anomalyRows,
+    bulkDeadLetter.isPending,
+    connected,
+    onJumpEvents,
+    onJumpRuns,
+    onNavigate,
+    requeue,
+  ]);
 
-  const activeRunStates: RunState[] = ["QUEUED", "LEASED", "RUNNING", "VERIFYING"];
-  const terminalRunStates: RunState[] = ["COMPLETED", "FAILED", "REFUSED", "TIMED_OUT", "CANCELLED"];
+  const activeRunStates: RunState[] = [
+    "QUEUED",
+    "LEASED",
+    "RUNNING",
+    "VERIFYING",
+  ];
+  const terminalRunStates: RunState[] = [
+    "COMPLETED",
+    "FAILED",
+    "REFUSED",
+    "TIMED_OUT",
+    "CANCELLED",
+  ];
   const factoryWide = context.kind !== "all";
   const feedsUnscoped = context.kind === "repo";
   const eventTally =
@@ -938,16 +1100,27 @@ export function Overview({
           { repos: (p) => p.repos },
         )
       : (s?.proposals.expired ?? 0);
-  const eventValue = (k: string, factory: number) => (eventTally ? (eventTally[k] ?? 0) : factory);
-  const runValue = (k: RunState) => (runTally ? (runTally[k] ?? 0) : (s?.runs.byState[k] ?? 0));
+  const eventValue = (k: string, factory: number) =>
+    eventTally ? (eventTally[k] ?? 0) : factory;
+  const runValue = (k: RunState) =>
+    runTally ? (runTally[k] ?? 0) : (s?.runs.byState[k] ?? 0);
 
-  const groupedFeed = useMemo(() => groupJournalEntries(feed.entries), [feed.entries]);
+  const groupedFeed = useMemo(
+    () => groupJournalEntries(feed.entries),
+    [feed.entries],
+  );
 
   // Stage 1 metrics
   const activeEventKeys = (
     Object.keys(s?.events ?? {}) as (keyof typeof EVENT_STATUS_HUES)[]
   ).sort((a, b) => {
-    const order = ["admitted", "planned", "noop", "human_needed", "dead_lettered"];
+    const order = [
+      "admitted",
+      "planned",
+      "noop",
+      "human_needed",
+      "dead_lettered",
+    ];
     return order.indexOf(a) - order.indexOf(b);
   });
   const eventSegs: Segment[] = activeEventKeys.map((k) => ({
@@ -961,7 +1134,12 @@ export function Overview({
   // Stage 2 metrics
   const proposalSegs: Segment[] = [
     { key: "open", label: "open", value: proposalOpen, hue: "var(--hue-info)" },
-    { key: "expired", label: "expired", value: proposalExpired, hue: "var(--hue-warn)" },
+    {
+      key: "expired",
+      label: "expired",
+      value: proposalExpired,
+      hue: "var(--hue-warn)",
+    },
   ];
   const proposalTotal = proposalOpen + proposalExpired;
 
@@ -981,7 +1159,10 @@ export function Overview({
   const inflightTotal = inflightSegs.reduce((a, x) => a + x.value, 0);
   const finishedTotal = terminalSegs.reduce((a, x) => a + x.value, 0);
   const okTotal = terminalSegs.find((x) => x.key === "COMPLETED")?.value ?? 0;
-  const idleWorkers = Math.max(0, (s?.workers.live ?? 0) - (s?.workers.busy ?? 0));
+  const idleWorkers = Math.max(
+    0,
+    (s?.workers.live ?? 0) - (s?.workers.busy ?? 0),
+  );
   const capacity = s
     ? (s.capacity ?? {
         running: s.workers.busy,
@@ -1017,13 +1198,15 @@ export function Overview({
           className="mb-5 rounded-lg border p-3"
           style={{
             borderColor: "var(--hue-warn)",
-            backgroundColor: "color-mix(in oklch, var(--hue-warn) 8%, var(--surface-1))",
+            backgroundColor:
+              "color-mix(in oklch, var(--hue-warn) 8%, var(--surface-1))",
           }}
         >
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2 text-[12px] font-semibold text-(--hue-warn)">
               <span className="size-2 rounded-full bg-(--hue-warn) motion-safe:animate-pulse" />
-              Anomalies · {anomalyRows.length} active issue{anomalyRows.length === 1 ? "" : "s"}
+              Anomalies · {anomalyRows.length} active issue
+              {anomalyRows.length === 1 ? "" : "s"}
               {deadLetterEventCount > 0
                 ? ` · (${deadLetterEventCount} event${deadLetterEventCount === 1 ? "" : "s"})`
                 : ""}
@@ -1033,8 +1216,12 @@ export function Overview({
           <div className="rounded-md border border-(--border) bg-(--surface-1)">
             {anomalyRows.map((a, i) => {
               const deadLetters = a.deadLetterGroup;
-              const deadLetterKey = deadLetters ? deadLetterGroupKey(deadLetters) : null;
-              const expanded = deadLetterKey ? expandedDeadLetterGroups.has(deadLetterKey) : false;
+              const deadLetterKey = deadLetters
+                ? deadLetterGroupKey(deadLetters)
+                : null;
+              const expanded = deadLetterKey
+                ? expandedDeadLetterGroups.has(deadLetterKey)
+                : false;
               const primaryLink = a.links[0];
               const quietActionClass =
                 "cursor-pointer rounded px-1.5 py-1 text-[11px] text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent) disabled:cursor-not-allowed disabled:opacity-40";
@@ -1061,24 +1248,35 @@ export function Overview({
                                   ? toggleDeadLetterGroup(deadLetters)
                                   : primaryLink?.go()
                               }
-                              aria-expanded={deadLetters.events.length > 1 ? expanded : undefined}
+                              aria-expanded={
+                                deadLetters.events.length > 1
+                                  ? expanded
+                                  : undefined
+                              }
                               className="flex min-w-0 cursor-pointer items-center gap-1.5 break-words text-left text-[12px] text-(--hue-warn) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent) sm:truncate"
                               title={a.text}
                             >
                               {deadLetters.events.length > 1 && (
-                                <span aria-hidden="true" className="w-3 shrink-0 text-(--text-faint)">
+                                <span
+                                  aria-hidden="true"
+                                  className="w-3 shrink-0 text-(--text-faint)"
+                                >
                                   {expanded ? "▾" : "▸"}
                                 </span>
                               )}
                               {deadLetters.events.length > 1 && (
                                 <>
-                                  <span>{deadLetters.events.length} dead-lettered</span>
+                                  <span>
+                                    {deadLetters.events.length} dead-lettered
+                                  </span>
                                   <span className="text-(--text-faint)">·</span>
                                 </>
                               )}
                               <span>{deadLetters.source}</span>
                               <span className="text-(--text-faint)">·</span>
-                              <span className="sm:truncate">{deadLetters.errorMessage}</span>
+                              <span className="sm:truncate">
+                                {deadLetters.errorMessage}
+                              </span>
                             </button>
                             {expanded && (
                               <ul className="mt-2 space-y-1 border-l border-(--border) pl-3">
@@ -1086,7 +1284,12 @@ export function Overview({
                                   <li key={`${event.source}:${event.eventId}`}>
                                     <button
                                       type="button"
-                                      onClick={() => onJumpEvents({ source: event.source, eventId: event.eventId })}
+                                      onClick={() =>
+                                        onJumpEvents({
+                                          source: event.source,
+                                          eventId: event.eventId,
+                                        })
+                                      }
                                       className="mono cursor-pointer text-[11px] text-(--text-dim) hover:text-(--text) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
                                       title={event.eventId}
                                     >
@@ -1111,7 +1314,9 @@ export function Overview({
                               type="button"
                               className="mono cursor-pointer text-[11px] text-(--text-dim) hover:underline focus-visible:outline-2 focus-visible:outline-(--accent)"
                               title={`${a.proposalId} — click to copy`}
-                              onClick={() => copyText(a.proposalId!, "proposal id")}
+                              onClick={() =>
+                                copyText(a.proposalId!, "proposal id")
+                              }
                             >
                               {shortId(a.proposalId)}
                             </button>
@@ -1120,13 +1325,18 @@ export function Overview({
                             <span className="text-(--text-faint)">·</span>
                             <span>
                               {a.proposal?.decision ?? EMPTY}
-                              {a.proposal?.reason ? ` — ${a.proposal.reason}` : ""}
+                              {a.proposal?.reason
+                                ? ` — ${a.proposal.reason}`
+                                : ""}
                             </span>
                             <span className="text-(--text-faint)">·</span>
                             <span className="text-(--text-faint)">
                               origin {a.proposal?.eventSource ?? EMPTY}/
                               {a.proposal?.eventId ? (
-                                <span className="mono" title={a.proposal.eventId}>
+                                <span
+                                  className="mono"
+                                  title={a.proposal.eventId}
+                                >
                                   {shortId(a.proposal.eventId)}
                                 </span>
                               ) : (
@@ -1135,11 +1345,16 @@ export function Overview({
                             </span>
                             <span className="text-(--text-faint)">·</span>
                             {a.proposal?.created_at ? (
-                              <span className="mono text-(--text-faint)" title={a.proposal.created_at}>
+                              <span
+                                className="mono text-(--text-faint)"
+                                title={a.proposal.created_at}
+                              >
                                 {formatRelative(a.proposal.created_at, now)}
                               </span>
                             ) : (
-                              <span className="text-(--text-faint)">age {EMPTY}</span>
+                              <span className="text-(--text-faint)">
+                                age {EMPTY}
+                              </span>
                             )}
                           </div>
                         ) : primaryLink ? (
@@ -1190,7 +1405,12 @@ export function Overview({
                               type="button"
                               className={quietActionClass}
                               disabled={!connected || bulkDeadLetter.isPending}
-                              onClick={() => setBulkDeadLetterAction({ action: "archive", group: deadLetters })}
+                              onClick={() =>
+                                setBulkDeadLetterAction({
+                                  action: "archive",
+                                  group: deadLetters,
+                                })
+                              }
                             >
                               Archive all
                             </button>
@@ -1198,7 +1418,12 @@ export function Overview({
                               type="button"
                               className={quietActionClass}
                               disabled={!connected || bulkDeadLetter.isPending}
-                              onClick={() => setBulkDeadLetterAction({ action: "requeue", group: deadLetters })}
+                              onClick={() =>
+                                setBulkDeadLetterAction({
+                                  action: "requeue",
+                                  group: deadLetters,
+                                })
+                              }
                             >
                               Requeue all
                             </button>
@@ -1209,8 +1434,15 @@ export function Overview({
                               <button
                                 type="button"
                                 className={quietActionClass}
-                                disabled={!connected || resolveAnomaly.isPending}
-                                onClick={() => resolveAnomaly.mutate({ kind: "archive", ...a.archive! })}
+                                disabled={
+                                  !connected || resolveAnomaly.isPending
+                                }
+                                onClick={() =>
+                                  resolveAnomaly.mutate({
+                                    kind: "archive",
+                                    ...a.archive!,
+                                  })
+                                }
                               >
                                 Archive
                               </button>
@@ -1232,7 +1464,12 @@ export function Overview({
                             type="button"
                             className={quietActionClass}
                             disabled={!connected || resolveAnomaly.isPending}
-                            onClick={() => resolveAnomaly.mutate({ kind: "release", ...a.releaseWorker! })}
+                            onClick={() =>
+                              resolveAnomaly.mutate({
+                                kind: "release",
+                                ...a.releaseWorker!,
+                              })
+                            }
                           >
                             Release lease
                           </button>
@@ -1254,20 +1491,31 @@ export function Overview({
               );
             })}
           </div>
-          <VerbError error={resolveAnomaly.error ?? bulkDeadLetter.error ?? reject.error ?? requeue.error} />
+          <VerbError
+            error={
+              resolveAnomaly.error ??
+              bulkDeadLetter.error ??
+              reject.error ??
+              requeue.error
+            }
+          />
         </div>
       ) : (
         <div className="mb-5 flex items-center justify-between rounded-lg border border-(--border) bg-(--surface-1) px-3.5 py-2.5 text-[12px] text-(--text-dim)">
           <div className="flex items-center gap-2">
             <span className="size-2 rounded-full bg-(--hue-ok)" />
-            <span className="font-medium text-(--text)">Doctor: All systems nominal</span>
+            <span className="font-medium text-(--text)">
+              Doctor: All systems nominal
+            </span>
           </div>
           <div className="flex items-center gap-2 text-[11px] text-(--text-faint)">
             <span>
               as of {formatRelative(new Date(status.dataUpdatedAt || now), now)}
             </span>
             <span>·</span>
-            <span>{feedsUnscoped ? "scope: factory-wide" : "scope: all repos"}</span>
+            <span>
+              {feedsUnscoped ? "scope: factory-wide" : "scope: all repos"}
+            </span>
           </div>
         </div>
       )}
@@ -1275,7 +1523,9 @@ export function Overview({
       {/* Band B: Unified Stage Cards (WM-205) */}
       {!s ? (
         <div className="mb-6 text-(--text-faint)">
-          {status.isError ? "Cannot reach the control API." : "Loading overview…"}
+          {status.isError
+            ? "Cannot reach the control API."
+            : "Loading overview…"}
         </div>
       ) : (
         <div className="mb-6 flex flex-col gap-4">
@@ -1311,13 +1561,17 @@ export function Overview({
                 </div>
               </>
             ) : (
-              <div className="text-[12px] text-(--text-faint)">no events yet</div>
+              <div className="text-[12px] text-(--text-faint)">
+                no events yet
+              </div>
             )}
 
             {/* Sub-row 2: Approval Gate */}
             <div className="mt-3.5 border-t border-(--border) pt-2.5">
               <div className="mb-1.5 flex items-baseline justify-between text-[11px]">
-                <span className="font-semibold text-(--text)">Approval Gate</span>
+                <span className="font-semibold text-(--text)">
+                  Approval Gate
+                </span>
                 <span className="mono text-(--text-dim)">
                   {proposalTotal > 0
                     ? `${proposalExpired > 0 ? `${proposalExpired} expired · ` : ""}${proposalOpen} open`
@@ -1351,7 +1605,9 @@ export function Overview({
                   </div>
                 </>
               ) : (
-                <div className="text-[12px] text-(--text-faint)">no proposals in gate</div>
+                <div className="text-[12px] text-(--text-faint)">
+                  no proposals in gate
+                </div>
               )}
             </div>
 
@@ -1360,7 +1616,9 @@ export function Overview({
             {s.inbox && (
               <div className="mt-3.5 border-t border-(--border) pt-2.5">
                 <div className="mb-1.5 flex items-baseline justify-between text-[11px]">
-                  <span className="font-semibold text-(--text)">Waiting on you</span>
+                  <span className="font-semibold text-(--text)">
+                    Waiting on you
+                  </span>
                   <span className="mono text-(--text-dim)">
                     {s.inbox.open > 0
                       ? `${s.inbox.open} open${s.inbox.acked > 0 ? ` · ${s.inbox.acked} acked` : ""}`
@@ -1377,7 +1635,11 @@ export function Overview({
                 >
                   <span
                     className="display text-xl tabular-nums"
-                    style={s.inbox.open > 0 ? { color: "var(--hue-warn)" } : undefined}
+                    style={
+                      s.inbox.open > 0
+                        ? { color: "var(--hue-warn)" }
+                        : undefined
+                    }
                   >
                     {s.inbox.open}
                   </span>
@@ -1387,15 +1649,24 @@ export function Overview({
                           const kinds = Object.entries(s.inbox.byKind!)
                             .filter(([, n]) => n > 0)
                             .sort((a, b) => b[1] - a[1]);
-                          const total = kinds.reduce((sum, [, n]) => sum + n, 0);
+                          const total = kinds.reduce(
+                            (sum, [, n]) => sum + n,
+                            0,
+                          );
                           // byKind spans open + acked on the API; say so when the
                           // breakdown would not add up to the open headline.
-                          const prefix = total !== s.inbox!.open ? "open + acked · " : "";
-                          return prefix + kinds.map(([kind, n]) => `${n} ${kind}`).join(" · ");
+                          const prefix =
+                            total !== s.inbox!.open ? "open + acked · " : "";
+                          return (
+                            prefix +
+                            kinds.map(([kind, n]) => `${n} ${kind}`).join(" · ")
+                          );
                         })()
                       : "Nothing needs a decision right now."}
                   </span>
-                  <span className="mono text-[11px] text-(--text-faint)">g n →</span>
+                  <span className="mono text-[11px] text-(--text-faint)">
+                    g n →
+                  </span>
                 </button>
               </div>
             )}
@@ -1409,9 +1680,13 @@ export function Overview({
           >
             {/* Sub-row 1: Active In-Flight Workloads */}
             <div className="mb-1.5 flex items-baseline justify-between text-[11px]">
-              <span className="font-semibold text-(--text)">Active In-Flight Pipeline</span>
+              <span className="font-semibold text-(--text)">
+                Active In-Flight Pipeline
+              </span>
               {inflightTotal > 0 && (
-                <span className="mono text-(--text-dim)">{inflightTotal} active</span>
+                <span className="mono text-(--text-dim)">
+                  {inflightTotal} active
+                </span>
               )}
             </div>
             {inflightTotal > 0 ? (
@@ -1435,13 +1710,17 @@ export function Overview({
                 </div>
               </>
             ) : (
-              <div className="text-[12px] text-(--text-faint)">nothing in flight</div>
+              <div className="text-[12px] text-(--text-faint)">
+                nothing in flight
+              </div>
             )}
 
             {/* Sub-row 2: Outcomes */}
             <div className="mt-3.5 border-t border-(--border) pt-2.5">
               <div className="mb-1.5 flex items-baseline justify-between text-[11px]">
-                <span className="font-semibold text-(--text)">Terminal Outcomes</span>
+                <span className="font-semibold text-(--text)">
+                  Terminal Outcomes
+                </span>
                 <span className="mono text-(--text-dim)">
                   {finishedTotal > 0
                     ? `${Math.round((okTotal / finishedTotal) * 100)}% completed (${finishedTotal} runs)`
@@ -1470,7 +1749,9 @@ export function Overview({
                   </div>
                 </>
               ) : (
-                <div className="text-[12px] text-(--text-faint)">no terminal runs</div>
+                <div className="text-[12px] text-(--text-faint)">
+                  no terminal runs
+                </div>
               )}
             </div>
 
@@ -1486,8 +1767,13 @@ export function Overview({
                   aria-label={`worker capacity${factoryWide ? " · factory-wide" : ""}: ${capacity!.running} running of ${capacity!.capacity}, ${capacity!.queued} queued`}
                   className="mono cursor-pointer rounded-full border border-(--border) bg-(--surface-2) px-2.5 py-1 text-(--text-dim) hover:text-(--text)"
                 >
-                  <strong className="text-(--text)">{capacity!.running}/{capacity!.capacity}</strong> capacity · {capacity!.queued} queued
-                  {capacity!.draining > 0 ? ` · ${capacity!.draining} draining` : ""}
+                  <strong className="text-(--text)">
+                    {capacity!.running}/{capacity!.capacity}
+                  </strong>{" "}
+                  capacity · {capacity!.queued} queued
+                  {capacity!.draining > 0
+                    ? ` · ${capacity!.draining} draining`
+                    : ""}
                 </button>
               </div>
               {capacity!.queued > 0 && capacity!.limitingFactor && (
@@ -1498,23 +1784,45 @@ export function Overview({
               {capacity!.classes.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-(--text-dim)">
                   {capacity!.classes.map((workerClass) => (
-                    <span key={workerClass.name} className="mono rounded-full bg-(--surface-2) px-2 py-0.5">
-                      {workerClass.name} {workerClass.running}/{workerClass.capacity}
+                    <span
+                      key={workerClass.name}
+                      className="mono rounded-full bg-(--surface-2) px-2 py-0.5"
+                    >
+                      {workerClass.name} {workerClass.running}/
+                      {workerClass.capacity}
                     </span>
                   ))}
                 </div>
               )}
               <div className="mb-1.5 mono text-[11px] text-(--text-dim)">
-                {s.workers.live} live · {s.workers.busy} busy · {idleWorkers} idle{s.workers.stale > 0 ? ` · ${s.workers.stale} stale` : ""}
+                {s.workers.live} live · {s.workers.busy} busy · {idleWorkers}{" "}
+                idle{s.workers.stale > 0 ? ` · ${s.workers.stale} stale` : ""}
               </div>
               <SegmentMeter
                 segments={[
-                  { key: "busy", label: "busy", value: s.workers.busy, hue: "var(--hue-info)" },
-                  { key: "idle", label: "idle", value: idleWorkers, hue: "var(--hue-ok)" },
-                  { key: "stale", label: "stale", value: s.workers.stale, hue: "var(--hue-warn)" },
+                  {
+                    key: "busy",
+                    label: "busy",
+                    value: s.workers.busy,
+                    hue: "var(--hue-info)",
+                  },
+                  {
+                    key: "idle",
+                    label: "idle",
+                    value: idleWorkers,
+                    hue: "var(--hue-ok)",
+                  },
+                  {
+                    key: "stale",
+                    label: "stale",
+                    value: s.workers.stale,
+                    hue: "var(--hue-warn)",
+                  },
                 ]}
                 onSegment={(status) =>
-                  jumpToWorkerHealth(status === "busy" || status === "stale" ? status : "live")
+                  jumpToWorkerHealth(
+                    status === "busy" || status === "stale" ? status : "live",
+                  )
                 }
               />
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap">
@@ -1565,7 +1873,9 @@ export function Overview({
               meta={
                 <span className="mono">
                   {s.artifacts.files} files · {formatBytes(s.artifacts.bytes)}
-                  {s.artifacts.orphans > 0 ? ` · ${s.artifacts.orphans} orphans` : ""}
+                  {s.artifacts.orphans > 0
+                    ? ` · ${s.artifacts.orphans} orphans`
+                    : ""}
                   {factoryWide ? " · factory-wide" : ""}
                 </span>
               }
@@ -1596,27 +1906,44 @@ export function Overview({
               {groupedFeed.map((group) => {
                 const row = formatActivityGroup(group);
                 return (
-                  <div key={group.seq} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-(--border) py-1.5 last:border-0">
-                    <span className="mono shrink-0 text-(--text-faint)" title={group.at}>
+                  <div
+                    key={group.seq}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-(--border) py-1.5 last:border-0"
+                  >
+                    <span
+                      className="mono shrink-0 text-(--text-faint)"
+                      title={group.at}
+                    >
                       {formatRelative(group.at, now)}
                     </span>
                     <span className="text-(--text-faint)">·</span>
-                    <JumpLink onClick={() => onJumpRun(group.runId)} title={group.runId} className="shrink-0">
+                    <JumpLink
+                      onClick={() => onJumpRun(group.runId)}
+                      title={group.runId}
+                      className="shrink-0"
+                    >
                       {shortId(group.runId)}
                     </JumpLink>
                     <span className="text-(--text-faint)">·</span>
                     <StateBadge state={group.to} />
                     {row.steps && (
-                      <span className="shrink-0 text-[11px] text-(--text-faint)" title={row.path}>
+                      <span
+                        className="shrink-0 text-[11px] text-(--text-faint)"
+                        title={row.path}
+                      >
                         {row.steps}
                       </span>
                     )}
                     <span className="text-(--text-faint)">·</span>
-                    <span className="shrink-0 text-(--text-faint)">by {shortId(group.actor)}</span>
+                    <span className="shrink-0 text-(--text-faint)">
+                      by {shortId(group.actor)}
+                    </span>
                     {row.reason && (
                       <>
                         <span className="text-(--text-faint)">·</span>
-                        <span className="min-w-0 break-words text-(--text-dim)">{row.reason}</span>
+                        <span className="min-w-0 break-words text-(--text-dim)">
+                          {row.reason}
+                        </span>
                       </>
                     )}
                   </div>
@@ -1640,12 +1967,22 @@ export function Overview({
                     : "Nothing published yet."}
               </div>
             ) : (
-              <div className="rounded-md border border-(--border) px-3 py-1" aria-live="off">
+              <div
+                className="rounded-md border border-(--border) px-3 py-1"
+                aria-live="off"
+              >
                 {(outbox.data?.outbox ?? []).map((o) => {
                   const type = String(o.event.type ?? "unknown event");
-                  const source = typeof o.event.source === "string" ? o.event.source : null;
-                  const eventId = typeof o.event.eventId === "string" ? o.event.eventId : null;
-                  const payload = (o.event.payload ?? {}) as Record<string, unknown>;
+                  const source =
+                    typeof o.event.source === "string" ? o.event.source : null;
+                  const eventId =
+                    typeof o.event.eventId === "string"
+                      ? o.event.eventId
+                      : null;
+                  const payload = (o.event.payload ?? {}) as Record<
+                    string,
+                    unknown
+                  >;
                   const summary =
                     typeof payload.outcome === "string"
                       ? payload.outcome
@@ -1656,7 +1993,10 @@ export function Overview({
                           : null;
 
                   return (
-                    <div key={o.seq} className="border-b border-(--border) py-1.5 last:border-0">
+                    <div
+                      key={o.seq}
+                      className="border-b border-(--border) py-1.5 last:border-0"
+                    >
                       <div className="flex items-baseline justify-between gap-3">
                         <div className="flex items-baseline gap-2 min-w-0 max-w-[75%]">
                           {source && eventId ? (
@@ -1668,7 +2008,10 @@ export function Overview({
                               {type}
                             </JumpLink>
                           ) : (
-                            <span className="truncate text-(--text-dim) font-medium" title={type}>
+                            <span
+                              className="truncate text-(--text-dim) font-medium"
+                              title={type}
+                            >
                               {type}
                             </span>
                           )}
@@ -1679,7 +2022,10 @@ export function Overview({
                           )}
                         </div>
                         {o.published_at ? (
-                          <span className="mono shrink-0 text-(--text-faint)" title={o.published_at}>
+                          <span
+                            className="mono shrink-0 text-(--text-faint)"
+                            title={o.published_at}
+                          >
                             {formatRelative(o.published_at, now)}
                           </span>
                         ) : (
@@ -1708,7 +2054,9 @@ export function Overview({
           }}
         >
           <p className="mb-4 text-[12px] text-(--text-dim)">
-            This will {bulkDeadLetterAction.action} all {bulkDeadLetterAction.group.events.length} events from {bulkDeadLetterAction.group.source} with this error.
+            This will {bulkDeadLetterAction.action} all{" "}
+            {bulkDeadLetterAction.group.events.length} events from{" "}
+            {bulkDeadLetterAction.group.source} with this error.
           </p>
           <VerbError error={bulkDeadLetter.error} />
           <div className="flex justify-end gap-2">
@@ -1719,7 +2067,9 @@ export function Overview({
               Cancel
             </Button>
             <Button
-              variant={bulkDeadLetterAction.action === "archive" ? "danger" : "primary"}
+              variant={
+                bulkDeadLetterAction.action === "archive" ? "danger" : "primary"
+              }
               disabled={!connected || bulkDeadLetter.isPending}
               onClick={() => bulkDeadLetter.mutate(bulkDeadLetterAction)}
             >
@@ -1740,7 +2090,8 @@ export function Overview({
             }}
           >
             <p className="mb-3 text-[12px] text-(--text-dim)">
-              Rejections are audit records. Explain why this proposal should not run.
+              Rejections are audit records. Explain why this proposal should not
+              run.
             </p>
             <label
               htmlFor="overview-rejection-reason"
@@ -1763,7 +2114,9 @@ export function Overview({
               </Button>
               <Button
                 variant="danger"
-                disabled={!rejectReason.trim() || reject.isPending || !connected}
+                disabled={
+                  !rejectReason.trim() || reject.isPending || !connected
+                }
                 onClick={submitReject}
               >
                 {reject.isPending ? "Rejecting…" : "Reject proposal"}

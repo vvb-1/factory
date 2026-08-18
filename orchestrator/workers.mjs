@@ -97,37 +97,67 @@ try {
 
   if (nodesMap.size === 0) {
     if (JSON_OUT) {
-      console.log(JSON.stringify({ nodes: [], count: 0, message: "no nodes configured in config/nodes.yaml" }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            nodes: [],
+            count: 0,
+            message: "no nodes configured in config/nodes.yaml",
+          },
+          null,
+          2,
+        ),
+      );
     } else {
-      console.log(c.yellow("No remote worker nodes configured in config/nodes.yaml"));
+      console.log(
+        c.yellow("No remote worker nodes configured in config/nodes.yaml"),
+      );
     }
     process.exit(0);
   }
 
   const selectedNodes = targetNode
-    ? (nodesMap.has(targetNode) ? [nodesMap.get(targetNode)] : null)
+    ? nodesMap.has(targetNode)
+      ? [nodesMap.get(targetNode)]
+      : null
     : Array.from(nodesMap.values());
 
   if (!selectedNodes) {
-    console.error(c.red(`Error: unknown node "${targetNode}". Configured nodes: ${Array.from(nodesMap.keys()).join(", ")}`));
+    console.error(
+      c.red(
+        `Error: unknown node "${targetNode}". Configured nodes: ${Array.from(nodesMap.keys()).join(", ")}`,
+      ),
+    );
     process.exit(1);
   }
 
   const localSha = getLocalTrunkSha();
 
   if (command === "list") {
-    const probes = selectedNodes.map((node) => probeRemoteNode(node, { localTrunkSha: localSha }));
+    const probes = selectedNodes.map((node) =>
+      probeRemoteNode(node, { localTrunkSha: localSha }),
+    );
 
     if (JSON_OUT) {
-      console.log(JSON.stringify({
-        timestamp: new Date().toISOString(),
-        localTrunkSha: localSha,
-        nodes: probes,
-      }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            timestamp: new Date().toISOString(),
+            localTrunkSha: localSha,
+            nodes: probes,
+          },
+          null,
+          2,
+        ),
+      );
       process.exit(0);
     }
 
-    console.log(c.bold(`factory workers — remote worker fleet (${probes.length} configured)`));
+    console.log(
+      c.bold(
+        `factory workers — remote worker fleet (${probes.length} configured)`,
+      ),
+    );
     if (localSha) {
       console.log(c.dim(`Local trunk SHA: ${localSha.slice(0, 8)}`));
     }
@@ -135,13 +165,19 @@ try {
 
     console.log(
       c.dim("  ") +
-      c.bold(pad("NODE", 16)) + "  " +
-      c.bold(pad("HOST", 22)) + "  " +
-      c.bold(pad("STATUS", 14)) + "  " +
-      c.bold(pad("SKEW", 12)) + "  " +
-      c.bold(pad("BRANCH / SHA", 24)) + "  " +
-      c.bold(pad("WORKER", 10)) + "  " +
-      c.bold("LABELS"),
+        c.bold(pad("NODE", 16)) +
+        "  " +
+        c.bold(pad("HOST", 22)) +
+        "  " +
+        c.bold(pad("STATUS", 14)) +
+        "  " +
+        c.bold(pad("SKEW", 12)) +
+        "  " +
+        c.bold(pad("BRANCH / SHA", 24)) +
+        "  " +
+        c.bold(pad("WORKER", 10)) +
+        "  " +
+        c.bold("LABELS"),
     );
 
     for (const p of probes) {
@@ -181,13 +217,19 @@ try {
 
       console.log(
         "  " +
-        pad(p.name, 16) + "  " +
-        pad(p.host, 22) + "  " +
-        pad(statusStr, 23) + "  " +
-        pad(skewStr, 21) + "  " +
-        pad(branchSha, 24) + "  " +
-        pad(workerStr, 19) + "  " +
-        c.dim(labelsStr),
+          pad(p.name, 16) +
+          "  " +
+          pad(p.host, 22) +
+          "  " +
+          pad(statusStr, 23) +
+          "  " +
+          pad(skewStr, 21) +
+          "  " +
+          pad(branchSha, 24) +
+          "  " +
+          pad(workerStr, 19) +
+          "  " +
+          c.dim(labelsStr),
       );
     }
     console.log();
@@ -197,7 +239,8 @@ try {
   if (command === "deploy") {
     const results = [];
     for (const node of selectedNodes) {
-      if (!JSON_OUT) console.log(c.cyan(`Deploying to node ${node.name} (${node.host})...`));
+      if (!JSON_OUT)
+        console.log(c.cyan(`Deploying to node ${node.name} (${node.host})...`));
       const res = deployRemoteWorker(node, { ref: targetRef });
       results.push(res);
       if (!JSON_OUT) {
@@ -215,14 +258,19 @@ try {
   if (command === "start") {
     const results = [];
     for (const node of selectedNodes) {
-      if (!JSON_OUT) console.log(c.cyan(`Starting worker on node ${node.name}...`));
+      if (!JSON_OUT)
+        console.log(c.cyan(`Starting worker on node ${node.name}...`));
       const res = startRemoteWorker(node);
       results.push(res);
       if (!JSON_OUT) {
         if (res.ok) {
-          console.log(c.green(`✓ Worker started on ${node.name} (PID ${res.pid})`));
+          console.log(
+            c.green(`✓ Worker started on ${node.name} (PID ${res.pid})`),
+          );
         } else {
-          console.log(c.red(`✗ Failed to start worker on ${node.name}: ${res.error}`));
+          console.log(
+            c.red(`✗ Failed to start worker on ${node.name}: ${res.error}`),
+          );
         }
       }
     }
@@ -233,14 +281,17 @@ try {
   if (command === "stop") {
     const results = [];
     for (const node of selectedNodes) {
-      if (!JSON_OUT) console.log(c.cyan(`Stopping worker on node ${node.name}...`));
+      if (!JSON_OUT)
+        console.log(c.cyan(`Stopping worker on node ${node.name}...`));
       const res = stopRemoteWorker(node);
       results.push(res);
       if (!JSON_OUT) {
         if (res.ok) {
           console.log(c.green(`✓ Worker stopped on ${node.name}`));
         } else {
-          console.log(c.red(`✗ Failed to stop worker on ${node.name}: ${res.error}`));
+          console.log(
+            c.red(`✗ Failed to stop worker on ${node.name}: ${res.error}`),
+          );
         }
       }
     }
@@ -251,14 +302,25 @@ try {
   if (command === "update" || command === "restart") {
     const results = [];
     for (const node of selectedNodes) {
-      if (!JSON_OUT) console.log(c.cyan(`Updating/restarting worker on node ${node.name}...`));
+      if (!JSON_OUT)
+        console.log(
+          c.cyan(`Updating/restarting worker on node ${node.name}...`),
+        );
       const res = updateRemoteWorker(node, { ref: targetRef });
       results.push(res);
       if (!JSON_OUT) {
         if (res.ok) {
-          console.log(c.green(`✓ Node ${node.name} updated and worker restarted (PID ${res.pid})`));
+          console.log(
+            c.green(
+              `✓ Node ${node.name} updated and worker restarted (PID ${res.pid})`,
+            ),
+          );
         } else {
-          console.log(c.red(`✗ Failed on step "${res.step}" for node ${node.name}: ${res.error}`));
+          console.log(
+            c.red(
+              `✗ Failed on step "${res.step}" for node ${node.name}: ${res.error}`,
+            ),
+          );
         }
       }
     }
@@ -266,7 +328,11 @@ try {
     process.exit(results.every((r) => r.ok) ? 0 : 1);
   }
 
-  console.error(c.red(`Unknown command "${command}". Run "factory workers --help" for usage.`));
+  console.error(
+    c.red(
+      `Unknown command "${command}". Run "factory workers --help" for usage.`,
+    ),
+  );
   process.exit(1);
 } catch (err) {
   console.error(c.red(`factory workers error: ${err.message}`));

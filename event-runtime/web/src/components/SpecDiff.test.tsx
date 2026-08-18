@@ -66,8 +66,8 @@ describe("SpecDiff component", () => {
 
     const scroller = r.getByTestId("spec-diff-scroll");
     expect(scroller).not.toBeNull();
-    expect(scroller.textContent).toContain("-   \"maxAttempts\": 3");
-    expect(scroller.textContent).toContain("+   \"maxAttempts\": 5");
+    expect(scroller.textContent).toContain('-   "maxAttempts": 3');
+    expect(scroller.textContent).toContain('+   "maxAttempts": 5');
   });
 
   test("singular changed line count when exactly 1 line changes", () => {
@@ -79,11 +79,25 @@ describe("SpecDiff component", () => {
 
   function mockScrollerDimensions(
     scroller: HTMLElement,
-    { clientHeight, scrollHeight, scrollTop = 0 }: { clientHeight: number; scrollHeight: number; scrollTop?: number },
+    {
+      clientHeight,
+      scrollHeight,
+      scrollTop = 0,
+    }: { clientHeight: number; scrollHeight: number; scrollTop?: number },
   ) {
-    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: clientHeight });
-    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: scrollHeight });
-    Object.defineProperty(scroller, "scrollTop", { configurable: true, value: scrollTop, writable: true });
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: clientHeight,
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: scrollHeight,
+    });
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      value: scrollTop,
+      writable: true,
+    });
   }
 
   test("does not re-subscribe the overflow observer when props are unchanged", () => {
@@ -153,7 +167,9 @@ describe("SpecDiff component", () => {
     const hint = r.getByText(/\d+ more lines below/);
     expect(hint).toBeDefined();
 
-    const stickyBottomNodes = [...scroller.querySelectorAll(".sticky.bottom-0")];
+    const stickyBottomNodes = [
+      ...scroller.querySelectorAll(".sticky.bottom-0"),
+    ];
     expect(stickyBottomNodes).toHaveLength(1);
     expect(stickyBottomNodes[0]?.contains(hint)).toBe(true);
     expect(stickyBottomNodes[0]?.className).toContain("-mt-10");
@@ -167,8 +183,16 @@ describe("SpecDiff component", () => {
 
     const body = r.getByTestId("spec-diff-body");
     expect(body.className).toContain("whitespace-pre-wrap");
-    const indented = [...body.querySelectorAll("[data-diff-line]")].map((el) => el.textContent ?? "");
-    expect(indented.some((t) => t.startsWith("-   \"maxAttempts\"") || t.startsWith("+   \"maxAttempts\""))).toBe(true);
+    const indented = [...body.querySelectorAll("[data-diff-line]")].map(
+      (el) => el.textContent ?? "",
+    );
+    expect(
+      indented.some(
+        (t) =>
+          t.startsWith('-   "maxAttempts"') ||
+          t.startsWith('+   "maxAttempts"'),
+      ),
+    ).toBe(true);
   });
 
   test("keeps changed-line header sticky while scrolling diff body", () => {
@@ -206,8 +230,8 @@ describe("SpecDiff component", () => {
     const button = r.getByRole("button", { name: "Copy diff" });
     fireEvent.click(button);
 
-    expect(written).toContain("-   \"timeout\": 30");
-    expect(written).toContain("+   \"timeout\": 60");
+    expect(written).toContain('-   "timeout": 30');
+    expect(written).toContain('+   "timeout": 60');
     expect(r.getByRole("status").textContent).toContain("Copied diff");
   });
 });

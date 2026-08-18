@@ -11,9 +11,26 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  parseLogLine, formatEntry, tailFormattedLines, tailEntries, entryTone, latestLogForTicket, buildTicketRows, formatSpend,
-  formatIssueCounts, parseReaperOutput, linearDeepLink, stageStatuses, formatAge, visibleWindow,
-  activeAgents, spendPct, spendTone, agentCapStat, supervisorAlive, needsAttention,
+  parseLogLine,
+  formatEntry,
+  tailFormattedLines,
+  tailEntries,
+  entryTone,
+  latestLogForTicket,
+  buildTicketRows,
+  formatSpend,
+  formatIssueCounts,
+  parseReaperOutput,
+  linearDeepLink,
+  stageStatuses,
+  formatAge,
+  visibleWindow,
+  activeAgents,
+  spendPct,
+  spendTone,
+  agentCapStat,
+  supervisorAlive,
+  needsAttention,
 } from "./watch-lib.mjs";
 
 test("ignores blank lines and non-JSON noise", () => {
@@ -30,29 +47,61 @@ test("ignores malformed JSON instead of throwing", () => {
 test("claude: extracts a tool_use call from an assistant message", () => {
   const line = JSON.stringify({
     type: "assistant",
-    message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm run lint" } }] },
+    message: {
+      content: [
+        { type: "tool_use", name: "Bash", input: { command: "npm run lint" } },
+      ],
+    },
   });
-  expect(parseLogLine(line)).toEqual([{ kind: "tool", tool: "Bash", detail: "npm run lint" }]);
+  expect(parseLogLine(line)).toEqual([
+    { kind: "tool", tool: "Bash", detail: "npm run lint" },
+  ]);
 });
 
 test("claude: a text-only assistant message yields no entries", () => {
-  const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "thinking..." }] } });
+  const line = JSON.stringify({
+    type: "assistant",
+    message: { content: [{ type: "text", text: "thinking..." }] },
+  });
   expect(parseLogLine(line)).toEqual([]);
 });
 
 test("verbose logs include Claude agent text while compact logs stay tool-only", () => {
-  const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "I will verify the migration first." }] } });
-  expect(parseLogLine(line, { verbose: true })).toEqual([{ kind: "text", detail: "I will verify the migration first." }]);
-  expect(formatEntry(parseLogLine(line, { verbose: true })[0])).toBe("agent — I will verify the migration first.");
+  const line = JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [{ type: "text", text: "I will verify the migration first." }],
+    },
+  });
+  expect(parseLogLine(line, { verbose: true })).toEqual([
+    { kind: "text", detail: "I will verify the migration first." },
+  ]);
+  expect(formatEntry(parseLogLine(line, { verbose: true })[0])).toBe(
+    "agent — I will verify the migration first.",
+  );
 });
 
 test("message-focused logs suppress tool calls", () => {
-  const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "git status" } }] } });
+  const line = JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [
+        { type: "tool_use", name: "Bash", input: { command: "git status" } },
+      ],
+    },
+  });
   expect(parseLogLine(line, { verbose: true, showTools: false })).toEqual([]);
 });
 
 test("claude: a successful result", () => {
-  const line = JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 12, total_cost_usd: 1.5, result: "done" });
+  const line = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    num_turns: 12,
+    total_cost_usd: 1.5,
+    result: "done",
+  });
   const [entry] = parseLogLine(line);
   expect(entry.kind).toBe("result");
   expect(entry.ok).toBe(true);
@@ -60,7 +109,14 @@ test("claude: a successful result", () => {
 });
 
 test("claude: a failed result includes the trimmed message", () => {
-  const line = JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, num_turns: 3, total_cost_usd: 0.4, result: "Unknown command" });
+  const line = JSON.stringify({
+    type: "result",
+    subtype: "error_max_turns",
+    is_error: true,
+    num_turns: 3,
+    total_cost_usd: 0.4,
+    result: "Unknown command",
+  });
   const [entry] = parseLogLine(line);
   expect(entry.ok).toBe(false);
   expect(formatEntry(entry)).toBe("FAILED — 3 turns ~$0.40 — Unknown command");
@@ -69,35 +125,75 @@ test("claude: a failed result includes the trimmed message", () => {
 test("agy: extracts an ACTIVE tool step_update", () => {
   const line = JSON.stringify({
     event: "step_update",
-    step_update: { step_type: "tool", state: "ACTIVE", tool_name: "run_command", tool_info: { parameters: { CommandLine: "bun test" } } },
+    step_update: {
+      step_type: "tool",
+      state: "ACTIVE",
+      tool_name: "run_command",
+      tool_info: { parameters: { CommandLine: "bun test" } },
+    },
   });
-  expect(parseLogLine(line)).toEqual([{ kind: "tool", tool: "run_command", detail: "bun test" }]);
+  expect(parseLogLine(line)).toEqual([
+    { kind: "tool", tool: "run_command", detail: "bun test" },
+  ]);
 });
 
 test("agy: a DONE step_update produces no entry (only ACTIVE tool steps do)", () => {
-  const line = JSON.stringify({ event: "step_update", step_update: { step_type: "tool", state: "DONE", tool_name: "run_command" } });
+  const line = JSON.stringify({
+    event: "step_update",
+    step_update: { step_type: "tool", state: "DONE", tool_name: "run_command" },
+  });
   expect(parseLogLine(line)).toEqual([]);
 });
 
 test("verbose logs include agy agent-response updates", () => {
-  const line = JSON.stringify({ event: "step_update", step_update: { step_type: "agent_response", state: "ACTIVE", text_delta: "Checking the PR now." } });
-  expect(parseLogLine(line, { verbose: true })).toEqual([{ kind: "text", detail: "Checking the PR now." }]);
+  const line = JSON.stringify({
+    event: "step_update",
+    step_update: {
+      step_type: "agent_response",
+      state: "ACTIVE",
+      text_delta: "Checking the PR now.",
+    },
+  });
+  expect(parseLogLine(line, { verbose: true })).toEqual([
+    { kind: "text", detail: "Checking the PR now." },
+  ]);
 });
 
 test("verbose logs include Codex agent messages", () => {
-  const line = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "I found the failing check." } });
-  expect(parseLogLine(line, { verbose: true })).toEqual([{ kind: "text", detail: "I found the failing check." }]);
+  const line = JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "I found the failing check." },
+  });
+  expect(parseLogLine(line, { verbose: true })).toEqual([
+    { kind: "text", detail: "I found the failing check." },
+  ]);
 });
 
 test("agy: a wrapped result event", () => {
-  const line = JSON.stringify({ event: "result", result: { status: "SUCCESS", num_turns: 5, total_cost_usd: 2, response: "ok" } });
+  const line = JSON.stringify({
+    event: "result",
+    result: {
+      status: "SUCCESS",
+      num_turns: 5,
+      total_cost_usd: 2,
+      response: "ok",
+    },
+  });
   const [entry] = parseLogLine(line);
   expect(entry.ok).toBe(true);
   expect(formatEntry(entry)).toBe("done — 5 turns ~$2.00");
 });
 
 test("agy: an ERROR status formats as failed", () => {
-  const line = JSON.stringify({ event: "result", result: { status: "ERROR", num_turns: 1, total_cost_usd: 0, error: "quota reached" } });
+  const line = JSON.stringify({
+    event: "result",
+    result: {
+      status: "ERROR",
+      num_turns: 1,
+      total_cost_usd: 0,
+      error: "quota reached",
+    },
+  });
   const [entry] = parseLogLine(line);
   expect(entry.ok).toBe(false);
 });
@@ -107,7 +203,20 @@ test("tailFormattedLines reads a file, formats every entry, and caps at maxEntri
   const file = path.join(dir, "sample.jsonl");
   const lines = [];
   for (let i = 0; i < 5; i++) {
-    lines.push(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: `f${i}.ts` } }] } }));
+    lines.push(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              name: "Read",
+              input: { file_path: `f${i}.ts` },
+            },
+          ],
+        },
+      }),
+    );
   }
   writeFileSync(file, lines.join("\n"));
   expect(tailFormattedLines(file, 2)).toEqual(["Read f3.ts", "Read f4.ts"]);
@@ -139,11 +248,25 @@ test("latestLogForTicket returns null when nothing matches", () => {
 test("buildTicketRows tags running and in-review tickets and preserves order", () => {
   const summary = {
     inProgressTickets: [{ identifier: "CLNT-1", title: "a" }],
-    inReviewTickets: [{ identifier: "CLNT-2", title: "b", prNumber: 123, prUrl: "https://github.com/acme/app/pull/123" }, { identifier: "CLNT-3", title: "c" }],
+    inReviewTickets: [
+      {
+        identifier: "CLNT-2",
+        title: "b",
+        prNumber: 123,
+        prUrl: "https://github.com/acme/app/pull/123",
+      },
+      { identifier: "CLNT-3", title: "c" },
+    ],
   };
   expect(buildTicketRows(summary)).toEqual([
     { identifier: "CLNT-1", title: "a", status: "running" },
-    { identifier: "CLNT-2", title: "b", prNumber: 123, prUrl: "https://github.com/acme/app/pull/123", status: "review" },
+    {
+      identifier: "CLNT-2",
+      title: "b",
+      prNumber: 123,
+      prUrl: "https://github.com/acme/app/pull/123",
+      status: "review",
+    },
     { identifier: "CLNT-3", title: "c", status: "review" },
   ]);
 });
@@ -151,9 +274,15 @@ test("buildTicketRows tags running and in-review tickets and preserves order", (
 test("buildTicketRows marks an In Progress claim without a live worker lease", () => {
   const rows = buildTicketRows({
     liveWorkerIds: ["CLNT-2"],
-    inProgressTickets: [{ identifier: "CLNT-1", title: "stale" }, { identifier: "CLNT-2", title: "live" }],
+    inProgressTickets: [
+      { identifier: "CLNT-1", title: "stale" },
+      { identifier: "CLNT-2", title: "live" },
+    ],
   });
-  expect(rows.map((row) => [row.identifier, row.hasWorker])).toEqual([["CLNT-1", false], ["CLNT-2", true]]);
+  expect(rows.map((row) => [row.identifier, row.hasWorker])).toEqual([
+    ["CLNT-1", false],
+    ["CLNT-2", true],
+  ]);
 });
 
 test("buildTicketRows tolerates a summary with no tickets", () => {
@@ -172,37 +301,59 @@ test("formatIssueCounts renders done/total and marks capped counts as floors", (
 });
 
 test("parseReaperOutput reads the reclaim count from a dry run", () => {
-  const out = "=== Stale-claim reaper [DRY RUN] threshold=45min ===\n\n  STALE CW-12  61m  agent  title\n\n=== Would reclaim: 2 | Healthy: 3 ===\nRun again with --apply to reclaim these.";
+  const out =
+    "=== Stale-claim reaper [DRY RUN] threshold=45min ===\n\n  STALE CW-12  61m  agent  title\n\n=== Would reclaim: 2 | Healthy: 3 ===\nRun again with --apply to reclaim these.";
   expect(parseReaperOutput(out)).toEqual({ stale: 2 });
 });
 
 test("parseReaperOutput reads the count from an --apply run", () => {
-  expect(parseReaperOutput("=== Reclaimed: 1 | Healthy: 0 ===")).toEqual({ stale: 1 });
+  expect(parseReaperOutput("=== Reclaimed: 1 | Healthy: 0 ===")).toEqual({
+    stale: 1,
+  });
 });
 
 test("parseReaperOutput treats a clean queue or garbage as nothing to reclaim", () => {
-  expect(parseReaperOutput("=== No stale claims among 4 in progress. ===")).toEqual({ stale: 0 });
+  expect(
+    parseReaperOutput("=== No stale claims among 4 in progress. ==="),
+  ).toEqual({ stale: 0 });
   expect(parseReaperOutput("")).toEqual({ stale: 0 });
   expect(parseReaperOutput(null)).toEqual({ stale: 0 });
 });
 
 test("linearDeepLink maps linear.app URLs to the desktop scheme, null otherwise", () => {
-  expect(linearDeepLink("https://linear.app/watt-mind/issue/CLNT-810/clean-up-blog-routing"))
-    .toBe("linear://watt-mind/issue/CLNT-810/clean-up-blog-routing");
+  expect(
+    linearDeepLink(
+      "https://linear.app/watt-mind/issue/CLNT-810/clean-up-blog-routing",
+    ),
+  ).toBe("linear://watt-mind/issue/CLNT-810/clean-up-blog-routing");
   expect(linearDeepLink("https://example.com/issue/X-1")).toBeNull();
   expect(linearDeepLink(undefined)).toBeNull();
 });
 
 test("stageStatuses: fresh log = active, old log = idle with the last result", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
-  const result = JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 4, total_cost_usd: 0.5, result: "ok" });
-  writeFileSync(path.join(dir, "bj29-factory-triage-20260804-120000.jsonl"), result);
+  const result = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    num_turns: 4,
+    total_cost_usd: 0.5,
+    result: "ok",
+  });
+  writeFileSync(
+    path.join(dir, "bj29-factory-triage-20260804-120000.jsonl"),
+    result,
+  );
   writeFileSync(path.join(dir, "bj29-CLNT-1-20260804-120000.jsonl"), result);
   const now = Date.now();
 
   // Written milliseconds ago -> triage and dispatch active, merge never ran.
   const live = stageStatuses(dir, "bj29", { now });
-  expect(live.map((s) => [s.stage, s.active])).toEqual([["triage", true], ["dispatch", true], ["merge", false]]);
+  expect(live.map((s) => [s.stage, s.active])).toEqual([
+    ["triage", true],
+    ["dispatch", true],
+    ["merge", false],
+  ]);
   expect(live[2].ageMs).toBeNull();
 
   // Same files viewed from 10 minutes later -> idle, with the parsed result.
@@ -214,17 +365,34 @@ test("stageStatuses: fresh log = active, old log = idle with the last result", (
 
 test("stageStatuses: dispatch ignores factory-stage logs; failures surface", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
-  const fail = JSON.stringify({ type: "result", subtype: "error_max_turns", is_error: true, num_turns: 2, total_cost_usd: 0.1, result: "boom" });
-  writeFileSync(path.join(dir, "bj29-factory-merge-20260804-120000.jsonl"), fail);
+  const fail = JSON.stringify({
+    type: "result",
+    subtype: "error_max_turns",
+    is_error: true,
+    num_turns: 2,
+    total_cost_usd: 0.1,
+    result: "boom",
+  });
+  writeFileSync(
+    path.join(dir, "bj29-factory-merge-20260804-120000.jsonl"),
+    fail,
+  );
   const later = { now: Date.now() + 10 * 60_000 };
   const s = stageStatuses(dir, "bj29", later);
-  expect(s[1]).toEqual({ stage: "dispatch", active: false, ageMs: null, lastResult: null });
+  expect(s[1]).toEqual({
+    stage: "dispatch",
+    active: false,
+    ageMs: null,
+    lastResult: null,
+  });
   expect(s[2].lastResult?.ok).toBe(false);
   rmSync(dir, { recursive: true, force: true });
 });
 
 test("stageStatuses tolerates a missing log dir", () => {
-  expect(stageStatuses("/no/such/dir", "bj29").every((s) => s.ageMs === null)).toBe(true);
+  expect(
+    stageStatuses("/no/such/dir", "bj29").every((s) => s.ageMs === null),
+  ).toBe(true);
 });
 
 test("formatAge is coarse and never negative-weird", () => {
@@ -236,18 +404,24 @@ test("formatAge is coarse and never negative-weird", () => {
 });
 
 test("visibleWindow keeps the selection in view and clamps at both ends", () => {
-  expect(visibleWindow(5, 2, 10)).toEqual([0, 5]);      // fits — no scrolling
-  expect(visibleWindow(20, 0, 6)).toEqual([0, 6]);      // top
-  expect(visibleWindow(20, 10, 6)).toEqual([7, 13]);    // centred mid-list
-  expect(visibleWindow(20, 19, 6)).toEqual([14, 20]);   // bottom clamp
-  expect(visibleWindow(20, 5, 0)).toEqual([0, 0]);      // degenerate pane
+  expect(visibleWindow(5, 2, 10)).toEqual([0, 5]); // fits — no scrolling
+  expect(visibleWindow(20, 0, 6)).toEqual([0, 6]); // top
+  expect(visibleWindow(20, 10, 6)).toEqual([7, 13]); // centred mid-list
+  expect(visibleWindow(20, 19, 6)).toEqual([14, 20]); // bottom clamp
+  expect(visibleWindow(20, 5, 0)).toEqual([0, 0]); // degenerate pane
 });
 
 test("activeAgents labels stage vs dispatch agents and drops stale logs", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
-  writeFileSync(path.join(dir, "bj29-factory-triage-20260804-164848.jsonl"), "{}");
+  writeFileSync(
+    path.join(dir, "bj29-factory-triage-20260804-164848.jsonl"),
+    "{}",
+  );
   writeFileSync(path.join(dir, "bj29-CLNT-810-20260804143850..jsonl"), "{}"); // double-dot stamp variant
-  writeFileSync(path.join(dir, "bj29-factory-merge-20260804120000.jsonl"), "{}"); // dashless stamp
+  writeFileSync(
+    path.join(dir, "bj29-factory-merge-20260804120000.jsonl"),
+    "{}",
+  ); // dashless stamp
   const live = activeAgents(dir, "bj29");
   expect(live.map((a) => [a.stage, a.label, a.identifier]).sort()).toEqual([
     ["dispatch", "CLNT-810", "CLNT-810"],
@@ -255,7 +429,9 @@ test("activeAgents labels stage vs dispatch agents and drops stale logs", () => 
     ["triage", "triage", null],
   ]);
   // The same files 10 minutes later are nobody's live agent.
-  expect(activeAgents(dir, "bj29", { now: Date.now() + 10 * 60_000 })).toEqual([]);
+  expect(activeAgents(dir, "bj29", { now: Date.now() + 10 * 60_000 })).toEqual(
+    [],
+  );
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -269,10 +445,10 @@ test("activeAgents tolerates a missing log dir and foreign repos", () => {
 
 test("spendPct and spendTone track the daily cap", () => {
   expect(spendPct(4.2, 40)).toBe(11);
-  expect(spendPct(0, 0)).toBeNull();      // no cap configured -> no percentage
+  expect(spendPct(0, 0)).toBeNull(); // no cap configured -> no percentage
   expect(spendTone(4, 40)).toBeUndefined();
   expect(spendTone(29, 40)).toBe("warn"); // >= 70%
-  expect(spendTone(37, 40)).toBe("bad");  // >= 90%
+  expect(spendTone(37, 40)).toBe("bad"); // >= 90%
   expect(spendTone(4, 0)).toBeUndefined();
 });
 
@@ -291,18 +467,41 @@ test("supervisorAlive scopes foreground run.mjs processes to their repos", () =>
   expect(supervisorAlive(ps, "legalease", "bj29")).toBe(true);
   expect(supervisorAlive(ps, "cashsaas", "bj29")).toBe(true);
   expect(supervisorAlive(ps, "coach-wattz", "bj29")).toBe(false);
-  expect(supervisorAlive("node unrelated-run.mjs --repo bj29", "bj29", "bj29")).toBe(false);
-  expect(supervisorAlive("bun orchestrator/run.mjs --all", "bj29", "bj29")).toBe(true);
-  expect(supervisorAlive("bun orchestrator/run.mjs --all", "legalease", "bj29")).toBe(false);
+  expect(
+    supervisorAlive("node unrelated-run.mjs --repo bj29", "bj29", "bj29"),
+  ).toBe(false);
+  expect(
+    supervisorAlive("bun orchestrator/run.mjs --all", "bj29", "bj29"),
+  ).toBe(true);
+  expect(
+    supervisorAlive("bun orchestrator/run.mjs --all", "legalease", "bj29"),
+  ).toBe(false);
 });
 
 test("tailEntries returns raw entries; entryTone classifies them", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "watch-lib-"));
   const file = path.join(dir, "log.jsonl");
-  writeFileSync(file, [
-    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] } }),
-    JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.1, result: "done" }),
-  ].join("\n"));
+  writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        num_turns: 3,
+        total_cost_usd: 0.1,
+        result: "done",
+      }),
+    ].join("\n"),
+  );
   const entries = tailEntries(file);
   expect(entries.map(entryTone)).toEqual(["tool", "ok"]);
   rmSync(dir, { recursive: true, force: true });
@@ -311,8 +510,12 @@ test("tailEntries returns raw entries; entryTone classifies them", () => {
 test("needsAttention fires on blocked tickets, a failed stage, quiet tickets, or budget in the red", () => {
   expect(needsAttention({})).toBe(false);
   expect(needsAttention({ blocked: 1 })).toBe(true);
-  expect(needsAttention({ stages: [{ lastResult: { ok: false } }] })).toBe(true);
-  expect(needsAttention({ stages: [{ lastResult: { ok: true } }] })).toBe(false);
+  expect(needsAttention({ stages: [{ lastResult: { ok: false } }] })).toBe(
+    true,
+  );
+  expect(needsAttention({ stages: [{ lastResult: { ok: true } }] })).toBe(
+    false,
+  );
   expect(needsAttention({ quietTickets: 1 })).toBe(true);
   expect(needsAttention({ budgetTone: "bad" })).toBe(true);
   expect(needsAttention({ budgetTone: "warn" })).toBe(false);
@@ -321,15 +524,35 @@ test("needsAttention fires on blocked tickets, a failed stage, quiet tickets, or
 test("claude: extracts file and query tool parameters in parseLogLine", () => {
   const fileLine = JSON.stringify({
     type: "assistant",
-    message: { content: [{ type: "tool_use", name: "view_file", input: { TargetFile: "/src/main.ts" } }] },
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          name: "view_file",
+          input: { TargetFile: "/src/main.ts" },
+        },
+      ],
+    },
   });
-  expect(parseLogLine(fileLine)).toEqual([{ kind: "tool", tool: "view_file", detail: "/src/main.ts" }]);
+  expect(parseLogLine(fileLine)).toEqual([
+    { kind: "tool", tool: "view_file", detail: "/src/main.ts" },
+  ]);
 
   const searchLine = JSON.stringify({
     type: "assistant",
-    message: { content: [{ type: "tool_use", name: "grep_search", input: { query: "export default" } }] },
+    message: {
+      content: [
+        {
+          type: "tool_use",
+          name: "grep_search",
+          input: { query: "export default" },
+        },
+      ],
+    },
   });
-  expect(parseLogLine(searchLine)).toEqual([{ kind: "tool", tool: "grep_search", detail: "export default" }]);
+  expect(parseLogLine(searchLine)).toEqual([
+    { kind: "tool", tool: "grep_search", detail: "export default" },
+  ]);
 });
 
 test("activeAgents correctly classifies tickets starting with factory- as dispatch agents", () => {

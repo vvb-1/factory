@@ -29,7 +29,12 @@ function emitTrace(onTrace, mode) {
   onTrace("assistant_text", { text: `fake: working on ${mode}` });
   onTrace("tool_use", { name: "Bash", input: { command: "fake-query" } });
   onTrace("tool_result", { content: "fake output" });
-  onTrace("usage", { durationMs: 1, numTurns: 1, costUSD: 0, usage: { input_tokens: 1, output_tokens: 1 } });
+  onTrace("usage", {
+    durationMs: 1,
+    numTurns: 1,
+    costUSD: 0,
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
 }
 
 function writeResult(workspaceDir, result) {
@@ -41,7 +46,14 @@ function writeResult(workspaceDir, result) {
 }
 
 function repoRow(name, overrides = {}) {
-  return { name, triage: 1, agentReady: 2, inProgress: 0, blocked: 0, ...overrides };
+  return {
+    name,
+    triage: 1,
+    agentReady: 2,
+    inProgress: 0,
+    blocked: 0,
+    ...overrides,
+  };
 }
 
 /**
@@ -50,7 +62,11 @@ function repoRow(name, overrides = {}) {
  */
 function ciDoctorArtifact(input) {
   const repo = String(input?.repo ?? "");
-  const verdict = repo.endsWith("-ticket") ? "TICKET" : repo.endsWith("-env") ? "ENV" : "FLAKE";
+  const verdict = repo.endsWith("-ticket")
+    ? "TICKET"
+    : repo.endsWith("-env")
+      ? "ENV"
+      : "FLAKE";
   return {
     verdict,
     culprit: "job Verify, step Setup bun",
@@ -62,18 +78,47 @@ function ciDoctorArtifact(input) {
 export const FAKE_PLAN_SHA = "c".repeat(40);
 
 export function mergeScanArtifact(repo) {
-  const base = { repo, github: `watt-mind/${repo}`, plan: [], fix: [], escalate: [] };
+  const base = {
+    repo,
+    github: `watt-mind/${repo}`,
+    plan: [],
+    fix: [],
+    escalate: [],
+  };
   if (repo === "clean") {
-    return { ...base, recommendation: "NOOP", summary: "fake: no open PRs", noopReason: "no_open_prs" };
+    return {
+      ...base,
+      recommendation: "NOOP",
+      summary: "fake: no open PRs",
+      noopReason: "no_open_prs",
+    };
   }
   if (repo.endsWith("-merge-esc") || repo.endsWith("-both")) {
     return {
       ...base,
       recommendation: "MERGE",
       plan: [
-        { pr: 42, headSha: FAKE_PLAN_SHA, ticket: "CLNT-777", action: "merge_pr", reason: "fake: clean review" },
-        { pr: 42, headSha: FAKE_PLAN_SHA, ticket: "CLNT-777", action: "ticket_done", reason: "fake: clean review" },
-        { pr: 44, headSha: FAKE_PLAN_SHA, ticket: "CLNT-778", action: "notify_escalate", reason: "fake: touches auth" },
+        {
+          pr: 42,
+          headSha: FAKE_PLAN_SHA,
+          ticket: "CLNT-777",
+          action: "merge_pr",
+          reason: "fake: clean review",
+        },
+        {
+          pr: 42,
+          headSha: FAKE_PLAN_SHA,
+          ticket: "CLNT-777",
+          action: "ticket_done",
+          reason: "fake: clean review",
+        },
+        {
+          pr: 44,
+          headSha: FAKE_PLAN_SHA,
+          ticket: "CLNT-778",
+          action: "notify_escalate",
+          reason: "fake: touches auth",
+        },
       ],
       escalate: [{ pr: 44, ticket: "CLNT-778", reason: "fake: touches auth" }],
       summary: `fake merge plan with escalation for ${repo}`,
@@ -99,15 +144,40 @@ export function mergeScanArtifact(repo) {
     ...base,
     recommendation: "MERGE",
     plan: [
-      { pr: 42, headSha: FAKE_PLAN_SHA, ticket: "CLNT-777", action: "merge_pr", reason: "fake: clean review" },
-      { pr: 42, headSha: FAKE_PLAN_SHA, ticket: "CLNT-777", action: "ticket_done", reason: "fake: clean review" },
+      {
+        pr: 42,
+        headSha: FAKE_PLAN_SHA,
+        ticket: "CLNT-777",
+        action: "merge_pr",
+        reason: "fake: clean review",
+      },
+      {
+        pr: 42,
+        headSha: FAKE_PLAN_SHA,
+        ticket: "CLNT-777",
+        action: "ticket_done",
+        reason: "fake: clean review",
+      },
     ],
     summary: `fake merge plan for ${repo}`,
   };
 }
 
-export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace, abortSignal, signal }) {
-  refuseSandbox("fake", def, "the fake adapter runs no process and models no VM; a sandboxed definition cannot be exercised through it");
+export async function execute({
+  spec,
+  def,
+  workspaceDir,
+  timeoutMs,
+  env,
+  onTrace,
+  abortSignal,
+  signal,
+}) {
+  refuseSandbox(
+    "fake",
+    def,
+    "the fake adapter runs no process and models no VM; a sandboxed definition cannot be exercised through it",
+  );
   // Every real adapter captures the agent's output as a runtime artifact
   // (worker.mjs RUNTIME_ARTIFACTS). The fake must too, or it models a world
   // where transcripts do not exist — which is exactly what run-postmortem
@@ -115,7 +185,12 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
   writeFileSync(
     path.join(workspaceDir, ".transcript.json"),
     `${JSON.stringify(
-      { adapter: "fake", agent: spec.agent, contract: spec.outputContract, input: spec.input },
+      {
+        adapter: "fake",
+        agent: spec.agent,
+        contract: spec.outputContract,
+        input: spec.input,
+      },
       null,
       2,
     )}\n`,
@@ -150,12 +225,21 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
     return { exitCode: 0, timedOut: false };
   }
   if (spec.outputContract === "factory.ci-log/v1") {
-    writeFileSync(path.join(workspaceDir, "failed.log"), `fake CI log for run ${spec.input?.runId}\nsocket hang up\n`, "utf8");
+    writeFileSync(
+      path.join(workspaceDir, "failed.log"),
+      `fake CI log for run ${spec.input?.runId}\nsocket hang up\n`,
+      "utf8",
+    );
     writeResult(workspaceDir, {
       schemaVersion: "factory.agent-result/v1",
       terminalState: "completed",
       reasonCode: "ok",
-      artifact: { command: ["fake"], exitCode: 0, outputTail: "", captured: "failed.log" },
+      artifact: {
+        command: ["fake"],
+        exitCode: 0,
+        outputTail: "",
+        captured: "failed.log",
+      },
       evidence: { command: ["fake"] },
       artifacts: [{ kind: "ci-log", path: "failed.log" }],
     });
@@ -178,7 +262,10 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       schemaVersion: "factory.agent-result/v1",
       terminalState: "completed",
       reasonCode: "ok",
-      artifact: { ...ciDoctorArtifact(spec.input), evidenceLines: [logText.trim().split("\n").at(-1) ?? "empty"] },
+      artifact: {
+        ...ciDoctorArtifact(spec.input),
+        evidenceLines: [logText.trim().split("\n").at(-1) ?? "empty"],
+      },
       evidence: { commands: ["fake"], logBytes: logText.length },
     });
     return { exitCode: 0, timedOut: false };
@@ -192,11 +279,22 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       terminalState: "completed",
       reasonCode: "ok",
       artifact: clean
-        ? { recommendation: "NOOP", repo, plan: [], summary: "fake: queue already clean" }
+        ? {
+            recommendation: "NOOP",
+            repo,
+            plan: [],
+            summary: "fake: queue already clean",
+          }
         : {
             recommendation: "TRIAGE",
             repo,
-            plan: [{ issueId: "CLNT-999", action: "label-agent-ready", reason: "fake: fully specified" }],
+            plan: [
+              {
+                issueId: "CLNT-999",
+                action: "label-agent-ready",
+                reason: "fake: fully specified",
+              },
+            ],
             summary: `fake triage of ${repo}`,
           },
       evidence: { commands: ["fake"], issuesSeen: 1 },
@@ -212,13 +310,26 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       terminalState: "completed",
       reasonCode: "ok",
       artifact: clean
-        ? { recommendation: "NOOP", repo, plan: [], summary: "fake: no hold has new evidence" }
+        ? {
+            recommendation: "NOOP",
+            repo,
+            plan: [],
+            summary: "fake: no hold has new evidence",
+          }
         : {
             recommendation: "UNBLOCK",
             repo,
             plan: [
-              { issueId: "CLNT-998", action: "release-to-triage", reason: "fake: dependency merged" },
-              { issueId: "CLNT-998", action: "comment-evidence", reason: "fake: dependency merged" },
+              {
+                issueId: "CLNT-998",
+                action: "release-to-triage",
+                reason: "fake: dependency merged",
+              },
+              {
+                issueId: "CLNT-998",
+                action: "comment-evidence",
+                reason: "fake: dependency merged",
+              },
             ],
             summary: `fake unblock of ${repo}`,
           },
@@ -233,7 +344,10 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       reasonCode: "ok",
       artifact: {
         repo: spec.input.repo,
-        applied: (spec.input.plan ?? []).map((i) => ({ issueId: i.issueId, action: i.action })),
+        applied: (spec.input.plan ?? []).map((i) => ({
+          issueId: i.issueId,
+          action: i.action,
+        })),
       },
       evidence: { commands: ["fake"] },
     });
@@ -248,13 +362,26 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       terminalState: "completed",
       reasonCode: "ok",
       artifact: clean
-        ? { recommendation: "NOOP", repo, plan: [], summary: "fake: nothing retirable with evidence" }
+        ? {
+            recommendation: "NOOP",
+            repo,
+            plan: [],
+            summary: "fake: nothing retirable with evidence",
+          }
         : {
             recommendation: "SWEEP",
             repo,
             plan: [
-              { issueId: "CLNT-997", action: "retire-shipped", reason: "fake: shipped in PR #1" },
-              { issueId: "CLNT-997", action: "comment-evidence", reason: "fake: shipped in PR #1" },
+              {
+                issueId: "CLNT-997",
+                action: "retire-shipped",
+                reason: "fake: shipped in PR #1",
+              },
+              {
+                issueId: "CLNT-997",
+                action: "comment-evidence",
+                reason: "fake: shipped in PR #1",
+              },
             ],
             summary: `fake sweep of ${repo}`,
           },
@@ -269,14 +396,20 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       reasonCode: "ok",
       artifact: {
         repo: spec.input.repo,
-        applied: (spec.input.plan ?? []).map((i) => ({ issueId: i.issueId, action: i.action })),
+        applied: (spec.input.plan ?? []).map((i) => ({
+          issueId: i.issueId,
+          action: i.action,
+        })),
       },
       evidence: { commands: ["fake"] },
     });
     return { exitCode: 0, timedOut: false };
   }
   if (spec.outputContract === "factory.triage-applied/v1") {
-    const applied = (spec.input.plan ?? []).map((i) => ({ issueId: i.issueId, action: i.action }));
+    const applied = (spec.input.plan ?? []).map((i) => ({
+      issueId: i.issueId,
+      action: i.action,
+    }));
     const actions = new Set(applied.map((entry) => entry.action));
     let outcome = "NO_CHANGE";
     if (actions.has("label-agent-ready")) outcome = "SUPPLY_CHANGED";
@@ -311,7 +444,10 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       reasonCode: "ok",
       artifact: {
         repo: spec.input.repo,
-        applied: (spec.input.plan ?? []).map((i) => ({ issueId: i.ticket ?? i.issueId, action: i.action })),
+        applied: (spec.input.plan ?? []).map((i) => ({
+          issueId: i.ticket ?? i.issueId,
+          action: i.action,
+        })),
       },
       evidence: { commands: ["fake"] },
     });
@@ -325,12 +461,23 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       terminalState: "completed",
       reasonCode: "ok",
       artifact: stale
-        ? { recommendation: "NOOP", mount: spec.input.mount, usedPct: spec.input.usedPct, plan: [], analysis: "fake: disk healthy at diagnose time" }
+        ? {
+            recommendation: "NOOP",
+            mount: spec.input.mount,
+            usedPct: spec.input.usedPct,
+            plan: [],
+            analysis: "fake: disk healthy at diagnose time",
+          }
         : {
             recommendation: "REMEDIATE",
             mount: spec.input.mount,
             usedPct: spec.input.usedPct,
-            plan: [{ action: "docker-builder-prune", expectedReclaimBytes: 1_000_000 }],
+            plan: [
+              {
+                action: "docker-builder-prune",
+                expectedReclaimBytes: 1_000_000,
+              },
+            ],
             analysis: "fake: docker build cache is eating the disk",
           },
       evidence: { commands: ["fake df"], outputs: { df: "fake" } },
@@ -352,7 +499,12 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
         afterUsedBytes: 4_000_000,
         reclaimedBytes: lying ? 9_999_999 : 1_000_000,
       },
-      evidence: { probeBefore: "5000000", probeAfter: "4000000", commands: ["fake"], outputs: {} },
+      evidence: {
+        probeBefore: "5000000",
+        probeAfter: "4000000",
+        commands: ["fake"],
+        outputs: {},
+      },
     });
     return { exitCode: 0, timedOut: false };
   }
@@ -401,8 +553,16 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
     case "with-artifact": {
       emitTrace(onTrace, mode);
       // Declares a file artifact and a transcript — exercises the §7 store.
-      writeFileSync(path.join(workspaceDir, "report.txt"), `fake report for ${mode}\n`, "utf8");
-      writeFileSync(path.join(workspaceDir, ".transcript.json"), `{"fake":"transcript"}\n`, "utf8");
+      writeFileSync(
+        path.join(workspaceDir, "report.txt"),
+        `fake report for ${mode}\n`,
+        "utf8",
+      );
+      writeFileSync(
+        path.join(workspaceDir, ".transcript.json"),
+        `{"fake":"transcript"}\n`,
+        "utf8",
+      );
       writeResult(workspaceDir, {
         schemaVersion: "factory.agent-result/v1",
         terminalState: "completed",
@@ -442,10 +602,14 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       if (sig?.aborted) return { exitCode: null, timedOut: false };
       await new Promise((resolve) => {
         const timer = setTimeout(resolve, timeoutMs);
-        sig?.addEventListener?.("abort", () => {
-          clearTimeout(timer);
-          resolve();
-        }, { once: true });
+        sig?.addEventListener?.(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
       });
       return { exitCode: null, timedOut: !sig?.aborted };
     }
@@ -468,7 +632,11 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
     }
 
     case "escape":
-      writeFileSync(path.resolve(workspaceDir, "..", "outside.txt"), "escaped\n", "utf8");
+      writeFileSync(
+        path.resolve(workspaceDir, "..", "outside.txt"),
+        "escaped\n",
+        "utf8",
+      );
       writeResult(workspaceDir, {
         schemaVersion: "factory.agent-result/v1",
         terminalState: "completed",
@@ -482,7 +650,10 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, env, onTrace
       writeResult(workspaceDir, {
         schemaVersion: "factory.agent-result/v1",
         terminalState: "completed",
-        artifact: { repos: [repoRow(mode ?? "unknown")], recommendedAction: "dispatch" },
+        artifact: {
+          repos: [repoRow(mode ?? "unknown")],
+          recommendedAction: "dispatch",
+        },
         evidence: { queries: ["fake"] },
       });
       return { exitCode: 0, timedOut: false };

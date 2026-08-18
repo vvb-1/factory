@@ -50,11 +50,15 @@ describe("inbox decision API (WM-390)", () => {
   test("detail, decide, conflicts, and retry use typed statuses", async () => {
     const s = await makeServer({ now: () => 1000 });
     try {
-      createInboxItem(s.db, {
-        kind: "BLOCKED",
-        title: "decision",
-        decision: request,
-      }, { id: "api_decision" });
+      createInboxItem(
+        s.db,
+        {
+          kind: "BLOCKED",
+          title: "decision",
+          decision: request,
+        },
+        { id: "api_decision" },
+      );
 
       const detail = await fetch(s.url("/inbox/api_decision"));
       expect(detail.status).toBe(200);
@@ -113,15 +117,23 @@ describe("inbox decision API (WM-390)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          requestHash: decisionRequestHash(request), optionId: "dismiss", fields: {},
+          requestHash: decisionRequestHash(request),
+          optionId: "dismiss",
+          fields: {},
         }),
       });
       expect(again.status).toBe(409);
       expect((await again.json()).error).toBe("already_decided");
 
-      const undecided = createInboxItem(s.db, {
-        kind: "BLOCKED", title: "not answered", decision: request,
-      }, { id: "not_decided" });
+      const undecided = createInboxItem(
+        s.db,
+        {
+          kind: "BLOCKED",
+          title: "not answered",
+          decision: request,
+        },
+        { id: "not_decided" },
+      );
       const retry = await fetch(s.url(`/inbox/${undecided.id}/decide/retry`), {
         method: "POST",
       });
@@ -146,7 +158,10 @@ describe("schedule trigger metadata (WM-259)", () => {
         },
       },
     };
-    const s = await makeServer({ registry: scheduleRegistry, now: () => nowMs });
+    const s = await makeServer({
+      registry: scheduleRegistry,
+      now: () => nowMs,
+    });
     try {
       emitDueTicks(s.db, scheduleRegistry, {
         now: Date.parse("2026-08-17T11:00:00.000Z"),
@@ -168,11 +183,15 @@ describe("schedule trigger metadata (WM-259)", () => {
       }
 
       const operatorEvents = s.db
-        .query(`SELECT envelope_json FROM events WHERE source = 'operator' ORDER BY event_id`)
+        .query(
+          `SELECT envelope_json FROM events WHERE source = 'operator' ORDER BY event_id`,
+        )
         .all()
         .map((row) => JSON.parse(row.envelope_json));
       expect(operatorEvents).toHaveLength(2);
-      expect(operatorEvents.every((event) => event.payload.repo === "factory")).toBe(true);
+      expect(
+        operatorEvents.every((event) => event.payload.repo === "factory"),
+      ).toBe(true);
 
       const schedules = await (await fetch(s.url("/schedules"))).json();
       expect(schedules.schedules[0]).toMatchObject({
@@ -206,11 +225,18 @@ describe("artifact-view sidecar on GET /agents (WM-454)", () => {
       expect(bare.outputView).toBeNull();
       expect(bare.outputViewFile).toBeNull();
       // Not part of the pinned identity.
-      expect(Object.keys(merge.pins)).not.toContain("agents/merge-scan.view.json");
+      expect(Object.keys(merge.pins)).not.toContain(
+        "agents/merge-scan.view.json",
+      );
       // web/src/types.ts AgentDef names both fields (kept in step by hand;
       // AgentDef is not pinned by the OPS-284 parity test).
-      const typesSrc = readFileSync(path.resolve(import.meta.dir, "../web/src/types.ts"), "utf8");
-      const agentDef = typesSrc.slice(typesSrc.indexOf("export interface AgentDef {"));
+      const typesSrc = readFileSync(
+        path.resolve(import.meta.dir, "../web/src/types.ts"),
+        "utf8",
+      );
+      const agentDef = typesSrc.slice(
+        typesSrc.indexOf("export interface AgentDef {"),
+      );
       expect(agentDef).toContain("outputViewFile?");
       expect(agentDef).toContain("outputView?");
     } finally {
@@ -221,9 +247,14 @@ describe("artifact-view sidecar on GET /agents (WM-454)", () => {
   test("a drifted view is served as null and named in /status.anomalies.configuration", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "evrt-view-"));
     for (const dir of ["agents", "schemas"]) {
-      cpSync(path.join(registry.root, dir), path.join(root, dir), { recursive: true });
+      cpSync(path.join(registry.root, dir), path.join(root, dir), {
+        recursive: true,
+      });
     }
-    cpSync(path.join(registry.root, "event-types.json"), path.join(root, "event-types.json"));
+    cpSync(
+      path.join(registry.root, "event-types.json"),
+      path.join(root, "event-types.json"),
+    );
     const viewFile = path.join(root, "agents", "triage-scan.view.json");
     const view = JSON.parse(readFileSync(viewFile, "utf8"));
     view.summary = "/tldr";
@@ -237,7 +268,9 @@ describe("artifact-view sidecar on GET /agents (WM-454)", () => {
       expect(triage.outputView).toBeNull();
       expect(triage.outputViewFile).toBe("agents/triage-scan.view.json");
       const status = await client.status();
-      const anomaly = status.anomalies.configuration.find((a) => a.includes("triage-scan@1"));
+      const anomaly = status.anomalies.configuration.find((a) =>
+        a.includes("triage-scan@1"),
+      );
       expect(anomaly).toContain("agents/triage-scan.view.json");
       expect(anomaly).toMatch(/"\/tldr" does not resolve/);
     } finally {

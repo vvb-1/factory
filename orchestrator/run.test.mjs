@@ -18,14 +18,23 @@ function shutdownHarness(childTracker, overrides = {}) {
   let timersCleared = 0;
   const shutdown = createShutdownController({
     childTracker,
-    clearTimers: () => { timersCleared++; },
+    clearTimers: () => {
+      timersCleared++;
+    },
     getCounts: () => ({ completed: 2, failed: 0 }),
     getRunningNames: () => ["dispatch"],
     log: (message) => logs.push(message),
     exit: (code) => exits.push(code),
     ...overrides,
   });
-  return { shutdown, exits, logs, get timersCleared() { return timersCleared; } };
+  return {
+    shutdown,
+    exits,
+    logs,
+    get timersCleared() {
+      return timersCleared;
+    },
+  };
 }
 
 test("active child processes are tracked and removed when they close", async () => {
@@ -80,14 +89,18 @@ test("shutdown stops waiting at its deadline", async () => {
 
   expect(result).toEqual({ forced: false, drained: false });
   expect(harness.exits).toEqual([0]);
-  expect(harness.logs.some((line) => line.includes("deadline reached"))).toBe(true);
+  expect(harness.logs.some((line) => line.includes("deadline reached"))).toBe(
+    true,
+  );
 });
 
 test("a second interrupt exits immediately with code 130", async () => {
   let terminateCalls = 0;
   const childTracker = {
     size: 1,
-    terminateAll: () => { terminateCalls++; },
+    terminateAll: () => {
+      terminateCalls++;
+    },
     waitForEmpty: () => new Promise(() => {}),
   };
   const harness = shutdownHarness(childTracker);

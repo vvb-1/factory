@@ -11,7 +11,12 @@ const CLI = fileURLToPath(new URL("../cli.mjs", import.meta.url));
 const SEED = fileURLToPath(new URL("./seed.mjs", import.meta.url));
 const VERIFY = fileURLToPath(new URL("./verify.mjs", import.meta.url));
 const TRIAGE_SCAN_OUTPUT_SCHEMA = JSON.parse(
-  readFileSync(fileURLToPath(new URL("../schemas/triage-scan.output.json", import.meta.url)), "utf8"),
+  readFileSync(
+    fileURLToPath(
+      new URL("../schemas/triage-scan.output.json", import.meta.url),
+    ),
+    "utf8",
+  ),
 );
 // A liveness bound, not a performance target (WM-503). The two assertions that
 // use it exist to catch a seed that waits on the WRONG causal edge — reusing a
@@ -30,9 +35,10 @@ const TRIAGE_SCAN_OUTPUT_SCHEMA = JSON.parse(
 // timeout). Rediscovered as WM-487, WM-492, WM-499 and WM-90 before WM-503.
 const SEED_TIMEOUT_MS = 20_000;
 
-const redact = (text) => String(text ?? "")
-  .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/g, "[REDACTED]")
-  .replace(/(authorization\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
+const redact = (text) =>
+  String(text ?? "")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/g, "[REDACTED]")
+    .replace(/(authorization\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
 
 function expectSuccess(label, result) {
   const diagnostic = [
@@ -50,7 +56,9 @@ async function waitForPublishedOutbox(port) {
       const response = await fetch(`http://127.0.0.1:${port}/status`);
       const status = await response.json();
       if (response.ok && status.anomalies?.unpublishedOutbox === 0) return;
-    } catch { /* intentionally ignored */ }
+    } catch {
+      /* intentionally ignored */
+    }
     await Bun.sleep(50);
   }
   expect.fail("seeded runtime did not publish its outbox within 5 seconds");
@@ -60,7 +68,9 @@ describe("triage-scan write-detail contract (WM-352)", () => {
   const artifactWithDetail = (detail) => ({
     recommendation: "TRIAGE",
     repo: "factory",
-    plan: [{ issueId: "WM-352", action: "write-detail", reason: "fixture", detail }],
+    plan: [
+      { issueId: "WM-352", action: "write-detail", reason: "fixture", detail },
+    ],
     summary: "fixture",
   });
 
@@ -81,8 +91,15 @@ describe("triage-scan write-detail contract (WM-352)", () => {
       "```",
     ].join("\n");
 
-    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail(canonical))).toEqual({ valid: true, errors: [] });
-    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail("## Rollout\n\n- Deploy globally."))).toEqual({
+    expect(
+      validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail(canonical)),
+    ).toEqual({ valid: true, errors: [] });
+    expect(
+      validate(
+        TRIAGE_SCAN_OUTPUT_SCHEMA,
+        artifactWithDetail("## Rollout\n\n- Deploy globally."),
+      ),
+    ).toEqual({
       valid: false,
       errors: [
         "$.plan[0].detail: does not match pattern ^\\s*## (Acceptance Criteria|Owned Paths|Verification)",
@@ -91,11 +108,21 @@ describe("triage-scan write-detail contract (WM-352)", () => {
   });
 
   test("continues to accept Owned Paths and Verification as the first section", () => {
-    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail("## Owned Paths\n\n- `README.md`"))).toEqual({
+    expect(
+      validate(
+        TRIAGE_SCAN_OUTPUT_SCHEMA,
+        artifactWithDetail("## Owned Paths\n\n- `README.md`"),
+      ),
+    ).toEqual({
       valid: true,
       errors: [],
     });
-    expect(validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail("## Verification\n\n```\nbun test\n```"))).toEqual({
+    expect(
+      validate(
+        TRIAGE_SCAN_OUTPUT_SCHEMA,
+        artifactWithDetail("## Verification\n\n```\nbun test\n```"),
+      ),
+    ).toEqual({
       valid: true,
       errors: [],
     });
@@ -119,10 +146,15 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     port = String(probe.port);
     probe.stop(true);
 
-    serveChild = spawnTracked("bun", [CLI, "serve", "--adapter-override", "fake", "--port", port], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-    }, { scope: "suite" });
+    serveChild = spawnTracked(
+      "bun",
+      [CLI, "serve", "--adapter-override", "fake", "--port", port],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+      { scope: "suite" },
+    );
 
     // Wait for health
     let up = false;
@@ -134,15 +166,31 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
           up = true;
           break;
         }
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
       await Bun.sleep(100);
     }
     expect(up).toBe(true);
 
-    workerChild = spawnTracked("bun", [CLI, "work", "--adapter-override", "fake", "--port", port, "--poll-ms", "40"], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-    }, { scope: "suite" });
+    workerChild = spawnTracked(
+      "bun",
+      [
+        CLI,
+        "work",
+        "--adapter-override",
+        "fake",
+        "--port",
+        port,
+        "--poll-ms",
+        "40",
+      ],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+      { scope: "suite" },
+    );
 
     // Health only proves the control API is listening. Seed drives approvals
     // immediately, so wait for the separate worker process to register first.
@@ -156,7 +204,9 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
           workerReady = true;
           break;
         }
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
       await Bun.sleep(50);
     }
     expect(workerReady).toBe(true);
@@ -166,24 +216,34 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     if (serveChild) {
       try {
         serveChild.kill("SIGKILL");
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
     }
     if (workerChild) {
       try {
         workerChild.kill("SIGKILL");
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
     }
   });
 
   test("initial seed succeeds and verify passes", async () => {
     const t0 = Date.now();
-    const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t1", "--poll-ms", "40"], {
-      encoding: "utf8",
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-    });
+    const seedRes = spawnSync(
+      "bun",
+      [SEED, "--port", port, "--prefix", "t1", "--poll-ms", "40"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+      },
+    );
     expectSuccess("initial seed", seedRes);
     expect(seedRes.stdout).toContain("merge-apply@2 watched");
-    expect(seedRes.stdout).not.toContain("merge-verify@1 exact landed lifecycle");
+    expect(seedRes.stdout).not.toContain(
+      "merge-verify@1 exact landed lifecycle",
+    );
     // The triage chain now waits for its auto-approved apply run to finish.
     expect(Date.now() - t0).toBeLessThan(SEED_TIMEOUT_MS);
     initialTriageApplyRun = seedRes.stdout.match(
@@ -209,18 +269,24 @@ describe("seed & re-seed deduplication (OPS-464)", () => {
     expect(res.status).not.toBe(0);
     expect(elapsedMs).toBeLessThan(2000);
     const output = `${res.stdout}${res.stderr}`;
-    expect(output).toContain("duplicate prefix \"t1\"");
+    expect(output).toContain('duplicate prefix "t1"');
   }, 10_000);
 
   test("re-seeding with a NEW prefix cleans up hang runs and allows verify to pass", async () => {
     const t0 = Date.now();
-    const seedRes = spawnSync("bun", [SEED, "--port", port, "--prefix", "t2", "--poll-ms", "40"], {
-      encoding: "utf8",
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-    });
+    const seedRes = spawnSync(
+      "bun",
+      [SEED, "--port", port, "--prefix", "t2", "--poll-ms", "40"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+      },
+    );
     expectSuccess("re-seed", seedRes);
     expect(seedRes.stdout).toContain("merge-apply@2 watched");
-    expect(seedRes.stdout).not.toContain("merge-verify@1 exact landed lifecycle");
+    expect(seedRes.stdout).not.toContain(
+      "merge-verify@1 exact landed lifecycle",
+    );
     // A fresh prefix must follow the new scan's causal edge, never reuse the
     // prior terminal triage-apply proposal while waiting for that edge.
     expect(Date.now() - t0).toBeLessThan(SEED_TIMEOUT_MS);

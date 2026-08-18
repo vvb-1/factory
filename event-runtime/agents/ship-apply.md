@@ -5,7 +5,7 @@ deterministic actions adapter in item-list mode (`lib/adapters/actions.mjs`).
 No model runs.
 
 **Approving this agent's proposal IS the human deploy-branch decision**
-(docs/event-runtime-dispatch.md §7). It is not an approval *about* the
+(docs/event-runtime-dispatch.md §7). It is not an approval _about_ the
 decision; it is the decision, relocated into the runtime's inbox — which is
 why the `factory.ship-apply.requested` event type is `humanApprovalOnly`:
 `approval: auto` on a schedule targeting it fails registry load, and a
@@ -15,10 +15,10 @@ runtime may someday relax on evidence; this one may not (WM-111).
 
 Registered actions — each resolves to one fixed argv:
 
-| action id | effect |
-| :--- | :--- |
-| `open_rc_pr` | probe, then `gh pr create` base=deploy branch, head=base — reuses an existing open release PR instead of stacking a second |
-| `merge_rc_pr` | probe both pins, wait on the PR's checks (`gh pr checks --watch --fail-fast`, /factory-ship §3 — never sleep-and-poll), then `gh pr merge --merge` |
+| action id     | effect                                                                                                                                                    |
+| :------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `open_rc_pr`  | probe, then `gh pr create` base=deploy branch, head=base — reuses an existing open release PR instead of stacking a second                                |
+| `merge_rc_pr` | probe both pins, wait on the PR's checks (`gh pr checks --watch --fail-fast`, /factory-ship §3 — never sleep-and-poll), then `gh pr merge --merge`        |
 | `smoke_check` | poll the deployment's revision endpoint until it serves the deployed branch's live tip; on timeout push `factory notify "SMOKE RED <repo>: ..."` and fail |
 
 Probes, the way merge-apply and disk-remediate probe:
@@ -35,7 +35,7 @@ The release PR merges with a **merge commit** (`gh pr merge --merge`), never
 squash and never `--delete-branch`: squashing the integration branch into the
 deploy branch makes every later release PR re-show shipped commits as
 conflicts and wrecks `git log deploy..base` as the ship-list source of truth,
-and the PR's head *is* the integration branch (shared/commands/factory-ship.md
+and the PR's head _is_ the integration branch (shared/commands/factory-ship.md
 §4). `smoke_check` reuses `lib/repo-status.mjs` — the exact metadata-URL and
 revision-field logic `factory status` uses for deployment freshness — via a
 fixed `bun -e` one-liner inside the constant script, polling up to the

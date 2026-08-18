@@ -19,7 +19,8 @@ export function formatDuration(seconds: number | null | undefined): string {
 
   for (const [size, suffix] of units) {
     const value = Math.floor(remaining / size);
-    if (value > 0 || (size === 1 && parts.length === 0)) parts.push(`${value}${suffix}`);
+    if (value > 0 || (size === 1 && parts.length === 0))
+      parts.push(`${value}${suffix}`);
     remaining %= size;
   }
 
@@ -41,7 +42,10 @@ export function formatRelative(
   now = Date.now(),
 ): string {
   if (timestamp == null) return EMPTY;
-  const at = timestamp instanceof Date ? timestamp.getTime() : new Date(timestamp).getTime();
+  const at =
+    timestamp instanceof Date
+      ? timestamp.getTime()
+      : new Date(timestamp).getTime();
   if (Number.isNaN(at)) return EMPTY;
 
   const seconds = Math.max(0, Math.floor((now - at) / 1000));

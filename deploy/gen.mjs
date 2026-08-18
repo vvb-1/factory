@@ -25,7 +25,8 @@ const OUT = path.join(ROOT, "deploy", "launchd");
 // resolved by the job's shell at runtime, and home-relative paths stay as a
 // literal `~/` until --install materialises them for the installing user
 // (launchd itself does not expand `~` or `$HOME` in plist values).
-export const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+export const DEFAULT_PATH =
+  "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 const EVENT_LABEL_PREFIX = "com.wattmind.factory.event";
 const DEFAULT_EVENT_WORKERS = "1:2";
 const DEPLOY_ROOT = '"${FACTORY_ROOT:-$HOME/Develop/factory}"';
@@ -34,7 +35,8 @@ const DEPLOY_ROOT = '"${FACTORY_ROOT:-$HOME/Develop/factory}"';
 export const materialize = (text, home = homedir()) =>
   text.replace(/(<string>|:)~\//g, `$1${home}/`);
 
-const xml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const xml = (s) =>
+  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export function eventWorkerRange(value = DEFAULT_EVENT_WORKERS) {
   const raw = String(value).trim();
@@ -42,8 +44,16 @@ export function eventWorkerRange(value = DEFAULT_EVENT_WORKERS) {
   if (!match) throw new Error(`--workers must be N or min:max (got "${raw}")`);
   const min = Number(match[1]);
   const max = Number(match[2] ?? match[1]);
-  if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min || max > 32) {
-    throw new Error(`--workers must satisfy 1 <= min <= max <= 32 (got "${raw}")`);
+  if (
+    !Number.isInteger(min) ||
+    !Number.isInteger(max) ||
+    min < 1 ||
+    max < min ||
+    max > 32
+  ) {
+    throw new Error(
+      `--workers must satisfy 1 <= min <= max <= 32 (got "${raw}")`,
+    );
   }
   return `${min}:${max}`;
 }
@@ -52,13 +62,17 @@ function optionValue(name, args = process.argv.slice(2)) {
   const index = args.indexOf(name);
   if (index === -1) return undefined;
   const value = args[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
+  if (!value || value.startsWith("--"))
+    throw new Error(`${name} requires a value`);
   return value;
 }
 
 export function launchdPath(environmentPath = DEFAULT_PATH, home = "~") {
   const entries = (environmentPath || DEFAULT_PATH).split(":").filter(Boolean);
-  for (const entry of [path.join(home, ".bun", "bin"), path.join(home, ".local", "bin")]) {
+  for (const entry of [
+    path.join(home, ".bun", "bin"),
+    path.join(home, ".local", "bin"),
+  ]) {
     if (!entries.includes(entry)) entries.push(entry);
   }
   return entries.join(":");
@@ -114,14 +128,16 @@ ${args.map((a) => `        <string>${xml(a)}</string>`).join("\n")}
  * checkout path, home directory, or secret: the small checked-in launcher
  * resolves those at runtime and writes logs below the current user's home.
  */
-export function eventRuntimePlist(role, {
-  workers = DEFAULT_EVENT_WORKERS,
-  environmentPath = DEFAULT_PATH,
-} = {}) {
-  if (role !== "serve" && role !== "work") throw new Error(`unknown event-runtime daemon role "${role}"`);
+export function eventRuntimePlist(
+  role,
+  { workers = DEFAULT_EVENT_WORKERS, environmentPath = DEFAULT_PATH } = {},
+) {
+  if (role !== "serve" && role !== "work")
+    throw new Error(`unknown event-runtime daemon role "${role}"`);
   const range = eventWorkerRange(workers);
   const label = `${EVENT_LABEL_PREFIX}-${role}`;
-  const launcher = '"${FACTORY_ROOT:-$HOME/Develop/factory}/bin/event-runtime-daemon"';
+  const launcher =
+    '"${FACTORY_ROOT:-$HOME/Develop/factory}/bin/event-runtime-daemon"';
   const command = `exec ${launcher} ${role}${role === "work" ? ` ${range}` : ""}`;
   const args = ["/bin/bash", "-lc", command];
 
@@ -175,27 +191,43 @@ export function renderEventRuntimePlists({
     const next = eventRuntimePlist(role, { workers, environmentPath });
     const prev = existsSync(file) ? readFileSync(file, "utf8") : null;
     writeFileSync(file, next);
-    rendered.push({ name: `factory.event-${role}`, label, file, changed: prev !== next });
+    rendered.push({
+      name: `factory.event-${role}`,
+      label,
+      file,
+      changed: prev !== next,
+    });
   }
   return rendered;
 }
 
-export function installPlists(enabled, defaults, {
-  outDir = OUT,
-  agentsDir = path.join(homedir(), "Library/LaunchAgents"),
-  run = execFileSync,
-  uid = process.getuid(),
-  home = homedir(),
-} = {}) {
+export function installPlists(
+  enabled,
+  defaults,
+  {
+    outDir = OUT,
+    agentsDir = path.join(homedir(), "Library/LaunchAgents"),
+    run = execFileSync,
+    uid = process.getuid(),
+    home = homedir(),
+  } = {},
+) {
   mkdirSync(agentsDir, { recursive: true });
   // launchd creates the log files but not their directory.
-  mkdirSync((defaults.log_dir || "~/Library/Logs").replace(/^~(?=\/|$)/, home), { recursive: true });
+  mkdirSync(
+    (defaults.log_dir || "~/Library/Logs").replace(/^~(?=\/|$)/, home),
+    { recursive: true },
+  );
   for (const job of enabled) {
     const label = job.label ?? `${defaults.label_prefix}.${job.name}`;
     const src = job.file ?? path.join(outDir, `${label}.plist`);
     const dst = path.join(agentsDir, `${label}.plist`);
     writeFileSync(dst, materialize(readFileSync(src, "utf8"), home));
-    try { run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" }); } catch { /* intentionally ignored */ }
+    try {
+      run("launchctl", ["bootout", `gui/${uid}/${label}`], { stdio: "ignore" });
+    } catch {
+      /* intentionally ignored */
+    }
     run("launchctl", ["bootstrap", `gui/${uid}`, dst]);
     console.log(`  loaded    ${label}`);
   }
@@ -217,19 +249,30 @@ export function main({
     const next = plist(job, defaults);
     const prev = existsSync(file) ? readFileSync(file, "utf8") : null;
     writeFileSync(file, next);
-    console.log(`${prev === next ? "  unchanged" : prev ? "  updated  " : "  created  "} ${path.basename(file)}  (every ${job.every})`);
+    console.log(
+      `${prev === next ? "  unchanged" : prev ? "  updated  " : "  created  "} ${path.basename(file)}  (every ${job.every})`,
+    );
   }
-  for (const job of skipped) console.log(`  disabled  ${job.name}  — ${String(job.why || "").slice(0, 60)}`);
+  for (const job of skipped)
+    console.log(
+      `  disabled  ${job.name}  — ${String(job.why || "").slice(0, 60)}`,
+    );
 
   const range = eventWorkerRange(workers);
   const eventDaemons = renderEventRuntimePlists({ workers: range });
   for (const daemon of eventDaemons) {
-    console.log(`${daemon.changed ? "  updated  " : "  unchanged"} ${path.basename(daemon.file)}`);
+    console.log(
+      `${daemon.changed ? "  updated  " : "  unchanged"} ${path.basename(daemon.file)}`,
+    );
   }
 
   if (!install) {
-    console.log(`\n${enabled.length} scheduled job(s) and 2 event daemon(s) rendered to deploy/launchd/ (workers ${range}).`);
-    console.log("Re-run with --install to copy and bootstrap the scheduled jobs.");
+    console.log(
+      `\n${enabled.length} scheduled job(s) and 2 event daemon(s) rendered to deploy/launchd/ (workers ${range}).`,
+    );
+    console.log(
+      "Re-run with --install to copy and bootstrap the scheduled jobs.",
+    );
     console.log("Event daemons are installed manually — see SETUP.md §3a.");
     return;
   }

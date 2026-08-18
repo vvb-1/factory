@@ -222,17 +222,17 @@ factory down         # stops all three
 
 It needs the web deps (`cd event-runtime/web && bun install`) because the UI runs under vite instead of the static `serve.mjs` build; `--dev` says so and exits rather than failing inside vite. Plain `factory up` behaves exactly as before.
 
-**The worker reloads only when idle.** It stamps its own code at startup (HEAD plus a content hash of `event-runtime/lib/**` and `event-runtime/cli.mjs`, so uncommitted edits count) and re-checks that stamp *between claims*. On a change it exits `75` and the supervisor re-execs it. A run in flight keeps the old code to completion — logged as `reload deferred until <run> finishes` — and the reload happens at the next idle poll. Nothing can interrupt a running agent, which is the reason this is a poll-boundary check and not a file watcher.
+**The worker reloads only when idle.** It stamps its own code at startup (HEAD plus a content hash of `event-runtime/lib/**` and `event-runtime/cli.mjs`, so uncommitted edits count) and re-checks that stamp _between claims_. On a change it exits `75` and the supervisor re-execs it. A run in flight keeps the old code to completion — logged as `reload deferred until <run> finishes` — and the reload happens at the next idle poll. Nothing can interrupt a running agent, which is the reason this is a poll-boundary check and not a file watcher.
 
 **Which change needs which reload:**
 
-| You changed | What reloads it |
-| :--- | :--- |
-| `event-runtime/lib/**`, `event-runtime/cli.mjs` | serve restarts immediately (`bun --watch`, drops in-flight planner work); the worker restarts at its next idle poll |
-| `event-runtime/web/**` | vite HMR — the open tab updates, nothing restarts |
-| `agents/*.md`, `schemas/**` | **neither.** Definitions are read per plan/claim but their pinned hashes are not: run `bun event-runtime/cli.mjs update-pins` |
-| `config/*.yaml` | restart serve |
-| `bin/live-stack.sh` | `factory down && factory up --dev` |
+| You changed                                     | What reloads it                                                                                                               |
+| :---------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------- |
+| `event-runtime/lib/**`, `event-runtime/cli.mjs` | serve restarts immediately (`bun --watch`, drops in-flight planner work); the worker restarts at its next idle poll           |
+| `event-runtime/web/**`                          | vite HMR — the open tab updates, nothing restarts                                                                             |
+| `agents/*.md`, `schemas/**`                     | **neither.** Definitions are read per plan/claim but their pinned hashes are not: run `bun event-runtime/cli.mjs update-pins` |
+| `config/*.yaml`                                 | restart serve                                                                                                                 |
+| `bin/live-stack.sh`                             | `factory down && factory up --dev`                                                                                            |
 
 Details, including the `work --reload-on-change` flag and `FACTORY_CODE_STAMP_ROOT`, are in [event-runtime/README.md](event-runtime/README.md#dev-live-reload--factory-up---dev-wm-213).
 
@@ -240,11 +240,11 @@ Details, including the `work --reload-on-change` flag and `FACTORY_CODE_STAMP_RO
 
 These are deliberate — the scaffold ships honest about what isn't built.
 
-| Gap | Why it's not done |
-| :--- | :--- |
+| Gap                       | Why it's not done                                                                                                                                                                                                                                                                                                                                                                       |
+| :------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A shared worktree library | Each repo still owns its own `bin/worktree-{up,down,warm}.sh`, and the common library stays deliberately deferred. The real variation across Wasp/Prisma/Postgres, pnpm/Nuxt/Prisma and Django/SQLite is visible now, but extracting it is real work with no forcing function yet — and a wrong abstraction here silently breaks the port and database isolation the scripts exist for. |
-| `evals/run.mjs` | Cases are written first on purpose — they specify what the skill is for. |
-| Per-agent Linear identity | Every agent currently claims as the human, so the assignee lock can't detect a lost race (OPS-40). The dispatcher is the natural place to inject a per-agent key — build it in rather than retrofitting. |
+| `evals/run.mjs`           | Cases are written first on purpose — they specify what the skill is for.                                                                                                                                                                                                                                                                                                                |
+| Per-agent Linear identity | Every agent currently claims as the human, so the assignee lock can't detect a lost race (OPS-40). The dispatcher is the natural place to inject a per-agent key — build it in rather than retrofitting.                                                                                                                                                                                |
 
 ## Flags worth knowing
 

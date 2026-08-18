@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { canonicalJson, hashBytes } from "./canonical.mjs";
@@ -23,9 +29,14 @@ import { computeDefHash } from "./receipts.mjs";
 function tempRegistry() {
   const root = mkdtempSync(path.join(tmpdir(), "event-registry-"));
   for (const dir of ["agents", "schemas"]) {
-    cpSync(path.join(RUNTIME_ROOT, dir), path.join(root, dir), { recursive: true });
+    cpSync(path.join(RUNTIME_ROOT, dir), path.join(root, dir), {
+      recursive: true,
+    });
   }
-  cpSync(path.join(RUNTIME_ROOT, "event-types.json"), path.join(root, "event-types.json"));
+  cpSync(
+    path.join(RUNTIME_ROOT, "event-types.json"),
+    path.join(root, "event-types.json"),
+  );
   return root;
 }
 
@@ -35,16 +46,28 @@ function tempRegistry() {
  * definition declares. The claude map stays as the per-route exception's
  * mapping — no committed route consumes it today.
  */
-const SAMPLE_PACK_ROOT = path.join(RUNTIME_ROOT, "test-support", "packs", "sample");
+const SAMPLE_PACK_ROOT = path.join(
+  RUNTIME_ROOT,
+  "test-support",
+  "packs",
+  "sample",
+);
 
-function samplePack(root = SAMPLE_PACK_ROOT, name = "sample", namespace = "sample") {
+function samplePack(
+  root = SAMPLE_PACK_ROOT,
+  name = "sample",
+  namespace = "sample",
+) {
   return { kind: "fs", name, path: root, namespace };
 }
 
 function tempPack({ name = "sample", namespace = "sample" } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "event-pack-"));
   cpSync(SAMPLE_PACK_ROOT, root, { recursive: true });
-  writeFileSync(path.join(root, "pack.json"), `${JSON.stringify({ name, version: "1.0.0", namespace }, null, 2)}\n`);
+  writeFileSync(
+    path.join(root, "pack.json"),
+    `${JSON.stringify({ name, version: "1.0.0", namespace }, null, 2)}\n`,
+  );
   return samplePack(root, name, namespace);
 }
 
@@ -52,7 +75,10 @@ function registryDigest(registry) {
   const agents = Object.fromEntries(
     [...registry.agents].map(([ref, def]) => {
       const { pack: _pack, promptPath, ...stable } = def;
-      return [ref, { ...stable, promptPath: path.relative(registry.root, promptPath) }];
+      return [
+        ref,
+        { ...stable, promptPath: path.relative(registry.root, promptPath) },
+      ];
     }),
   );
   return hashBytes(
@@ -91,8 +117,12 @@ describe("registry", () => {
     const def = getAgent(registry, "factory-status-report@1");
     expect(def.outputSchema.required).toContain("recommendedAction");
     expect(def.pack).toBe("event-runtime");
-    expect(registry.packs).toEqual([{ name: "event-runtime", root: RUNTIME_ROOT, namespace: "" }]);
-    expect(getEventType(registry, "factory.status-report.requested").agent).toBe("factory-status-report@1");
+    expect(registry.packs).toEqual([
+      { name: "event-runtime", root: RUNTIME_ROOT, namespace: "" },
+    ]);
+    expect(
+      getEventType(registry, "factory.status-report.requested").agent,
+    ).toBe("factory-status-report@1");
     expect(getEventType(registry, "unknown.event")).toBeNull();
   });
 
@@ -107,9 +137,9 @@ describe("registry", () => {
     // WM-469 intentionally adds the three declarative kernel-control fields
     // to the affected definitions while preserving their refs and pins
     // (digest regenerated on top of the #559 baseline).
-    // Regenerated after rebase over #567 (WM-679) + #563 (WM-469): both change
-    // agent definitions, which are registry inputs. Reason in PR body.
-    const expected = "sha256:55929d285a47a1abfadca8df9a0b8dab3ff421bd55ec4b939e77c25ecca92536";
+    // Regenerated after WM-610 prettier reformat of code and markdown files.
+    const expected =
+      "sha256:f618f5d7bbcbdac48dadf5ed490ebeefee9734ac9f78e535ef5bb29ba9ee414b";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -126,21 +156,38 @@ describe("registry", () => {
     const def = registry.agents.get("dispatch@1");
     expect(def.pack).toBe("event-runtime");
     expect(Object.keys(def)).not.toContain("pack");
-    expect(computeDefHash(def)).toBe("sha256:323836eeac3c5b7370dc13e83cbe4f0d7cc029155e76ea0fc80672b7a7f973fd");
+    expect(computeDefHash(def)).toBe(
+      "sha256:0314e7e591bb4942e04a86a1211b28469d6ce750b3e9384db82380eaf396ec95",
+    );
   });
 
   test("loads a namespaced filesystem pack and validates the merged maps", () => {
     const registry = loadRegistry({ packRoots: [samplePack()] });
     const def = getAgent(registry, "sample/echo@1");
     expect(def.pack).toBe("sample");
-    expect(def.promptPath).toBe(path.join(SAMPLE_PACK_ROOT, "agents", "echo.md"));
-    expect(def.pins).toEqual(JSON.parse(readFileSync(path.join(SAMPLE_PACK_ROOT, "pins.json"), "utf8")));
+    expect(def.promptPath).toBe(
+      path.join(SAMPLE_PACK_ROOT, "agents", "echo.md"),
+    );
+    expect(def.pins).toEqual(
+      JSON.parse(
+        readFileSync(path.join(SAMPLE_PACK_ROOT, "pins.json"), "utf8"),
+      ),
+    );
     expect(Object.entries(def.pins)).toHaveLength(3);
-    expect(getEventType(registry, "sample.echo.requested").agent).toBe("sample/echo@1");
-    expect(getEventType(registry, "sample.core-status.requested").agent).toBe("factory-status-report@1");
+    expect(getEventType(registry, "sample.echo.requested").agent).toBe(
+      "sample/echo@1",
+    );
+    expect(getEventType(registry, "sample.core-status.requested").agent).toBe(
+      "factory-status-report@1",
+    );
     expect(registry.edges["sample/echo@1"].recommendationField).toBe("message");
-    expect(registry.schedules["sample-echo"].eventType).toBe("sample.echo.requested");
-    expect(registry.packs.map((pack) => pack.name)).toEqual(["event-runtime", "sample"]);
+    expect(registry.schedules["sample-echo"].eventType).toBe(
+      "sample.echo.requested",
+    );
+    expect(registry.packs.map((pack) => pack.name)).toEqual([
+      "event-runtime",
+      "sample",
+    ]);
   });
 
   test("merged validation accepts a loader with no filesystem access", () => {
@@ -160,7 +207,12 @@ describe("registry", () => {
       limits: { timeout_seconds: 30, attempts: 1 },
       mutating: false,
     };
-    const pins = Object.fromEntries(Object.entries(resources).map(([name, bytes]) => [name, hashBytes(bytes)]));
+    const pins = Object.fromEntries(
+      Object.entries(resources).map(([name, bytes]) => [
+        name,
+        hashBytes(bytes),
+      ]),
+    );
     const loader = {
       listAgentDefs: () => [{ source: "memory:agents/echo.json", definition }],
       readPinned: (relative) => ({
@@ -181,13 +233,23 @@ describe("registry", () => {
           : Object.create(null),
     };
     const registry = loadRegistry({
-      packRoots: [{ kind: "memory", name: "memory", namespace: "memory", root: "memory:pack" }],
-      loaderFor: (pack, options) => (pack.kind === "memory" ? loader : createFsPackLoader(pack, options)),
+      packRoots: [
+        {
+          kind: "memory",
+          name: "memory",
+          namespace: "memory",
+          root: "memory:pack",
+        },
+      ],
+      loaderFor: (pack, options) =>
+        pack.kind === "memory" ? loader : createFsPackLoader(pack, options),
     });
     const def = getAgent(registry, "memory/echo@1");
     expect(def.promptPath).toBe("memory:agents/echo.md");
     expect(def.pins).toEqual(pins);
-    expect(getEventType(registry, "memory.echo.requested").agent).toBe("memory/echo@1");
+    expect(getEventType(registry, "memory.echo.requested").agent).toBe(
+      "memory/echo@1",
+    );
   });
 
   test("duplicate agent refs identify both source packs", () => {
@@ -239,7 +301,9 @@ describe("registry", () => {
         },
       }),
     );
-    expect(() => loadRegistry({ packRoots: [edgePack] })).toThrow(/targets unregistered event type toString/);
+    expect(() => loadRegistry({ packRoots: [edgePack] })).toThrow(
+      /targets unregistered event type toString/,
+    );
 
     const schedulePack = tempPack();
     writeFileSync(
@@ -253,12 +317,16 @@ describe("registry", () => {
         },
       }),
     );
-    expect(() => loadRegistry({ packRoots: [schedulePack] })).toThrow(/fires unregistered event type constructor/);
+    expect(() => loadRegistry({ packRoots: [schedulePack] })).toThrow(
+      /fires unregistered event type constructor/,
+    );
   });
 
   test("exactly one pack owns the bare namespace", () => {
     const bare = tempPack({ name: "bare-extra", namespace: "" });
-    expect(() => loadRegistry({ packRoots: [bare] })).toThrow(/exactly one pack must own the bare namespace.*event-runtime.*bare-extra/);
+    expect(() => loadRegistry({ packRoots: [bare] })).toThrow(
+      /exactly one pack must own the bare namespace.*event-runtime.*bare-extra/,
+    );
   });
 
   test("config-listed packs cannot admit mutating agents", () => {
@@ -266,7 +334,9 @@ describe("registry", () => {
     const defFile = path.join(pack.path, "agents", "echo.json");
     const def = JSON.parse(readFileSync(defFile, "utf8"));
     writeFileSync(defFile, JSON.stringify({ ...def, mutating: true }));
-    expect(() => loadRegistry({ packRoots: [pack] })).toThrow(/config-listed pack.*may not declare mutating: true.*WM-468/);
+    expect(() => loadRegistry({ packRoots: [pack] })).toThrow(
+      /config-listed pack.*may not declare mutating: true.*WM-468/,
+    );
   });
 
   test("a pack agent that merely omits mutating is not refused by the pack rule (WM-470)", () => {
@@ -276,9 +346,13 @@ describe("registry", () => {
     // so an omitting def must additionally be enforceable by construction.
     const pack = tempPack();
     const defFile = path.join(pack.path, "agents", "echo.json");
-    const { mutating: _mutating, ...def } = JSON.parse(readFileSync(defFile, "utf8"));
+    const { mutating: _mutating, ...def } = JSON.parse(
+      readFileSync(defFile, "utf8"),
+    );
     writeFileSync(defFile, JSON.stringify(def));
-    expect(() => loadRegistry({ packRoots: [pack] })).not.toThrow(/may not declare mutating: true/);
+    expect(() => loadRegistry({ packRoots: [pack] })).not.toThrow(
+      /may not declare mutating: true/,
+    );
     writeFileSync(defFile, JSON.stringify({ ...def, command: ["true"] }));
     const registry = loadRegistry({ packRoots: [pack] });
     expect(getAgent(registry, "sample/echo@1").mutating).toBeUndefined();
@@ -288,7 +362,9 @@ describe("registry", () => {
     const pack = tempPack();
     const prompt = path.join(pack.path, "agents", "echo.md");
     writeFileSync(prompt, `${readFileSync(prompt, "utf8")}drift\n`);
-    expect(() => loadRegistry({ packRoots: [pack] })).toThrow(/does not match pin/);
+    expect(() => loadRegistry({ packRoots: [pack] })).toThrow(
+      /does not match pin/,
+    );
     expect(updatePins({ pack })).toEqual(["sample"]);
     expect(() => loadRegistry({ packRoots: [pack] })).not.toThrow();
     writeFileSync(path.join(pack.path, "pins.json"), "not-json\n");
@@ -298,9 +374,15 @@ describe("registry", () => {
     const mismatched = tempPack({ name: "policy-name" });
     writeFileSync(
       path.join(mismatched.path, "pack.json"),
-      JSON.stringify({ name: "manifest-name", version: "1.0.0", namespace: "sample" }),
+      JSON.stringify({
+        name: "manifest-name",
+        version: "1.0.0",
+        namespace: "sample",
+      }),
     );
-    expect(() => loadRegistry({ packRoots: [mismatched] })).toThrow(/does not match policy name/);
+    expect(() => loadRegistry({ packRoots: [mismatched] })).toThrow(
+      /does not match policy name/,
+    );
   });
 
   test("loadPackRoots reads only policy-listed roots and validates fail-closed", () => {
@@ -309,37 +391,60 @@ describe("registry", () => {
     const policy = path.join(root, "config", "policy.yaml");
     expect(loadPackRoots({ root })).toEqual([]);
 
-    writeFileSync(policy, "packs:\n  - name: sample\n    path: vendor/sample\n    namespace: sample\n");
+    writeFileSync(
+      policy,
+      "packs:\n  - name: sample\n    path: vendor/sample\n    namespace: sample\n",
+    );
     expect(loadPackRoots({ root })).toEqual([
-      { kind: "fs", name: "sample", path: path.join(root, "vendor", "sample"), namespace: "sample" },
+      {
+        kind: "fs",
+        name: "sample",
+        path: path.join(root, "vendor", "sample"),
+        namespace: "sample",
+      },
     ]);
     writeFileSync(policy, "packs:\n  sample: vendor/sample\n");
     expect(() => loadPackRoots({ root })).toThrow(/packs.*array/);
-    writeFileSync(policy, "packs:\n  - name: sample\n    path: one\n  - name: sample\n    path: two\n");
+    writeFileSync(
+      policy,
+      "packs:\n  - name: sample\n    path: one\n  - name: sample\n    path: two\n",
+    );
     expect(() => loadPackRoots({ root })).toThrow(/duplicate pack name/);
   });
 
   test("update-pins --pack rejects missing and unknown pack names", () => {
     const run = (...args) =>
       Bun.spawnSync({
-        cmd: [process.execPath, "event-runtime/cli.mjs", "update-pins", ...args],
+        cmd: [
+          process.execPath,
+          "event-runtime/cli.mjs",
+          "update-pins",
+          ...args,
+        ],
         cwd: path.dirname(RUNTIME_ROOT),
         stdout: "pipe",
         stderr: "pipe",
       });
     const missing = run("--pack");
     expect(missing.exitCode).not.toBe(0);
-    expect(missing.stderr.toString()).toContain("usage: update-pins [--pack NAME]");
+    expect(missing.stderr.toString()).toContain(
+      "usage: update-pins [--pack NAME]",
+    );
 
     const unknown = run("--pack", "not-configured");
     expect(unknown.exitCode).not.toBe(0);
-    expect(unknown.stderr.toString()).toContain('unknown configured pack "not-configured"');
+    expect(unknown.stderr.toString()).toContain(
+      'unknown configured pack "not-configured"',
+    );
   });
 
   test("editing a pinned file without re-pinning fails closed", () => {
     const root = tempRegistry();
     const promptFile = path.join(root, "agents", "factory-status-report.md");
-    writeFileSync(promptFile, `${readFileSync(promptFile, "utf8")}\n<!-- drift -->\n`);
+    writeFileSync(
+      promptFile,
+      `${readFileSync(promptFile, "utf8")}\n<!-- drift -->\n`,
+    );
     expect(() => loadRegistry({ root })).toThrow(RegistryError);
     updatePins({ root });
     expect(() => loadRegistry({ root })).not.toThrow();
@@ -358,13 +463,18 @@ describe("registry", () => {
     const def = getAgent(registry, "dispatch@1");
     expect(def.mutating).toBe(true);
     expect(def.workspace.type).toBe("worktree");
-    expect(getEventType(registry, "factory.dispatch.requested").agent).toBe("dispatch@1");
+    expect(getEventType(registry, "factory.dispatch.requested").agent).toBe(
+      "dispatch@1",
+    );
     // The carve-out is the workspace type, nothing wider: the same def on an
     // ephemeral workspace must still fail closed.
     const root = tempRegistry();
     const defFile = path.join(root, "agents", "dispatch.json");
     const raw = JSON.parse(readFileSync(defFile, "utf8"));
-    writeFileSync(defFile, JSON.stringify({ ...raw, workspace: { type: "ephemeral" } }));
+    writeFileSync(
+      defFile,
+      JSON.stringify({ ...raw, workspace: { type: "ephemeral" } }),
+    );
     expect(() => loadRegistry({ root })).toThrow(/mutating/);
   });
 
@@ -374,14 +484,21 @@ describe("registry", () => {
     const apply = JSON.parse(readFileSync(applyFile, "utf8"));
     writeFileSync(
       applyFile,
-      JSON.stringify({ ...apply, chainCommandEdges: ["factory.not-registered"] }),
+      JSON.stringify({
+        ...apply,
+        chainCommandEdges: ["factory.not-registered"],
+      }),
     );
     expect(() => loadRegistry({ root: badEdgeRoot })).toThrow(
       /chainCommandEdges targets unregistered event type factory\.not-registered/,
     );
 
     const badRepoMatchRoot = tempRegistry();
-    const verifyFile = path.join(badRepoMatchRoot, "agents", "merge-verify.json");
+    const verifyFile = path.join(
+      badRepoMatchRoot,
+      "agents",
+      "merge-verify.json",
+    );
     const verify = JSON.parse(readFileSync(verifyFile, "utf8"));
     writeFileSync(
       verifyFile,
@@ -392,9 +509,16 @@ describe("registry", () => {
     );
 
     const badExemptionRoot = tempRegistry();
-    const exemptFile = path.join(badExemptionRoot, "agents", "merge-verify.json");
+    const exemptFile = path.join(
+      badExemptionRoot,
+      "agents",
+      "merge-verify.json",
+    );
     const exempt = JSON.parse(readFileSync(exemptFile, "utf8"));
-    writeFileSync(exemptFile, JSON.stringify({ ...exempt, dispatchGateExempt: true }));
+    writeFileSync(
+      exemptFile,
+      JSON.stringify({ ...exempt, dispatchGateExempt: true }),
+    );
     expect(() => loadRegistry({ root: badExemptionRoot })).toThrow(
       /"dispatchGateExempt" is admissible only for workspace\.type "worktree"/,
     );
@@ -407,7 +531,10 @@ describe("registry", () => {
     );
     expect(declared.length).toBeGreaterThan(0);
     for (const [agentRef, eventType] of declared) {
-      expect(loaded.eventTypes[eventType], `${agentRef} -> ${eventType}`).toBeDefined();
+      expect(
+        loaded.eventTypes[eventType],
+        `${agentRef} -> ${eventType}`,
+      ).toBeDefined();
     }
   });
 
@@ -417,7 +544,12 @@ describe("registry", () => {
       writeFileSync(
         path.join(root, "schedules.json"),
         JSON.stringify({
-          "reconcile-x": { every: "10m", eventType: "factory.reconcile.requested", payload, enabled: false },
+          "reconcile-x": {
+            every: "10m",
+            eventType: "factory.reconcile.requested",
+            payload,
+            enabled: false,
+          },
         }),
       );
     withPayload(["bj29"]);
@@ -432,7 +564,8 @@ describe("registry", () => {
     const root = tempRegistry();
     const defFile = path.join(root, "agents", "factory-status-report.json");
     const def = JSON.parse(readFileSync(defFile, "utf8"));
-    const withRepos = (repos) => writeFileSync(defFile, JSON.stringify({ ...def, repos }));
+    const withRepos = (repos) =>
+      writeFileSync(defFile, JSON.stringify({ ...def, repos }));
 
     withRepos("bj29"); // not an array
     expect(() => loadRegistry({ root })).toThrow(/"repos"/);
@@ -447,7 +580,10 @@ describe("registry", () => {
     // config/repos.yaml here — the planner owns that at plan time.
     withRepos(["bj29", "not-in-repos-yaml"]);
     const registry = loadRegistry({ root });
-    expect(getAgent(registry, "factory-status-report@1").repos).toEqual(["bj29", "not-in-repos-yaml"]);
+    expect(getAgent(registry, "factory-status-report@1").repos).toEqual([
+      "bj29",
+      "not-in-repos-yaml",
+    ]);
   });
 
   test("model_tier: valid tiers load and are readable; absent field stays absent (WM-135)", () => {
@@ -459,7 +595,9 @@ describe("registry", () => {
     // tier any routed definition declares — event types outside this test's
     // own agent are validated too.
     const registry = loadRegistry({ root, modelTiers: PI_TIERS });
-    expect(getAgent(registry, "factory-status-report@1").model_tier).toBe("standard");
+    expect(getAgent(registry, "factory-status-report@1").model_tier).toBe(
+      "standard",
+    );
     // A definition that declares nothing is untouched — adapter default.
     expect(getAgent(registry, "reconcile@1").model_tier).toBeUndefined();
     expect(getAgent(registry, "reconcile@1").model).toBeUndefined();
@@ -471,9 +609,12 @@ describe("registry", () => {
     const def = JSON.parse(readFileSync(defFile, "utf8"));
     for (const bad of ["medium", "opus-4", 3, null]) {
       writeFileSync(defFile, JSON.stringify({ ...def, model_tier: bad }));
-      expect(() => loadRegistry({ root, modelTiers: { claude: { strong: "default", standard: "sonnet" } } })).toThrow(
-        /"model_tier"/,
-      );
+      expect(() =>
+        loadRegistry({
+          root,
+          modelTiers: { claude: { strong: "default", standard: "sonnet" } },
+        }),
+      ).toThrow(/"model_tier"/);
     }
   });
 
@@ -485,11 +626,18 @@ describe("registry", () => {
     // No pi tier map at all, and a map missing this one tier: both refuse.
     // (factory-status-report is the first routed event type in the file, so
     // its unmapped "light" is what the load trips on in both cases.)
-    expect(() => loadRegistry({ root, modelTiers: {} })).toThrow(/no mapping for adapter "pi"/);
+    expect(() => loadRegistry({ root, modelTiers: {} })).toThrow(
+      /no mapping for adapter "pi"/,
+    );
     expect(() =>
       loadRegistry({
         root,
-        modelTiers: { pi: { strong: "openai-codex/gpt-5.6-sol", standard: "openai-codex/gpt-5.6-terra" } },
+        modelTiers: {
+          pi: {
+            strong: "openai-codex/gpt-5.6-sol",
+            standard: "openai-codex/gpt-5.6-terra",
+          },
+        },
       }),
     ).toThrow(/model_tier "light" has no mapping/);
   });
@@ -502,7 +650,13 @@ describe("registry", () => {
     // reconcile routes via the command adapter — "light" is resolved for no
     // adapter there, so the command route stays applicable either way.
     const registry = loadRegistry({ root, modelTiers: PI_TIERS });
-    expect(resolveModel(getAgent(registry, "reconcile@1"), "command", registry.modelTiers)).toBeNull();
+    expect(
+      resolveModel(
+        getAgent(registry, "reconcile@1"),
+        "command",
+        registry.modelTiers,
+      ),
+    ).toBeNull();
   });
 
   test("model override: malformed rejected, well-formed wins over the tier (WM-135)", () => {
@@ -517,33 +671,59 @@ describe("registry", () => {
 
     // Both fields allowed; the override wins, and it also satisfies load even
     // though "light" has no mapping — the tier is never consulted.
-    writeFileSync(defFile, JSON.stringify({ ...def, model: "claude-opus-4-1", model_tier: "light" }));
+    writeFileSync(
+      defFile,
+      JSON.stringify({ ...def, model: "claude-opus-4-1", model_tier: "light" }),
+    );
     const registry = loadRegistry({ root, modelTiers: tiers });
     const loaded = getAgent(registry, "factory-status-report@1");
-    expect(resolveModel(loaded, "claude", registry.modelTiers)).toBe("claude-opus-4-1");
+    expect(resolveModel(loaded, "claude", registry.modelTiers)).toBe(
+      "claude-opus-4-1",
+    );
   });
 
   test("resolveModel: override > tier map > adapter default; sentinel passes through (WM-135)", () => {
-    const tiers = { claude: { strong: "default", standard: "sonnet", light: "haiku" } };
-    expect(resolveModel({ ref: "x@1", model_tier: "standard" }, "claude", tiers)).toBe("sonnet");
-    expect(resolveModel({ ref: "x@1", model_tier: "strong" }, "claude", tiers)).toBe(DEFAULT_MODEL);
-    expect(resolveModel({ ref: "x@1", model: "haiku", model_tier: "strong" }, "claude", tiers)).toBe("haiku");
+    const tiers = {
+      claude: { strong: "default", standard: "sonnet", light: "haiku" },
+    };
+    expect(
+      resolveModel({ ref: "x@1", model_tier: "standard" }, "claude", tiers),
+    ).toBe("sonnet");
+    expect(
+      resolveModel({ ref: "x@1", model_tier: "strong" }, "claude", tiers),
+    ).toBe(DEFAULT_MODEL);
+    expect(
+      resolveModel(
+        { ref: "x@1", model: "haiku", model_tier: "strong" },
+        "claude",
+        tiers,
+      ),
+    ).toBe("haiku");
     expect(resolveModel({ ref: "x@1" }, "claude", tiers)).toBeNull(); // nothing declared → adapter default
-    expect(resolveModel({ ref: "x@1", model_tier: "light" }, "command", tiers)).toBeNull(); // not applicable
-    expect(() => resolveModel({ ref: "x@1", model_tier: "light" }, "claude", {})).toThrow(RegistryError);
+    expect(
+      resolveModel({ ref: "x@1", model_tier: "light" }, "command", tiers),
+    ).toBeNull(); // not applicable
+    expect(() =>
+      resolveModel({ ref: "x@1", model_tier: "light" }, "claude", {}),
+    ).toThrow(RegistryError);
   });
 
   test("loadModelTierMap: reads policy.yaml, validates shape fail-closed, tolerates absence (WM-135)", () => {
     const root = mkdtempSync(path.join(tmpdir(), "event-policy-"));
     expect(loadModelTierMap({ root })).toEqual({}); // no policy.yaml at all
     mkdirSync(path.join(root, "config"), { recursive: true });
-    const write = (yaml) => writeFileSync(path.join(root, "config", "policy.yaml"), yaml);
+    const write = (yaml) =>
+      writeFileSync(path.join(root, "config", "policy.yaml"), yaml);
 
     write("concurrency:\n  max_in_flight_per_repo: 3\n"); // no models block
     expect(loadModelTierMap({ root })).toEqual({});
 
-    write("models:\n  claude:\n    strong: default\n    standard: sonnet\n    light: haiku\n");
-    expect(loadModelTierMap({ root })).toEqual({ claude: { strong: "default", standard: "sonnet", light: "haiku" } });
+    write(
+      "models:\n  claude:\n    strong: default\n    standard: sonnet\n    light: haiku\n",
+    );
+    expect(loadModelTierMap({ root })).toEqual({
+      claude: { strong: "default", standard: "sonnet", light: "haiku" },
+    });
 
     write("models:\n  claude:\n    strnog: sonnet\n"); // typo'd tier key
     expect(() => loadModelTierMap({ root })).toThrow(/not a tier/);
@@ -557,7 +737,9 @@ describe("registry", () => {
     const root = tempRegistry();
     writeFileSync(
       path.join(root, "event-types.json"),
-      JSON.stringify({ "x.y": { agent: "ghost@9", idempotencyScope: ["correlationId"] } }),
+      JSON.stringify({
+        "x.y": { agent: "ghost@9", idempotencyScope: ["correlationId"] },
+      }),
     );
     expect(() => loadRegistry({ root })).toThrow(/unregistered agent/);
   });
@@ -568,9 +750,17 @@ describe("registry", () => {
     const merge = getArtifactView(registry, "merge-scan@2");
     expect(merge.file).toBe("agents/merge-scan.view.json");
     expect(merge.view.schemaVersion).toBe("factory.artifact-view/v1");
-    expect(getArtifactView(registry, "triage-scan@1").view.status.path).toBe("/recommendation");
-    expect(getArtifactView(registry, "reconcile@1")).toEqual({ file: null, view: null });
-    expect(getArtifactView(registry, "ghost@9")).toEqual({ file: null, view: null });
+    expect(getArtifactView(registry, "triage-scan@1").view.status.path).toBe(
+      "/recommendation",
+    );
+    expect(getArtifactView(registry, "reconcile@1")).toEqual({
+      file: null,
+      view: null,
+    });
+    expect(getArtifactView(registry, "ghost@9")).toEqual({
+      file: null,
+      view: null,
+    });
     expect(registry.anomalies).toEqual([]);
     // Views are not part of the definition pin nor of the receipt defHash:
     // the def object never carries them, and the sidecar has no pin entry.
@@ -578,10 +768,19 @@ describe("registry", () => {
     expect(def.outputView).toBeUndefined();
     expect(Object.keys(def.pins)).not.toContain("agents/merge-scan.view.json");
     const { promptPath, inputSchema, outputSchema, ...pinnedIdentity } = def;
-    expect(computeDefHash(def)).toBe(computeDefHash({ ...pinnedIdentity, promptPath, inputSchema, outputSchema }));
+    expect(computeDefHash(def)).toBe(
+      computeDefHash({
+        ...pinnedIdentity,
+        promptPath,
+        inputSchema,
+        outputSchema,
+      }),
+    );
     // A .view.json file is never mistaken for a definition, and re-pinning
     // leaves it alone.
-    expect([...registry.agents.keys()].some((ref) => ref.includes(".view"))).toBe(false);
+    expect(
+      [...registry.agents.keys()].some((ref) => ref.includes(".view")),
+    ).toBe(false);
     const root = tempRegistry();
     expect(updatePins({ root })).toEqual([]);
   });
@@ -595,7 +794,10 @@ describe("registry", () => {
     writeFileSync(viewFile, JSON.stringify(view));
     const registry = loadRegistry({ root, modelTiers: PI_TIERS });
     // Served without a view; the anomaly names the agent, the file and the errors.
-    expect(getArtifactView(registry, "merge-scan@2")).toEqual({ file: "agents/merge-scan.view.json", view: null });
+    expect(getArtifactView(registry, "merge-scan@2")).toEqual({
+      file: "agents/merge-scan.view.json",
+      view: null,
+    });
     expect(registry.anomalies).toHaveLength(1);
     expect(registry.anomalies[0]).toContain("merge-scan@2");
     expect(registry.anomalies[0]).toContain("agents/merge-scan.view.json");
@@ -609,7 +811,12 @@ describe("registry", () => {
     expect(getArtifactView(again, "merge-scan@2").view).toBeNull();
     expect(again.anomalies[0]).toMatch(/unparseable/);
     // A schema-invalid document (bad `as`) is refused the same way.
-    writeFileSync(viewFile, JSON.stringify({ ...view, sections: [{ path: "/plan", as: "chart" }] }));
-    expect(loadRegistry({ root, modelTiers: PI_TIERS }).anomalies[0]).toMatch(/not in enum/);
+    writeFileSync(
+      viewFile,
+      JSON.stringify({ ...view, sections: [{ path: "/plan", as: "chart" }] }),
+    );
+    expect(loadRegistry({ root, modelTiers: PI_TIERS }).anomalies[0]).toMatch(
+      /not in enum/,
+    );
   });
 });

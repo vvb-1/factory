@@ -59,7 +59,9 @@ function PaletteDialogHost() {
         nav
       </button>
       <CommandPalette
-        actions={[{ label: "Keyboard shortcuts", run: () => setDialogOpen(true) }]}
+        actions={[
+          { label: "Keyboard shortcuts", run: () => setDialogOpen(true) },
+        ]}
         onJumpRun={NOOP}
         onJumpProposal={NOOP}
         onJumpEvent={NOOP}
@@ -114,7 +116,9 @@ describe("CommandPalette", () => {
     const r = renderPalette();
     modal.depth = 1;
     chordK();
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
   });
 
   test("⌘K still closes the palette when it is already open", () => {
@@ -123,7 +127,9 @@ describe("CommandPalette", () => {
     expect(r.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
     expect(modal.depth).toBe(1);
     chordK();
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
     expect(modal.depth).toBe(0);
   });
 
@@ -139,7 +145,9 @@ describe("CommandPalette", () => {
   test("opening focuses the search input", () => {
     const r = renderPalette();
     chordK();
-    expect(document.activeElement).toBe(r.getByPlaceholderText("Type a command…"));
+    expect(document.activeElement).toBe(
+      r.getByPlaceholderText("Type a command…"),
+    );
   });
 
   test("Tab from the last control wraps to the first inside the panel", () => {
@@ -171,7 +179,9 @@ describe("CommandPalette", () => {
     chordK();
     expect(r.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
     expect(document.activeElement).toBe(outside);
   });
 
@@ -181,19 +191,31 @@ describe("CommandPalette", () => {
     outside.focus();
     chordK();
     fireEvent.mouseDown(r.getByTestId("palette-overlay"));
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
     expect(document.activeElement).toBe(outside);
   });
 
   test("selecting an item restores focus to the previously focused element", () => {
     let ran = false;
-    const r = renderPalette([{ label: "Overview", group: "Go", run: () => { ran = true; } }]);
+    const r = renderPalette([
+      {
+        label: "Overview",
+        group: "Go",
+        run: () => {
+          ran = true;
+        },
+      },
+    ]);
     const outside = r.getByTestId("outside");
     outside.focus();
     chordK();
     fireEvent.click(r.getByText("Overview"));
     expect(ran).toBe(true);
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
     expect(document.activeElement).toBe(outside);
   });
 
@@ -209,7 +231,9 @@ describe("CommandPalette", () => {
     r.getByTestId("outside").focus();
     chordK();
     fireEvent.click(r.getByText("Focus filter"));
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
     expect(document.activeElement).toBe(r.getByTestId("view-filter"));
   });
 
@@ -218,14 +242,20 @@ describe("CommandPalette", () => {
     const opener = r.getByTestId("dialog-opener");
     opener.focus();
     chordK();
-    expect(document.activeElement).toBe(r.getByPlaceholderText("Type a command…"));
+    expect(document.activeElement).toBe(
+      r.getByPlaceholderText("Type a command…"),
+    );
 
     fireEvent.click(r.getByText("Keyboard shortcuts"));
-    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(true);
+    expect(r.queryByRole("dialog", { name: "Command palette" }) == null).toBe(
+      true,
+    );
     expect(r.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(r.queryByRole("dialog", { name: "Keyboard shortcuts" }) == null).toBe(true);
+    expect(
+      r.queryByRole("dialog", { name: "Keyboard shortcuts" }) == null,
+    ).toBe(true);
     expect(document.activeElement).toBe(opener);
   });
 
@@ -235,7 +265,9 @@ describe("CommandPalette", () => {
     const input = r.getByPlaceholderText("Type a command…");
     fireEvent.keyDown(input, { key: "ArrowDown" });
 
-    const activeItem = r.getByText("Copy id").closest<HTMLElement>("[cmdk-item]");
+    const activeItem = r
+      .getByText("Copy id")
+      .closest<HTMLElement>("[cmdk-item]");
     expect(activeItem?.getAttribute("aria-selected")).toBe("true");
     const classes = activeItem?.className.split(/\s+/) ?? [];
     expect(classes).toContain("data-[selected=true]:bg-(--surface-2)");
@@ -245,7 +277,9 @@ describe("CommandPalette", () => {
   test("uses a single focus border, scroll fade, and theme-aware backdrop", () => {
     const r = renderPalette();
     chordK();
-    const inputClasses = r.getByPlaceholderText("Type a command…").className.split(/\s+/);
+    const inputClasses = r
+      .getByPlaceholderText("Type a command…")
+      .className.split(/\s+/);
     expect(inputClasses).toContain("border-0");
     expect(inputClasses).toContain("border-b");
     expect(inputClasses).toContain("outline-none");
@@ -253,17 +287,27 @@ describe("CommandPalette", () => {
     expect(inputClasses).toContain("focus:border-(--accent)");
     expect(inputClasses).toContain("focus:ring-0");
 
-    expect(r.getByTestId("palette-results").className).toContain("overflow-y-auto");
-    expect(r.getByTestId("palette-results").className).toContain("scroll-pb-10");
-    expect(r.getByTestId("palette-results-fade").className).toContain("bg-linear-to-t");
-    const overlayClasses = r.getByTestId("palette-overlay").className.split(/\s+/);
+    expect(r.getByTestId("palette-results").className).toContain(
+      "overflow-y-auto",
+    );
+    expect(r.getByTestId("palette-results").className).toContain(
+      "scroll-pb-10",
+    );
+    expect(r.getByTestId("palette-results-fade").className).toContain(
+      "bg-linear-to-t",
+    );
+    const overlayClasses = r
+      .getByTestId("palette-overlay")
+      .className.split(/\s+/);
     expect(overlayClasses).toContain("bg-black/40");
     expect(overlayClasses).toContain("[[data-theme=light]_&]:bg-black/20");
   });
 
   test("`#541`, `PR 541` and `pr:541` offer the PR journey; a bare number does not (WM-640)", async () => {
     const jumps: number[] = [];
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchInterval: false } } });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
     const r = render(
       <QueryClientProvider client={client}>
         <CommandPalette
@@ -280,13 +324,17 @@ describe("CommandPalette", () => {
     for (const typed of ["#541", "PR 541", "pr:541"]) {
       chordK();
       // The palette re-mounts its input on every open — query it each round.
-      fireEvent.input(r.getByPlaceholderText("Type a command…"), { target: { value: typed } });
+      fireEvent.input(r.getByPlaceholderText("Type a command…"), {
+        target: { value: typed },
+      });
       const item = await r.findByText("#541", { selector: "span.mono" });
       fireEvent.click(item.closest("[cmdk-item]")!);
     }
     expect(jumps).toEqual([541, 541, 541]);
     chordK();
-    fireEvent.input(r.getByPlaceholderText("Type a command…"), { target: { value: "541" } });
+    fireEvent.input(r.getByPlaceholderText("Type a command…"), {
+      target: { value: "541" },
+    });
     await r.findByText("No matching command");
     expect(r.queryByText("#541", { selector: "span.mono" }) == null).toBe(true);
   });

@@ -9,7 +9,7 @@ isolated worktree for the ticket. This is not a general implementation run.
 2. Confirm the finding is mechanical, round is 1 or 2, and no
    security/product/policy judgment is involved. Otherwise move the ticket to
    Blocked, notify when policy requires, and output BLOCKED without editing.
-   Owned Paths bound the *correction*, not the *rebase* (WM-679):
+   Owned Paths bound the _correction_, not the _rebase_ (WM-679):
    - `rebase_onto_base` / `rerun_ci_at_head`: rebase the head branch onto the
      current base. Resolve conflicts faithfully to both sides, reading the
      surrounding code; the files git reports as conflicting are in scope for

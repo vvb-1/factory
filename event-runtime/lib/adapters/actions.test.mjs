@@ -16,8 +16,14 @@ const tmp = (p) => mkdtempSync(path.join(os.tmpdir(), p));
 
 describe("appendIssueDetail (WM-343)", () => {
   test("appends the same detail only once", () => {
-    const first = appendIssueDetail("Existing description", "## Verification\n\nRun the exact command.");
-    const second = appendIssueDetail(first.description, "## Verification\n\nRun the exact command.");
+    const first = appendIssueDetail(
+      "Existing description",
+      "## Verification\n\nRun the exact command.",
+    );
+    const second = appendIssueDetail(
+      first.description,
+      "## Verification\n\nRun the exact command.",
+    );
 
     expect(first.appended).toBe(true);
     expect(second).toEqual({ description: first.description, appended: false });
@@ -29,7 +35,13 @@ describe("buildArgv (OPS-410)", () => {
   test("replaces {target} and {remote} in exec template", () => {
     const exec = ["ssh", "-o", "BatchMode=yes", "{target}", "{remote}"];
     const argv = buildArgv(exec, "root@10.0.0.1", "df -h");
-    expect(argv).toEqual(["ssh", "-o", "BatchMode=yes", "root@10.0.0.1", "df -h"]);
+    expect(argv).toEqual([
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "root@10.0.0.1",
+      "df -h",
+    ]);
   });
 
   test("handles multiple occurrences of {target} or {remote}", () => {
@@ -40,15 +52,28 @@ describe("buildArgv (OPS-410)", () => {
 
   test("safely handles special $ patterns in remote without regex backreference corruption", () => {
     const exec = ["ssh", "{target}", "{remote}"];
-    const remoteWithDollar = "awk '{print $1}' /var/log/syslog | grep $& | sed 's/$//'";
+    const remoteWithDollar =
+      "awk '{print $1}' /var/log/syslog | grep $& | sed 's/$//'";
     const argv = buildArgv(exec, "user@host", remoteWithDollar);
     expect(argv).toEqual(["ssh", "user@host", remoteWithDollar]);
   });
 
   test("expands array remote into argv elements when element is exact {remote}", () => {
     const exec = ["ssh", "{target}", "{remote}"];
-    const argv = buildArgv(exec, "user@host", ["df", "--output=used", "-B1", "/var"]);
-    expect(argv).toEqual(["ssh", "user@host", "df", "--output=used", "-B1", "/var"]);
+    const argv = buildArgv(exec, "user@host", [
+      "df",
+      "--output=used",
+      "-B1",
+      "/var",
+    ]);
+    expect(argv).toEqual([
+      "ssh",
+      "user@host",
+      "df",
+      "--output=used",
+      "-B1",
+      "/var",
+    ]);
   });
 });
 
@@ -95,7 +120,9 @@ describe("validateRemotePlaceholders (OPS-410)", () => {
         path: { type: "string", pattern: "[a-z]+" },
       },
     };
-    expect(() => validateRemotePlaceholders(def, schema)).toThrow(/unconstrained placeholder/);
+    expect(() => validateRemotePlaceholders(def, schema)).toThrow(
+      /unconstrained placeholder/,
+    );
   });
 
   test("throws when placeholder property lacks both enum and anchored pattern", () => {
@@ -108,7 +135,9 @@ describe("validateRemotePlaceholders (OPS-410)", () => {
         mount: { type: "string" },
       },
     };
-    expect(() => validateRemotePlaceholders(def, schema)).toThrow(/unconstrained placeholder/);
+    expect(() => validateRemotePlaceholders(def, schema)).toThrow(
+      /unconstrained placeholder/,
+    );
   });
 
   test("throws when placeholder is completely missing from inputSchema", () => {
@@ -119,7 +148,9 @@ describe("validateRemotePlaceholders (OPS-410)", () => {
       type: "object",
       properties: {},
     };
-    expect(() => validateRemotePlaceholders(def, schema)).toThrow(/missing from input schema/);
+    expect(() => validateRemotePlaceholders(def, schema)).toThrow(
+      /missing from input schema/,
+    );
   });
 });
 
@@ -135,8 +166,12 @@ describe("substituteRemote", () => {
   });
 
   test("throws on missing or non-primitive input field", () => {
-    expect(() => substituteRemote("df -h {mount}", {})).toThrow(/missing\/non-primitive/);
-    expect(() => substituteRemote("df -h {mount}", { mount: { nested: true } })).toThrow(/missing\/non-primitive/);
+    expect(() => substituteRemote("df -h {mount}", {})).toThrow(
+      /missing\/non-primitive/,
+    );
+    expect(() =>
+      substituteRemote("df -h {mount}", { mount: { nested: true } }),
+    ).toThrow(/missing\/non-primitive/);
   });
 });
 
@@ -148,24 +183,32 @@ describe("substituteArgv", () => {
   });
 
   test("throws on missing or non-primitive fields", () => {
-    expect(() => substituteArgv(["echo", "{missing}"], {})).toThrow(/missing\/non-primitive/);
+    expect(() => substituteArgv(["echo", "{missing}"], {})).toThrow(
+      /missing\/non-primitive/,
+    );
   });
 
   test("rejects JavaScript template interpolation that collides with argv placeholders", () => {
-    expect(() => substituteArgv(["bun", "-e", "console.log(`${identifier}`)"], {})).toThrow(
-      /contains "\$\{".*collides with argv placeholder syntax/,
-    );
+    expect(() =>
+      substituteArgv(["bun", "-e", "console.log(`${identifier}`)"], {}),
+    ).toThrow(/contains "\$\{".*collides with argv placeholder syntax/);
   });
 });
 
 describe("probeBytes", () => {
   test("parses last integer in probe output", () => {
-    expect(probeBytes("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 10000 456789\n")).toBe(456789);
+    expect(
+      probeBytes(
+        "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 10000 456789\n",
+      ),
+    ).toBe(456789);
     expect(probeBytes("   12345   \n")).toBe(12345);
   });
 
   test("throws on invalid probe output without numbers", () => {
-    expect(() => probeBytes("no numbers here")).toThrow(/probe output has no byte count/);
+    expect(() => probeBytes("no numbers here")).toThrow(
+      /probe output has no byte count/,
+    );
     expect(() => probeBytes("")).toThrow(/probe output has no byte count/);
   });
 });
@@ -189,11 +232,17 @@ describe("execute refutations", () => {
       },
     };
     const spec = {
-      input: { host: "lab", unconstrained: "; rm -rf /", actions: [{ action: "a" }] },
+      input: {
+        host: "lab",
+        unconstrained: "; rm -rf /",
+        actions: [{ action: "a" }],
+      },
     };
     const res = await execute({ spec, def, workspaceDir: ws, timeoutMs: 5000 });
     expect(res.exitCode).toBe(1);
-    expect(readFileSync(path.join(ws, ".actions.log"), "utf8")).toContain("unconstrained placeholder");
+    expect(readFileSync(path.join(ws, ".actions.log"), "utf8")).toContain(
+      "unconstrained placeholder",
+    );
   });
 
   test("refuses execution on unknown host", async () => {
@@ -210,7 +259,9 @@ describe("execute refutations", () => {
     };
     const res = await execute({ spec, def, workspaceDir: ws, timeoutMs: 5000 });
     expect(res.exitCode).toBe(1);
-    expect(readFileSync(path.join(ws, ".actions.log"), "utf8")).toContain("not in the definition's host allowlist");
+    expect(readFileSync(path.join(ws, ".actions.log"), "utf8")).toContain(
+      "not in the definition's host allowlist",
+    );
   });
 });
 
@@ -247,7 +298,9 @@ describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
     const res = await execute({ spec, def, workspaceDir: ws, timeoutMs: 5000 });
     expect(res.exitCode).toBe(0);
 
-    const result = JSON.parse(readFileSync(path.join(ws, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(ws, "result.json"), "utf8"),
+    );
     expect(result.artifact.outcome).toBe("SUPPLY_CHANGED");
 
     const noopSpec = {
@@ -256,9 +309,16 @@ describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
         plan: [{ issueId: "WM-118", action: "noop" }],
       },
     };
-    const noopRes = await execute({ spec: noopSpec, def, workspaceDir: ws, timeoutMs: 5000 });
+    const noopRes = await execute({
+      spec: noopSpec,
+      def,
+      workspaceDir: ws,
+      timeoutMs: 5000,
+    });
     expect(noopRes.exitCode).toBe(0);
-    const noopResult = JSON.parse(readFileSync(path.join(ws, "result.json"), "utf8"));
+    const noopResult = JSON.parse(
+      readFileSync(path.join(ws, "result.json"), "utf8"),
+    );
     expect(noopResult.artifact.outcome).toBe("NO_CHANGE");
   });
 
@@ -277,7 +337,11 @@ describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
       input: {
         repo: "bj29",
         plan: [
-          { ticket: "WM-116", action: "echo_ticket", reason: "testing item key" },
+          {
+            ticket: "WM-116",
+            action: "echo_ticket",
+            reason: "testing item key",
+          },
           { ticket: "WM-117", action: "echo_reason", reason: "second item" },
         ],
       },
@@ -286,7 +350,9 @@ describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
     expect(res.exitCode).toBe(0);
     expect(res.timedOut).toBe(false);
 
-    const result = JSON.parse(readFileSync(path.join(ws, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(ws, "result.json"), "utf8"),
+    );
     expect(result.schemaVersion).toBe("factory.agent-result/v1");
     expect(result.terminalState).toBe("completed");
     expect(result.artifact).toEqual({
@@ -323,4 +389,3 @@ describe("execute item-list mode (OPS-229, WM-109, WM-116)", () => {
     );
   });
 });
-

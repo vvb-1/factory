@@ -37,7 +37,11 @@ const LABELS = [
 
 // ------------------------------------------------------------ label math ---
 test("adding a label KEEPS the labels already on the ticket", () => {
-  const ids = resolveLabelIds(["type:bug", "area:api"], { add: ["ai:needs-review"] }, LABELS);
+  const ids = resolveLabelIds(
+    ["type:bug", "area:api"],
+    { add: ["ai:needs-review"] },
+    LABELS,
+  );
   expect(ids).toContain("l-bug");
   expect(ids).toContain("l-area");
   expect(ids).toContain("l-review");
@@ -45,14 +49,22 @@ test("adding a label KEEPS the labels already on the ticket", () => {
 });
 
 test("removing takes out only the named label", () => {
-  const ids = resolveLabelIds(["type:bug", "ai:agent-ready"], { remove: ["ai:agent-ready"] }, LABELS);
+  const ids = resolveLabelIds(
+    ["type:bug", "ai:agent-ready"],
+    { remove: ["ai:agent-ready"] },
+    LABELS,
+  );
   expect(ids).toEqual(["l-bug"]);
 });
 
 test("unknown label names are dropped rather than sent as undefined ids", () => {
   // A stale label removed from the workspace must not become `undefined` in the
   // mutation array — Linear rejects the whole update, losing the state change.
-  const ids = resolveLabelIds(["type:bug", "area:deleted-label"], { add: [] }, LABELS);
+  const ids = resolveLabelIds(
+    ["type:bug", "area:deleted-label"],
+    { add: [] },
+    LABELS,
+  );
   expect(ids).toEqual(["l-bug"]);
 });
 
@@ -76,17 +88,28 @@ test("claiming drops agent-ready and adds in-progress plus the harness label", (
   expect(add).toEqual(["ai:in-progress", "agent:claude-code"]);
   expect(remove).toContain("ai:agent-ready");
 
-  const ids = resolveLabelIds(["ai:agent-ready", "type:bug"], { add, remove }, LABELS);
+  const ids = resolveLabelIds(
+    ["ai:agent-ready", "type:bug"],
+    { add, remove },
+    LABELS,
+  );
   expect(ids).toContain("l-prog");
   expect(ids).toContain("l-claude");
-  expect(ids).toContain("l-bug");           // curated label survives
-  expect(ids).not.toContain("l-ready");     // lifecycle flag replaced
+  expect(ids).toContain("l-bug"); // curated label survives
+  expect(ids).not.toContain("l-ready"); // lifecycle flag replaced
 });
 
 test("re-claiming on a different harness does not leave two agent:* labels", () => {
-  const { add, remove } = claimLabels(["agent:codex", "ai:in-progress"], "claude");
+  const { add, remove } = claimLabels(
+    ["agent:codex", "ai:in-progress"],
+    "claude",
+  );
   expect(remove).toContain("agent:codex");
-  const ids = resolveLabelIds(["agent:codex", "ai:in-progress"], { add, remove }, LABELS);
+  const ids = resolveLabelIds(
+    ["agent:codex", "ai:in-progress"],
+    { add, remove },
+    LABELS,
+  );
   expect(ids).toContain("l-claude");
   expect(ids).not.toContain("l-codex");
 });
@@ -110,8 +133,11 @@ test("an unknown source:* is rejected; area:* is free-form and is not", () => {
 // -------------------------------------------------------------- rendering ---
 test("formatTicket shows the fields the protocol acts on", () => {
   const text = formatTicket({
-    identifier: "CLNT-616", title: "Fix login", url: "https://linear.app/x/CLNT-616",
-    state: { name: "Todo" }, assignee: null,
+    identifier: "CLNT-616",
+    title: "Fix login",
+    url: "https://linear.app/x/CLNT-616",
+    state: { name: "Todo" },
+    assignee: null,
     labels: { nodes: [{ name: "ai:agent-ready" }] },
   });
   expect(text).toContain("CLNT-616");
@@ -187,30 +213,54 @@ test("formatComments accepts issue object containing comments nodes", () => {
 
 // ------------------------------------------------------- argument parsing ---
 test("state label-only updates do not parse flag values as positional arguments", () => {
-  expect(parsePositionalArgs([
-    "state", "WM-250", "--add", "ai:needs-review", "--remove", "ai:in-progress",
-  ])).toEqual(["WM-250"]);
+  expect(
+    parsePositionalArgs([
+      "state",
+      "WM-250",
+      "--add",
+      "ai:needs-review",
+      "--remove",
+      "ai:in-progress",
+    ]),
+  ).toEqual(["WM-250"]);
 });
 
 test("state and label updates preserve the explicit state positional argument", () => {
-  expect(parsePositionalArgs([
-    "state", "WM-250", "In Review", "--add", "ai:needs-review",
-  ])).toEqual(["WM-250", "In Review"]);
+  expect(
+    parsePositionalArgs([
+      "state",
+      "WM-250",
+      "In Review",
+      "--add",
+      "ai:needs-review",
+    ]),
+  ).toEqual(["WM-250", "In Review"]);
 });
 
 test("values for other flags are not treated as positional arguments", () => {
-  expect(parsePositionalArgs([
-    "claim", "WM-250", "--agent", "codex", "--json",
-  ])).toEqual(["WM-250"]);
-  expect(parsePositionalArgs([
-    "file", "--team", "WM", "--title", "A title", "--todo",
-  ])).toEqual([]);
+  expect(
+    parsePositionalArgs(["claim", "WM-250", "--agent", "codex", "--json"]),
+  ).toEqual(["WM-250"]);
+  expect(
+    parsePositionalArgs([
+      "file",
+      "--team",
+      "WM",
+      "--title",
+      "A title",
+      "--todo",
+    ]),
+  ).toEqual([]);
 });
 
 // -------------------------------------------------------- label mutations ---
 test("label edits support both addition and removal without touching other labels", () => {
   const current = ["type:bug", "area:api", "ai:in-progress"];
-  const ids = resolveLabelIds(current, { add: ["ai:needs-review"], remove: ["ai:in-progress"] }, LABELS);
+  const ids = resolveLabelIds(
+    current,
+    { add: ["ai:needs-review"], remove: ["ai:in-progress"] },
+    LABELS,
+  );
   expect(ids).toContain("l-bug");
   expect(ids).toContain("l-area");
   expect(ids).toContain("l-review");
@@ -224,12 +274,22 @@ test("closure check blocks ai:agent-ready when Owned Paths closure policy is inc
   const previous = process.env.FACTORY_REPOS_ROOT;
   try {
     mkdirSync(path.join(root, "config"), { recursive: true });
-    mkdirSync(path.join(repoPath, "event-runtime", "agents"), { recursive: true });
-    mkdirSync(path.join(repoPath, "event-runtime", "schemas"), { recursive: true });
-    writeFileSync(path.join(repoPath, "event-runtime", "agents", "triage-scan.json"), `${JSON.stringify({
-      pins: { "event-runtime/schemas/triage-scan.output.json": "x" },
-    })}\n`);
-    writeFileSync(path.join(root, "config", "repos.yaml"), `repos:\n  - name: wm\n    path: ${repoPath}\n    team: WM\n    project: Tests\n    owned_paths_policy:\n      direct:\n        - source: shared/**\n          requires:\n            - dist/**\n      pin_manifests:\n        - event-runtime/agents/*.json\n`);
+    mkdirSync(path.join(repoPath, "event-runtime", "agents"), {
+      recursive: true,
+    });
+    mkdirSync(path.join(repoPath, "event-runtime", "schemas"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(repoPath, "event-runtime", "agents", "triage-scan.json"),
+      `${JSON.stringify({
+        pins: { "event-runtime/schemas/triage-scan.output.json": "x" },
+      })}\n`,
+    );
+    writeFileSync(
+      path.join(root, "config", "repos.yaml"),
+      `repos:\n  - name: wm\n    path: ${repoPath}\n    team: WM\n    project: Tests\n    owned_paths_policy:\n      direct:\n        - source: shared/**\n          requires:\n            - dist/**\n      pin_manifests:\n        - event-runtime/agents/*.json\n`,
+    );
 
     process.env.FACTORY_REPOS_ROOT = root;
     __resetLinearReposCache();
@@ -240,13 +300,16 @@ test("closure check blocks ai:agent-ready when Owned Paths closure policy is inc
         project: { name: "Tests" },
         description: "## Owned Paths\n- shared/**\n",
       }),
-    ).toEqual(["Missing required Owned Paths entry: dist/** (required by shared/**)"]);
+    ).toEqual([
+      "Missing required Owned Paths entry: dist/** (required by shared/**)",
+    ]);
 
     expect(
       closureCheckMessages({
         team: { key: "WM" },
         project: { name: "Tests" },
-        description: "## Owned Paths\n- shared/**\n- event-runtime/schemas/triage-scan.output.json\n- dist/**\n",
+        description:
+          "## Owned Paths\n- shared/**\n- event-runtime/schemas/triage-scan.output.json\n- dist/**\n",
       }),
     ).toEqual([
       "Missing required Owned Paths entry: event-runtime/agents/triage-scan.json (required by event-runtime/schemas/triage-scan.output.json from event-runtime/agents/triage-scan.json)",
@@ -260,4 +323,3 @@ test("closure check blocks ai:agent-ready when Owned Paths closure policy is inc
     rmSync(root, { recursive: true, force: true });
   }
 });
-

@@ -41,7 +41,8 @@ describe("gondolin sandbox invariants", () => {
       let stdout = "";
       const result = await runInSandbox({
         policy: { provider: "gondolin" },
-        command: "cat /workspace/from-host.txt && echo 'guest wrote this' > /workspace/from-guest.txt",
+        command:
+          "cat /workspace/from-host.txt && echo 'guest wrote this' > /workspace/from-guest.txt",
         shell: true,
         workspaceDir: dir,
         timeoutMs: 60_000,
@@ -52,7 +53,9 @@ describe("gondolin sandbox invariants", () => {
 
       expect(result.exitCode).toBe(0);
       expect(stdout).toContain("host wrote this");
-      expect(readFileSync(path.join(dir, "from-guest.txt"), "utf8")).toBe("guest wrote this\n");
+      expect(readFileSync(path.join(dir, "from-guest.txt"), "utf8")).toBe(
+        "guest wrote this\n",
+      );
     },
     VM_TIMEOUT_MS,
   );
@@ -66,7 +69,8 @@ describe("gondolin sandbox invariants", () => {
         policy: { provider: "gondolin", allowedHosts: ["api.github.com"] },
         // -m keeps a hypothetical hang from eating the whole test timeout;
         // observed behaviour is a fast 403 from the host proxy.
-        command: "curl -sS -m 20 -o /dev/null -w '%{http_code}' https://example.com/ || echo CURL_FAILED",
+        command:
+          "curl -sS -m 20 -o /dev/null -w '%{http_code}' https://example.com/ || echo CURL_FAILED",
         shell: true,
         workspaceDir: dir,
         timeoutMs: 60_000,
@@ -83,7 +87,8 @@ describe("gondolin sandbox invariants", () => {
       let allowed = "";
       const allowedRun = await runInSandbox({
         policy: { provider: "gondolin", allowedHosts: ["example.com"] },
-        command: "curl -sS -m 30 -o /dev/null -w '%{http_code}' https://example.com/",
+        command:
+          "curl -sS -m 30 -o /dev/null -w '%{http_code}' https://example.com/",
         shell: true,
         workspaceDir: dir,
         timeoutMs: 60_000,
@@ -108,7 +113,12 @@ describe("gondolin sandbox invariants", () => {
         policy: {
           provider: "gondolin",
           allowedHosts: ["api.linear.app"],
-          secrets: { LINEAR_API_KEY: { hosts: ["api.linear.app"], env: "WM185_TEST_SECRET" } },
+          secrets: {
+            LINEAR_API_KEY: {
+              hosts: ["api.linear.app"],
+              env: "WM185_TEST_SECRET",
+            },
+          },
         },
         // Read it from the environment AND from the raw process environ, so a
         // future SDK change that leaks the value anywhere in the guest fails here.

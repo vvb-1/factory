@@ -22,7 +22,10 @@ import { runOnce } from "./worker.mjs";
 
 const PV = "git:test-pv";
 const base = loadRegistry();
-const db = () => openDb(path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-sched-")), "runtime.db"));
+const db = () =>
+  openDb(
+    path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-sched-")), "runtime.db"),
+  );
 
 /** The real registry with one loop overridden — schedules are just data. */
 const withLoop = (overrides = {}) => ({
@@ -42,24 +45,34 @@ const withLoop = (overrides = {}) => ({
 
 const at = (iso) => Date.parse(iso);
 
-function planMergeRequest(d, registry, {
-  eventId,
-  source = "operator",
-  now = at("2026-08-17T10:30:45Z"),
-} = {}) {
-  const admitted = admitEvent(d, registry, {
-    schemaVersion: "factory.event/v1",
-    eventId,
-    type: "factory.merge.requested",
-    source,
-    subject: "factory",
-    occurredAt: new Date(now).toISOString(),
-    correlationId: eventId,
-    causationId: source === "chain" ? "run-parent" : null,
-    payload: { repo: "factory" },
-  }, { now });
+function planMergeRequest(
+  d,
+  registry,
+  { eventId, source = "operator", now = at("2026-08-17T10:30:45Z") } = {},
+) {
+  const admitted = admitEvent(
+    d,
+    registry,
+    {
+      schemaVersion: "factory.event/v1",
+      eventId,
+      type: "factory.merge.requested",
+      source,
+      subject: "factory",
+      occurredAt: new Date(now).toISOString(),
+      correlationId: eventId,
+      causationId: source === "chain" ? "run-parent" : null,
+      payload: { repo: "factory" },
+    },
+    { now },
+  );
   expect(admitted.admitted).toBe(true);
-  return planEvent(d, registry, { source, eventId }, { now, policyVersion: PV });
+  return planEvent(
+    d,
+    registry,
+    { source, eventId },
+    { now, policyVersion: PV },
+  );
 }
 
 describe("cadence and slots", () => {
@@ -75,9 +88,15 @@ describe("cadence and slots", () => {
 
   test("a slot is the interval floor, so every moment inside it maps to one id", () => {
     const hour = 3600;
-    expect(slotFor(at("2026-08-13T21:00:00Z"), hour)).toBe("2026-08-13T21:00:00.000Z");
-    expect(slotFor(at("2026-08-13T21:59:59Z"), hour)).toBe("2026-08-13T21:00:00.000Z");
-    expect(slotFor(at("2026-08-13T22:00:00Z"), hour)).toBe("2026-08-13T22:00:00.000Z");
+    expect(slotFor(at("2026-08-13T21:00:00Z"), hour)).toBe(
+      "2026-08-13T21:00:00.000Z",
+    );
+    expect(slotFor(at("2026-08-13T21:59:59Z"), hour)).toBe(
+      "2026-08-13T21:00:00.000Z",
+    );
+    expect(slotFor(at("2026-08-13T22:00:00Z"), hour)).toBe(
+      "2026-08-13T22:00:00.000Z",
+    );
   });
 });
 
@@ -86,7 +105,9 @@ describe("dueSlots — catch-up policy (§4)", () => {
   const now = at("2026-08-14T04:30:00Z");
 
   test("a loop that never fired fires once, for the current slot", () => {
-    expect(dueSlots({ lastSlot: null, nowMs: now, cadenceSeconds: hour })).toEqual({
+    expect(
+      dueSlots({ lastSlot: null, nowMs: now, cadenceSeconds: hour }),
+    ).toEqual({
       slots: ["2026-08-14T04:00:00.000Z"],
       skipped: 0,
     });
@@ -94,7 +115,11 @@ describe("dueSlots — catch-up policy (§4)", () => {
 
   test("already fired this slot → nothing due (the restart case)", () => {
     expect(
-      dueSlots({ lastSlot: "2026-08-14T04:00:00.000Z", nowMs: now, cadenceSeconds: hour }),
+      dueSlots({
+        lastSlot: "2026-08-14T04:00:00.000Z",
+        nowMs: now,
+        cadenceSeconds: hour,
+      }),
     ).toEqual({ slots: [], skipped: 0 });
   });
 
@@ -146,10 +171,14 @@ describe("dueSlots — catch-up policy (§4)", () => {
     });
     expect(outcome.slots).toHaveLength(24);
     // last slot is the current slot
-    expect(outcome.slots[outcome.slots.length - 1]).toBe("2026-08-14T04:30:00.000Z");
+    expect(outcome.slots[outcome.slots.length - 1]).toBe(
+      "2026-08-14T04:30:00.000Z",
+    );
     // slots are strictly in chronological order
     for (let i = 1; i < outcome.slots.length; i++) {
-      expect(Date.parse(outcome.slots[i])).toBeGreaterThan(Date.parse(outcome.slots[i - 1]));
+      expect(Date.parse(outcome.slots[i])).toBeGreaterThan(
+        Date.parse(outcome.slots[i - 1]),
+      );
     }
     // Total intervals: (nowMs slot - monthAgo) / 60s = 43230 intervals -> skipped = 43230 - 24 = 43206
     expect(outcome.skipped).toBe(43206);
@@ -179,13 +208,17 @@ describe("emitDueTicks (§3)", () => {
 
     // Three more "restarts" later in the same hour: nothing new.
     for (const minutes of [20, 40, 59]) {
-      const again = emitDueTicks(d, registry, { now: at(`2026-08-13T21:${minutes}:00Z`) });
+      const again = emitDueTicks(d, registry, {
+        now: at(`2026-08-13T21:${minutes}:00Z`),
+      });
       expect(again.emitted).toEqual([]);
     }
     expect(d.query(`SELECT COUNT(*) AS n FROM events`).get().n).toBe(1);
 
     // Next hour fires once.
-    expect(emitDueTicks(d, registry, { now: at("2026-08-13T22:05:00Z") }).emitted).toHaveLength(1);
+    expect(
+      emitDueTicks(d, registry, { now: at("2026-08-13T22:05:00Z") }).emitted,
+    ).toHaveLength(1);
   });
 
   test("the tick carries its loop, slot and how many slots it stands for", () => {
@@ -194,33 +227,51 @@ describe("emitDueTicks (§3)", () => {
     emitDueTicks(d, registry, { now: at("2026-08-13T22:00:00Z") });
     emitDueTicks(d, registry, { now: at("2026-08-14T04:00:00Z") });
 
-    const row = d.query(`SELECT envelope_json FROM events ORDER BY event_id DESC LIMIT 1`).get();
+    const row = d
+      .query(`SELECT envelope_json FROM events ORDER BY event_id DESC LIMIT 1`)
+      .get();
     const envelope = JSON.parse(row.envelope_json);
     expect(envelope.payload).toMatchObject({ loop: "reaper", skippedSlots: 5 });
-    expect(envelope.eventId).toBe(tickEventId("reaper", "2026-08-14T04:00:00.000Z"));
+    expect(envelope.eventId).toBe(
+      tickEventId("reaper", "2026-08-14T04:00:00.000Z"),
+    );
     expect(envelope.source).toBe("schedule");
   });
 
   test("a static payload rides on the tick and the planner proposes the routed run (WM-72)", () => {
     const d = db();
-    const registry = withLoop({ eventType: "factory.reconcile.requested", payload: { repo: "bj29" } });
+    const registry = withLoop({
+      eventType: "factory.reconcile.requested",
+      payload: { repo: "bj29" },
+    });
     emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
 
-    const row = d.query(`SELECT envelope_json FROM events ORDER BY event_id DESC LIMIT 1`).get();
+    const row = d
+      .query(`SELECT envelope_json FROM events ORDER BY event_id DESC LIMIT 1`)
+      .get();
     const envelope = JSON.parse(row.envelope_json);
     expect(envelope.type).toBe("factory.reconcile.requested");
     // Tick identity fields always win the merge over the static payload.
-    expect(envelope.payload).toMatchObject({ repo: "bj29", loop: "reaper", slot: "2026-08-13T21:00:00.000Z" });
+    expect(envelope.payload).toMatchObject({
+      repo: "bj29",
+      loop: "reaper",
+      slot: "2026-08-13T21:00:00.000Z",
+    });
 
     planAdmittedEvents(d, registry, { policyVersion: PV });
-    const proposal = openProposals(d, {}).find((p) => p.spec?.agent === "reconcile@1");
+    const proposal = openProposals(d, {}).find(
+      (p) => p.spec?.agent === "reconcile@1",
+    );
     expect(proposal).toBeTruthy();
     expect(proposal.status).toBe("open");
   });
 
   test("a disabled loop never fires", () => {
     const d = db();
-    expect(emitDueTicks(d, withLoop({ enabled: false }), { now: Date.now() }).emitted).toEqual([]);
+    expect(
+      emitDueTicks(d, withLoop({ enabled: false }), { now: Date.now() })
+        .emitted,
+    ).toEqual([]);
   });
 
   test("lastAdmittedSlot reads back the newest slot", () => {
@@ -293,11 +344,17 @@ describe("emitDueTicks (§3)", () => {
     const t1 = at("2026-08-16T15:30:00.000Z");
     const t1Ticks = emitDueTicks(d, registry, { now: t1 });
     expect(t1Ticks.emitted).toHaveLength(2);
-    expect(t1Ticks.emitted.find((e) => e.loop === "merge-factory")?.slot).toBe("2026-08-16T15:30:00.000Z");
+    expect(t1Ticks.emitted.find((e) => e.loop === "merge-factory")?.slot).toBe(
+      "2026-08-16T15:30:00.000Z",
+    );
 
     // lastAdmittedSlot must resolve the slot despite eventType being factory.merge.requested
-    expect(lastAdmittedSlot(d, "merge-factory", { now: t1 })).toBe("2026-08-16T15:30:00.000Z");
-    expect(lastAdmittedSlot(d, "merge-other", { now: t1 })).toBe("2026-08-16T15:30:00.000Z");
+    expect(lastAdmittedSlot(d, "merge-factory", { now: t1 })).toBe(
+      "2026-08-16T15:30:00.000Z",
+    );
+    expect(lastAdmittedSlot(d, "merge-other", { now: t1 })).toBe(
+      "2026-08-16T15:30:00.000Z",
+    );
 
     // scheduleView reports correct lastSlot, nextDue, and stopped state
     const view = scheduleView(d, registry, { now: t1 });
@@ -315,18 +372,28 @@ describe("emitDueTicks (§3)", () => {
     const t2 = at("2026-08-16T15:30:30.000Z");
     const t2Ticks = emitDueTicks(d, registry, { now: t2 });
     expect(t2Ticks.emitted).toHaveLength(2);
-    expect(lastAdmittedSlot(d, "merge-factory", { now: t2 })).toBe("2026-08-16T15:30:30.000Z");
+    expect(lastAdmittedSlot(d, "merge-factory", { now: t2 })).toBe(
+      "2026-08-16T15:30:30.000Z",
+    );
 
     // Loop isolation: inserting only a merge-other event does not affect merge-factory
     const dIsolated = db();
-    emitDueTicks(dIsolated, {
-      ...base,
-      schedules: {
-        "merge-other": registry.schedules["merge-other"],
+    emitDueTicks(
+      dIsolated,
+      {
+        ...base,
+        schedules: {
+          "merge-other": registry.schedules["merge-other"],
+        },
       },
-    }, { now: t1 });
-    expect(lastAdmittedSlot(dIsolated, "merge-factory", { now: t1 })).toBeNull();
-    expect(lastAdmittedSlot(dIsolated, "merge-other", { now: t1 })).toBe("2026-08-16T15:30:00.000Z");
+      { now: t1 },
+    );
+    expect(
+      lastAdmittedSlot(dIsolated, "merge-factory", { now: t1 }),
+    ).toBeNull();
+    expect(lastAdmittedSlot(dIsolated, "merge-other", { now: t1 })).toBe(
+      "2026-08-16T15:30:00.000Z",
+    );
   });
 });
 
@@ -345,14 +412,21 @@ describe("planning a tick (§5, §6)", () => {
     emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
     planAdmittedEvents(d, registry, { policyVersion: PV });
 
-    const proposal = openProposals(d, {}).find((p) => p.spec?.agent === "reaper@1");
+    const proposal = openProposals(d, {}).find(
+      (p) => p.spec?.agent === "reaper@1",
+    );
     expect(proposal).toBeTruthy();
     expect(proposal.status).toBe("open");
     expect(d.query(`SELECT state FROM runs`).get().state).toBe("PROPOSED");
 
     // Auto-approval must not touch a watched loop.
-    expect(autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV }).approved).toEqual([]);
-    expect(openProposals(d, {}).find((p) => p.spec?.agent === "reaper@1").status).toBe("open");
+    expect(
+      autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV })
+        .approved,
+    ).toEqual([]);
+    expect(
+      openProposals(d, {}).find((p) => p.spec?.agent === "reaper@1").status,
+    ).toBe("open");
   });
 
   test("an auto loop is approved by the scheduler — and the journal says so", () => {
@@ -361,14 +435,20 @@ describe("planning a tick (§5, §6)", () => {
     emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
     planAdmittedEvents(d, registry, { policyVersion: PV });
 
-    const outcome = autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV });
+    const outcome = autoApproveScheduled(d, registry, approveProposal, {
+      policyVersion: PV,
+    });
     expect(outcome.approved).toHaveLength(1);
     const runId = outcome.approved[0].runId;
-    expect(d.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId).state).toBe("QUEUED");
+    expect(
+      d.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId).state,
+    ).toBe("QUEUED");
 
     // The distinction that is the whole audit trail: nobody looked at this.
     const approval = d
-      .query(`SELECT actor FROM lifecycle_events WHERE run_id = ? AND to_state = 'APPROVED'`)
+      .query(
+        `SELECT actor FROM lifecycle_events WHERE run_id = ? AND to_state = 'APPROVED'`,
+      )
       .get(runId);
     expect(approval.actor).toBe("schedule");
     expect(approval.actor).not.toBe("operator");
@@ -386,7 +466,9 @@ describe("planning a tick (§5, §6)", () => {
     planAdmittedEvents(d, registry, { policyVersion: PV });
 
     const noop = d
-      .query(`SELECT decision, reason FROM proposals WHERE decision = 'noop' ORDER BY rowid DESC LIMIT 1`)
+      .query(
+        `SELECT decision, reason FROM proposals WHERE decision = 'noop' ORDER BY rowid DESC LIMIT 1`,
+      )
       .get();
     expect(noop.reason).toBe("previous_run_in_flight");
     expect(d.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
@@ -401,9 +483,13 @@ describe("planning a tick (§5, §6)", () => {
     });
     emitDueTicks(d, registry, { now: at("2026-08-17T10:30:00Z") });
     planAdmittedEvents(d, registry, { policyVersion: PV });
-    const [approved] = autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV }).approved;
+    const [approved] = autoApproveScheduled(d, registry, approveProposal, {
+      policyVersion: PV,
+    }).approved;
 
-    const operator = planMergeRequest(d, registry, { eventId: "operator-merge-overlap" });
+    const operator = planMergeRequest(d, registry, {
+      eventId: "operator-merge-overlap",
+    });
     expect(operator).toMatchObject({
       decision: "noop",
       reason: "previous_run_in_flight",
@@ -421,15 +507,23 @@ describe("planning a tick (§5, §6)", () => {
       singleton: false,
       approval: "auto",
     });
-    const operator = planMergeRequest(d, registry, { eventId: "operator-merge-first" });
-    approveProposal(d, registry, operator.proposal.id, { actor: "operator", policyVersion: PV });
+    const operator = planMergeRequest(d, registry, {
+      eventId: "operator-merge-first",
+    });
+    approveProposal(d, registry, operator.proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
 
     const tickAt = at("2026-08-17T11:00:00Z");
     emitDueTicks(d, registry, { now: tickAt });
     const scheduled = planEvent(
       d,
       registry,
-      { source: "schedule", eventId: tickEventId("reaper", "2026-08-17T11:00:00.000Z") },
+      {
+        source: "schedule",
+        eventId: tickEventId("reaper", "2026-08-17T11:00:00.000Z"),
+      },
       { now: tickAt, policyVersion: PV },
     );
     expect(scheduled).toMatchObject({
@@ -448,8 +542,13 @@ describe("planning a tick (§5, §6)", () => {
       payload: { repo: "factory" },
       approval: "auto",
     });
-    const operator = planMergeRequest(d, registry, { eventId: "operator-before-chain" });
-    approveProposal(d, registry, operator.proposal.id, { actor: "operator", policyVersion: PV });
+    const operator = planMergeRequest(d, registry, {
+      eventId: "operator-before-chain",
+    });
+    approveProposal(d, registry, operator.proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
 
     const chained = planMergeRequest(d, registry, {
       eventId: "chain-merge-overlap",
@@ -486,7 +585,9 @@ describe("planning a tick (§5, §6)", () => {
     emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
     planAdmittedEvents(d, registry, { policyVersion: PV });
 
-    const props1 = openProposals(d, {}).filter((p) => p.spec?.agent === "reaper@1");
+    const props1 = openProposals(d, {}).filter(
+      (p) => p.spec?.agent === "reaper@1",
+    );
     expect(props1).toHaveLength(1);
     expect(props1[0].status).toBe("open");
 
@@ -495,10 +596,19 @@ describe("planning a tick (§5, §6)", () => {
     planAdmittedEvents(d, registry, { policyVersion: PV });
 
     // Both proposals exist and are open / proposed — NOT silenced into a NOOP!
-    const props2 = openProposals(d, {}).filter((p) => p.spec?.agent === "reaper@1");
+    const props2 = openProposals(d, {}).filter(
+      (p) => p.spec?.agent === "reaper@1",
+    );
     expect(props2).toHaveLength(2);
-    expect(d.query(`SELECT COUNT(*) AS n FROM runs WHERE state = 'PROPOSED'`).get().n).toBe(2);
-    expect(d.query(`SELECT COUNT(*) AS n FROM proposals WHERE decision = 'noop'`).get().n).toBe(0);
+    expect(
+      d.query(`SELECT COUNT(*) AS n FROM runs WHERE state = 'PROPOSED'`).get()
+        .n,
+    ).toBe(2);
+    expect(
+      d
+        .query(`SELECT COUNT(*) AS n FROM proposals WHERE decision = 'noop'`)
+        .get().n,
+    ).toBe(0);
   });
 });
 
@@ -515,7 +625,9 @@ describe("scheduleView (§9)", () => {
     const d = db();
     const registry = withLoop();
 
-    const unticked = scheduleView(d, registry, { now: at("2026-08-13T21:30:00Z") })[0];
+    const unticked = scheduleView(d, registry, {
+      now: at("2026-08-13T21:30:00Z"),
+    })[0];
     expect(unticked).toMatchObject({
       lastSlot: null,
       nextDue: "2026-08-13T21:00:00.000Z",
@@ -524,13 +636,22 @@ describe("scheduleView (§9)", () => {
 
     emitDueTicks(d, registry, { now: at("2026-08-13T21:00:00Z") });
 
-    const soon = scheduleView(d, registry, { now: at("2026-08-13T21:30:00Z") })[0];
-    expect(soon).toMatchObject({ loop: "reaper", every: "60m", enabled: true, stopped: false });
+    const soon = scheduleView(d, registry, {
+      now: at("2026-08-13T21:30:00Z"),
+    })[0];
+    expect(soon).toMatchObject({
+      loop: "reaper",
+      every: "60m",
+      enabled: true,
+      stopped: false,
+    });
     expect(soon.lastSlot).toBe("2026-08-13T21:00:00.000Z");
     expect(soon.nextDue).toBe("2026-08-13T22:00:00.000Z");
 
     // Five hours of silence on an hourly loop: the clock is not turning.
-    const later = scheduleView(d, registry, { now: at("2026-08-14T02:00:00Z") })[0];
+    const later = scheduleView(d, registry, {
+      now: at("2026-08-14T02:00:00Z"),
+    })[0];
     expect(later.stopped).toBe(true);
     expect(later.intervalsLate).toBe(5);
   });
@@ -540,7 +661,9 @@ describe("scheduleView (§9)", () => {
     const registry = withLoop({ approval: "auto" });
 
     // Before ticking: no slots, not neverCompleted
-    expect(scheduleView(d, registry, { now: at("2026-08-13T21:00:00Z") })[0]).toMatchObject({
+    expect(
+      scheduleView(d, registry, { now: at("2026-08-13T21:00:00Z") })[0],
+    ).toMatchObject({
       lastSlot: null,
       lastCompletedSlot: null,
       neverCompleted: false,
@@ -551,7 +674,9 @@ describe("scheduleView (§9)", () => {
     planAdmittedEvents(d, registry, { policyVersion: PV });
     autoApproveScheduled(d, registry, approveProposal, { policyVersion: PV });
 
-    const ticking = scheduleView(d, registry, { now: at("2026-08-13T21:10:00Z") })[0];
+    const ticking = scheduleView(d, registry, {
+      now: at("2026-08-13T21:10:00Z"),
+    })[0];
     expect(ticking.lastSlot).toBe("2026-08-13T21:00:00.000Z");
     expect(ticking.lastCompletedSlot).toBeNull();
     expect(ticking.neverCompleted).toBe(true);
@@ -559,7 +684,9 @@ describe("scheduleView (§9)", () => {
     // Run completes
     await runOnce(d, registry, adapters, workerOpts());
 
-    const running = scheduleView(d, registry, { now: at("2026-08-13T21:20:00Z") })[0];
+    const running = scheduleView(d, registry, {
+      now: at("2026-08-13T21:20:00Z"),
+    })[0];
     expect(running.lastSlot).toBe("2026-08-13T21:00:00.000Z");
     expect(running.lastCompletedSlot).toBe("2026-08-13T21:00:00.000Z");
     expect(running.neverCompleted).toBe(false);
@@ -568,7 +695,9 @@ describe("scheduleView (§9)", () => {
   test("a disabled loop is never reported stopped", () => {
     const d = db();
     const registry = withLoop({ enabled: false });
-    expect(scheduleView(d, registry, { now: Date.now() })[0].stopped).toBe(false);
+    expect(scheduleView(d, registry, { now: Date.now() })[0].stopped).toBe(
+      false,
+    );
   });
 });
 

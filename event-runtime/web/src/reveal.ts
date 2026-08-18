@@ -18,11 +18,15 @@ export interface RevealFeedbackInput {
  * Returns a human-readable feedback message describing what the reveal changed,
  * or null if nothing was changed (silent reveal).
  */
-export function formatRevealNotification(input: RevealFeedbackInput): string | null {
+export function formatRevealNotification(
+  input: RevealFeedbackInput,
+): string | null {
   const { kind, id, state, tabChanged, filterCleared } = input;
   if (!tabChanged && !filterCleared) return null;
 
-  const stateReason = state ? ` — ${kind} ${id} is ${state}` : ` to show ${kind} ${id}`;
+  const stateReason = state
+    ? ` — ${kind} ${id} is ${state}`
+    : ` to show ${kind} ${id}`;
 
   if (tabChanged && filterCleared) {
     return `Showing all states and cleared filter${stateReason}`;

@@ -1,11 +1,23 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Database } from "bun:sqlite";
 import {
-  PathViolation, WorktreeError, createWorkspace, destroyWorkspace,
-  detectWorktreeOwnershipConflict, safeJoin,
+  PathViolation,
+  WorktreeError,
+  createWorkspace,
+  destroyWorkspace,
+  detectWorktreeOwnershipConflict,
+  safeJoin,
 } from "./workspace.mjs";
 
 function tmpRoot() {
@@ -17,7 +29,9 @@ describe("safeJoin", () => {
 
   test("accepts nested relative paths", () => {
     expect(safeJoin(ws, "result.json")).toBe(path.join(ws, "result.json"));
-    expect(safeJoin(ws, "logs/agent/output.log")).toBe(path.join(ws, "logs", "agent", "output.log"));
+    expect(safeJoin(ws, "logs/agent/output.log")).toBe(
+      path.join(ws, "logs", "agent", "output.log"),
+    );
   });
 
   test("rejects absolute paths", () => {
@@ -45,10 +59,22 @@ test("detectWorktreeOwnershipConflict excludes self but reports competing runs a
     CREATE TABLE attempts (run_id TEXT, attempt INTEGER, lease_owner TEXT);
   `);
   const spec = JSON.stringify({ input: { repo: "factory", ticket: "WM-627" } });
-  db.query(`INSERT INTO runs VALUES (?, ?, ?)`).run("run_self", "RUNNING", spec);
-  db.query(`INSERT INTO runs VALUES (?, ?, ?)`).run("run_other", "VERIFYING", spec);
+  db.query(`INSERT INTO runs VALUES (?, ?, ?)`).run(
+    "run_self",
+    "RUNNING",
+    spec,
+  );
+  db.query(`INSERT INTO runs VALUES (?, ?, ?)`).run(
+    "run_other",
+    "VERIFYING",
+    spec,
+  );
   db.query(`INSERT INTO runs VALUES (?, ?, ?)`).run("run_done", "FAILED", spec);
-  db.query(`INSERT INTO attempts VALUES (?, ?, ?)`).run("run_self", 1, "worker_self");
+  db.query(`INSERT INTO attempts VALUES (?, ?, ?)`).run(
+    "run_self",
+    1,
+    "worker_self",
+  );
   db.close();
 
   const conflict = detectWorktreeOwnershipConflict({
@@ -58,7 +84,12 @@ test("detectWorktreeOwnershipConflict excludes self but reports competing runs a
     attempt: 1,
     databasePath,
     leases: [
-      { repo: "factory", ticket: "WM-627", owner: "worker_self", pid: process.pid },
+      {
+        repo: "factory",
+        ticket: "WM-627",
+        owner: "worker_self",
+        pid: process.pid,
+      },
       { repo: "factory", ticket: "WM-627", owner: "worker_other", pid: 42 },
     ],
   });
@@ -66,27 +97,48 @@ test("detectWorktreeOwnershipConflict excludes self but reports competing runs a
     runs: [{ runId: "run_other", state: "VERIFYING" }],
     leases: [{ owner: "worker_other", pid: 42 }],
   });
-  expect(detectWorktreeOwnershipConflict({
-    repo: "factory",
-    ticket: "WM-627",
-    runId: "run_self",
-    attempt: 1,
-    databasePath,
-    leases: [{ repo: "factory", ticket: "WM-627", owner: "worker_self", pid: process.pid }],
-  })?.runs).toEqual([{ runId: "run_other", state: "VERIFYING" }]);
+  expect(
+    detectWorktreeOwnershipConflict({
+      repo: "factory",
+      ticket: "WM-627",
+      runId: "run_self",
+      attempt: 1,
+      databasePath,
+      leases: [
+        {
+          repo: "factory",
+          ticket: "WM-627",
+          owner: "worker_self",
+          pid: process.pid,
+        },
+      ],
+    })?.runs,
+  ).toEqual([{ runId: "run_other", state: "VERIFYING" }]);
 });
 
 describe("createWorkspace / destroyWorkspace", () => {
   test("creates <runId>-a<attempt> and writes canonical input.json", () => {
     const root = tmpRoot();
-    const { dir } = createWorkspace({ root, runId: "run_x", attempt: 1, input: { b: 2, a: 1 } });
+    const { dir } = createWorkspace({
+      root,
+      runId: "run_x",
+      attempt: 1,
+      input: { b: 2, a: 1 },
+    });
     expect(dir).toBe(path.join(root, "run_x-a1"));
-    expect(readFileSync(path.join(dir, "input.json"), "utf8")).toBe('{"a":1,"b":2}\n');
+    expect(readFileSync(path.join(dir, "input.json"), "utf8")).toBe(
+      '{"a":1,"b":2}\n',
+    );
   });
 
   test("destroy removes the directory; retain leaves it and returns false", () => {
     const root = tmpRoot();
-    const { dir } = createWorkspace({ root, runId: "run_y", attempt: 1, input: {} });
+    const { dir } = createWorkspace({
+      root,
+      runId: "run_y",
+      attempt: 1,
+      input: {},
+    });
     expect(destroyWorkspace(dir, { retain: true })).toBe(false);
     expect(existsSync(dir)).toBe(true);
     expect(destroyWorkspace(dir)).toBe(true);
@@ -105,12 +157,19 @@ describe("worktree workspaces (WM-108)", () => {
   let callsLog;
   let previousReposRoot;
 
-  const calls = () => (existsSync(callsLog) ? readFileSync(callsLog, "utf8").trim().split("\n") : []);
+  const calls = () =>
+    existsSync(callsLog)
+      ? readFileSync(callsLog, "utf8").trim().split("\n")
+      : [];
 
   beforeAll(() => {
     factoryRoot = mkdtempSync(path.join(os.tmpdir(), "evrt-wt-factory-"));
-    repoDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "evrt-wt-repo-")));
-    wtRoot = realpathSync(mkdtempSync(path.join(os.tmpdir(), "evrt-wt-trees-")));
+    repoDir = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), "evrt-wt-repo-")),
+    );
+    wtRoot = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), "evrt-wt-trees-")),
+    );
     callsLog = path.join(repoDir, "calls.log");
 
     mkdirSync(path.join(repoDir, "bin"), { recursive: true });
@@ -221,7 +280,9 @@ describe("worktree workspaces (WM-108)", () => {
     const link = path.join(dir, "repo");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(realpathSync(link)).toBe(path.join(wtRoot, "WM-1"));
-    expect(JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8")).ticket).toBe("WM-1");
+    expect(
+      JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8")).ticket,
+    ).toBe("WM-1");
     expect(destroyWorkspace(dir)).toBe(true);
   });
 
@@ -243,7 +304,9 @@ describe("worktree workspaces (WM-108)", () => {
     expect(calls()).toContain("down WM-3");
     expect(existsSync(dir)).toBe(true);
     expect(existsSync(tree)).toBe(true);
-    expect(readFileSync(path.join(tree, "debug-change"), "utf8")).toBe("keep me\n");
+    expect(readFileSync(path.join(tree, "debug-change"), "utf8")).toBe(
+      "keep me\n",
+    );
     expect(existsSync(path.join(tree, "ports"))).toBe(false);
     expect(existsSync(path.join(tree, "run", "serve.pid"))).toBe(false);
     expect(existsSync(path.join(tree, "run", "worker.pid"))).toBe(false);
@@ -258,7 +321,9 @@ describe("worktree workspaces (WM-108)", () => {
     expect(existsSync(path.join(wtRoot, "WM-12"))).toBe(false);
 
     const retry = make("wtrepo", "WM-12", "run_wt12_retry");
-    expect(calls().filter((call) => call.startsWith("up WM-12 "))).toHaveLength(2);
+    expect(calls().filter((call) => call.startsWith("up WM-12 "))).toHaveLength(
+      2,
+    );
     expect(destroyWorkspace(retry.dir)).toBe(true);
     expect(destroyWorkspace(dir)).toBe(true);
   });
@@ -268,7 +333,9 @@ describe("worktree workspaces (WM-108)", () => {
     expect(destroyWorkspace(dir, { retain: true })).toBe(false);
     expect(existsSync(dir)).toBe(true);
     expect(existsSync(path.join(wtRoot, "WM-4"))).toBe(true);
-    const { downFailure } = JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8"));
+    const { downFailure } = JSON.parse(
+      readFileSync(path.join(dir, ".worktree.json"), "utf8"),
+    );
     expect(downFailure.reason).toBe("fatal: refusing dirty tree");
     expect(downFailure.reason).not.toContain("warn:");
     expect(downFailure.stderr).toContain("warn: cleanup probe used fallback");
@@ -287,28 +354,39 @@ describe("worktree workspaces (WM-108)", () => {
   test("a live competing run or lease refuses an existing tree before worktree_up", () => {
     const tree = path.join(wtRoot, "WM-13");
     mkdirSync(tree, { recursive: true });
-    const before = calls().filter((call) => call.startsWith("up WM-13 ")).length;
+    const before = calls().filter((call) =>
+      call.startsWith("up WM-13 "),
+    ).length;
 
-    expect(() => make("wtrepo", "WM-13", "run_wt13", {
-      worktreeOwnershipConflict: () => ({
-        reason: "ticket has a non-terminal run or live worker lease",
-        runs: [{ runId: "run_other", state: "RUNNING" }],
-        leases: [{ owner: "worker_other", pid: 42 }],
+    expect(() =>
+      make("wtrepo", "WM-13", "run_wt13", {
+        worktreeOwnershipConflict: () => ({
+          reason: "ticket has a non-terminal run or live worker lease",
+          runs: [{ runId: "run_other", state: "RUNNING" }],
+          leases: [{ owner: "worker_other", pid: 42 }],
+        }),
       }),
-    })).toThrow(/worktree_in_use/);
-    expect(calls().filter((call) => call.startsWith("up WM-13 "))).toHaveLength(before);
+    ).toThrow(/worktree_in_use/);
+    expect(calls().filter((call) => call.startsWith("up WM-13 "))).toHaveLength(
+      before,
+    );
     expect(existsSync(tree)).toBe(true);
   });
 
   test("a recovered wip ref is journaled in the workspace marker/input and commented once", () => {
     const comments = [];
-    const { dir, worktree } = make("recovered-up", "WM-13", "run_wt13_recovered", {
-      worktreeOwnershipConflict: () => null,
-      worktreePreservationComment: (entry) => {
-        comments.push(entry);
-        return { status: "posted" };
+    const { dir, worktree } = make(
+      "recovered-up",
+      "WM-13",
+      "run_wt13_recovered",
+      {
+        worktreeOwnershipConflict: () => null,
+        worktreePreservationComment: (entry) => {
+          comments.push(entry);
+          return { status: "posted" };
+        },
       },
-    });
+    );
 
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({
@@ -322,8 +400,14 @@ describe("worktree workspaces (WM-108)", () => {
       push: "local_only",
       comment: { status: "posted" },
     });
-    expect(JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8")).preservedWip).toEqual(worktree.preservedWip);
-    expect(JSON.parse(readFileSync(path.join(dir, "input.json"), "utf8")).worktreeRecovery).toMatchObject({
+    expect(
+      JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8"))
+        .preservedWip,
+    ).toEqual(worktree.preservedWip);
+    expect(
+      JSON.parse(readFileSync(path.join(dir, "input.json"), "utf8"))
+        .worktreeRecovery,
+    ).toMatchObject({
       ref: "wip/WM-13-20260817T183000Z",
       guidance: expect.stringContaining("abandoned prior attempt"),
     });
@@ -338,8 +422,13 @@ describe("worktree workspaces (WM-108)", () => {
       exitCode: 1,
       output: "entry chunk exceeds budget",
     });
-    expect(JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8")).baseline).toEqual(worktree.baseline);
-    expect(JSON.parse(readFileSync(path.join(dir, "input.json"), "utf8"))).toMatchObject({
+    expect(
+      JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8"))
+        .baseline,
+    ).toEqual(worktree.baseline);
+    expect(
+      JSON.parse(readFileSync(path.join(dir, "input.json"), "utf8")),
+    ).toMatchObject({
       repo: "red-baseline",
       ticket: "WM-5",
       baseline: {
@@ -374,7 +463,9 @@ describe("worktree workspaces (WM-108)", () => {
       expect(err.evidence.stdout).toBe("starting worktree setup\n");
       expect(err.evidence.stderr).toContain("warn:");
       expect(err.evidence.stderr).toContain("recorded port 7740");
-      const { upFailure } = JSON.parse(readFileSync(path.join(workspaceDir, ".worktree.json"), "utf8"));
+      const { upFailure } = JSON.parse(
+        readFileSync(path.join(workspaceDir, ".worktree.json"), "utf8"),
+      );
       expect(upFailure.reason).toBe("fatal: template failed to build");
       expect(upFailure.status).toBe(7);
       expect(upFailure.stdout).toBe(err.evidence.stdout);
@@ -419,26 +510,39 @@ describe("worktree workspaces (WM-108)", () => {
         expect(err.code).toBe("workspace_provisioning_error");
         expect(err.message).toContain("timed out after 25ms");
         expect(Date.now() - started).toBeLessThan(1_000);
-        expect(JSON.parse(readFileSync(path.join(workspaceDir, ".worktree.json"), "utf8"))).toMatchObject({
+        expect(
+          JSON.parse(
+            readFileSync(path.join(workspaceDir, ".worktree.json"), "utf8"),
+          ),
+        ).toMatchObject({
           repo: "hanging-up",
           ticket: "WM-11",
           down: "bin/worktree-down.sh",
         });
       }
     } finally {
-      if (previous === undefined) delete process.env.FACTORY_WORKTREE_SCRIPT_TIMEOUT_MS;
+      if (previous === undefined)
+        delete process.env.FACTORY_WORKTREE_SCRIPT_TIMEOUT_MS;
       else process.env.FACTORY_WORKTREE_SCRIPT_TIMEOUT_MS = previous;
     }
   });
 
   test("a repo with no declared scripts fails typed, not with a crash mid-spawn", () => {
     expect(() => make("noscripts", "WM-6", "run_wt6")).toThrow(WorktreeError);
-    expect(() => make("noscripts", "WM-6", "run_wt6")).toThrow(/declares no worktree lifecycle/);
+    expect(() => make("noscripts", "WM-6", "run_wt6")).toThrow(
+      /declares no worktree lifecycle/,
+    );
   });
 
   test("missing input.repo or input.ticket is a typed error", () => {
     expect(() =>
-      createWorkspace({ root: tmpRoot(), runId: "run_wt7", attempt: 1, input: { repo: "wtrepo" }, workspace: { type: "worktree" } }),
+      createWorkspace({
+        root: tmpRoot(),
+        runId: "run_wt7",
+        attempt: 1,
+        input: { repo: "wtrepo" },
+        workspace: { type: "worktree" },
+      }),
     ).toThrow(/input.repo and input.ticket/);
   });
 });

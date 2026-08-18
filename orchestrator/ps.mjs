@@ -9,7 +9,11 @@
  *   factory ps --port 7404
  */
 import { factoryRoot } from "../lib/factory-root.mjs";
-import { collectFactoryPsSnapshot, formatFactoryPsReport, c } from "../lib/ps.mjs";
+import {
+  collectFactoryPsSnapshot,
+  formatFactoryPsReport,
+  c,
+} from "../lib/ps.mjs";
 
 const argv = process.argv.slice(2);
 const val = (flag) => {

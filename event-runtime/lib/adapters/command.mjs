@@ -48,10 +48,14 @@ export function resolveTemplate(template, input) {
     element.replace(/\{([A-Za-z0-9_]+)\}/g, (_, field) => {
       const value = context[field];
       if (value === undefined || value === null) {
-        throw new Error(`command template references missing input field "${field}"`);
+        throw new Error(
+          `command template references missing input field "${field}"`,
+        );
       }
       if (!["string", "number", "boolean"].includes(typeof value)) {
-        throw new Error(`command template field "${field}" must be a primitive, got ${typeof value}`);
+        throw new Error(
+          `command template field "${field}" must be a primitive, got ${typeof value}`,
+        );
       }
       return String(value);
     }),
@@ -77,7 +81,9 @@ function killProcessGroup(child, signal = "SIGTERM") {
  * paths so the two can never drift into producing different artifacts.
  */
 function writeResultJson({ workspaceDir, def, argv, output }) {
-  const captured = def.captureStdout ? [{ kind: def.captureKind ?? "output", path: def.captureStdout }] : [];
+  const captured = def.captureStdout
+    ? [{ kind: def.captureKind ?? "output", path: def.captureStdout }]
+    : [];
   writeFileSync(
     path.join(workspaceDir, "result.json"),
     `${JSON.stringify(
@@ -108,12 +114,22 @@ function writeResultJson({ workspaceDir, def, argv, output }) {
  *
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-async function executeSandboxed({ def, argv, workspaceDir, timeoutMs, abortSignal, onTrace, runSandbox }) {
+async function executeSandboxed({
+  def,
+  argv,
+  workspaceDir,
+  timeoutMs,
+  abortSignal,
+  onTrace,
+  runSandbox,
+}) {
   let output = "";
   const collect = (chunk) => {
     output = (output + chunk).slice(-OUTPUT_TAIL_CHARS);
   };
-  const capture = def.captureStdout ? createWriteStream(path.join(workspaceDir, def.captureStdout)) : null;
+  const capture = def.captureStdout
+    ? createWriteStream(path.join(workspaceDir, def.captureStdout))
+    : null;
 
   const { exitCode, timedOut } = await runSandboxed({
     adapter: "command",
@@ -141,14 +157,33 @@ async function executeSandboxed({ def, argv, workspaceDir, timeoutMs, abortSigna
 /**
  * @returns {Promise<{ exitCode: number | null, timedOut: boolean }>}
  */
-export async function execute({ spec, def, workspaceDir, timeoutMs, abortSignal, signal, onTrace, runSandbox }) {
+export async function execute({
+  spec,
+  def,
+  workspaceDir,
+  timeoutMs,
+  abortSignal,
+  signal,
+  onTrace,
+  runSandbox,
+}) {
   if (!Array.isArray(def.command) || def.command.length === 0) {
-    throw new Error(`definition ${def.ref} has no command template — not a command-adapter agent`);
+    throw new Error(
+      `definition ${def.ref} has no command template — not a command-adapter agent`,
+    );
   }
   const argv = resolveTemplate(def.command, spec.input);
 
   if (sandboxRequested(def)) {
-    return executeSandboxed({ def, argv, workspaceDir, timeoutMs, abortSignal: abortSignal ?? signal, onTrace, runSandbox });
+    return executeSandboxed({
+      def,
+      argv,
+      workspaceDir,
+      timeoutMs,
+      abortSignal: abortSignal ?? signal,
+      onTrace,
+      runSandbox,
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -179,13 +214,19 @@ export async function execute({ spec, def, workspaceDir, timeoutMs, abortSignal,
     const termTimer = setTimeout(() => {
       timedOut = true;
       killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
+      killTimer = setTimeout(
+        () => killProcessGroup(child, "SIGKILL"),
+        KILL_GRACE_MS,
+      );
     }, timeoutMs);
 
     const onAbort = () => {
       killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), KILL_GRACE_MS);
+        killTimer = setTimeout(
+          () => killProcessGroup(child, "SIGKILL"),
+          KILL_GRACE_MS,
+        );
       }
     };
     const abortSig = abortSignal ?? signal;

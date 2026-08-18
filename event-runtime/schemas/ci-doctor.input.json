@@ -1,11 +1,7 @@
 {
   "title": "ci-doctor input — one failed GitHub Actions run",
   "type": "object",
-  "required": [
-    "repo",
-    "runId",
-    "logArtifact"
-  ],
+  "required": ["repo", "runId", "logArtifact"],
   "additionalProperties": false,
   "properties": {
     "repo": {
@@ -14,10 +10,7 @@
       "description": "GitHub repository slug (owner/name) the failed run belongs to — not the config/repos.yaml short name"
     },
     "runId": {
-      "type": [
-        "string",
-        "integer"
-      ],
+      "type": ["string", "integer"],
       "description": "GitHub Actions run id to diagnose (number, or numeric string as gh prints it)"
     },
     "headSha": {

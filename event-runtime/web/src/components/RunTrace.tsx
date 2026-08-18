@@ -1,6 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownIcon, CodeIcon, CopyIcon, FileTextIcon } from "@radix-ui/react-icons";
-import { Fragment, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDownIcon,
+  CodeIcon,
+  CopyIcon,
+  FileTextIcon,
+} from "@radix-ui/react-icons";
+import {
+  Fragment,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api } from "../api";
 import { goPrefixActive } from "../goSequence";
 import { keyGuard } from "../hooks";
@@ -38,7 +52,11 @@ const TRACE_QUIET_BUTTON =
   "inline-flex h-7 items-center gap-1.5 rounded border border-(--border) bg-(--surface-0) px-2 text-[11px] font-medium text-(--text-faint) transition-colors hover:bg-(--surface-1) hover:text-(--text-dim)";
 
 /** States in which the trace is still being written — poll incrementally. */
-export const LIVE_STATES: readonly RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
+export const LIVE_STATES: readonly RunState[] = [
+  "LEASED",
+  "RUNNING",
+  "VERIFYING",
+];
 
 /** Server page cap; the recorder's row cap (2000 + 1 marker) is ≤ 5 pages. */
 const PAGE = 500;
@@ -74,7 +92,10 @@ function useTraceFeed(runId: string, live: boolean) {
         const res = await api.trace(runId, cursor.current, PAGE);
         if (res.entries.length) {
           const seen = new Set(acc.current.map((e) => e.seq));
-          acc.current = [...acc.current, ...res.entries.filter((e) => !seen.has(e.seq))];
+          acc.current = [
+            ...acc.current,
+            ...res.entries.filter((e) => !seen.has(e.seq)),
+          ];
           cursor.current = res.entries[res.entries.length - 1].seq;
         }
         if (res.entries.length < PAGE) break;
@@ -104,7 +125,8 @@ function useTraceFeed(runId: string, live: boolean) {
 }
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const tokenRegex = /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)|(~~[^~]+~~)|(\[[^\]]+\]\([^)]+\))/g;
+  const tokenRegex =
+    /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)|(~~[^~]+~~)|(\[[^\]]+\]\([^)]+\))/g;
   const nodes: React.ReactNode[] = [];
   let lastIdx = 0;
   let match: RegExpExecArray | null;
@@ -116,23 +138,44 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
     const full = match[0];
     if (match[1]) {
       nodes.push(
-        <code key={match.index} className="mono rounded bg-(--surface-2) px-1 py-0.5 text-[11px] text-(--text)">
+        <code
+          key={match.index}
+          className="mono rounded bg-(--surface-2) px-1 py-0.5 text-[11px] text-(--text)"
+        >
           {full.slice(1, -1)}
-        </code>
+        </code>,
       );
     } else if (match[2]) {
-      nodes.push(<strong key={match.index} className="font-semibold text-(--text)">{full.slice(2, -2)}</strong>);
+      nodes.push(
+        <strong key={match.index} className="font-semibold text-(--text)">
+          {full.slice(2, -2)}
+        </strong>,
+      );
     } else if (match[3]) {
-      nodes.push(<em key={match.index} className="italic text-(--text-dim)">{full.slice(1, -1)}</em>);
+      nodes.push(
+        <em key={match.index} className="italic text-(--text-dim)">
+          {full.slice(1, -1)}
+        </em>,
+      );
     } else if (match[4]) {
-      nodes.push(<del key={match.index} className="line-through text-(--text-faint)">{full.slice(2, -2)}</del>);
+      nodes.push(
+        <del key={match.index} className="line-through text-(--text-faint)">
+          {full.slice(2, -2)}
+        </del>,
+      );
     } else if (match[5]) {
       const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(full);
       if (linkMatch) {
         nodes.push(
-          <a key={match.index} href={linkMatch[2]} target="_blank" rel="noreferrer" className="text-(--accent) underline hover:opacity-80">
+          <a
+            key={match.index}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noreferrer"
+            className="text-(--accent) underline hover:opacity-80"
+          >
             {linkMatch[1]}
-          </a>
+          </a>,
         );
       } else {
         nodes.push(full);
@@ -161,11 +204,21 @@ export function MarkdownView({
     return (
       <div className={`relative ${className}`}>
         {allowToggle && (
-          <div className="mb-1 flex justify-end gap-1" role="group" aria-label="Markdown actions">
-            <TraceIconButton label="Copy raw markdown" onClick={() => copyText(text, "raw markdown")}>
+          <div
+            className="mb-1 flex justify-end gap-1"
+            role="group"
+            aria-label="Markdown actions"
+          >
+            <TraceIconButton
+              label="Copy raw markdown"
+              onClick={() => copyText(text, "raw markdown")}
+            >
               <CopyIcon className="size-3.5" />
             </TraceIconButton>
-            <TraceIconButton label="Show formatted view" onClick={() => setRaw(false)}>
+            <TraceIconButton
+              label="Show formatted view"
+              onClick={() => setRaw(false)}
+            >
               <FileTextIcon className="size-3.5" />
             </TraceIconButton>
           </div>
@@ -189,19 +242,25 @@ export function MarkdownView({
     if (!listType || !listItems.length) return;
     if (listType === "ul") {
       blocks.push(
-        <ul key={`ul-${key}`} className="my-1 ml-4 list-disc space-y-0.5 text-[12px] text-(--text-dim)">
+        <ul
+          key={`ul-${key}`}
+          className="my-1 ml-4 list-disc space-y-0.5 text-[12px] text-(--text-dim)"
+        >
           {listItems.map((item, idx) => (
             <li key={idx}>{renderInlineMarkdown(item)}</li>
           ))}
-        </ul>
+        </ul>,
       );
     } else {
       blocks.push(
-        <ol key={`ol-${key}`} className="my-1 ml-4 list-decimal space-y-0.5 text-[12px] text-(--text-dim)">
+        <ol
+          key={`ol-${key}`}
+          className="my-1 ml-4 list-decimal space-y-0.5 text-[12px] text-(--text-dim)"
+        >
           {listItems.map((item, idx) => (
             <li key={idx}>{renderInlineMarkdown(item)}</li>
           ))}
-        </ol>
+        </ol>,
       );
     }
     listType = null;
@@ -217,17 +276,23 @@ export function MarkdownView({
         inCodeBlock = false;
         const codeText = codeBuffer.join("\n");
         blocks.push(
-          <div key={`code-${i}`} className="my-1.5 overflow-hidden rounded-md border border-(--border) bg-(--surface-0)">
+          <div
+            key={`code-${i}`}
+            className="my-1.5 overflow-hidden rounded-md border border-(--border) bg-(--surface-0)"
+          >
             <div className="flex items-center justify-between border-b border-(--border) bg-(--surface-1) px-2.5 py-0.5 text-[11px] text-(--text-faint) mono">
               <span>{codeLang || "code"}</span>
-              <TraceIconButton label="Copy code block" onClick={() => copyText(codeText, "code block")}>
+              <TraceIconButton
+                label="Copy code block"
+                onClick={() => copyText(codeText, "code block")}
+              >
                 <CopyIcon className="size-3.5" />
               </TraceIconButton>
             </div>
             <pre className="mono overflow-auto p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-(--text)">
               {codeText}
             </pre>
-          </div>
+          </div>,
         );
         codeBuffer = [];
         codeLang = "";
@@ -249,13 +314,41 @@ export function MarkdownView({
       const level = headingMatch[1].length;
       const content = headingMatch[2];
       if (level === 1) {
-        blocks.push(<h1 key={i} className="mb-1.5 mt-2 text-[14px] font-semibold text-(--text) border-b border-(--border) pb-0.5">{renderInlineMarkdown(content)}</h1>);
+        blocks.push(
+          <h1
+            key={i}
+            className="mb-1.5 mt-2 text-[14px] font-semibold text-(--text) border-b border-(--border) pb-0.5"
+          >
+            {renderInlineMarkdown(content)}
+          </h1>,
+        );
       } else if (level === 2) {
-        blocks.push(<h2 key={i} className="mb-1 mt-2 text-[13px] font-semibold text-(--text) border-b border-(--border) pb-0.5">{renderInlineMarkdown(content)}</h2>);
+        blocks.push(
+          <h2
+            key={i}
+            className="mb-1 mt-2 text-[13px] font-semibold text-(--text) border-b border-(--border) pb-0.5"
+          >
+            {renderInlineMarkdown(content)}
+          </h2>,
+        );
       } else if (level === 3) {
-        blocks.push(<h3 key={i} className="mb-0.5 mt-1.5 text-[12px] font-semibold text-(--text)">{renderInlineMarkdown(content)}</h3>);
+        blocks.push(
+          <h3
+            key={i}
+            className="mb-0.5 mt-1.5 text-[12px] font-semibold text-(--text)"
+          >
+            {renderInlineMarkdown(content)}
+          </h3>,
+        );
       } else {
-        blocks.push(<h4 key={i} className="mb-0.5 mt-1 text-[12px] font-semibold text-(--text)">{renderInlineMarkdown(content)}</h4>);
+        blocks.push(
+          <h4
+            key={i}
+            className="mb-0.5 mt-1 text-[12px] font-semibold text-(--text)"
+          >
+            {renderInlineMarkdown(content)}
+          </h4>,
+        );
       }
       continue;
     }
@@ -263,9 +356,12 @@ export function MarkdownView({
     if (line.startsWith("> ")) {
       flushList(i);
       blocks.push(
-        <blockquote key={i} className="my-1 border-l-2 border-(--accent) pl-2.5 italic text-(--text-dim) text-[12px]">
+        <blockquote
+          key={i}
+          className="my-1 border-l-2 border-(--accent) pl-2.5 italic text-(--text-dim) text-[12px]"
+        >
           {renderInlineMarkdown(line.slice(2))}
-        </blockquote>
+        </blockquote>,
       );
       continue;
     }
@@ -291,9 +387,12 @@ export function MarkdownView({
       blocks.push(<div key={i} className="h-1" />);
     } else {
       blocks.push(
-        <p key={i} className="my-0.5 text-[12px] leading-relaxed text-(--text-dim)">
+        <p
+          key={i}
+          className="my-0.5 text-[12px] leading-relaxed text-(--text-dim)"
+        >
           {renderInlineMarkdown(line)}
-        </p>
+        </p>,
       );
     }
   }
@@ -302,11 +401,21 @@ export function MarkdownView({
   return (
     <div className={`relative ${className}`}>
       {allowToggle && text.length > 50 && (
-        <div className="mb-1 flex justify-end gap-1" role="group" aria-label="Markdown actions">
-          <TraceIconButton label="Copy markdown text" onClick={() => copyText(text, "markdown text")}>
+        <div
+          className="mb-1 flex justify-end gap-1"
+          role="group"
+          aria-label="Markdown actions"
+        >
+          <TraceIconButton
+            label="Copy markdown text"
+            onClick={() => copyText(text, "markdown text")}
+          >
             <CopyIcon className="size-3.5" />
           </TraceIconButton>
-          <TraceIconButton label="Show raw markdown" onClick={() => setRaw(true)}>
+          <TraceIconButton
+            label="Show raw markdown"
+            onClick={() => setRaw(true)}
+          >
             <CodeIcon className="size-3.5" />
           </TraceIconButton>
         </div>
@@ -333,10 +442,12 @@ export function formatErrorRowLabel(
   content: unknown,
 ): { label: string; title: string } {
   const tool = toolName?.trim() || "unknown tool";
-  const firstLine = errorText(content).split(/\r?\n/, 1)[0].trim() || "No error message";
-  const preview = firstLine.length > ERROR_PREVIEW_LENGTH
-    ? `${firstLine.slice(0, ERROR_PREVIEW_LENGTH - 1)}…`
-    : firstLine;
+  const firstLine =
+    errorText(content).split(/\r?\n/, 1)[0].trim() || "No error message";
+  const preview =
+    firstLine.length > ERROR_PREVIEW_LENGTH
+      ? `${firstLine.slice(0, ERROR_PREVIEW_LENGTH - 1)}…`
+      : firstLine;
   return {
     label: `${tool} · ${preview}`,
     title: `${tool} · ${firstLine}`,
@@ -369,13 +480,28 @@ function getEntryDuration(e: TraceEntry, next?: TraceEntry): number | null {
   return Number.isNaN(delta) || delta < 0 ? null : delta;
 }
 
-function TimingWaterfall({ durationMs, maxMs }: { durationMs: number; maxMs: number }) {
+function TimingWaterfall({
+  durationMs,
+  maxMs,
+}: {
+  durationMs: number;
+  maxMs: number;
+}) {
   const pct = Math.min(100, Math.max(8, (durationMs / (maxMs || 1)) * 100));
-  const durLabel = durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`;
+  const durLabel =
+    durationMs >= 1000
+      ? `${(durationMs / 1000).toFixed(1)}s`
+      : `${durationMs}ms`;
   return (
-    <div className="flex items-center gap-1.5 mono text-[10px] text-(--text-faint)" title={`Execution time: ${durLabel}`}>
+    <div
+      className="flex items-center gap-1.5 mono text-[10px] text-(--text-faint)"
+      title={`Execution time: ${durLabel}`}
+    >
       <div className="h-1.5 w-12 overflow-hidden rounded-full bg-(--surface-2)">
-        <div className="h-full rounded-full bg-(--accent) opacity-80" style={{ width: `${pct}%` }} />
+        <div
+          className="h-full rounded-full bg-(--accent) opacity-80"
+          style={{ width: `${pct}%` }}
+        />
       </div>
       <span>{durLabel}</span>
     </div>
@@ -464,7 +590,9 @@ function TraceBody({
     return (
       <div className="min-w-0 flex-1" style={{ color: "var(--hue-err)" }}>
         <span className="font-medium">Denied: {p.tool ?? "tool"}</span>
-        {p.rule ? <span className="ml-1 text-(--text-dim)">— {p.rule}</span> : null}
+        {p.rule ? (
+          <span className="ml-1 text-(--text-dim)">— {p.rule}</span>
+        ) : null}
       </div>
     );
   }
@@ -475,7 +603,9 @@ function TraceBody({
           <div className="min-w-0 flex-1">
             <MarkdownView text={p.text ?? ""} />
           </div>
-          {durationMs != null && maxMs != null && <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />}
+          {durationMs != null && maxMs != null && (
+            <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />
+          )}
         </div>
       </div>
     );
@@ -485,7 +615,9 @@ function TraceBody({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className="mono">tool · {p.name ?? "unknown tool"}</span>
-          {durationMs != null && maxMs != null && <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />}
+          {durationMs != null && maxMs != null && (
+            <TimingWaterfall durationMs={durationMs} maxMs={maxMs} />
+          )}
         </div>
         {p.input !== undefined && (
           <Disclosure label="input" forceOpen={forceOpen}>
@@ -505,7 +637,11 @@ function TraceBody({
           forceOpen={forceOpen}
           label={
             errorLabel ? (
-              <span className="block max-w-full truncate" style={{ color: "var(--hue-err)" }} title={errorLabel.title}>
+              <span
+                className="block max-w-full truncate"
+                style={{ color: "var(--hue-err)" }}
+                title={errorLabel.title}
+              >
                 {errorLabel.label}
               </span>
             ) : (
@@ -529,7 +665,8 @@ function TraceBody({
   if (kind === "usage") {
     return (
       <div className="min-w-0 flex-1 text-(--text-faint)">
-        {p.numTurns ?? "?"} turns · {p.durationMs != null ? `${(p.durationMs / 1000).toFixed(1)}s` : "?"} ·{" "}
+        {p.numTurns ?? "?"} turns ·{" "}
+        {p.durationMs != null ? `${(p.durationMs / 1000).toFixed(1)}s` : "?"} ·{" "}
         {p.costUSD != null ? `$${p.costUSD.toFixed(4)}` : "?"}
         {p.usage && Object.keys(p.usage).length > 0 && (
           <Disclosure label="tokens" forceOpen={forceOpen}>
@@ -543,11 +680,16 @@ function TraceBody({
     if (p.note === "trace_truncated") {
       return (
         <div className="min-w-0 flex-1" style={{ color: "var(--hue-warn)" }}>
-          trace truncated — {p.dropped ?? "?"} event{p.dropped === 1 ? "" : "s"} dropped past the cap
+          trace truncated — {p.dropped ?? "?"} event{p.dropped === 1 ? "" : "s"}{" "}
+          dropped past the cap
         </div>
       );
     }
-    return <div className="min-w-0 flex-1 text-(--text-faint)">{p.note ?? "lifecycle"}</div>;
+    return (
+      <div className="min-w-0 flex-1 text-(--text-faint)">
+        {p.note ?? "lifecycle"}
+      </div>
+    );
   }
   // Unknown kind (future factory.trace versions): show, do not reinterpret.
   return (
@@ -567,10 +709,19 @@ const isErrorKind = (e: TraceEntry) =>
   (e.kind === "lifecycle" && e.payload?.note === "trace_truncated");
 const isUsageKind = (k: string) => k === "usage";
 
-const FILTER_ORDER: TraceFilterKind[] = ["all", "tools", "reasoning", "errors", "usage"];
+const FILTER_ORDER: TraceFilterKind[] = [
+  "all",
+  "tools",
+  "reasoning",
+  "errors",
+  "usage",
+];
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable=true]"))
+  );
 }
 
 /**
@@ -638,7 +789,10 @@ export function RunTrace({
         if (payload.id != null) byId.set(String(payload.id), payload);
         latestByAttempt.set(entry.attempt, payload);
       } else if (entry.kind === "tool_result") {
-        const exact = payload.toolUseId != null ? byId.get(String(payload.toolUseId)) : undefined;
+        const exact =
+          payload.toolUseId != null
+            ? byId.get(String(payload.toolUseId))
+            : undefined;
         const call = exact ?? latestByAttempt.get(entry.attempt);
         if (call) byResultSeq.set(entry.seq, call);
       }
@@ -656,17 +810,25 @@ export function RunTrace({
         hasTokens = true;
         const u = e.payload.usage;
         promptTokens += u.input_tokens ?? u.prompt_tokens ?? u.inputTokens ?? 0;
-        completionTokens += u.output_tokens ?? u.completion_tokens ?? u.outputTokens ?? 0;
+        completionTokens +=
+          u.output_tokens ?? u.completion_tokens ?? u.outputTokens ?? 0;
       }
       if (e.payload?.costUSD) totalCost += e.payload.costUSD;
     }
-    return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens, totalCost, hasTokens };
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      totalCost,
+      hasTokens,
+    };
   }, [entries]);
 
   const visibleEntries = useMemo(() => {
     if (filter === "all") return entries;
     if (filter === "tools") return entries.filter((e) => isToolKind(e.kind));
-    if (filter === "reasoning") return entries.filter((e) => isReasoningKind(e.kind));
+    if (filter === "reasoning")
+      return entries.filter((e) => isReasoningKind(e.kind));
     if (filter === "errors") return entries.filter(isErrorKind);
     if (filter === "usage") return entries.filter((e) => isUsageKind(e.kind));
     return entries;
@@ -677,7 +839,10 @@ export function RunTrace({
 
   const handleJumpToError = useCallback(() => {
     if (allErrorEntries.length === 0) return;
-    const nextIdx = activeErrorIdx === null ? 0 : (activeErrorIdx + 1) % allErrorEntries.length;
+    const nextIdx =
+      activeErrorIdx === null
+        ? 0
+        : (activeErrorIdx + 1) % allErrorEntries.length;
     const target = allErrorEntries[nextIdx];
     setActiveErrorIdx(nextIdx);
     setJumpCount((c) => c + 1);
@@ -703,7 +868,10 @@ export function RunTrace({
       const dur = getEntryDuration(entries[i], entries[i + 1]);
       if (dur != null) map.set(entries[i].seq, dur);
     }
-    const max = shown.reduce((largest, entry) => Math.max(largest, map.get(entry.seq) ?? 0), 0);
+    const max = shown.reduce(
+      (largest, entry) => Math.max(largest, map.get(entry.seq) ?? 0),
+      0,
+    );
     return { durations: map, maxDurationMs: max || 1000 };
   }, [entries, shown]);
 
@@ -719,9 +887,15 @@ export function RunTrace({
         e.payload?.text,
         e.payload?.name,
         e.payload?.note,
-        typeof e.payload?.input === "object" ? JSON.stringify(e.payload.input) : String(e.payload?.input ?? ""),
-        typeof e.payload?.content === "object" ? JSON.stringify(e.payload.content) : String(e.payload?.content ?? ""),
-      ].join(" ").toLowerCase();
+        typeof e.payload?.input === "object"
+          ? JSON.stringify(e.payload.input)
+          : String(e.payload?.input ?? ""),
+        typeof e.payload?.content === "object"
+          ? JSON.stringify(e.payload.content)
+          : String(e.payload?.content ?? ""),
+      ]
+        .join(" ")
+        .toLowerCase();
       if (text.includes(q)) matches.push(i);
     }
     return matches;
@@ -733,7 +907,8 @@ export function RunTrace({
   const jumpToLatest = useCallback(() => {
     setFollowLive(true);
     setUnreadCount(0);
-    lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+    lastSeenSeqRef.current =
+      entries.length > 0 ? entries[entries.length - 1].seq : 0;
     if (scroller.current) {
       scroller.current.scrollTo({
         top: scroller.current.scrollHeight,
@@ -748,8 +923,10 @@ export function RunTrace({
     const i = FILTER_ORDER.indexOf(filter);
     if (i < 0) return;
     let next: TraceFilterKind | null = null;
-    if (e.key === "ArrowRight") next = FILTER_ORDER[(i + 1) % FILTER_ORDER.length];
-    else if (e.key === "ArrowLeft") next = FILTER_ORDER[(i - 1 + FILTER_ORDER.length) % FILTER_ORDER.length];
+    if (e.key === "ArrowRight")
+      next = FILTER_ORDER[(i + 1) % FILTER_ORDER.length];
+    else if (e.key === "ArrowLeft")
+      next = FILTER_ORDER[(i - 1 + FILTER_ORDER.length) % FILTER_ORDER.length];
     else if (e.key === "Home") next = FILTER_ORDER[0];
     else if (e.key === "End") next = FILTER_ORDER[FILTER_ORDER.length - 1];
     if (!next || next === filter) {
@@ -761,7 +938,9 @@ export function RunTrace({
     if ((e.target as HTMLElement).closest('[role="tab"]')) {
       const key = next;
       queueMicrotask(() => {
-        regionRef.current?.querySelector<HTMLElement>(`[role="tab"][data-filter="${key}"]`)?.focus();
+        regionRef.current
+          ?.querySelector<HTMLElement>(`[role="tab"][data-filter="${key}"]`)
+          ?.focus();
       });
     }
   };
@@ -781,7 +960,9 @@ export function RunTrace({
       if (searchMatches.length > 0) {
         e.preventDefault();
         if (e.shiftKey || e.key === "ArrowUp") {
-          setActiveMatch((m) => (m - 1 + searchMatches.length) % searchMatches.length);
+          setActiveMatch(
+            (m) => (m - 1 + searchMatches.length) % searchMatches.length,
+          );
         } else {
           setActiveMatch((m) => (m + 1) % searchMatches.length);
         }
@@ -794,7 +975,15 @@ export function RunTrace({
   // e for expand/collapse details, l for follow-live, G for jump-to-latest, . for jump-to-error.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (keyGuard(e) || isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey || goPrefixActive()) return;
+      if (
+        keyGuard(e) ||
+        isTypingTarget(e.target) ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        goPrefixActive()
+      )
+        return;
 
       if (e.key === "1") {
         e.preventDefault();
@@ -814,7 +1003,10 @@ export function RunTrace({
       } else if (e.key === "[") {
         e.preventDefault();
         const i = FILTER_ORDER.indexOf(filter);
-        if (i >= 0) setFilter(FILTER_ORDER[(i - 1 + FILTER_ORDER.length) % FILTER_ORDER.length]);
+        if (i >= 0)
+          setFilter(
+            FILTER_ORDER[(i - 1 + FILTER_ORDER.length) % FILTER_ORDER.length],
+          );
       } else if (e.key === "]") {
         e.preventDefault();
         const i = FILTER_ORDER.indexOf(filter);
@@ -830,7 +1022,8 @@ export function RunTrace({
           e.preventDefault();
           if (followLive) {
             setFollowLive(false);
-            lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+            lastSeenSeqRef.current =
+              entries.length > 0 ? entries[entries.length - 1].seq : 0;
           } else {
             jumpToLatest();
           }
@@ -847,7 +1040,15 @@ export function RunTrace({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [filter, live, followLive, entries, counts.errors, handleJumpToError, jumpToLatest]);
+  }, [
+    filter,
+    live,
+    followLive,
+    entries,
+    counts.errors,
+    handleJumpToError,
+    jumpToLatest,
+  ]);
 
   // Jump to active search match:
   useEffect(() => {
@@ -866,21 +1067,30 @@ export function RunTrace({
     }
     if (followLive) {
       setUnreadCount(0);
-      lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+      lastSeenSeqRef.current =
+        entries.length > 0 ? entries[entries.length - 1].seq : 0;
     } else {
-      const count = entries.filter((e) => e.seq > lastSeenSeqRef.current).length;
+      const count = entries.filter(
+        (e) => e.seq > lastSeenSeqRef.current,
+      ).length;
       setUnreadCount(count);
     }
   }, [entries, live, followLive]);
 
   // Jump to active error match:
   useEffect(() => {
-    if (activeErrorIdx !== null && allErrorEntries.length > 0 && scroller.current) {
+    if (
+      activeErrorIdx !== null &&
+      allErrorEntries.length > 0 &&
+      scroller.current
+    ) {
       const target = allErrorEntries[activeErrorIdx % allErrorEntries.length];
       if (!target) return;
       const targetIdx = shown.findIndex((e) => e.seq === target.seq);
       if (targetIdx !== -1) {
-        const el = scroller.current.querySelector(`[data-trace-idx="${targetIdx}"]`);
+        const el = scroller.current.querySelector(
+          `[data-trace-idx="${targetIdx}"]`,
+        );
         el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }
     }
@@ -902,11 +1112,13 @@ export function RunTrace({
         setFollowLive(true);
       }
       setUnreadCount(0);
-      lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+      lastSeenSeqRef.current =
+        entries.length > 0 ? entries[entries.length - 1].seq : 0;
     } else {
       if (followLive) {
         setFollowLive(false);
-        lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+        lastSeenSeqRef.current =
+          entries.length > 0 ? entries[entries.length - 1].seq : 0;
       }
     }
   };
@@ -933,22 +1145,38 @@ export function RunTrace({
               onClick={() => {
                 if (followLive) {
                   setFollowLive(false);
-                  lastSeenSeqRef.current = entries.length > 0 ? entries[entries.length - 1].seq : 0;
+                  lastSeenSeqRef.current =
+                    entries.length > 0 ? entries[entries.length - 1].seq : 0;
                 } else {
                   jumpToLatest();
                 }
               }}
               className={`${TRACE_QUIET_BUTTON} ${
-                followLive ? "border-(--border-strong) bg-(--surface-2) text-(--text)" : ""
+                followLive
+                  ? "border-(--border-strong) bg-(--surface-2) text-(--text)"
+                  : ""
               }`}
-              title={followLive ? "Auto-scrolling live (l). Click to pause." : "Auto-scroll paused (l). Click to follow live."}
+              title={
+                followLive
+                  ? "Auto-scrolling live (l). Click to pause."
+                  : "Auto-scroll paused (l). Click to follow live."
+              }
             >
               <span
                 className={`size-1.5 rounded-full ${followLive ? "motion-safe:animate-pulse" : ""}`}
-                style={{ background: followLive ? "var(--hue-warn)" : "var(--text-faint)" }}
+                style={{
+                  background: followLive
+                    ? "var(--hue-warn)"
+                    : "var(--text-faint)",
+                }}
               />
               <span>{followLive ? "Follow live" : "Follow live (paused)"}</span>
-              <span aria-hidden="true" className="mono ml-0.5 text-(--text-faint) text-[10px]">l</span>
+              <span
+                aria-hidden="true"
+                className="mono ml-0.5 text-(--text-faint) text-[10px]"
+              >
+                l
+              </span>
             </button>
             {unreadCount > 0 && !followLive ? (
               <span className="text-[11px] font-medium text-(--hue-warn)">
@@ -956,19 +1184,32 @@ export function RunTrace({
               </span>
             ) : null}
           </div>
-        ) : <div />}
+        ) : (
+          <div />
+        )}
 
         {tokenStats.hasTokens && (
           <div className="flex items-center gap-1.5 rounded bg-(--surface-1) border border-(--border) px-2 py-0.5 text-[11px] mono text-(--text-dim)">
-            <span title="Cumulative token burn across trace">{tokenStats.promptTokens.toLocaleString()} in · {tokenStats.completionTokens.toLocaleString()} out</span>
-            {tokenStats.totalCost > 0 && <span className="text-(--text-faint)">(${tokenStats.totalCost.toFixed(4)})</span>}
+            <span title="Cumulative token burn across trace">
+              {tokenStats.promptTokens.toLocaleString()} in ·{" "}
+              {tokenStats.completionTokens.toLocaleString()} out
+            </span>
+            {tokenStats.totalCost > 0 && (
+              <span className="text-(--text-faint)">
+                (${tokenStats.totalCost.toFixed(4)})
+              </span>
+            )}
           </div>
         )}
       </div>
 
       {entries.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1" role="tablist" aria-label="Trace kind">
+          <div
+            className="flex flex-wrap gap-1"
+            role="tablist"
+            aria-label="Trace kind"
+          >
             {filterTabs.map((t, idx) => (
               <button
                 key={t.key}
@@ -983,12 +1224,23 @@ export function RunTrace({
                     ? "bg-(--surface-3) text-(--text)"
                     : "text-(--text-faint) hover:bg-(--surface-2)"
                 }`}
-                style={t.key === "errors" && t.count > 0 ? { color: "var(--hue-err)" } : undefined}
+                style={
+                  t.key === "errors" && t.count > 0
+                    ? { color: "var(--hue-err)" }
+                    : undefined
+                }
                 title={`Filter to ${t.label} (${idx + 1})`}
               >
                 <span>{t.label}</span>
-                {t.count > 0 && <span className="ml-1 tabular-nums opacity-75">{t.count}</span>}
-                <span aria-hidden="true" className="mono ml-1 text-(--text-faint) text-[10px] opacity-70">
+                {t.count > 0 && (
+                  <span className="ml-1 tabular-nums opacity-75">
+                    {t.count}
+                  </span>
+                )}
+                <span
+                  aria-hidden="true"
+                  className="mono ml-1 text-(--text-faint) text-[10px] opacity-70"
+                >
                   {idx + 1}
                 </span>
               </button>
@@ -1007,9 +1259,17 @@ export function RunTrace({
                 <ArrowDownIcon aria-hidden="true" className="size-3" />
                 <span>next error</span>
                 <span className="mono text-[10px] opacity-75">
-                  {activeErrorIdx === null ? 0 : (activeErrorIdx % counts.errors) + 1}/{counts.errors}
+                  {activeErrorIdx === null
+                    ? 0
+                    : (activeErrorIdx % counts.errors) + 1}
+                  /{counts.errors}
                 </span>
-                <span aria-hidden="true" className="mono ml-0.5 opacity-75 text-[10px]">.</span>
+                <span
+                  aria-hidden="true"
+                  className="mono ml-0.5 opacity-75 text-[10px]"
+                >
+                  .
+                </span>
               </button>
             )}
 
@@ -1028,20 +1288,31 @@ export function RunTrace({
                 className="w-24 bg-transparent outline-none text-(--text) placeholder:text-(--text-faint) sm:w-32"
               />
               {!search && (
-                <kbd aria-hidden="true" className="mono text-[9px] text-(--text-faint) border border-(--border) rounded px-1 bg-(--surface-1)">
+                <kbd
+                  aria-hidden="true"
+                  className="mono text-[9px] text-(--text-faint) border border-(--border) rounded px-1 bg-(--surface-1)"
+                >
                   /
                 </kbd>
               )}
               {search && (
                 <>
                   <span className="mono text-[10px] text-(--text-faint)">
-                    {searchMatches.length ? `${(activeMatch % searchMatches.length) + 1}/${searchMatches.length}` : "0"}
+                    {searchMatches.length
+                      ? `${(activeMatch % searchMatches.length) + 1}/${searchMatches.length}`
+                      : "0"}
                   </span>
                   {searchMatches.length > 0 && (
                     <>
                       <button
                         type="button"
-                        onClick={() => setActiveMatch((m) => (m - 1 + searchMatches.length) % searchMatches.length)}
+                        onClick={() =>
+                          setActiveMatch(
+                            (m) =>
+                              (m - 1 + searchMatches.length) %
+                              searchMatches.length,
+                          )
+                        }
                         className="text-(--text-faint) hover:text-(--text)"
                         title="Previous match"
                         aria-label="Previous match"
@@ -1050,7 +1321,9 @@ export function RunTrace({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setActiveMatch((m) => (m + 1) % searchMatches.length)}
+                        onClick={() =>
+                          setActiveMatch((m) => (m + 1) % searchMatches.length)
+                        }
                         className="text-(--text-faint) hover:text-(--text)"
                         title="Next match"
                         aria-label="Next match"
@@ -1081,7 +1354,12 @@ export function RunTrace({
               title="Toggle expand/collapse details (e)"
             >
               <span>{expandAll ? "Collapse details" : "Expand details"}</span>
-              <span aria-hidden="true" className="mono text-[10px] text-(--text-faint)">e</span>
+              <span
+                aria-hidden="true"
+                className="mono text-[10px] text-(--text-faint)"
+              >
+                e
+              </span>
             </button>
           </div>
         </div>
@@ -1110,18 +1388,22 @@ export function RunTrace({
           >
             {shown.map((e, i) => {
               const isMatch = searchMatches.includes(i);
-              const isActiveMatch = searchMatches.length > 0 && searchMatches[activeMatch % searchMatches.length] === i;
+              const isActiveMatch =
+                searchMatches.length > 0 &&
+                searchMatches[activeMatch % searchMatches.length] === i;
               const isActiveError =
                 activeErrorIdx !== null &&
                 allErrorEntries.length > 0 &&
-                allErrorEntries[activeErrorIdx % allErrorEntries.length]?.seq === e.seq;
+                allErrorEntries[activeErrorIdx % allErrorEntries.length]
+                  ?.seq === e.seq;
               return (
                 <Fragment key={e.seq}>
-                  {multiAttempt && (i === 0 || shown[i - 1].attempt !== e.attempt) && (
-                    <div className="border-b border-(--border) py-1 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
-                      Attempt #{e.attempt}
-                    </div>
-                  )}
+                  {multiAttempt &&
+                    (i === 0 || shown[i - 1].attempt !== e.attempt) && (
+                      <div className="border-b border-(--border) py-1 text-[11px] font-medium tracking-wide text-(--text-faint) uppercase">
+                        Attempt #{e.attempt}
+                      </div>
+                    )}
                   <div
                     data-trace-idx={i}
                     className={`flex items-baseline gap-2 border-b border-(--border) py-1.5 last:border-0 transition-colors ${
@@ -1134,8 +1416,12 @@ export function RunTrace({
                             : ""
                     }`}
                   >
-                    <span className="mono w-[72px] shrink-0 text-(--text-faint)" title={e.ts}>
-                      {new Date(e.ts).toLocaleTimeString([], { hour12: false })} ·
+                    <span
+                      className="mono w-[72px] shrink-0 text-(--text-faint)"
+                      title={e.ts}
+                    >
+                      {new Date(e.ts).toLocaleTimeString([], { hour12: false })}{" "}
+                      ·
                     </span>
                     <TraceBody
                       kind={e.kind}
@@ -1164,7 +1450,12 @@ export function RunTrace({
                     ? `New activity (${unreadCount}) — Jump to latest`
                     : "Jump to latest"}
                 </span>
-                <span aria-hidden="true" className="mono ml-0.5 text-white/75 text-[10px]">G</span>
+                <span
+                  aria-hidden="true"
+                  className="mono ml-0.5 text-white/75 text-[10px]"
+                >
+                  G
+                </span>
               </button>
             </div>
           )}
@@ -1177,7 +1468,11 @@ export function RunTrace({
           {onExpand && (
             <>
               {" — "}
-              <button type="button" onClick={onExpand} className="text-(--accent) hover:underline">
+              <button
+                type="button"
+                onClick={onExpand}
+                className="text-(--accent) hover:underline"
+              >
                 open full view
               </button>
             </>
@@ -1191,11 +1486,18 @@ export function RunTrace({
     return (
       <div>
         <div className="display mb-2 text-[15px] font-semibold">
-          Trace{entries.length ? <span className="ml-2 text-(--text-faint)">· {entries.length}</span> : null}
+          Trace
+          {entries.length ? (
+            <span className="ml-2 text-(--text-faint)">· {entries.length}</span>
+          ) : null}
         </div>
         {body}
       </div>
     );
   }
-  return <Section title={`Trace${entries.length ? ` · ${entries.length}` : ""}`}>{body}</Section>;
+  return (
+    <Section title={`Trace${entries.length ? ` · ${entries.length}` : ""}`}>
+      {body}
+    </Section>
+  );
 }

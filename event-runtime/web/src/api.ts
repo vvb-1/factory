@@ -34,11 +34,17 @@ export class ApiError extends Error {
 type CachedResponse = { etag: string; body: unknown };
 const responseCache = new Map<string, CachedResponse>();
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const url = `/api${path}`;
   const cacheKey = method === "GET" ? url : null;
   const cached = cacheKey ? responseCache.get(cacheKey) : undefined;
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (cached) headers["if-none-match"] = cached.etag;
   const res = await fetch(url, {
     method,
@@ -61,7 +67,10 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   if (!res.ok) {
     const message =
-      json?.error ?? (Array.isArray(json?.errors) ? json.errors.join("; ") : `HTTP ${res.status}`);
+      json?.error ??
+      (Array.isArray(json?.errors)
+        ? json.errors.join("; ")
+        : `HTTP ${res.status}`);
     throw new ApiError(message, res.status);
   }
   if (cacheKey) {
@@ -72,40 +81,89 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return json as T;
 }
 
-export function fetchArtifacts(filters?: { kind?: string; orphan?: boolean; search?: string }) {
+export function fetchArtifacts(filters?: {
+  kind?: string;
+  orphan?: boolean;
+  search?: string;
+}) {
   const query = new URLSearchParams();
   if (filters?.kind) query.set("kind", filters.kind);
-  if (filters?.orphan !== undefined) query.set("orphan", String(filters.orphan));
+  if (filters?.orphan !== undefined)
+    query.set("orphan", String(filters.orphan));
   if (filters?.search) query.set("search", filters.search);
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  return call<{ artifacts: ArtifactInventoryItem[] }>("GET", `/artifacts${suffix}`);
+  return call<{ artifacts: ArtifactInventoryItem[] }>(
+    "GET",
+    `/artifacts${suffix}`,
+  );
 }
 
 export const api = {
-  health: () => call<{ ok: boolean; policyVersion: string; env: EnvIdentity }>("GET", "/health"),
+  health: () =>
+    call<{ ok: boolean; policyVersion: string; env: EnvIdentity }>(
+      "GET",
+      "/health",
+    ),
   status: () => call<StatusView>("GET", "/status"),
   events: (status?: string) =>
-    call<{ events: AdmittedEvent[] }>("GET", `/events${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+    call<{ events: AdmittedEvent[] }>(
+      "GET",
+      `/events${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
   proposals: () => call<{ proposals: Proposal[] }>("GET", "/proposals"),
   // Full decision history (?status=all), newest first — read-only audit view.
   proposalHistory: (status = "all") =>
-    call<{ proposals: Proposal[] }>("GET", `/proposals?status=${encodeURIComponent(status)}`),
-  approve: (id: string) => call<ApproveOutcome>("POST", `/proposals/${encodeURIComponent(id)}/approve`, {}),
+    call<{ proposals: Proposal[] }>(
+      "GET",
+      `/proposals?status=${encodeURIComponent(status)}`,
+    ),
+  approve: (id: string) =>
+    call<ApproveOutcome>(
+      "POST",
+      `/proposals/${encodeURIComponent(id)}/approve`,
+      {},
+    ),
   reject: (id: string, reason?: string) =>
-    call<{ rejected: boolean }>("POST", `/proposals/${encodeURIComponent(id)}/reject`, { reason }),
+    call<{ rejected: boolean }>(
+      "POST",
+      `/proposals/${encodeURIComponent(id)}/reject`,
+      { reason },
+    ),
   runs: (state?: string) =>
-    call<{ runs: RunListItem[] }>("GET", `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`),
-  run: (id: string) => call<RunDetail>("GET", `/runs/${encodeURIComponent(id)}`),
+    call<{ runs: RunListItem[] }>(
+      "GET",
+      `/runs${state ? `?state=${encodeURIComponent(state)}` : ""}`,
+    ),
+  run: (id: string) =>
+    call<RunDetail>("GET", `/runs/${encodeURIComponent(id)}`),
   // Live agent trace, ascending by seq; `since` is the last seen seq (incremental).
   trace: (id: string, since = 0, limit = 500) =>
-    call<TraceView>("GET", `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`),
+    call<TraceView>(
+      "GET",
+      `/runs/${encodeURIComponent(id)}/trace?since=${since}&limit=${limit}`,
+    ),
   cancel: (id: string, reason?: string) =>
-    call<CancelOutcome>("POST", `/runs/${encodeURIComponent(id)}/cancel`, reason ? { reason } : {}),
+    call<CancelOutcome>(
+      "POST",
+      `/runs/${encodeURIComponent(id)}/cancel`,
+      reason ? { reason } : {},
+    ),
   retry: (id: string, force = false) =>
-    call<{ queued: boolean }>("POST", `/runs/${encodeURIComponent(id)}/retry`, { force }),
+    call<{ queued: boolean }>("POST", `/runs/${encodeURIComponent(id)}/retry`, {
+      force,
+    }),
   replay: (envelope: unknown) =>
-    call<{ admitted: boolean; duplicate: boolean; eventId: string }>("POST", "/replay", envelope),
-  injectEvent: (type: string, payload: Record<string, unknown>, source = "factory-web", subject = "factory") => {
+    call<{ admitted: boolean; duplicate: boolean; eventId: string }>(
+      "POST",
+      "/replay",
+      envelope,
+    ),
+  injectEvent: (
+    type: string,
+    payload: Record<string, unknown>,
+    source = "factory-web",
+    subject = "factory",
+  ) => {
     const eventId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const envelope = {
       schemaVersion: "factory.event/v1",
@@ -117,11 +175,17 @@ export const api = {
       correlationId: eventId,
       payload,
     };
-    return call<{ admitted: boolean; duplicate: boolean; eventId: string }>("POST", "/replay", envelope);
+    return call<{ admitted: boolean; duplicate: boolean; eventId: string }>(
+      "POST",
+      "/replay",
+      envelope,
+    );
   },
   // Append-only lifecycle feed: entries newest-first, `since` is the last seen head.
-  journal: (since = 0, limit = 100) => call<JournalView>("GET", `/journal?since=${since}&limit=${limit}`),
-  outbox: (limit = 20) => call<{ outbox: OutboxRow[] }>("GET", `/outbox?limit=${limit}`),
+  journal: (since = 0, limit = 100) =>
+    call<JournalView>("GET", `/journal?since=${since}&limit=${limit}`),
+  outbox: (limit = 20) =>
+    call<{ outbox: OutboxRow[] }>("GET", `/outbox?limit=${limit}`),
   // Re-plan a dead_lettered or human_needed event (404 unknown, 409 wrong status).
   requeue: (source: string, eventId: string) =>
     call<{ requeued: boolean }>("POST", "/events/requeue", { source, eventId }),
@@ -130,26 +194,45 @@ export const api = {
     call<{ archived: boolean }>("POST", "/events/archive", { source, eventId }),
   // Requeue/fail the run held by a stale worker and retire its registry row.
   releaseWorker: (workerId: string, runId: string) =>
-    call<{ released: boolean; runId: string }>("POST", `/workers/${encodeURIComponent(workerId)}/release`, { runId }),
+    call<{ released: boolean; runId: string }>(
+      "POST",
+      `/workers/${encodeURIComponent(workerId)}/release`,
+      { runId },
+    ),
   // The agent registry, fully readable: definitions, prompts, schemas, pins.
   agents: () => call<AgentsView>("GET", "/agents"),
   // Every event + run under one correlation id (WM-527); 404 when unknown.
-  chain: (correlationId: string) => call<ChainView>("GET", `/chain/${encodeURIComponent(correlationId)}`),
+  chain: (correlationId: string) =>
+    call<ChainView>("GET", `/chain/${encodeURIComponent(correlationId)}`),
   // Configured factory repositories (config/repos.yaml) — context tabs open from this list.
   repos: () => call<{ repos: RepoItem[] }>("GET", "/repos"),
   // Janitor worktree scan and cleanup (apply: false for dry run, apply: true for teardown)
   janitor: (name: string, apply = false) =>
-    call<JanitorResult>("POST", `/repos/${encodeURIComponent(name)}/janitor`, { apply }),
+    call<JanitorResult>("POST", `/repos/${encodeURIComponent(name)}/janitor`, {
+      apply,
+    }),
   // The worker registry: which processes are alive, where, and what they run.
   workers: () => call<{ workers: Worker[] }>("GET", "/workers"),
   // Human inbox ledger (WM-285): everything waiting on the operator, by status.
   inbox: (status: InboxStatus = "open") =>
-    call<{ items: InboxItem[] }>("GET", `/inbox?status=${encodeURIComponent(status)}`),
+    call<{ items: InboxItem[] }>(
+      "GET",
+      `/inbox?status=${encodeURIComponent(status)}`,
+    ),
   // Ack = "seen"; 404 unknown item, 409 already resolved.
-  ackInbox: (id: string) => call<{ item: InboxItem }>("POST", `/inbox/${encodeURIComponent(id)}/ack`, {}),
+  ackInbox: (id: string) =>
+    call<{ item: InboxItem }>(
+      "POST",
+      `/inbox/${encodeURIComponent(id)}/ack`,
+      {},
+    ),
   // Resolve = "dealt with"; idempotent on the ledger, 404 unknown item.
   resolveInbox: (id: string, reason?: string) =>
-    call<{ item: InboxItem }>("POST", `/inbox/${encodeURIComponent(id)}/resolve`, reason ? { reason } : {}),
+    call<{ item: InboxItem }>(
+      "POST",
+      `/inbox/${encodeURIComponent(id)}/resolve`,
+      reason ? { reason } : {},
+    ),
   // The schedule registry: recurring loops, cadence, timing, and health.
   schedules: () => call<{ schedules: ScheduleItem[] }>("GET", "/schedules"),
   // Trigger an ad-hoc run. Explicit PR numbers are accepted only by merge schedules.
@@ -181,7 +264,10 @@ export interface ScheduleItem {
 }
 
 export const extendRun = (id: string, seconds: number, override = false) =>
-  call<ExtendOutcome>("POST", `/runs/${encodeURIComponent(id)}/extend`, { seconds, override });
+  call<ExtendOutcome>("POST", `/runs/${encodeURIComponent(id)}/extend`, {
+    seconds,
+    override,
+  });
 
 export interface ExtendOutcome {
   extended: true;

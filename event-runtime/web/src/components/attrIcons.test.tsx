@@ -23,7 +23,18 @@ describe("attribute icon registry (§5.2 tier 4, WM-483)", () => {
   });
 
   test("identity and state labels are unmapped so they render an empty, reserved slot", () => {
-    for (const k of ["id", "run", "runId", "version", "specHash", "idempotencyKey", "state", "status", "decision", "pid"]) {
+    for (const k of [
+      "id",
+      "run",
+      "runId",
+      "version",
+      "specHash",
+      "idempotencyKey",
+      "state",
+      "status",
+      "decision",
+      "pid",
+    ]) {
       expect(attrIcon(k)).toBeNull();
     }
   });

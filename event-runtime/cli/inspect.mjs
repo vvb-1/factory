@@ -52,7 +52,8 @@ export async function inspect(client, runId) {
     // before the JSON that says it.
     if (view.result.artifact !== undefined) {
       const artifactView = await viewFor(client, run.spec.agent);
-      for (const line of inspectHeader(artifactView, view.result.artifact)) console.log(`  ${line}`);
+      for (const line of inspectHeader(artifactView, view.result.artifact))
+        console.log(`  ${line}`);
     }
     console.log(
       `  terminalState ${view.result.terminalState}   reason ${view.result.reasonCode ?? "-"}`,

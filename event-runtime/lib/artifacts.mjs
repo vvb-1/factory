@@ -33,7 +33,8 @@ export function hashFile(filePath) {
 
 /** Resolve a store path from a content hash; malformed hashes fail closed. */
 export function artifactPath(storeRoot, sha256hex) {
-  if (!HEX64.test(sha256hex ?? "")) throw new Error(`invalid artifact hash: ${sha256hex}`);
+  if (!HEX64.test(sha256hex ?? ""))
+    throw new Error(`invalid artifact hash: ${sha256hex}`);
   return path.join(storeRoot, sha256hex);
 }
 
@@ -63,12 +64,18 @@ export function storeCollected({ entries, storeRoot }) {
     }
     const srcHash = hashFile(src);
     if (srcHash !== entry.sha256) {
-      throw new Error(`artifact source hash mismatch: expected ${entry.sha256}, got ${srcHash}`);
+      throw new Error(
+        `artifact source hash mismatch: expected ${entry.sha256}, got ${srcHash}`,
+      );
     }
     if (existsSync(dest)) {
       const destHash = hashFile(dest);
       if (destHash === entry.sha256) {
-        return { ...entry, uri: `file://${dest}`, sizeBytes: statSync(dest).size };
+        return {
+          ...entry,
+          uri: `file://${dest}`,
+          sizeBytes: statSync(dest).size,
+        };
       }
       rmSync(dest, { force: true });
     }
@@ -79,7 +86,9 @@ export function storeCollected({ entries, storeRoot }) {
       copyFileSync(src, tmpPath);
       const tmpHash = hashFile(tmpPath);
       if (tmpHash !== entry.sha256) {
-        throw new Error(`artifact store hash mismatch: expected ${entry.sha256}, got ${tmpHash}`);
+        throw new Error(
+          `artifact store hash mismatch: expected ${entry.sha256}, got ${tmpHash}`,
+        );
       }
       renameSync(tmpPath, dest);
     } finally {
@@ -110,20 +119,28 @@ export function findArtifact(storeRoot, sha256hex) {
  * Stored bytes are re-verified against the declared hash upon materialization;
  * corrupt entries fail loudly and are purged from the store (OPS-439).
  */
-export function materializeArtifact({ storeRoot, sha256hex, workspaceDir, as }) {
+export function materializeArtifact({
+  storeRoot,
+  sha256hex,
+  workspaceDir,
+  as,
+}) {
   const found = findArtifact(storeRoot, sha256hex);
   if (!found) throw new Error(`artifact ${sha256hex} is not in the store`);
   const actualHash = hashFile(found.file);
   if (actualHash !== sha256hex) {
     rmSync(found.file, { force: true });
-    throw new Error(`corrupt artifact ${sha256hex} in store (actual hash was ${actualHash}): removed corrupt entry`);
+    throw new Error(
+      `corrupt artifact ${sha256hex} in store (actual hash was ${actualHash}): removed corrupt entry`,
+    );
   }
   if (typeof as !== "string" || !as || path.isAbsolute(as)) {
     throw new Error(`artifact target "${as}" must be a relative filename`);
   }
   const root = path.resolve(workspaceDir);
   const dest = path.resolve(root, as);
-  if (!dest.startsWith(root + path.sep)) throw new Error(`artifact target "${as}" escapes the workspace`);
+  if (!dest.startsWith(root + path.sep))
+    throw new Error(`artifact target "${as}" escapes the workspace`);
   const realRoot = existsSync(root) ? realpathSync(root) : root;
   mkdirSync(path.dirname(dest), { recursive: true });
   const realDir = realpathSync(path.dirname(dest));
@@ -132,9 +149,11 @@ export function materializeArtifact({ storeRoot, sha256hex, workspaceDir, as }) 
   }
   if (existsSync(dest)) {
     const stat = lstatSync(dest);
-    if (stat.isSymbolicLink()) throw new Error(`artifact target "${as}" is a symlink`);
+    if (stat.isSymbolicLink())
+      throw new Error(`artifact target "${as}" is a symlink`);
     const realDest = realpathSync(dest);
-    if (!realDest.startsWith(realRoot + path.sep)) throw new Error(`artifact target "${as}" escapes the workspace`);
+    if (!realDest.startsWith(realRoot + path.sep))
+      throw new Error(`artifact target "${as}" escapes the workspace`);
   }
   copyFileSync(found.file, dest);
   return { path: dest, sha256: sha256hex, sizeBytes: found.sizeBytes };
@@ -156,19 +175,25 @@ export function referencedHashes(db) {
  * to it. The store remains the source of truth for which bytes exist; stale
  * result references to missing files therefore do not produce phantom rows.
  */
-export function listArtifacts(db, storeRoot, { orphan, kind, search, limit } = {}) {
+export function listArtifacts(
+  db,
+  storeRoot,
+  { orphan, kind, search, limit } = {},
+) {
   if (!existsSync(storeRoot)) return [];
 
   const references = new Map();
-  const rows = db.query(
-    `SELECT results.run_id, results.result_json, runs.spec_json, runs.state, runs.created_at
+  const rows = db
+    .query(
+      `SELECT results.run_id, results.result_json, runs.spec_json, runs.state, runs.created_at
      FROM results
      LEFT JOIN runs ON runs.run_id = results.run_id`,
-  ).all();
+    )
+    .all();
   for (const row of rows) {
     let agent = null;
     try {
-      agent = row.spec_json ? JSON.parse(row.spec_json).agent ?? null : null;
+      agent = row.spec_json ? (JSON.parse(row.spec_json).agent ?? null) : null;
     } catch {
       // A catalogue read should still expose the bytes if an old spec is bad.
     }
@@ -188,15 +213,27 @@ export function listArtifacts(db, storeRoot, { orphan, kind, search, limit } = {
 
   const term = typeof search === "string" ? search.toLowerCase() : null;
   const inventory = [];
-  for (const sha256 of readdirSync(storeRoot).filter((name) => HEX64.test(name)).sort()) {
+  for (const sha256 of readdirSync(storeRoot)
+    .filter((name) => HEX64.test(name))
+    .sort()) {
     const stat = statSync(path.join(storeRoot, sha256));
     if (!stat.isFile()) continue;
     const refs = references.get(sha256) ?? [];
     const referenced = refs.length > 0;
     if (orphan !== undefined && orphan === referenced) continue;
     if (kind !== undefined && !refs.some((ref) => ref.kind === kind)) continue;
-    if (term && ![sha256, ...refs.flatMap((ref) => [ref.runId, ref.kind, ref.agent, ref.state])]
-      .some((value) => String(value ?? "").toLowerCase().includes(term))) continue;
+    if (
+      term &&
+      ![
+        sha256,
+        ...refs.flatMap((ref) => [ref.runId, ref.kind, ref.agent, ref.state]),
+      ].some((value) =>
+        String(value ?? "")
+          .toLowerCase()
+          .includes(term),
+      )
+    )
+      continue;
     inventory.push({
       sha256,
       sizeBytes: stat.size,
@@ -215,7 +252,8 @@ export function listArtifacts(db, storeRoot, { orphan, kind, search, limit } = {
  * superseded one can leave bytes behind); they are only a problem unattended.
  */
 export function storeStats(db, storeRoot, { now = Date.now() } = {}) {
-  if (!existsSync(storeRoot)) return { files: 0, bytes: 0, orphans: 0, orphanBytes: 0 };
+  if (!existsSync(storeRoot))
+    return { files: 0, bytes: 0, orphans: 0, orphanBytes: 0 };
   const referenced = referencedHashes(db);
   let files = 0;
   let bytes = 0;
@@ -231,7 +269,13 @@ export function storeStats(db, storeRoot, { now = Date.now() } = {}) {
       orphanBytes += size;
     }
   }
-  return { files, bytes, orphans, orphanBytes, at: new Date(now).toISOString() };
+  return {
+    files,
+    bytes,
+    orphans,
+    orphanBytes,
+    at: new Date(now).toISOString(),
+  };
 }
 
 /**
@@ -242,9 +286,14 @@ export function storeStats(db, storeRoot, { now = Date.now() } = {}) {
 export function pruneArtifacts(
   db,
   storeRoot,
-  { olderThanMs = 7 * 24 * 60 * 60 * 1000, now = Date.now(), dryRun = false } = {},
+  {
+    olderThanMs = 7 * 24 * 60 * 60 * 1000,
+    now = Date.now(),
+    dryRun = false,
+  } = {},
 ) {
-  if (!existsSync(storeRoot)) return { deleted: 0, freedBytes: 0, remainingOrphans: 0 };
+  if (!existsSync(storeRoot))
+    return { deleted: 0, freedBytes: 0, remainingOrphans: 0 };
   const referenced = referencedHashes(db);
   let deleted = 0;
   let freedBytes = 0;
@@ -279,14 +328,24 @@ export function pruneArtifacts(
  * by the time it executes".
  */
 export function pinRunArtifact(db, runId, { kind = "transcript" } = {}) {
-  const run = db.query(`SELECT run_id, state, spec_json FROM runs WHERE run_id = ?`).get(runId);
+  const run = db
+    .query(`SELECT run_id, state, spec_json FROM runs WHERE run_id = ?`)
+    .get(runId);
   if (!run) throw new Error(`unknown run ${runId}`);
   const row = db
-    .query(`SELECT result_json FROM results WHERE run_id = ? ORDER BY attempt DESC LIMIT 1`)
+    .query(
+      `SELECT result_json FROM results WHERE run_id = ? ORDER BY attempt DESC LIMIT 1`,
+    )
     .get(runId);
-  if (!row) throw new Error(`run ${runId} has no accepted result — nothing was captured`);
-  const entry = (JSON.parse(row.result_json).artifacts ?? []).find((a) => a.kind === kind);
-  if (!entry?.sha256) throw new Error(`run ${runId} stored no "${kind}" artifact`);
+  if (!row)
+    throw new Error(
+      `run ${runId} has no accepted result — nothing was captured`,
+    );
+  const entry = (JSON.parse(row.result_json).artifacts ?? []).find(
+    (a) => a.kind === kind,
+  );
+  if (!entry?.sha256)
+    throw new Error(`run ${runId} stored no "${kind}" artifact`);
   return {
     runId,
     transcript: entry.sha256,

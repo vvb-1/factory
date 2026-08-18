@@ -26,29 +26,48 @@ export function parsePrRef(input: string): number | null {
 }
 
 /** Decorate exact ticket string tokens produced by JSON/detail renderers. */
-export function installTicketJourneyLinks(root: HTMLElement, open: (ticket: string) => void): () => void {
+export function installTicketJourneyLinks(
+  root: HTMLElement,
+  open: (ticket: string) => void,
+): () => void {
   const decorate = () => {
     for (const span of root.querySelectorAll<HTMLSpanElement>("span")) {
       if (span.childElementCount > 0 || span.dataset.ticketJourneyId) continue;
-      const ticket = (span.textContent ?? "").trim().replace(/^([\"'])|([\"'])$/g, "").toUpperCase();
+      const ticket = (span.textContent ?? "")
+        .trim()
+        .replace(/^([\"'])|([\"'])$/g, "")
+        .toUpperCase();
       if (!TICKET_ID_PATTERN.test(ticket)) continue;
       span.dataset.ticketJourneyId = ticket;
       span.setAttribute("role", "link");
       span.tabIndex = 0;
       span.setAttribute("aria-label", `Open ticket ${ticket}`);
       span.title = `Open ticket journey for ${ticket}`;
-      span.classList.add("cursor-pointer", "hover:text-(--accent)", "hover:underline");
+      span.classList.add(
+        "cursor-pointer",
+        "hover:text-(--accent)",
+        "hover:underline",
+      );
     }
   };
-  const ticketTarget = (target: EventTarget | null): { element: HTMLElement; ticket: string } | null => {
-    const element = target instanceof Element
-      ? target.closest<HTMLElement>("[data-ticket-journey-id], button")
-      : null;
+  const ticketTarget = (
+    target: EventTarget | null,
+  ): { element: HTMLElement; ticket: string } | null => {
+    const element =
+      target instanceof Element
+        ? target.closest<HTMLElement>("[data-ticket-journey-id], button")
+        : null;
     if (!element) return null;
     const dataTicket = element.dataset.ticketJourneyId;
-    const ticket = (dataTicket ?? element.textContent ?? "").trim().toUpperCase();
-    const exactCopyButton = element.tagName === "BUTTON" && element.title.trim().toUpperCase() === ticket;
-    return (dataTicket || exactCopyButton) && TICKET_ID_PATTERN.test(ticket) ? { element, ticket } : null;
+    const ticket = (dataTicket ?? element.textContent ?? "")
+      .trim()
+      .toUpperCase();
+    const exactCopyButton =
+      element.tagName === "BUTTON" &&
+      element.title.trim().toUpperCase() === ticket;
+    return (dataTicket || exactCopyButton) && TICKET_ID_PATTERN.test(ticket)
+      ? { element, ticket }
+      : null;
   };
   const onClick = (event: MouseEvent) => {
     const target = ticketTarget(event.target);
@@ -227,7 +246,14 @@ export interface TimelineItem {
 export interface SubjectJourney {
   subject: SubjectRef;
   /** For PR journeys: the repo (`owner/name`), ticket, branch and merge state the artifacts recorded. */
-  pr: { number: number; github: string | null; ticket: string | null; headRef: string | null; mergeState: string | null; url: string | null } | null;
+  pr: {
+    number: number;
+    github: string | null;
+    ticket: string | null;
+    headRef: string | null;
+    mergeState: string | null;
+    url: string | null;
+  } | null;
   activity: boolean;
   timeline: TimelineItem[];
   totalCost: number | null;
@@ -268,7 +294,10 @@ function validDate(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function timeOf(value: string | null | undefined, fallback = "1970-01-01T00:00:00.000Z"): string {
+function timeOf(
+  value: string | null | undefined,
+  fallback = "1970-01-01T00:00:00.000Z",
+): string {
   return validDate(value) == null ? fallback : value!;
 }
 
@@ -285,7 +314,10 @@ export function prHref(number: number | string): string {
   return `#/prs/${encodeURIComponent(String(number))}`;
 }
 
-function walk(value: unknown, visit: (key: string, value: unknown) => void): void {
+function walk(
+  value: unknown,
+  visit: (key: string, value: unknown) => void,
+): void {
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
     for (const entry of value) walk(entry, visit);
@@ -306,7 +338,8 @@ export function ticketIdsIn(value: unknown): string[] {
   };
   if (typeof value === "string") add(value);
   walk(value, (key, entry) => {
-    if (/^(ticket|ticketId|issue|issueId|linearId|subject)$/i.test(key)) add(entry);
+    if (/^(ticket|ticketId|issue|issueId|linearId|subject)$/i.test(key))
+      add(entry);
   });
   return [...ids];
 }
@@ -318,7 +351,10 @@ export function ticketIdsIn(value: unknown): string[] {
 export function prNumbersIn(value: unknown): number[] {
   const numbers = new Set<number>();
   const addNumber = (candidate: unknown) => {
-    const number = typeof candidate === "string" ? Number(candidate.replace(/^PR\s*#?/i, "").trim()) : Number(candidate);
+    const number =
+      typeof candidate === "string"
+        ? Number(candidate.replace(/^PR\s*#?/i, "").trim())
+        : Number(candidate);
     if (Number.isInteger(number) && number > 0) numbers.add(number);
   };
   const inspect = (key: string, entry: unknown) => {
@@ -327,7 +363,9 @@ export function prNumbersIn(value: unknown): number[] {
       else if (typeof entry !== "object" || entry === null) addNumber(entry);
     }
     if (typeof entry === "string") {
-      const url = entry.match(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:$|[/?#])/);
+      const url = entry.match(
+        /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:$|[/?#])/,
+      );
       if (url) addNumber(url[1]);
     }
   };
@@ -340,7 +378,10 @@ function prUrlsIn(value: unknown): string[] {
   const urls = new Set<string>();
   const inspect = (entry: unknown) => {
     if (typeof entry !== "string") return;
-    if (/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:$|[/?#])/.test(entry)) urls.add(entry);
+    if (
+      /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:$|[/?#])/.test(entry)
+    )
+      urls.add(entry);
   };
   inspect(value);
   walk(value, (_key, entry) => inspect(entry));
@@ -361,15 +402,21 @@ function nestedValue(value: unknown, keyPattern: RegExp): unknown {
 
 function githubOf(value: unknown): string | null {
   const github = nestedValue(value, /^github$/i);
-  return typeof github === "string" && /^[^/]+\/[^/]+$/.test(github) ? github : null;
+  return typeof github === "string" && /^[^/]+\/[^/]+$/.test(github)
+    ? github
+    : null;
 }
 
 function shortSha(sha: unknown): string | null {
-  return typeof sha === "string" && /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 7) : null;
+  return typeof sha === "string" && /^[0-9a-f]{7,40}$/i.test(sha)
+    ? sha.slice(0, 7)
+    : null;
 }
 
 function eventPr(event: JourneyEvent): { number: number; url: string } | null {
-  const number = Number(nestedValue(event.envelope, /^(pr|prNumber|pullRequestNumber)$/i));
+  const number = Number(
+    nestedValue(event.envelope, /^(pr|prNumber|pullRequestNumber)$/i),
+  );
   if (!Number.isInteger(number) || number <= 0) return null;
   const github = githubOf(event.envelope);
   if (!github) return null;
@@ -377,11 +424,15 @@ function eventPr(event: JourneyEvent): { number: number; url: string } | null {
 }
 
 function lifecycleSorted(run: JourneyRun): JourneyLifecycle[] {
-  return [...run.lifecycle].sort((a, b) => a.at.localeCompare(b.at) || a.seq - b.seq);
+  return [...run.lifecycle].sort(
+    (a, b) => a.at.localeCompare(b.at) || a.seq - b.seq,
+  );
 }
 
 function resultAt(run: JourneyRun): string {
-  return lifecycleSorted(run).at(-1)?.at ?? run.run.updated_at ?? run.run.created_at;
+  return (
+    lifecycleSorted(run).at(-1)?.at ?? run.run.updated_at ?? run.run.created_at
+  );
 }
 
 function runWindow(run: JourneyRun): { start: number; end: number } | null {
@@ -401,7 +452,8 @@ export function formatDuration(ms: number | null): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m${seconds % 60 ? ` ${seconds % 60}s` : ""}`;
+  if (minutes < 60)
+    return `${minutes}m${seconds % 60 ? ` ${seconds % 60}s` : ""}`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return `${hours}h${rest ? ` ${rest}m` : ""}`;
@@ -410,7 +462,11 @@ export function formatDuration(ms: number | null): string {
 function clock(value: string | number): string {
   const ms = typeof value === "number" ? value : validDate(value);
   if (ms == null) return "—";
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function lifecycleChildren(run: JourneyRun): TimelineItem[] {
@@ -424,16 +480,23 @@ function lifecycleChildren(run: JourneyRun): TimelineItem[] {
       label: entry.to_state,
       detail: `${entry.actor}${entry.reason ? ` · ${entry.reason}` : ""}`,
       href: runHref(run.run.runId),
-      durationMs: previous != null && current != null ? Math.max(0, current - previous) : null,
+      durationMs:
+        previous != null && current != null
+          ? Math.max(0, current - previous)
+          : null,
     };
   });
 }
 
-function proposalFor(event: JourneyEvent, proposals: JourneyProposal[]): JourneyProposal | undefined {
+function proposalFor(
+  event: JourneyEvent,
+  proposals: JourneyProposal[],
+): JourneyProposal | undefined {
   return proposals.find(
     (proposal) =>
       proposal.id === event.proposalId ||
-      (proposal.eventId === event.eventId && proposal.eventSource === event.source),
+      (proposal.eventId === event.eventId &&
+        proposal.eventSource === event.source),
   );
 }
 
@@ -448,16 +511,21 @@ function mergeLabel(run: JourneyRun): string | null {
   return null;
 }
 
-function checkLabel(run: JourneyRun): { label: string; detail: string | null } | null {
+function checkLabel(
+  run: JourneyRun,
+): { label: string; detail: string | null } | null {
   const artifact = run.result?.artifact ?? {};
   let checksGreen: boolean | null = null;
   walk(artifact, (key, value) => {
-    if (/^(checksGreen|ciGreen)$/i.test(key) && typeof value === "boolean") checksGreen = value;
+    if (/^(checksGreen|ciGreen)$/i.test(key) && typeof value === "boolean")
+      checksGreen = value;
   });
   if (checksGreen == null) return null;
   return {
     label: checksGreen ? "CI checks green" : "CI checks red",
-    detail: checksGreen ? "All recorded checks passed" : "One or more recorded checks failed",
+    detail: checksGreen
+      ? "All recorded checks passed"
+      : "One or more recorded checks failed",
   };
 }
 
@@ -483,24 +551,38 @@ export interface ScanVerdict {
   round: number | null;
 }
 
-export function scanVerdictFor(artifact: unknown, pr: number): ScanVerdict | null {
+export function scanVerdictFor(
+  artifact: unknown,
+  pr: number,
+): ScanVerdict | null {
   if (!artifact || typeof artifact !== "object") return null;
   const record = artifact as Record<string, unknown>;
-  const buckets: Array<[ScanVerdict["bucket"], string]> = [["MERGE", "plan"], ["FIX", "fix"], ["ESCALATE", "escalate"]];
+  const buckets: Array<[ScanVerdict["bucket"], string]> = [
+    ["MERGE", "plan"],
+    ["FIX", "fix"],
+    ["ESCALATE", "escalate"],
+  ];
   for (const [bucket, key] of buckets) {
     const list = record[key];
     if (!Array.isArray(list)) continue;
-    const entry = list.find((item) => item && typeof item === "object" && Number((item as any).pr) === pr) as
-      | Record<string, unknown>
-      | undefined;
+    const entry = list.find(
+      (item) =>
+        item && typeof item === "object" && Number((item as any).pr) === pr,
+    ) as Record<string, unknown> | undefined;
     if (!entry) continue;
     return {
       bucket,
       headSha: typeof entry.headSha === "string" ? entry.headSha : null,
       headRef: typeof entry.headRef === "string" ? entry.headRef : null,
-      ticket: typeof entry.ticket === "string" ? entry.ticket.toUpperCase() : null,
+      ticket:
+        typeof entry.ticket === "string" ? entry.ticket.toUpperCase() : null,
       mergeable: typeof entry.mergeable === "boolean" ? entry.mergeable : null,
-      reason: typeof entry.reason === "string" ? entry.reason : typeof entry.finding === "string" ? entry.finding : null,
+      reason:
+        typeof entry.reason === "string"
+          ? entry.reason
+          : typeof entry.finding === "string"
+            ? entry.finding
+            : null,
       round: typeof entry.round === "number" ? entry.round : null,
     };
   }
@@ -509,7 +591,9 @@ export function scanVerdictFor(artifact: unknown, pr: number): ScanVerdict | nul
 
 /** GitHub's own vocabulary when a scan artifact quotes it; `mergeable` when it only recorded the boolean. */
 function mergeStateOf(verdict: ScanVerdict): string | null {
-  const quoted = verdict.reason?.match(/\b(CONFLICTING|MERGEABLE|UNSTABLE|DIRTY|BLOCKED|BEHIND|CLEAN|DRAFT)\b/);
+  const quoted = verdict.reason?.match(
+    /\b(CONFLICTING|MERGEABLE|UNSTABLE|DIRTY|BLOCKED|BEHIND|CLEAN|DRAFT)\b/,
+  );
   if (quoted) return quoted[1];
   if (verdict.mergeable === true) return "MERGEABLE";
   if (verdict.mergeable === false) return "NOT MERGEABLE";
@@ -517,11 +601,19 @@ function mergeStateOf(verdict: ScanVerdict): string | null {
 }
 
 /** A refused or failed run, with the code the runtime recorded for it. */
-function refusalOf(run: JourneyRun): { verb: "refused" | "failed"; code: string; at: string } | null {
+function refusalOf(
+  run: JourneyRun,
+): { verb: "refused" | "failed"; code: string; at: string } | null {
   const terminal = String(run.result?.terminalState ?? "");
-  const verb = run.run.state === "REFUSED" || /refused/i.test(terminal) ? "refused" : run.run.state === "FAILED" || /failed/i.test(terminal) ? "failed" : null;
+  const verb =
+    run.run.state === "REFUSED" || /refused/i.test(terminal)
+      ? "refused"
+      : run.run.state === "FAILED" || /failed/i.test(terminal)
+        ? "failed"
+        : null;
   if (!verb) return null;
-  const code: string | null = run.result?.reasonCode ?? lifecycleSorted(run).at(-1)?.reason ?? null;
+  const code: string | null =
+    run.result?.reasonCode ?? lifecycleSorted(run).at(-1)?.reason ?? null;
   return { verb, code: code ?? verb, at: resultAt(run) };
 }
 
@@ -543,13 +635,20 @@ function prEntryIn(value: unknown, pr: number): Record<string, unknown> | null {
   };
   visit(value);
   if (found) return found;
-  return prNumbersIn(value).includes(pr) && value && typeof value === "object" && !Array.isArray(value)
+  return prNumbersIn(value).includes(pr) &&
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
 function ticketOfRun(run: JourneyRun): string | null {
-  return ticketIdsIn(run.run.spec.input)[0] ?? ticketIdsIn(run.result?.artifact)[0] ?? null;
+  return (
+    ticketIdsIn(run.run.spec.input)[0] ??
+    ticketIdsIn(run.result?.artifact)[0] ??
+    null
+  );
 }
 
 function repoOfSource(source: SubjectJourneySource): string | null {
@@ -571,25 +670,43 @@ function repoOfSource(source: SubjectJourneySource): string | null {
  * `headSha`) — no new recording. Rendered muted with a `↔` prefix so the
  * refusal they explain reads directly under them.
  */
-function concurrentRows(source: SubjectJourneySource, prOfSubject: number | null, subjectTicket: string | null): TimelineItem[] {
+function concurrentRows(
+  source: SubjectJourneySource,
+  prOfSubject: number | null,
+  subjectTicket: string | null,
+): TimelineItem[] {
   const rows: TimelineItem[] = [];
   const windows = source.runs
-    .filter((run) => RUN_FAMILY.scan.test(run.run.spec.agent) || RUN_FAMILY.fix.test(run.run.spec.agent))
+    .filter(
+      (run) =>
+        RUN_FAMILY.scan.test(run.run.spec.agent) ||
+        RUN_FAMILY.fix.test(run.run.spec.agent),
+    )
     .map((run) => ({ run, window: runWindow(run) }))
-    .filter((entry): entry is { run: JourneyRun; window: { start: number; end: number } } => entry.window != null);
+    .filter(
+      (
+        entry,
+      ): entry is { run: JourneyRun; window: { start: number; end: number } } =>
+        entry.window != null,
+    );
   if (!windows.length) return rows;
   const seen = new Set<string>();
-  const others = [...source.runs, ...(source.contextRuns ?? [])].filter((run) => {
-    if (seen.has(run.run.runId) || RUN_FAMILY.merge.test(run.run.spec.agent)) return false;
-    seen.add(run.run.runId);
-    // Only chains that touched *this* subject: the subject's own ticket, or a
-    // run whose result names the PR. The server-side ticket join can carry
-    // neighbours (other tickets' dispatches sharing a scan) — they are not
-    // concurrent activity on this subject.
-    const ticket = ticketOfRun(run);
-    if (subjectTicket && ticket === subjectTicket) return true;
-    return prOfSubject != null && prNumbersIn(run.result).includes(prOfSubject);
-  });
+  const others = [...source.runs, ...(source.contextRuns ?? [])].filter(
+    (run) => {
+      if (seen.has(run.run.runId) || RUN_FAMILY.merge.test(run.run.spec.agent))
+        return false;
+      seen.add(run.run.runId);
+      // Only chains that touched *this* subject: the subject's own ticket, or a
+      // run whose result names the PR. The server-side ticket join can carry
+      // neighbours (other tickets' dispatches sharing a scan) — they are not
+      // concurrent activity on this subject.
+      const ticket = ticketOfRun(run);
+      if (subjectTicket && ticket === subjectTicket) return true;
+      return (
+        prOfSubject != null && prNumbersIn(run.result).includes(prOfSubject)
+      );
+    },
+  );
   for (const { run: windowRun, window } of windows) {
     for (const other of others) {
       const span = runWindow(other);
@@ -597,10 +714,17 @@ function concurrentRows(source: SubjectJourneySource, prOfSubject: number | null
       const artifact = other.result?.artifact ?? null;
       const ticket = ticketOfRun(other);
       const who = `${ticket ? `${ticket} ` : ""}${agentShort(other.run.spec.agent)}`;
-      const pushed = shortSha(nestedValue(artifact, /^(headSha|pushedSha|commitSha)$/i));
-      const openedUrl = prUrlsIn(artifact).find((url) => prOfSubject == null || Number(prNumber(url)) === prOfSubject);
+      const pushed = shortSha(
+        nestedValue(artifact, /^(headSha|pushedSha|commitSha)$/i),
+      );
+      const openedUrl = prUrlsIn(artifact).find(
+        (url) => prOfSubject == null || Number(prNumber(url)) === prOfSubject,
+      );
       const finishedAt = validDate(resultAt(other));
-      const insideWindow = finishedAt != null && finishedAt >= window.start && finishedAt <= window.end;
+      const insideWindow =
+        finishedAt != null &&
+        finishedAt >= window.start &&
+        finishedAt <= window.end;
       let at: number;
       let label: string;
       let detail: string;
@@ -635,16 +759,25 @@ function concurrentRows(source: SubjectJourneySource, prOfSubject: number | null
 }
 
 /** Pure chronological join used by the views and fixture tests. */
-export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJourneySource): SubjectJourney {
+export function subjectJourney(
+  kind: SubjectKind,
+  id: string,
+  source: SubjectJourneySource,
+): SubjectJourney {
   const subject: SubjectRef = { ...source.subject, kind, id };
   const prOfSubject = kind === "pr" ? Number(id) : null;
   const timeline: TimelineItem[] = [];
-  const resultPrUrls = new Set(source.runs.flatMap((run) => prUrlsIn(run.result)));
+  const resultPrUrls = new Set(
+    source.runs.flatMap((run) => prUrlsIn(run.result)),
+  );
   const prUrls = new Set(resultPrUrls);
   const renderedPrUrls = new Set<string>();
   const allActivityTimes = [
     ...source.events.flatMap((event) => [event.occurredAt, event.admittedAt]),
-    ...source.proposals.flatMap((proposal) => [proposal.created_at, proposal.decided_at ?? ""]),
+    ...source.proposals.flatMap((proposal) => [
+      proposal.created_at,
+      proposal.decided_at ?? "",
+    ]),
     ...source.runs.flatMap((run) => [run.run.created_at, run.run.updated_at]),
   ].filter((value) => validDate(value) != null);
   const earliest = [...allActivityTimes].sort()[0] ?? null;
@@ -670,24 +803,36 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
 
   for (const event of source.events) {
     const proposal = proposalFor(event, source.proposals);
-    const decision = proposal?.decision ?? (event.status === "planned" ? "planned" : event.status);
+    const decision =
+      proposal?.decision ??
+      (event.status === "planned" ? "planned" : event.status);
     const reason = reasonText(proposal?.reason);
     const dispatch = /dispatch/i.test(event.type);
-    const agentReady = /agent[-_. ]?ready/i.test(event.type) || /agent[-_. ]?ready/i.test(JSON.stringify(event.envelope));
+    const agentReady =
+      /agent[-_. ]?ready/i.test(event.type) ||
+      /agent[-_. ]?ready/i.test(JSON.stringify(event.envelope));
     const at = timeOf(event.occurredAt, event.admittedAt);
     const eventPrRef = eventPr(event);
-    const prEntry = kind === "pr" ? prEntryIn(event.envelope, prOfSubject!) : null;
-    const eventHead = shortSha(prEntry ? prEntry.headSha : nestedValue(event.envelope, /^headSha$/i));
+    const prEntry =
+      kind === "pr" ? prEntryIn(event.envelope, prOfSubject!) : null;
+    const eventHead = shortSha(
+      prEntry ? prEntry.headSha : nestedValue(event.envelope, /^headSha$/i),
+    );
     if (prEntry) {
       prGithub ??= githubOf(event.envelope);
-      prTicket ??= ticketIdsIn(prEntry)[0] ?? ticketIdsIn(nestedValue(event.envelope, /^payload$/i))[0] ?? null;
+      prTicket ??=
+        ticketIdsIn(prEntry)[0] ??
+        ticketIdsIn(nestedValue(event.envelope, /^payload$/i))[0] ??
+        null;
       if (typeof prEntry.headRef === "string") prHeadRef ??= prEntry.headRef;
     }
     const typeLabel = agentReady
       ? "agent-ready"
       : dispatch
         ? "dispatch requested"
-        : event.type.replace(/^factory\./, "").replace(/\.requested$/, " requested");
+        : event.type
+            .replace(/^factory\./, "")
+            .replace(/\.requested$/, " requested");
     const prSuffix =
       kind === "pr" && prEntry && eventHead
         ? ` · at ${eventHead}`
@@ -699,13 +844,17 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
       kind: proposal ? "decision" : "event",
       at,
       label: `${typeLabel}${prSuffix}`,
-      detail: proposal ? `${decision}${reason ? ` · ${reason}` : ""}` : event.status,
+      detail: proposal
+        ? `${decision}${reason ? ` · ${reason}` : ""}`
+        : event.status,
       href: eventHref(event),
       durationMs: null,
     });
 
     if (eventPrRef) {
-      const knownUrl = [...resultPrUrls].find((url) => prNumber(url) === String(eventPrRef.number));
+      const knownUrl = [...resultPrUrls].find(
+        (url) => prNumber(url) === String(eventPrRef.number),
+      );
       const url = knownUrl ?? eventPrRef.url;
       prUrls.add(url);
       if (kind === "ticket" && !knownUrl && !renderedPrUrls.has(url)) {
@@ -724,7 +873,10 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
     // On a PR journey the scan artifact already carries the CI verdict and the
     // merge decision for this PR; repeating them from the request event that
     // copies the plan would double every row.
-    const checksGreen = kind === "pr" ? null : nestedValue(event.envelope, /^(checksGreen|ciGreen)$/i);
+    const checksGreen =
+      kind === "pr"
+        ? null
+        : nestedValue(event.envelope, /^(checksGreen|ciGreen)$/i);
     if (typeof checksGreen === "boolean") {
       timeline.push({
         id: `ci:event:${event.source}:${event.eventId}`,
@@ -740,14 +892,27 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
     const landed = /merge-landed/i.test(event.type);
     // Only decisions to merge are merge rows; scan ticks, fix and escalate
     // requests already have their own event row.
-    if (landed || (kind === "ticket" && (/merge-apply/i.test(event.type) || (typeof action === "string" && /merge/i.test(action))))) {
-      const mergeSha = shortSha(nestedValue(event.envelope, /^mergeCommitSha$/i));
+    if (
+      landed ||
+      (kind === "ticket" &&
+        (/merge-apply/i.test(event.type) ||
+          (typeof action === "string" && /merge/i.test(action))))
+    ) {
+      const mergeSha = shortSha(
+        nestedValue(event.envelope, /^mergeCommitSha$/i),
+      );
       timeline.push({
         id: `merge:event:${event.source}:${event.eventId}`,
         kind: "merge",
         at,
-        label: landed ? `merged${mergeSha ? ` as ${mergeSha}` : ""}` : action === "merge_pr" ? "merge requested" : "merge decision",
-        detail: (nestedValue(event.envelope, /^reason$/i) as string | undefined) ?? null,
+        label: landed
+          ? `merged${mergeSha ? ` as ${mergeSha}` : ""}`
+          : action === "merge_pr"
+            ? "merge requested"
+            : "merge decision",
+        detail:
+          (nestedValue(event.envelope, /^reason$/i) as string | undefined) ??
+          null,
         href: eventHref(event),
         durationMs: null,
       });
@@ -763,7 +928,11 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
   for (const run of source.runs) {
     const totals = run.usage?.totals;
     const attempts = totals?.attempts ?? run.usage?.attempts?.length ?? 0;
-    if (attempts > 0 || (totals?.costUSD ?? 0) > 0 || (totals?.totalTokens ?? 0) > 0) {
+    if (
+      attempts > 0 ||
+      (totals?.costUSD ?? 0) > 0 ||
+      (totals?.totalTokens ?? 0) > 0
+    ) {
       usageKnown = true;
       totalCost += Number(totals?.costUSD ?? 0);
       totalTokens += Number(totals?.totalTokens ?? 0);
@@ -776,7 +945,9 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
       model,
       formatDuration(duration),
       attempts > 0 ? `$${Number(totals?.costUSD ?? 0).toFixed(2)}` : "—",
-    ].filter(Boolean).join(" · ");
+    ]
+      .filter(Boolean)
+      .join(" · ");
     timeline.push({
       id: `run:${run.run.runId}`,
       kind: "run",
@@ -811,13 +982,22 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
         kind: "pr",
         at: resultAt(run),
         label: `PR #${prNumber(url)} opened`,
-        detail: kind === "pr" ? `by ${ticketOfRun(run) ?? agentShort(run.run.spec.agent)} · ${run.run.runId}` : null,
+        detail:
+          kind === "pr"
+            ? `by ${ticketOfRun(run) ?? agentShort(run.run.spec.agent)} · ${run.run.runId}`
+            : null,
         href: kind === "pr" ? url : prHref(number),
         external: kind === "pr",
         durationMs: null,
       });
     }
-    const ci = kind === "pr" ? checkLabel({ ...run, result: { artifact: prEntryIn(artifact, prOfSubject!) ?? {} } }) : checkLabel(run);
+    const ci =
+      kind === "pr"
+        ? checkLabel({
+            ...run,
+            result: { artifact: prEntryIn(artifact, prOfSubject!) ?? {} },
+          })
+        : checkLabel(run);
     if (ci) {
       timeline.push({
         id: `ci:${run.run.runId}`,
@@ -829,7 +1009,10 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
         durationMs: null,
       });
     }
-    const verdict = kind === "pr" && RUN_FAMILY.scan.test(run.run.spec.agent) ? scanVerdictFor(artifact, prOfSubject!) : null;
+    const verdict =
+      kind === "pr" && RUN_FAMILY.scan.test(run.run.spec.agent)
+        ? scanVerdictFor(artifact, prOfSubject!)
+        : null;
     if (verdict) {
       const head = shortSha(verdict.headSha);
       prTicket ??= verdict.ticket;
@@ -862,7 +1045,11 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
           durationMs: null,
         });
       }
-    } else if (RUN_FAMILY.apply.test(run.run.spec.agent) && artifact && /merge_pr/.test(JSON.stringify(artifact))) {
+    } else if (
+      RUN_FAMILY.apply.test(run.run.spec.agent) &&
+      artifact &&
+      /merge_pr/.test(JSON.stringify(artifact))
+    ) {
       timeline.push({
         id: `merge:${run.run.runId}`,
         kind: "merge",
@@ -875,20 +1062,28 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
     }
     const refusal = refusalOf(run);
     if (refusal) {
-      const reason = (humanizeWithCode(refusal.code) ?? refusal.code).replace(/\s+/g, " ");
+      const reason = (humanizeWithCode(refusal.code) ?? refusal.code).replace(
+        /\s+/g,
+        " ",
+      );
       timeline.push({
         id: `refusal:${run.run.runId}`,
         kind: "decision",
         at: refusal.at,
         label: `${agentShort(run.run.spec.agent)} ${refusal.verb} · ${reason.length > 160 ? `${reason.slice(0, 159)}…` : reason}`,
-        detail: reason.length > 160 ? `${run.run.runId} · ${reason}` : run.run.runId,
+        detail:
+          reason.length > 160 ? `${run.run.runId} · ${reason}` : run.run.runId,
         href: runHref(run.run.runId),
         durationMs: null,
       });
     }
     if (activeStates.has(run.run.state)) {
       const last = lifecycleSorted(run).at(-1);
-      currentRun = { runId: run.run.runId, state: run.run.state, actor: last?.actor ?? null };
+      currentRun = {
+        runId: run.run.runId,
+        state: run.run.state,
+        actor: last?.actor ?? null,
+      };
     }
   }
 
@@ -904,10 +1099,21 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
     });
   }
 
-  timeline.push(...concurrentRows(source, prOfSubject, kind === "ticket" ? subject.id : prTicket));
+  timeline.push(
+    ...concurrentRows(
+      source,
+      prOfSubject,
+      kind === "ticket" ? subject.id : prTicket,
+    ),
+  );
 
   if (kind === "ticket" && /^done$/i.test(subject.state ?? "")) {
-    const at = timeline.map((item) => item.at).filter((value) => validDate(value) != null).sort().at(-1) ?? earliest;
+    const at =
+      timeline
+        .map((item) => item.at)
+        .filter((value) => validDate(value) != null)
+        .sort()
+        .at(-1) ?? earliest;
     if (at) {
       timeline.push({
         id: `${subject.id}:done`,
@@ -933,22 +1139,45 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
     .at(-1);
 
   const repo = repoOfSource(source);
-  const loopType = kind === "pr" ? /^factory\.merge\.requested$/ : /^factory\.(work|dispatch)\.requested$/;
-  const retryOriginType = [...source.events]
-    .filter((event) => loopType.test(event.type))
-    .sort((a, b) => timeOf(a.occurredAt, a.admittedAt).localeCompare(timeOf(b.occurredAt, b.admittedAt)))[0]?.type ??
+  const loopType =
+    kind === "pr"
+      ? /^factory\.merge\.requested$/
+      : /^factory\.(work|dispatch)\.requested$/;
+  const retryOriginType =
+    [...source.events]
+      .filter((event) => loopType.test(event.type))
+      .sort((a, b) =>
+        timeOf(a.occurredAt, a.admittedAt).localeCompare(
+          timeOf(b.occurredAt, b.admittedAt),
+        ),
+      )[0]?.type ??
     (source.schedules ?? [])
       .filter((schedule) => loopType.test(schedule.eventType))
-      .sort((a, b) => (validDate(a.nextDue) ?? Infinity) - (validDate(b.nextDue) ?? Infinity))[0]?.eventType ??
+      .sort(
+        (a, b) =>
+          (validDate(a.nextDue) ?? Infinity) -
+          (validDate(b.nextDue) ?? Infinity),
+      )[0]?.eventType ??
     (kind === "pr" ? "factory.merge.requested" : "factory.work.requested");
   const nextSchedule = nextScheduledRetry(
     { type: retryOriginType, repos: repo ? [repo] : [] },
     source.schedules ?? [],
   );
-  const nextVisit = nextSchedule?.nextDue ? { loop: nextSchedule.loop, at: nextSchedule.nextDue } : null;
-  const merged = timeline.some((item) => item.kind === "merge" && /^merged/.test(item.label));
-  const ticketWaiting = kind === "ticket" && (latestNoop != null || /^(todo|backlog)$/i.test(subject.state ?? ""));
-  if (nextVisit && !merged && !/^done$/i.test(subject.state ?? "") && (kind === "pr" || ticketWaiting)) {
+  const nextVisit = nextSchedule?.nextDue
+    ? { loop: nextSchedule.loop, at: nextSchedule.nextDue }
+    : null;
+  const merged = timeline.some(
+    (item) => item.kind === "merge" && /^merged/.test(item.label),
+  );
+  const ticketWaiting =
+    kind === "ticket" &&
+    (latestNoop != null || /^(todo|backlog)$/i.test(subject.state ?? ""));
+  if (
+    nextVisit &&
+    !merged &&
+    !/^done$/i.test(subject.state ?? "") &&
+    (kind === "pr" || ticketWaiting)
+  ) {
     timeline.push({
       id: `schedule:${nextVisit.loop}`,
       kind: "schedule",
@@ -963,44 +1192,57 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
   for (let index = 0; index < timeline.length; index += 1) {
     const previous = index ? validDate(timeline[index - 1].at) : null;
     const current = validDate(timeline[index].at);
-    timeline[index].durationMs = previous != null && current != null ? Math.max(0, current - previous) : null;
+    timeline[index].durationMs =
+      previous != null && current != null
+        ? Math.max(0, current - previous)
+        : null;
   }
 
   const activityRows = timeline.filter((item) => item.kind !== "schedule");
   const first = validDate(subject.createdAt ?? activityRows[0]?.at);
   const last = validDate(activityRows.at(-1)?.at);
-  const leadTimeMs = first != null && last != null && last > first ? last - first : null;
-  const lastRun = [...source.runs].sort((a, b) => resultAt(a).localeCompare(resultAt(b))).at(-1);
+  const leadTimeMs =
+    first != null && last != null && last > first ? last - first : null;
+  const lastRun = [...source.runs]
+    .sort((a, b) => resultAt(a).localeCompare(resultAt(b)))
+    .at(-1);
   const lastRefusal = lastRun ? refusalOf(lastRun) : null;
   const blockingReason =
     reasonText(latestNoop?.reason) ??
     (kind === "pr" && lastRefusal ? humanizeWithCode(lastRefusal.code) : null);
   const awaitingApproval = [...source.proposals]
-    .filter((proposal) => proposal.status === "open" && proposal.decision === "run")
+    .filter(
+      (proposal) => proposal.status === "open" && proposal.decision === "run",
+    )
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .at(-1);
   if (!currentRun && awaitingApproval?.runId) {
-    currentRun = { runId: awaitingApproval.runId, state: "PROPOSED", actor: null };
+    currentRun = {
+      runId: awaitingApproval.runId,
+      state: "PROPOSED",
+      actor: null,
+    };
   }
-  const nextAction = currentRun && currentRun.state !== "PROPOSED"
-    ? `${currentRun.runId} is ${currentRun.state.toLowerCase()}${currentRun.actor ? ` on ${currentRun.actor}` : ""}`
-    : awaitingApproval
-      ? `Awaiting approval for ${awaitingApproval.id}`
-      : merged && kind === "pr"
-        ? "Merged — no further action"
-        : blockingReason
-          ? `Waiting: ${blockingReason}${nextVisit ? ` · ${nextVisit.loop} revisits at ${clock(nextVisit.at)}` : ""}`
-          : /^done$/i.test(subject.state ?? "")
-            ? "No further action"
-            : kind === "pr"
-              ? nextVisit
-                ? `Waiting for ${nextVisit.loop} at ${clock(nextVisit.at)}`
-                : "Waiting for the next merge scan"
-              : prUrls.size
-                ? "Waiting for review or merge"
-                : source.activity
-                  ? "Waiting for the next dispatch decision"
-                  : `No runtime activity for ${subject.id}`;
+  const nextAction =
+    currentRun && currentRun.state !== "PROPOSED"
+      ? `${currentRun.runId} is ${currentRun.state.toLowerCase()}${currentRun.actor ? ` on ${currentRun.actor}` : ""}`
+      : awaitingApproval
+        ? `Awaiting approval for ${awaitingApproval.id}`
+        : merged && kind === "pr"
+          ? "Merged — no further action"
+          : blockingReason
+            ? `Waiting: ${blockingReason}${nextVisit ? ` · ${nextVisit.loop} revisits at ${clock(nextVisit.at)}` : ""}`
+            : /^done$/i.test(subject.state ?? "")
+              ? "No further action"
+              : kind === "pr"
+                ? nextVisit
+                  ? `Waiting for ${nextVisit.loop} at ${clock(nextVisit.at)}`
+                  : "Waiting for the next merge scan"
+                : prUrls.size
+                  ? "Waiting for review or merge"
+                  : source.activity
+                    ? "Waiting for the next dispatch decision"
+                    : `No runtime activity for ${subject.id}`;
 
   const pr =
     kind === "pr"
@@ -1010,11 +1252,14 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
           ticket: prTicket,
           headRef: prHeadRef,
           mergeState: merged ? "MERGED" : prMergeState,
-          url: prGithub ? `https://github.com/${prGithub}/pull/${prOfSubject}` : null,
+          url: prGithub
+            ? `https://github.com/${prGithub}/pull/${prOfSubject}`
+            : null,
         }
       : null;
   if (pr?.url) subject.url = pr.url;
-  if (kind === "pr" && !subject.title && pr?.headRef) subject.title = pr.headRef;
+  if (kind === "pr" && !subject.title && pr?.headRef)
+    subject.title = pr.headRef;
   if (kind === "pr" && !subject.state) subject.state = pr?.mergeState ?? null;
 
   return {
@@ -1035,7 +1280,10 @@ export function subjectJourney(kind: SubjectKind, id: string, source: SubjectJou
 }
 
 /** The WM-595 entry point: a ticket journey from the `/api/runs?ticket=` join. */
-export function buildTicketJourney(source: TicketJourneySource & Partial<Pick<SubjectJourneySource, "inbox" | "schedules">>): SubjectJourney {
+export function buildTicketJourney(
+  source: TicketJourneySource &
+    Partial<Pick<SubjectJourneySource, "inbox" | "schedules">>,
+): SubjectJourney {
   return subjectJourney("ticket", source.ticket.id, {
     subject: { kind: "ticket", ...source.ticket },
     activity: source.activity,
@@ -1065,16 +1313,22 @@ export function selectPrSource(
   },
 ): SubjectJourneySource {
   const namesPr = (value: unknown) => prNumbersIn(value).includes(pr);
-  const events = input.events.filter((event) => namesPr(event.envelope) || namesPr(event.subject));
-  const eventKeys = new Set(events.map((event) => `${event.source}\0${event.eventId}`));
+  const events = input.events.filter(
+    (event) => namesPr(event.envelope) || namesPr(event.subject),
+  );
+  const eventKeys = new Set(
+    events.map((event) => `${event.source}\0${event.eventId}`),
+  );
   const proposals = input.proposals.filter(
     (proposal) =>
       namesPr(proposal.spec?.input) ||
-      (proposal.eventId && eventKeys.has(`${proposal.eventSource}\0${proposal.eventId}`)),
+      (proposal.eventId &&
+        eventKeys.has(`${proposal.eventSource}\0${proposal.eventId}`)),
   );
   const runIds = new Set<string>();
   for (const event of events) if (event.runId) runIds.add(event.runId);
-  for (const proposal of proposals) if (proposal.runId) runIds.add(proposal.runId);
+  for (const proposal of proposals)
+    if (proposal.runId) runIds.add(proposal.runId);
   const runs = input.runs.filter(
     (run) =>
       runIds.has(run.run.runId) ||
@@ -1083,7 +1337,8 @@ export function selectPrSource(
       (run.result && scanVerdictFor(run.result.artifact, pr) != null),
   );
   const tickets = new Set<string>();
-  for (const event of events) for (const ticket of ticketIdsIn(event.envelope)) tickets.add(ticket);
+  for (const event of events)
+    for (const ticket of ticketIdsIn(event.envelope)) tickets.add(ticket);
   for (const run of runs) {
     const ticket = ticketOfRun(run);
     if (ticket) tickets.add(ticket);
@@ -1091,20 +1346,30 @@ export function selectPrSource(
       const list = (run.result?.artifact as any)?.[bucket];
       if (!Array.isArray(list)) continue;
       const entry = list.find((item: any) => Number(item?.pr) === pr);
-      if (typeof entry?.ticket === "string") tickets.add(entry.ticket.toUpperCase());
+      if (typeof entry?.ticket === "string")
+        tickets.add(entry.ticket.toUpperCase());
     }
   }
   // Same-ticket runs are the other chain that moves the PR's head (the
   // dispatch agent pushing while a scan reads) — context for the ↔ rows only.
   const own = new Set(runs.map((run) => run.run.runId));
   const contextRuns = input.runs.filter((run) => {
-    if (own.has(run.run.runId) || RUN_FAMILY.merge.test(run.run.spec.agent)) return false;
+    if (own.has(run.run.runId) || RUN_FAMILY.merge.test(run.run.spec.agent))
+      return false;
     const ticket = ticketOfRun(run);
     return ticket != null && tickets.has(ticket);
   });
-  const allRuns = [...runs].sort((a, b) => a.run.created_at.localeCompare(b.run.created_at));
+  const allRuns = [...runs].sort((a, b) =>
+    a.run.created_at.localeCompare(b.run.created_at),
+  );
   const inbox = (input.inbox ?? []).filter((item) => namesPr(item.refs));
-  const first = [...events.map((e) => e.occurredAt), ...allRuns.map((r) => r.run.created_at)].filter((v) => validDate(v) != null).sort()[0] ?? null;
+  const first =
+    [
+      ...events.map((e) => e.occurredAt),
+      ...allRuns.map((r) => r.run.created_at),
+    ]
+      .filter((v) => validDate(v) != null)
+      .sort()[0] ?? null;
   return {
     subject: {
       kind: "pr",
@@ -1114,7 +1379,11 @@ export function selectPrSource(
       createdAt: first,
       url: `#/prs/${pr}`,
     },
-    activity: events.length > 0 || proposals.length > 0 || allRuns.length > 0 || inbox.length > 0,
+    activity:
+      events.length > 0 ||
+      proposals.length > 0 ||
+      allRuns.length > 0 ||
+      inbox.length > 0,
     events,
     proposals,
     runs: allRuns,

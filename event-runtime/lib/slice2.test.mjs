@@ -16,7 +16,8 @@ const registry = loadRegistry();
 const PV = "git:test-pv";
 
 function alertEnvelope(overrides = {}) {
-  const id = overrides.alertId ?? `alert-${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    overrides.alertId ?? `alert-${Math.random().toString(36).slice(2, 8)}`;
   return {
     schemaVersion: "factory.event/v1",
     eventId: `keep-${id}`,
@@ -40,13 +41,22 @@ function harness() {
   const db = openDb(path.join(dir, "runtime.db"));
   const workspaces = mkdtempSync(path.join(os.tmpdir(), "evrt-s2-ws-"));
   const adapters = { pi: fake, actions: fake };
-  const workerOpts = { workspacesRoot: workspaces, owner: "w-test", policyVersion: PV };
+  const workerOpts = {
+    workspacesRoot: workspaces,
+    owner: "w-test",
+    policyVersion: PV,
+  };
 
   async function approveNext(agentRef) {
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const proposal = openProposals(db, {}).find((p) => p.spec?.agent === agentRef);
+    const proposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === agentRef,
+    );
     expect(proposal).toBeTruthy();
-    const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
+    const approved = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
     expect(approved.approved).toBe(true);
     const summary = await runOnce(db, registry, adapters, workerOpts);
     return { proposal, runId: approved.runId, summary };
@@ -65,18 +75,24 @@ describe("slice 2: disk alert → diagnose → approved remediation (OPS-208)", 
     // REMEDIATE recommendation → chain event → watched remediation proposal.
     expect(resolveChains(db, registry).emitted).toBe(1);
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const remedProposal = openProposals(db, {}).find((p) => p.spec?.agent === "disk-remediate@1");
+    const remedProposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "disk-remediate@1",
+    );
     expect(remedProposal.status).toBe("open"); // AC: no node B without approval
     expect(remedProposal.spec.input).toEqual({
       host: "lab",
       mount: "/",
-      actions: [{ action: "docker-builder-prune", expectedReclaimBytes: 1_000_000 }],
+      actions: [
+        { action: "docker-builder-prune", expectedReclaimBytes: 1_000_000 },
+      ],
     });
 
     const remediate = await approveNext("disk-remediate@1");
     expect(remediate.summary.terminalState).toBe("COMPLETED");
 
-    const result = db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(remediate.runId);
+    const result = db
+      .query(`SELECT result_json FROM results WHERE run_id = ?`)
+      .get(remediate.runId);
     const parsed = JSON.parse(result.result_json);
     expect(parsed.artifact.reclaimedBytes).toBe(1_000_000);
     expect(parsed.verification.checks).toContain("evidence_recomputed");
@@ -92,9 +108,15 @@ describe("slice 2: disk alert → diagnose → approved remediation (OPS-208)", 
     const diagnose = await approveNext("disk-diagnose@1");
     expect(diagnose.summary.terminalState).toBe("COMPLETED");
 
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 1,
+      errors: [],
+    });
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "disk-remediate@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "disk-remediate@1"),
+    ).toBeUndefined();
   });
 
   test("duplicate alert (same host+alertId) → one run", async () => {
@@ -102,14 +124,21 @@ describe("slice 2: disk alert → diagnose → approved remediation (OPS-208)", 
     admitEvent(db, registry, alertEnvelope({ alertId: "a3", usedPct: 93 }));
     planAdmittedEvents(db, registry, { policyVersion: PV });
     // Re-fired alert: same alertId/host, different usedPct — must converge.
-    admitEvent(db, registry, { ...alertEnvelope({ alertId: "a3", usedPct: 97 }), eventId: "keep-a3-refire" });
+    admitEvent(db, registry, {
+      ...alertEnvelope({ alertId: "a3", usedPct: 97 }),
+      eventId: "keep-a3-refire",
+    });
     planAdmittedEvents(db, registry, { policyVersion: PV });
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
   });
 
   test("a lying artifact fails closed: verifier recomputes reclaim from evidence", async () => {
     const { db, approveNext } = harness();
-    admitEvent(db, registry, alertEnvelope({ alertId: "a4", mount: "/bad", usedPct: 95 }));
+    admitEvent(
+      db,
+      registry,
+      alertEnvelope({ alertId: "a4", mount: "/bad", usedPct: 95 }),
+    );
     await approveNext("disk-diagnose@1");
     resolveChains(db, registry);
     const remediate = await approveNext("disk-remediate@1");
@@ -117,9 +146,13 @@ describe("slice 2: disk alert → diagnose → approved remediation (OPS-208)", 
     expect(remediate.summary.reasonCode).toBe("contract_violation");
     // The journal carries the recomputation detail.
     const journal = db
-      .query(`SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`)
+      .query(
+        `SELECT reason FROM lifecycle_events WHERE run_id = ? AND to_state = 'FAILED'`,
+      )
       .get(remediate.runId);
-    expect(journal.reason).toContain("evidence_mismatch: reclaimedBytes 9999999 != recomputed 1000000");
+    expect(journal.reason).toContain(
+      "evidence_mismatch: reclaimedBytes 9999999 != recomputed 1000000",
+    );
   });
 });
 
@@ -144,13 +177,21 @@ describe("actions adapter (OPS-208)", () => {
     const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "evrt-act-ws-"));
 
     const outcome = await actions.execute({
-      spec: { input: { host: "testhost", mount: "/", actions: [{ action: "shrink" }] } },
+      spec: {
+        input: {
+          host: "testhost",
+          mount: "/",
+          actions: [{ action: "shrink" }],
+        },
+      },
       def: localDef(dir),
       workspaceDir,
       timeoutMs: 10_000,
     });
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-    const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+    );
     expect(result.artifact.beforeUsedBytes).toBe(1000);
     expect(result.artifact.afterUsedBytes).toBe(400);
     expect(result.artifact.reclaimedBytes).toBe(600);
@@ -163,7 +204,13 @@ describe("actions adapter (OPS-208)", () => {
     const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "evrt-act-ws-"));
 
     const outcome = await actions.execute({
-      spec: { input: { host: "testhost", mount: "/", actions: [{ action: "shrink" }, { action: "rm-rf-everything" }] } },
+      spec: {
+        input: {
+          host: "testhost",
+          mount: "/",
+          actions: [{ action: "shrink" }, { action: "rm-rf-everything" }],
+        },
+      },
       def: localDef(dir),
       workspaceDir,
       timeoutMs: 10_000,
@@ -171,7 +218,9 @@ describe("actions adapter (OPS-208)", () => {
     expect(outcome.exitCode).toBe(1);
     // The registered action in the same list did NOT run either.
     expect(readFileSync(path.join(dir, "blob")).length).toBe(1000);
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain("not in the closed action registry");
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("not in the closed action registry");
   });
 
   test("unknown host refuses before executing", async () => {
@@ -179,12 +228,16 @@ describe("actions adapter (OPS-208)", () => {
     writeFileSync(path.join(dir, "blob"), Buffer.alloc(1000));
     const workspaceDir = mkdtempSync(path.join(os.tmpdir(), "evrt-act-ws-"));
     const outcome = await actions.execute({
-      spec: { input: { host: "prod-db", mount: "/", actions: [{ action: "shrink" }] } },
+      spec: {
+        input: { host: "prod-db", mount: "/", actions: [{ action: "shrink" }] },
+      },
       def: localDef(dir),
       workspaceDir,
       timeoutMs: 10_000,
     });
     expect(outcome.exitCode).toBe(1);
-    expect(readFileSync(path.join(workspaceDir, ".actions.log"), "utf8")).toContain("host allowlist");
+    expect(
+      readFileSync(path.join(workspaceDir, ".actions.log"), "utf8"),
+    ).toContain("host allowlist");
   });
 });

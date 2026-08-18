@@ -11,7 +11,9 @@ function processGroupForPid(pid) {
     encoding: "utf8",
   });
   const pgid = Number(result.stdout.trim());
-  return result.status === 0 && Number.isInteger(pgid) && pgid > 0 ? pgid : null;
+  return result.status === 0 && Number.isInteger(pgid) && pgid > 0
+    ? pgid
+    : null;
 }
 
 const testRunnerPgid = processGroupForPid(process.pid);
@@ -59,7 +61,9 @@ export function trackProcess(pid, { group = true, scope = "test" } = {}) {
   }
   const entry = { pid: Number(pid), group, scope };
   if (entry.group && testRunnerPgid !== null && entry.pid === testRunnerPgid) {
-    throw new Error(`refusing to track the test runner process group ${testRunnerPgid}`);
+    throw new Error(
+      `refusing to track the test runner process group ${testRunnerPgid}`,
+    );
   }
   tracked.set(keyFor(entry), entry);
   return entry;
@@ -67,7 +71,8 @@ export function trackProcess(pid, { group = true, scope = "test" } = {}) {
 
 /** Find and register the detached process group containing pid. */
 export function trackProcessGroupForPid(pid, options = {}) {
-  if (process.platform === "win32") return trackProcess(pid, { ...options, group: false });
+  if (process.platform === "win32")
+    return trackProcess(pid, { ...options, group: false });
   const pgid = processGroupForPid(pid);
   if (pgid === null) {
     throw new Error(`could not resolve process group for test pid ${pid}`);
@@ -81,7 +86,8 @@ export function trackProcessGroupsMatching(fragment, options = {}) {
   const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], {
     encoding: "utf8",
   });
-  if (result.status !== 0) throw new Error("could not inspect test process groups");
+  if (result.status !== 0)
+    throw new Error("could not inspect test process groups");
   for (const line of result.stdout.split("\n")) {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
     if (!match || !match[3].includes(fragment)) continue;
@@ -98,7 +104,8 @@ export function trackMarkedFakeRuntimeGroups(marker, options = {}) {
   const result = spawnSync("ps", ["-axo", "pid=,pgid=,command="], {
     encoding: "utf8",
   });
-  if (result.status !== 0) throw new Error("could not inspect marked test process groups");
+  if (result.status !== 0)
+    throw new Error("could not inspect marked test process groups");
   for (const line of result.stdout.split("\n")) {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
     if (!match) continue;
@@ -129,7 +136,7 @@ export function processOwnerWatchdogSource(ownerPid = process.pid) {
     `const __factoryTestOwnerPid = ${Number(ownerPid)};`,
     "const __factoryTestOwnerWatch = setInterval(() => {",
     "  try { process.kill(__factoryTestOwnerPid, 0); } catch {",
-    "    try { process.kill(-process.pid, \"SIGKILL\"); } catch { process.exit(1); }",
+    '    try { process.kill(-process.pid, "SIGKILL"); } catch { process.exit(1); }',
     "  }",
     "}, 100);",
     "__factoryTestOwnerWatch.unref?.();",
@@ -176,8 +183,13 @@ export function spawnTracked(command, args = [], options = {}, tracking = {}) {
   return child;
 }
 
-export async function cleanupTrackedProcesses({ scope = "all", graceMs = 250 } = {}) {
-  const entries = [...tracked.values()].filter((entry) => scope === "all" || entry.scope === scope);
+export async function cleanupTrackedProcesses({
+  scope = "all",
+  graceMs = 250,
+} = {}) {
+  const entries = [...tracked.values()].filter(
+    (entry) => scope === "all" || entry.scope === scope,
+  );
   for (const entry of entries) signalTracked(entry, "SIGTERM");
 
   if (graceMs > 0 && entries.some(isAlive)) {

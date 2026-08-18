@@ -11,6 +11,8 @@ export default function extend(args) {
     const outcome = await client.extend(runId, seconds, {
       override: args.includes("--override"),
     });
-    console.log(`extended ${runId} by ${seconds}s; deadline ${outcome.deadlineAt}`);
+    console.log(
+      `extended ${runId} by ${seconds}s; deadline ${outcome.deadlineAt}`,
+    );
   });
 }

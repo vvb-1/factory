@@ -13,7 +13,14 @@ import type { CapabilityGraph, GraphNode } from "./model";
 function sampleGraph(): CapabilityGraph {
   return {
     nodes: [
-      { id: "event:gh.failed", kind: "eventType", label: "gh.failed", adapter: "claude", scope: [], ttl: null },
+      {
+        id: "event:gh.failed",
+        kind: "eventType",
+        label: "gh.failed",
+        adapter: "claude",
+        scope: [],
+        ttl: null,
+      },
       {
         id: "agent:doctor@1",
         kind: "agent",
@@ -28,7 +35,12 @@ function sampleGraph(): CapabilityGraph {
       },
     ],
     edges: [
-      { id: "routes:gh.failed", source: "event:gh.failed", target: "agent:doctor@1", kind: "routes" },
+      {
+        id: "routes:gh.failed",
+        source: "event:gh.failed",
+        target: "agent:doctor@1",
+        kind: "routes",
+      },
     ],
   };
 }
@@ -43,7 +55,14 @@ describe("layoutGraph", () => {
   test("calculates positions for nodes and edges in a graph", async () => {
     const graph: CapabilityGraph = {
       nodes: [
-        { id: "event:gh.failed", kind: "eventType", label: "gh.failed", adapter: "claude", scope: [], ttl: null },
+        {
+          id: "event:gh.failed",
+          kind: "eventType",
+          label: "gh.failed",
+          adapter: "claude",
+          scope: [],
+          ttl: null,
+        },
         {
           id: "agent:doctor@1",
           kind: "agent",
@@ -58,7 +77,12 @@ describe("layoutGraph", () => {
         },
       ],
       edges: [
-        { id: "routes:gh.failed", source: "event:gh.failed", target: "agent:doctor@1", kind: "routes" },
+        {
+          id: "routes:gh.failed",
+          source: "event:gh.failed",
+          target: "agent:doctor@1",
+          kind: "routes",
+        },
       ],
     };
 
@@ -85,7 +109,11 @@ describe("layoutGraph", () => {
             ? { ...n, activeRuns: [{ state: "RUNNING", count: 2 }] }
             : n,
       ),
-      edges: base.edges.map((e) => ({ ...e, label: "routes (3)", invocations: 3 })),
+      edges: base.edges.map((e) => ({
+        ...e,
+        label: "routes (3)",
+        invocations: 3,
+      })),
     };
     expect(graphIdentity(overlay)).toBe(graphIdentity(base));
   });
@@ -104,7 +132,15 @@ describe("layoutGraph", () => {
     expect(
       graphIdentity({
         ...base,
-        edges: [...base.edges, { id: "rec:x", source: "agent:doctor@1", target: "event:gh.failed", kind: "recommends" }],
+        edges: [
+          ...base.edges,
+          {
+            id: "rec:x",
+            source: "agent:doctor@1",
+            target: "event:gh.failed",
+            kind: "recommends",
+          },
+        ],
       }),
     ).not.toBe(graphIdentity(base));
   });
@@ -125,7 +161,11 @@ describe("layoutGraph", () => {
     const first = await layoutGraphIfIdentityChanged(base, null, layout);
     expect(calls).toBe(1);
     expect(first.positions).not.toBeNull();
-    const second = await layoutGraphIfIdentityChanged(overlay, first.identity, layout);
+    const second = await layoutGraphIfIdentityChanged(
+      overlay,
+      first.identity,
+      layout,
+    );
     expect(calls).toBe(1);
     expect(second.positions).toBeNull();
     expect(second.identity).toBe(first.identity);
@@ -134,7 +174,14 @@ describe("layoutGraph", () => {
   test("rejects when layout calculation exceeds bounded timeout", async () => {
     const graph: CapabilityGraph = {
       nodes: [
-        { id: "event:e1", kind: "eventType", label: "e1", adapter: "a", scope: [], ttl: null },
+        {
+          id: "event:e1",
+          kind: "eventType",
+          label: "e1",
+          adapter: "a",
+          scope: [],
+          ttl: null,
+        },
       ],
       edges: [],
     };

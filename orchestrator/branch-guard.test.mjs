@@ -67,7 +67,9 @@ describe("protectedBranchesFor & isProtectedBranch", () => {
     expect(isProtectedBranch("MASTER", repo)).toBe(true);
     expect(isProtectedBranch("REFS/HEADS/PRODUCTION", repo)).toBe(true);
     expect(isProtectedBranch("origin/Staging", repo)).toBe(true);
-    expect(isProtectedBranch("staging", { ...repo, base: "StAgInG" })).toBe(true);
+    expect(isProtectedBranch("staging", { ...repo, base: "StAgInG" })).toBe(
+      true,
+    );
     expect(isProtectedBranch("upstream/develop", repo)).toBe(false);
     expect(isProtectedBranch("feature/origin/develop", repo)).toBe(false);
   });
@@ -159,7 +161,14 @@ describe("evaluateBranchGuard", () => {
   });
 
   test("returns REFUSED (2) for prefixed and case-variant protected branches", () => {
-    for (const branch of ["refs/heads/develop", "origin/develop", "heads/develop", "Develop", "Master", "MAIN"]) {
+    for (const branch of [
+      "refs/heads/develop",
+      "origin/develop",
+      "heads/develop",
+      "Develop",
+      "Master",
+      "MAIN",
+    ]) {
       const res = evaluateBranchGuard({
         branch,
         repo,
@@ -185,27 +194,52 @@ describe("evaluateBranchGuard", () => {
   });
 
   test("returns CANNOT_EVALUATE (3) on missing branch or repo", () => {
-    expect(evaluateBranchGuard({ branch: "", repo, targetPr: 1, openPrs }).exitCode).toBe(EXIT.CANNOT_EVALUATE);
-    expect(evaluateBranchGuard({ branch: "feat/foo", repo: null, targetPr: 1, openPrs }).exitCode).toBe(EXIT.CANNOT_EVALUATE);
+    expect(
+      evaluateBranchGuard({ branch: "", repo, targetPr: 1, openPrs }).exitCode,
+    ).toBe(EXIT.CANNOT_EVALUATE);
+    expect(
+      evaluateBranchGuard({
+        branch: "feat/foo",
+        repo: null,
+        targetPr: 1,
+        openPrs,
+      }).exitCode,
+    ).toBe(EXIT.CANNOT_EVALUATE);
   });
 });
 
 describe("gh helper failure modes", () => {
   test("resolveHeadBranch returns null on gh error", () => {
-    const run = recorder(() => ({ status: 1, stdout: "", stderr: "not found" }));
+    const run = recorder(() => ({
+      status: 1,
+      stdout: "",
+      stderr: "not found",
+    }));
     expect(resolveHeadBranch("/fake", 123, run)).toBeNull();
   });
 
   test("resolveHeadBranch returns branch name on success", () => {
-    const run = recorder(() => ({ status: 0, stdout: "feat/my-branch\n", stderr: "" }));
+    const run = recorder(() => ({
+      status: 0,
+      stdout: "feat/my-branch\n",
+      stderr: "",
+    }));
     expect(resolveHeadBranch("/fake", 123, run)).toBe("feat/my-branch");
   });
 
   test("listOpenPrs returns null on gh failure or JSON parse error", () => {
-    const runFail = recorder(() => ({ status: 1, stdout: "", stderr: "gh error" }));
+    const runFail = recorder(() => ({
+      status: 1,
+      stdout: "",
+      stderr: "gh error",
+    }));
     expect(listOpenPrs("/fake", runFail)).toBeNull();
 
-    const runBadJson = recorder(() => ({ status: 0, stdout: "invalid json", stderr: "" }));
+    const runBadJson = recorder(() => ({
+      status: 0,
+      stdout: "invalid json",
+      stderr: "",
+    }));
     expect(listOpenPrs("/fake", runBadJson)).toBeNull();
   });
 
@@ -215,7 +249,9 @@ describe("gh helper failure modes", () => {
       stdout: JSON.stringify([{ number: 10, headRefName: "feat/x" }]),
       stderr: "",
     }));
-    expect(listOpenPrs("/fake", run)).toEqual([{ number: 10, headRefName: "feat/x" }]);
+    expect(listOpenPrs("/fake", run)).toEqual([
+      { number: 10, headRefName: "feat/x" },
+    ]);
   });
 });
 
@@ -253,7 +289,11 @@ repos:
       },
     );
 
-    try { unlinkSync(tmpConfig); } catch { /* intentionally ignored */ }
+    try {
+      unlinkSync(tmpConfig);
+    } catch {
+      /* intentionally ignored */
+    }
     expect(r.status).toBe(EXIT.SAFE);
     expect(r.stdout).toContain("safe to delete");
   });
@@ -289,7 +329,11 @@ repos:
       },
     );
 
-    try { unlinkSync(tmpConfig); } catch { /* intentionally ignored */ }
+    try {
+      unlinkSync(tmpConfig);
+    } catch {
+      /* intentionally ignored */
+    }
     expect(r.status).toBe(EXIT.REFUSED);
     expect(r.stderr).toContain("protected branch");
   });
@@ -304,7 +348,13 @@ repos:
 
     const rBadRepo = spawnSync(
       "bun",
-      [path.join(import.meta.dirname, "branch-guard.mjs"), "--repo", "nonexistent", "--pr", "123"],
+      [
+        path.join(import.meta.dirname, "branch-guard.mjs"),
+        "--repo",
+        "nonexistent",
+        "--pr",
+        "123",
+      ],
       { encoding: "utf8" },
     );
     expect(rBadRepo.status).toBe(EXIT.CANNOT_EVALUATE);

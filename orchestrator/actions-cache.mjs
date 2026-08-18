@@ -13,7 +13,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../lib/schedule.mjs";
-import { renderActionsCacheUsage, summarizeActionsCacheUsage } from "../lib/actions-cache.mjs";
+import {
+  renderActionsCacheUsage,
+  summarizeActionsCacheUsage,
+} from "../lib/actions-cache.mjs";
 
 const argv = process.argv.slice(2);
 const value = (flag) => {
@@ -31,7 +34,9 @@ const number = (flag, fallback) => {
   return parsed;
 };
 
-const policy = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8"));
+const policy = Bun.YAML.parse(
+  readFileSync(path.join(ROOT, "config/policy.yaml"), "utf8"),
+);
 const configured = policy.actions_cache ?? {};
 const organization = value("--org") ?? configured.organization;
 const includedGb = number("--included-gb", configured.included_gb);
@@ -39,7 +44,9 @@ const warningPercent = number("--warning-percent", configured.warning_percent);
 const json = argv.includes("--json");
 
 if (!organization || !includedGb || !warningPercent) {
-  console.error("Actions-cache policy is incomplete; set organization, included_gb, and warning_percent in config/policy.yaml.");
+  console.error(
+    "Actions-cache policy is incomplete; set organization, included_gb, and warning_percent in config/policy.yaml.",
+  );
   process.exit(2);
 }
 
@@ -49,7 +56,9 @@ if (process.env.FACTORY_ACTIONS_CACHE_USAGE_JSON) {
   raw = process.env.FACTORY_ACTIONS_CACHE_USAGE_JSON;
 } else {
   const api = Bun.spawnSync([
-    "gh", "api", `orgs/${organization}/actions/cache/usage-by-repository?per_page=100`,
+    "gh",
+    "api",
+    `orgs/${organization}/actions/cache/usage-by-repository?per_page=100`,
   ]);
   if (api.exitCode !== 0) {
     process.stderr.write(api.stderr);
@@ -66,7 +75,10 @@ try {
   process.exit(1);
 }
 
-const summary = summarizeActionsCacheUsage(payload, { includedGb, warningPercent });
+const summary = summarizeActionsCacheUsage(payload, {
+  includedGb,
+  warningPercent,
+});
 if (json) console.log(JSON.stringify(summary, null, 2));
 else console.log(renderActionsCacheUsage(summary));
 process.exit(summary.warning ? 1 : 0);

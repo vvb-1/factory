@@ -49,7 +49,13 @@ const CONFIG: DisplayConfig<Row> = {
   ],
   subGroups: ["agent"],
   sorts: [
-    { key: "created", label: "Created", get: (r) => r.created_at, defaultDir: "desc", column: "created" },
+    {
+      key: "created",
+      label: "Created",
+      get: (r) => r.created_at,
+      defaultDir: "desc",
+      column: "created",
+    },
     { key: "agent", label: "Agent", get: (r) => r.agent, column: "agent" },
   ],
   columns: [
@@ -59,7 +65,13 @@ const CONFIG: DisplayConfig<Row> = {
   ],
 };
 
-const row = (id: string, state: string, agent: string, created: string, extra?: Partial<Row>): Row => ({
+const row = (
+  id: string,
+  state: string,
+  agent: string,
+  created: string,
+  extra?: Partial<Row>,
+): Row => ({
   id,
   state,
   agent,
@@ -68,10 +80,18 @@ const row = (id: string, state: string, agent: string, created: string, extra?: 
 });
 
 const ROWS: Row[] = [
-  row("r1", "COMPLETED", "doctor", "2026-01-03", { envelope: { payload: { repo: "watt-mind/factory", priority: 1 } } }),
-  row("r2", "RUNNING", "scout", "2026-01-01", { envelope: { payload: { repo: "watt-mind/core", priority: 3 } } }),
-  row("r3", "FAILED", "doctor", "2026-01-04", { envelope: { payload: { repo: "watt-mind/factory", priority: 2 } } }),
-  row("r4", "RUNNING", "doctor", "2026-01-02", { spec: { input: { repo: "watt-mind/agent" } } }),
+  row("r1", "COMPLETED", "doctor", "2026-01-03", {
+    envelope: { payload: { repo: "watt-mind/factory", priority: 1 } },
+  }),
+  row("r2", "RUNNING", "scout", "2026-01-01", {
+    envelope: { payload: { repo: "watt-mind/core", priority: 3 } },
+  }),
+  row("r3", "FAILED", "doctor", "2026-01-04", {
+    envelope: { payload: { repo: "watt-mind/factory", priority: 2 } },
+  }),
+  row("r4", "RUNNING", "doctor", "2026-01-02", {
+    spec: { input: { repo: "watt-mind/agent" } },
+  }),
   row("r5", "COMPLETED", "scout", "2026-01-05"),
 ];
 
@@ -87,9 +107,16 @@ afterEach(() => {
 describe("pathExtractor", () => {
   test("parsePath tokenizes dot and bracket paths safely", () => {
     expect(parsePath("payload.repo")).toEqual(["payload", "repo"]);
-    expect(parsePath("spec.input['model-name']")).toEqual(["spec", "input", "model-name"]);
+    expect(parsePath("spec.input['model-name']")).toEqual([
+      "spec",
+      "input",
+      "model-name",
+    ]);
     expect(parsePath("repos[0].name")).toEqual(["repos", "0", "name"]);
-    expect(parsePath("payload.__proto__.polluted")).toEqual(["payload", "polluted"]);
+    expect(parsePath("payload.__proto__.polluted")).toEqual([
+      "payload",
+      "polluted",
+    ]);
   });
 
   test("getPathValue extracts nested property safely", () => {
@@ -101,7 +128,10 @@ describe("pathExtractor", () => {
   });
 
   test("extractRowValue checks root and fallback payload/spec scopes", () => {
-    const eventRow = { id: "e1", envelope: { payload: { repo: "my-repo", count: 42 } } };
+    const eventRow = {
+      id: "e1",
+      envelope: { payload: { repo: "my-repo", count: 42 } },
+    };
     expect(extractRowValue(eventRow, "envelope.payload.repo")).toBe("my-repo");
     expect(extractRowValue(eventRow, "payload.repo")).toBe("my-repo");
     expect(extractRowValue(eventRow, "repo")).toBe("my-repo");
@@ -117,7 +147,9 @@ describe("schemaDiscovery", () => {
   test("discoverPayloadFields proposes candidate paths with sample values", () => {
     const fields = discoverPayloadFields(ROWS, []);
     expect(fields.length).toBeGreaterThan(0);
-    const repoField = fields.find((f) => f.path === "payload.repo" || f.path === "spec.input.repo");
+    const repoField = fields.find(
+      (f) => f.path === "payload.repo" || f.path === "spec.input.repo",
+    );
     expect(repoField).toBeDefined();
     expect(repoField?.occurrenceCount).toBeGreaterThanOrEqual(1);
   });
@@ -128,12 +160,22 @@ describe("buildSections", () => {
     const sections = buildSections(ROWS, CONFIG, state());
     expect(sections).toHaveLength(1);
     expect(sections[0].key).toBe(NONE);
-    expect(sections[0].rows.map((r) => r.id)).toEqual(["r1", "r2", "r3", "r4", "r5"]);
+    expect(sections[0].rows.map((r) => r.id)).toEqual([
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+      "r5",
+    ]);
   });
 
   test("enum grouping orders buckets canonically with counts and hues", () => {
     const sections = buildSections(ROWS, CONFIG, state({ groupBy: "state" }));
-    expect(sections.map((s) => s.value)).toEqual(["RUNNING", "COMPLETED", "FAILED"]);
+    expect(sections.map((s) => s.value)).toEqual([
+      "RUNNING",
+      "COMPLETED",
+      "FAILED",
+    ]);
     expect(sections.map((s) => s.count)).toEqual([2, 2, 1]);
     expect(sections[0].hue).toBe("var(--hue-warn)");
   });
@@ -147,27 +189,51 @@ describe("buildSections", () => {
   test("a value outside the canonical order still gets a bucket, after the enums", () => {
     const rows = [...ROWS, row("r6", "MYSTERY", "scout", "2026-01-06")];
     const sections = buildSections(rows, CONFIG, state({ groupBy: "state" }));
-    expect(sections.map((s) => s.value)).toEqual(["RUNNING", "COMPLETED", "FAILED", "MYSTERY"]);
+    expect(sections.map((s) => s.value)).toEqual([
+      "RUNNING",
+      "COMPLETED",
+      "FAILED",
+      "MYSTERY",
+    ]);
     expect(sections[3].count).toBe(1);
   });
 
   test("show empty groups emits zero-count buckets from the canonical order", () => {
     const rows = [row("r1", "RUNNING", "doctor", "2026-01-01")];
-    const sections = buildSections(rows, CONFIG, state({ groupBy: "state", showEmpty: true }));
-    expect(sections.map((s) => s.value)).toEqual(["RUNNING", "COMPLETED", "FAILED"]);
+    const sections = buildSections(
+      rows,
+      CONFIG,
+      state({ groupBy: "state", showEmpty: true }),
+    );
+    expect(sections.map((s) => s.value)).toEqual([
+      "RUNNING",
+      "COMPLETED",
+      "FAILED",
+    ]);
     expect(sections.map((s) => s.count)).toEqual([1, 0, 0]);
     expect(sections[1].rows).toEqual([]);
   });
 
   test("sub-grouping nests second-level sections with scoped collapse keys", () => {
-    const sections = buildSections(ROWS, CONFIG, state({ groupBy: "state", subGroupBy: "agent" }));
+    const sections = buildSections(
+      ROWS,
+      CONFIG,
+      state({ groupBy: "state", subGroupBy: "agent" }),
+    );
     const running = sections.find((s) => s.value === "RUNNING");
     expect(running?.subsections).toBeDefined();
-    expect(running?.subsections?.map((sub) => sub.key)).toEqual(["RUNNING∕doctor", "RUNNING∕scout"]);
+    expect(running?.subsections?.map((sub) => sub.key)).toEqual([
+      "RUNNING∕doctor",
+      "RUNNING∕scout",
+    ]);
   });
 
   test("sub-group equal to the group collapses to a single level", () => {
-    const sections = buildSections(ROWS, CONFIG, state({ groupBy: "state", subGroupBy: "state" }));
+    const sections = buildSections(
+      ROWS,
+      CONFIG,
+      state({ groupBy: "state", subGroupBy: "state" }),
+    );
     expect(sections.every((s) => !s.subsections)).toBe(true);
   });
 
@@ -180,18 +246,24 @@ describe("buildSections", () => {
 
 describe("sortRows", () => {
   test("default order preserves API order and desc reverses it", () => {
-    expect(sortRows(ROWS, CONFIG, state()).map((r) => r.id)).toEqual(["r1", "r2", "r3", "r4", "r5"]);
-    expect(sortRows(ROWS, CONFIG, state({ sortDir: "desc" })).map((r) => r.id)).toEqual([
-      "r5",
-      "r4",
-      "r3",
-      "r2",
+    expect(sortRows(ROWS, CONFIG, state()).map((r) => r.id)).toEqual([
       "r1",
+      "r2",
+      "r3",
+      "r4",
+      "r5",
     ]);
+    expect(
+      sortRows(ROWS, CONFIG, state({ sortDir: "desc" })).map((r) => r.id),
+    ).toEqual(["r5", "r4", "r3", "r2", "r1"]);
   });
 
   test("field sort is applied inside groups and is stable on ties", () => {
-    const sorted = sortRows(ROWS, CONFIG, state({ sortBy: "created", sortDir: "asc" }));
+    const sorted = sortRows(
+      ROWS,
+      CONFIG,
+      state({ sortBy: "created", sortDir: "asc" }),
+    );
     expect(sorted.map((r) => r.created_at)).toEqual([
       "2026-01-01",
       "2026-01-02",
@@ -202,7 +274,11 @@ describe("sortRows", () => {
   });
 
   test("custom column sort evaluates nested payload path", () => {
-    const sorted = sortRows(ROWS, CONFIG, state({ sortBy: "custom:payload.priority", sortDir: "asc" }));
+    const sorted = sortRows(
+      ROWS,
+      CONFIG,
+      state({ sortBy: "custom:payload.priority", sortDir: "asc" }),
+    );
     expect(sorted[0].id).toBe("r1"); // priority 1
     expect(sorted[1].id).toBe("r3"); // priority 2
     expect(sorted[2].id).toBe("r2"); // priority 3
@@ -215,11 +291,29 @@ describe("sortRows", () => {
       row("r3", "RUNNING", "c", "2d ago"),
       row("r4", "RUNNING", "d", "2m ago"),
     ];
-    const asc = sortRows(timeRows, CONFIG, state({ sortBy: "created", sortDir: "asc" }));
-    expect(asc.map((r) => r.created_at)).toEqual(["1s ago", "2m ago", "1d ago", "2d ago"]);
+    const asc = sortRows(
+      timeRows,
+      CONFIG,
+      state({ sortBy: "created", sortDir: "asc" }),
+    );
+    expect(asc.map((r) => r.created_at)).toEqual([
+      "1s ago",
+      "2m ago",
+      "1d ago",
+      "2d ago",
+    ]);
 
-    const desc = sortRows(timeRows, CONFIG, state({ sortBy: "created", sortDir: "desc" }));
-    expect(desc.map((r) => r.created_at)).toEqual(["2d ago", "1d ago", "2m ago", "1s ago"]);
+    const desc = sortRows(
+      timeRows,
+      CONFIG,
+      state({ sortBy: "created", sortDir: "desc" }),
+    );
+    expect(desc.map((r) => r.created_at)).toEqual([
+      "2d ago",
+      "1d ago",
+      "2m ago",
+      "1s ago",
+    ]);
   });
 
   test("does not mutate its input", () => {
@@ -231,7 +325,11 @@ describe("sortRows", () => {
 
 describe("flattenSections", () => {
   test("skips collapsed sections and collapsed sub-sections", () => {
-    const sections = buildSections(ROWS, CONFIG, state({ groupBy: "state", subGroupBy: "agent" }));
+    const sections = buildSections(
+      ROWS,
+      CONFIG,
+      state({ groupBy: "state", subGroupBy: "agent" }),
+    );
     const flatAll = flattenSections(sections, []);
     expect(flatAll).toHaveLength(ROWS.length);
 
@@ -255,11 +353,15 @@ describe("state transitions & custom columns (WM-214)", () => {
   test("addCustomColumn and removeCustomColumn work cleanly", () => {
     const s1 = addCustomColumn(state(), "payload.repo");
     expect(s1.customColumns).toEqual(["payload.repo"]);
-    expect(visibleColumns(CONFIG, s1).map((c) => c.key)).toContain("custom:payload.repo");
+    expect(visibleColumns(CONFIG, s1).map((c) => c.key)).toContain(
+      "custom:payload.repo",
+    );
 
     const s2 = removeCustomColumn(s1, "payload.repo");
     expect(s2.customColumns).toEqual([]);
-    expect(visibleColumns(CONFIG, s2).map((c) => c.key)).not.toContain("custom:payload.repo");
+    expect(visibleColumns(CONFIG, s2).map((c) => c.key)).not.toContain(
+      "custom:payload.repo",
+    );
   });
 
   test("cycleColumnSort walks custom column sort cycle", () => {
@@ -282,7 +384,10 @@ describe("state transitions & custom columns (WM-214)", () => {
     expect(visibleColumns(CONFIG, s1).map((c) => c.key)).toEqual(["id"]);
 
     const s2 = toggleColumn(s1, "agent");
-    expect(visibleColumns(CONFIG, s2).map((c) => c.key)).toEqual(["id", "agent"]);
+    expect(visibleColumns(CONFIG, s2).map((c) => c.key)).toEqual([
+      "id",
+      "agent",
+    ]);
   });
 });
 
@@ -324,7 +429,11 @@ describe("persistence", () => {
 
   test("isDefaultDisplayState detects deviation including customColumns", () => {
     expect(isDefaultDisplayState(CONFIG, state())).toBe(true);
-    expect(isDefaultDisplayState(CONFIG, state({ customColumns: ["payload.repo"] }))).toBe(false);
-    expect(isDefaultDisplayState(CONFIG, state({ groupBy: "state" }))).toBe(false);
+    expect(
+      isDefaultDisplayState(CONFIG, state({ customColumns: ["payload.repo"] })),
+    ).toBe(false);
+    expect(isDefaultDisplayState(CONFIG, state({ groupBy: "state" }))).toBe(
+      false,
+    );
   });
 });

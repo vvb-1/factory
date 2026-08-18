@@ -79,7 +79,7 @@ describe("required-context resolver", () => {
     );
     expect(apply).toContain('[ "$required_status" -eq 1 ]');
     expect(apply).toContain(
-      'no required checks reported on the \'$expected_ref\' branch',
+      "no required checks reported on the '$expected_ref' branch",
     );
     expect(apply).not.toContain("/protection");
   });
@@ -114,9 +114,7 @@ describe("configured merge_ci proof", () => {
       proveMergeCiFallback({
         ...fallback,
         // An auxiliary visible check is deliberately not part of proof input.
-        visibleChecks: [
-          { name: "docs", bucket: "pass", state: "SUCCESS" },
-        ],
+        visibleChecks: [{ name: "docs", bucket: "pass", state: "SUCCESS" }],
       }),
     ).toEqual({
       runId: 409,
@@ -150,7 +148,10 @@ describe("configured merge_ci proof", () => {
     expect(() =>
       proveMergeCiFallback({
         ...fallback,
-        jobs: [fallback.jobs[0], { ...fallback.jobs[1], conclusion: "failure" }],
+        jobs: [
+          fallback.jobs[0],
+          { ...fallback.jobs[1], conclusion: "failure" },
+        ],
       }),
     ).toThrow("required job Verify is not completed successfully");
   });

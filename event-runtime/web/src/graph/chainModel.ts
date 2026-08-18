@@ -16,8 +16,20 @@ import type { ChainEvent, ChainRun, ChainView } from "../types";
  */
 
 export type ChainNode =
-  | { kind: "chainEvent"; id: string; event: ChainEvent; root: boolean; depth: number }
-  | { kind: "chainRun"; id: string; run: ChainRun; root: boolean; depth: number };
+  | {
+      kind: "chainEvent";
+      id: string;
+      event: ChainEvent;
+      root: boolean;
+      depth: number;
+    }
+  | {
+      kind: "chainRun";
+      id: string;
+      run: ChainRun;
+      root: boolean;
+      depth: number;
+    };
 
 export interface ChainEdge {
   id: string;
@@ -35,10 +47,13 @@ export interface ChainGraph {
   maxDepth: number;
 }
 
-export const eventNodeId = (source: string, eventId: string) => `event:${source}:${eventId}`;
+export const eventNodeId = (source: string, eventId: string) =>
+  `event:${source}:${eventId}`;
 export const runNodeId = (runId: string) => `run:${runId}`;
 
-export function buildChainGraph(view: Pick<ChainView, "events" | "runs">): ChainGraph {
+export function buildChainGraph(
+  view: Pick<ChainView, "events" | "runs">,
+): ChainGraph {
   const nodes = new Map<string, ChainNode>();
   const edges: ChainEdge[] = [];
   const runsById = new Map(view.runs.map((r) => [r.runId, r]));
@@ -55,7 +70,12 @@ export function buildChainGraph(view: Pick<ChainView, "events" | "runs">): Chain
   const incoming = new Set<string>();
   const seenEdge = new Set<string>();
   const addEdge = (edge: ChainEdge) => {
-    if (seenEdge.has(edge.id) || !nodes.has(edge.source) || !nodes.has(edge.target)) return;
+    if (
+      seenEdge.has(edge.id) ||
+      !nodes.has(edge.source) ||
+      !nodes.has(edge.target)
+    )
+      return;
     if (edge.source === edge.target) return;
     seenEdge.add(edge.id);
     edges.push(edge);
@@ -65,7 +85,12 @@ export function buildChainGraph(view: Pick<ChainView, "events" | "runs">): Chain
   for (const event of view.events) {
     const eid = eventNodeId(event.source, event.eventId);
     if (event.runId && runsById.has(event.runId)) {
-      addEdge({ id: `produced:${eid}`, source: eid, target: runNodeId(event.runId), kind: "produced" });
+      addEdge({
+        id: `produced:${eid}`,
+        source: eid,
+        target: runNodeId(event.runId),
+        kind: "produced",
+      });
     }
     if (event.causationId && runsById.has(event.causationId)) {
       addEdge({
@@ -82,7 +107,12 @@ export function buildChainGraph(view: Pick<ChainView, "events" | "runs">): Chain
     if (!run.eventSource || !run.eventId) continue;
     const eid = eventNodeId(run.eventSource, run.eventId);
     if (nodes.has(eid)) {
-      addEdge({ id: `produced:${eid}`, source: eid, target: runNodeId(run.runId), kind: "produced" });
+      addEdge({
+        id: `produced:${eid}`,
+        source: eid,
+        target: runNodeId(run.runId),
+        kind: "produced",
+      });
     }
   }
 
@@ -106,7 +136,8 @@ export function buildChainGraph(view: Pick<ChainView, "events" | "runs">): Chain
     if (visiting.has(id)) return 0;
     visiting.add(id);
     let depth = 0;
-    for (const parent of parents.get(id) ?? []) depth = Math.max(depth, depthOf(parent) + 1);
+    for (const parent of parents.get(id) ?? [])
+      depth = Math.max(depth, depthOf(parent) + 1);
     visiting.delete(id);
     memo.set(id, depth);
     return depth;
@@ -121,15 +152,20 @@ export function buildChainGraph(view: Pick<ChainView, "events" | "runs">): Chain
 }
 
 /** The chain key an event belongs to — mirrors lib/api-chain.mjs `chainKeyOf`. */
-export function chainKeyOfEvent(event: { correlationId?: string | null; eventId: string }): string {
+export function chainKeyOfEvent(event: {
+  correlationId?: string | null;
+  eventId: string;
+}): string {
   return event.correlationId ?? event.eventId;
 }
 
 /** Human summary of the origin, for headers: "clock.tick.merge-scan · schedule". */
 export function chainOriginLabel(graph: ChainGraph): string | null {
   const root = graph.nodes.find((n) => n.root && n.kind === "chainEvent");
-  if (root && root.kind === "chainEvent") return `${root.event.type} · ${root.event.source}`;
+  if (root && root.kind === "chainEvent")
+    return `${root.event.type} · ${root.event.source}`;
   const rootRun = graph.nodes.find((n) => n.root && n.kind === "chainRun");
-  if (rootRun && rootRun.kind === "chainRun") return `${rootRun.run.agent ?? rootRun.run.runId} · run`;
+  if (rootRun && rootRun.kind === "chainRun")
+    return `${rootRun.run.agent ?? rootRun.run.runId} · run`;
   return null;
 }

@@ -54,7 +54,9 @@ function requireHostPattern(value, label) {
     throw new SandboxPolicyError(`${label} must be a non-empty host pattern`);
   }
   if (value.includes("/") || value.includes(" ")) {
-    throw new SandboxPolicyError(`${label} must be a bare host pattern ("api.github.com"), not a URL or path: ${JSON.stringify(value)}`);
+    throw new SandboxPolicyError(
+      `${label} must be a bare host pattern ("api.github.com"), not a URL or path: ${JSON.stringify(value)}`,
+    );
   }
   return value;
 }
@@ -68,7 +70,9 @@ function requireGuestPath(value, label) {
     throw new SandboxPolicyError(`${label} must be an absolute guest path`);
   }
   if (value.split("/").includes("..")) {
-    throw new SandboxPolicyError(`${label} must not contain ".." segments: ${JSON.stringify(value)}`);
+    throw new SandboxPolicyError(
+      `${label} must not contain ".." segments: ${JSON.stringify(value)}`,
+    );
   }
   return value.length > 1 && value.endsWith("/") ? value.slice(0, -1) : value;
 }
@@ -109,7 +113,9 @@ export function normalizePolicy(raw, { workspaceDir } = {}) {
   const allowedHosts = [];
   if (policy.allowedHosts !== undefined) {
     if (!Array.isArray(policy.allowedHosts)) {
-      throw new SandboxPolicyError("sandbox.allowedHosts must be an array of host patterns");
+      throw new SandboxPolicyError(
+        "sandbox.allowedHosts must be an array of host patterns",
+      );
     }
     for (const [i, host] of policy.allowedHosts.entries()) {
       allowedHosts.push(requireHostPattern(host, `sandbox.allowedHosts[${i}]`));
@@ -129,9 +135,13 @@ export function normalizePolicy(raw, { workspaceDir } = {}) {
         );
       }
       if (!Array.isArray(entry.hosts) || entry.hosts.length === 0) {
-        throw new SandboxPolicyError(`sandbox.secrets.${name}.hosts must be a non-empty array`);
+        throw new SandboxPolicyError(
+          `sandbox.secrets.${name}.hosts must be a non-empty array`,
+        );
       }
-      const hosts = entry.hosts.map((h, i) => requireHostPattern(h, `sandbox.secrets.${name}.hosts[${i}]`));
+      const hosts = entry.hosts.map((h, i) =>
+        requireHostPattern(h, `sandbox.secrets.${name}.hosts[${i}]`),
+      );
       for (const host of hosts) {
         if (!allowedHosts.includes(host)) {
           // See rule 2 in the module header.
@@ -142,13 +152,18 @@ export function normalizePolicy(raw, { workspaceDir } = {}) {
       }
       const envVar = entry.env ?? name;
       if (typeof envVar !== "string" || envVar.trim() === "") {
-        throw new SandboxPolicyError(`sandbox.secrets.${name}.env must be a non-empty environment variable name`);
+        throw new SandboxPolicyError(
+          `sandbox.secrets.${name}.env must be a non-empty environment variable name`,
+        );
       }
       secrets.push({ name, envVar, hosts });
     }
   }
 
-  const workspaceMount = requireGuestPath(policy.workspaceMount ?? DEFAULT_WORKSPACE_MOUNT, "sandbox.workspaceMount");
+  const workspaceMount = requireGuestPath(
+    policy.workspaceMount ?? DEFAULT_WORKSPACE_MOUNT,
+    "sandbox.workspaceMount",
+  );
 
   const mounts = [];
   if (workspaceDir !== undefined) {
@@ -161,11 +176,22 @@ export function normalizePolicy(raw, { workspaceDir } = {}) {
   if (policy.mounts !== undefined) {
     const declared = requireObject(policy.mounts, "sandbox.mounts");
     for (const [guestPathRaw, value] of Object.entries(declared)) {
-      const guestPath = requireGuestPath(guestPathRaw, `sandbox.mounts["${guestPathRaw}"]`);
-      const spec = typeof value === "string" ? { path: value } : requireObject(value, `sandbox.mounts["${guestPathRaw}"]`);
-      const hostPath = requireHostPath(spec.path, `sandbox.mounts["${guestPathRaw}"].path`);
+      const guestPath = requireGuestPath(
+        guestPathRaw,
+        `sandbox.mounts["${guestPathRaw}"]`,
+      );
+      const spec =
+        typeof value === "string"
+          ? { path: value }
+          : requireObject(value, `sandbox.mounts["${guestPathRaw}"]`);
+      const hostPath = requireHostPath(
+        spec.path,
+        `sandbox.mounts["${guestPathRaw}"].path`,
+      );
       if (mounts.some((m) => m.guestPath === guestPath)) {
-        throw new SandboxPolicyError(`sandbox.mounts["${guestPathRaw}"] collides with an existing mount at ${guestPath}`);
+        throw new SandboxPolicyError(
+          `sandbox.mounts["${guestPathRaw}"] collides with an existing mount at ${guestPath}`,
+        );
       }
       mounts.push({ guestPath, hostPath, readonly: spec.readonly === true });
     }
@@ -177,10 +203,20 @@ export function normalizePolicy(raw, { workspaceDir } = {}) {
   }
   const memory = policy.memory ?? DEFAULT_MEMORY;
   if (typeof memory !== "string" || !/^\d+[KMGT]?$/.test(memory)) {
-    throw new SandboxPolicyError(`sandbox.memory must be a qemu size string like "1G", got ${JSON.stringify(memory)}`);
+    throw new SandboxPolicyError(
+      `sandbox.memory must be a qemu size string like "1G", got ${JSON.stringify(memory)}`,
+    );
   }
 
-  return { provider: policy.provider, allowedHosts, secrets, mounts, workspaceMount, memory, cpus };
+  return {
+    provider: policy.provider,
+    allowedHosts,
+    secrets,
+    mounts,
+    workspaceMount,
+    memory,
+    cpus,
+  };
 }
 
 /**

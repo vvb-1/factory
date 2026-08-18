@@ -3,7 +3,15 @@
 `./input.json` names a run of this runtime:
 
 ```json
-{ "runId": "run_...", "runPin": { "runId": "run_...", "transcript": "<40+ hex>", "state": "FAILED", "agent": "ci-doctor@2" } }
+{
+  "runId": "run_...",
+  "runPin": {
+    "runId": "run_...",
+    "transcript": "<40+ hex>",
+    "state": "FAILED",
+    "agent": "ci-doctor@2"
+  }
+}
 ```
 
 `./transcript.json` is **that run's captured agent transcript**, materialized

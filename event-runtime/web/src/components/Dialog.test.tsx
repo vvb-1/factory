@@ -84,7 +84,11 @@ describe("Dialog", () => {
       const [confirm, setConfirm] = useState(false);
       return (
         <OpenDialog onClose={() => {}}>
-          <button type="button" data-testid="choose" onClick={() => setConfirm(true)}>
+          <button
+            type="button"
+            data-testid="choose"
+            onClick={() => setConfirm(true)}
+          >
             choose
           </button>
           {confirm ? (
@@ -135,9 +139,18 @@ describe("Dialog", () => {
 
     // happy-dom has no layout engine, so stamp the CSSOM values this browser
     // case produces and make the regression fail under the old heuristic.
-    Object.defineProperty(envelope, "offsetParent", { configurable: true, value: panel });
-    Object.defineProperty(chip, "offsetParent", { configurable: true, value: panel });
-    Object.defineProperty(contentsControl, "offsetParent", { configurable: true, value: null });
+    Object.defineProperty(envelope, "offsetParent", {
+      configurable: true,
+      value: panel,
+    });
+    Object.defineProperty(chip, "offsetParent", {
+      configurable: true,
+      value: panel,
+    });
+    Object.defineProperty(contentsControl, "offsetParent", {
+      configurable: true,
+      value: null,
+    });
 
     envelope.focus();
     fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
@@ -147,7 +160,11 @@ describe("Dialog", () => {
   test("Tab cycle includes a position: fixed control", () => {
     const r = render(
       <OpenDialog onClose={() => {}}>
-        <button type="button" data-testid="fixed-control" style={{ position: "fixed" }}>
+        <button
+          type="button"
+          data-testid="fixed-control"
+          style={{ position: "fixed" }}
+        >
           fixed control
         </button>
       </OpenDialog>,
@@ -157,9 +174,18 @@ describe("Dialog", () => {
     const chip = r.getByTestId("chip");
     const fixedControl = r.getByTestId("fixed-control");
 
-    Object.defineProperty(envelope, "offsetParent", { configurable: true, value: panel });
-    Object.defineProperty(chip, "offsetParent", { configurable: true, value: panel });
-    Object.defineProperty(fixedControl, "offsetParent", { configurable: true, value: null });
+    Object.defineProperty(envelope, "offsetParent", {
+      configurable: true,
+      value: panel,
+    });
+    Object.defineProperty(chip, "offsetParent", {
+      configurable: true,
+      value: panel,
+    });
+    Object.defineProperty(fixedControl, "offsetParent", {
+      configurable: true,
+      value: null,
+    });
 
     envelope.focus();
     fireEvent.keyDown(window, { key: "Tab", shiftKey: true });

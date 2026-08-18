@@ -223,7 +223,10 @@ export const MIGRATIONS = [
       // A cold start can have several processes read user_version before one
       // acquires the migration lock. Keep the additive step retry-safe when a
       // waiter enters with that stale read after the first process committed.
-      const columns = db.query(`PRAGMA table_info(events)`).all().map((row) => row.name);
+      const columns = db
+        .query(`PRAGMA table_info(events)`)
+        .all()
+        .map((row) => row.name);
       if (!columns.includes("archived_at")) {
         db.exec(`ALTER TABLE events ADD COLUMN archived_at TEXT;`);
       }
@@ -241,7 +244,10 @@ export const MIGRATIONS = [
     name: "inbox_decisions",
     up(db) {
       const columns = new Set(
-        db.query(`PRAGMA table_info(inbox_items)`).all().map((row) => row.name),
+        db
+          .query(`PRAGMA table_info(inbox_items)`)
+          .all()
+          .map((row) => row.name),
       );
       for (const [name, type] of [
         ["decision_json", "TEXT"],

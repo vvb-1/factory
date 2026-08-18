@@ -42,7 +42,10 @@ export function parsePath(path: string): readonly string[] {
 /**
  * Safely traverses an object along a tokenized path without throwing.
  */
-export function getPathValue(target: unknown, path: string | readonly string[]): unknown {
+export function getPathValue(
+  target: unknown,
+  path: string | readonly string[],
+): unknown {
   if (target == null) return undefined;
   const tokens = typeof path === "string" ? parsePath(path) : path;
   let curr: any = target;

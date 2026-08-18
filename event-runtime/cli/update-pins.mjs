@@ -12,7 +12,8 @@ export default function updatePinsCommand(args = []) {
     fail("usage: update-pins [--pack NAME]");
   }
   try {
-    const changed = args.length === 0 ? updatePins() : updatePins({ pack: args[1] });
+    const changed =
+      args.length === 0 ? updatePins() : updatePins({ pack: args[1] });
     console.log(
       changed.length
         ? `re-pinned: ${changed.join(", ")}`

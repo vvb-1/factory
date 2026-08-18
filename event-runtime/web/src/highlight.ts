@@ -1,11 +1,5 @@
 export type JsonTokenKind =
-  | "key"
-  | "string"
-  | "number"
-  | "boolean"
-  | "null"
-  | "punct"
-  | "plain";
+  "key" | "string" | "number" | "boolean" | "null" | "punct" | "plain";
 
 export interface JsonToken {
   kind: JsonTokenKind;

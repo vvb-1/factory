@@ -44,7 +44,10 @@ describe("orchestrator/workers CLI", () => {
   });
 
   test("factory workers returns warning when no nodes configured in plain text mode", () => {
-    const emptyConfig = path.join(tmpdir(), `empty-nodes-txt-${Date.now()}.yaml`);
+    const emptyConfig = path.join(
+      tmpdir(),
+      `empty-nodes-txt-${Date.now()}.yaml`,
+    );
     writeFileSync(emptyConfig, "nodes: {}\n");
 
     try {
@@ -58,7 +61,9 @@ describe("orchestrator/workers CLI", () => {
         },
       });
       expect(res.exitCode).toBe(0);
-      expect(res.stdout.toString()).toContain("No remote worker nodes configured");
+      expect(res.stdout.toString()).toContain(
+        "No remote worker nodes configured",
+      );
     } finally {
       rmSync(emptyConfig, { force: true });
     }

@@ -1,7 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { keyGuard, refetchIntervals, useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import {
+  keyGuard,
+  refetchIntervals,
+  useDisplayOptions,
+  useListKeys,
+  useNow,
+  useTabKeys,
+} from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -56,13 +63,20 @@ export type WorkerDisplayState = ReturnType<typeof health> | "draining";
 export const WORKER_HEALTH_FILTERS = ["live", "busy", "stale"] as const;
 export type WorkerHealthFilter = (typeof WORKER_HEALTH_FILTERS)[number];
 
-export const isWorkerHealthFilter = (value: string | null): value is WorkerHealthFilter =>
+export const isWorkerHealthFilter = (
+  value: string | null,
+): value is WorkerHealthFilter =>
   WORKER_HEALTH_FILTERS.some((filter) => filter === value);
 
 /** Overview health counts are disjoint: live excludes stale and stopped workers. */
-export const workerMatchesHealth = (worker: Worker, filter: WorkerHealthFilter): boolean => {
+export const workerMatchesHealth = (
+  worker: Worker,
+  filter: WorkerHealthFilter,
+): boolean => {
   const state = health(worker);
-  return filter === "live" ? state === "idle" || state === "busy" : state === filter;
+  return filter === "live"
+    ? state === "idle" || state === "busy"
+    : state === filter;
 };
 
 const WORKER_STATE_HUES: Record<WorkerDisplayState, string> = {
@@ -72,11 +86,17 @@ const WORKER_STATE_HUES: Record<WorkerDisplayState, string> = {
 
 /** Stale remains the strongest signal; otherwise a drain request is explicit. */
 export const workerDisplayState = (worker: Worker): WorkerDisplayState =>
-  worker.stale ? "stale" : worker.draining && worker.state !== "stopped" ? "draining" : health(worker);
+  worker.stale
+    ? "stale"
+    : worker.draining && worker.state !== "stopped"
+      ? "draining"
+      : health(worker);
 
 /** Compatibility projection for an older API that has not added capacity yet. */
 export function capacityFromWorkers(rows: Worker[]): WorkerCapacity {
-  const live = rows.filter((worker) => worker.state !== "stopped" && !worker.stale);
+  const live = rows.filter(
+    (worker) => worker.state !== "stopped" && !worker.stale,
+  );
   const running = live.filter((worker) => worker.state === "busy").length;
   const draining = live.filter((worker) => worker.draining).length;
   return {
@@ -84,7 +104,8 @@ export function capacityFromWorkers(rows: Worker[]): WorkerCapacity {
     capacity: live.length,
     queued: 0,
     live: live.length,
-    idle: live.filter((worker) => worker.state !== "busy" && !worker.draining).length,
+    idle: live.filter((worker) => worker.state !== "busy" && !worker.draining)
+      .length,
     draining,
     target: Math.max(0, live.length - draining),
     min: null,
@@ -97,7 +118,10 @@ export function capacityFromWorkers(rows: Worker[]): WorkerCapacity {
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable=true]"))
+  );
 }
 
 /**
@@ -134,7 +158,9 @@ export function fleetBanner(rows: Worker[]): FleetBanner | null {
 }
 
 /** Split the registry into live and stopped, preserving order within each group. */
-export function partitionWorkers<T extends Worker>(rows: T[]): { live: T[]; stopped: T[] } {
+export function partitionWorkers<T extends Worker>(
+  rows: T[],
+): { live: T[]; stopped: T[] } {
   const live: T[] = [];
   const stopped: T[] = [];
   for (const w of rows) (isLive(w) ? live : stopped).push(w);
@@ -156,11 +182,15 @@ export interface EnrichedWorker extends Worker {
   runItem: RunListItem | null;
 }
 
-export function enrichWorker(w: Worker, runMap: Map<string, RunListItem>): EnrichedWorker {
+export function enrichWorker(
+  w: Worker,
+  runMap: Map<string, RunListItem>,
+): EnrichedWorker {
   const r = w.currentRun ? (runMap.get(w.currentRun) ?? null) : null;
   const activeAgent = r?.agent ?? EMPTY;
   const repos = r?.repos?.length ? r.repos.join(", ") : "";
-  const ticketMatch = r?.eventId?.match(/\b([A-Z]{2,10}-\d+|PR-\d+)\b/)?.[0] ?? "";
+  const ticketMatch =
+    r?.eventId?.match(/\b([A-Z]{2,10}-\d+|PR-\d+)\b/)?.[0] ?? "";
   const activeTarget =
     repos && ticketMatch && !repos.includes(ticketMatch)
       ? `${repos} · ${ticketMatch}`
@@ -191,18 +221,65 @@ const WORKERS_DISPLAY: DisplayConfig<EnrichedWorker> = {
   ],
   subGroups: ["agent", "host", "state"],
   sorts: [
-    { key: "worker", label: "Worker", get: (w) => w.workerId, column: "worker" },
+    {
+      key: "worker",
+      label: "Worker",
+      get: (w) => w.workerId,
+      column: "worker",
+    },
     { key: "host", label: "Host", get: (w) => w.host, column: "host" },
     { key: "pid", label: "PID", get: (w) => w.pid, column: "pid" },
     { key: "state", label: "State", get: workerDisplayState, column: "state" },
-    { key: "agent", label: "Agent", get: (w) => w.activeAgent, column: "agent" },
-    { key: "target", label: "Target", get: (w) => w.activeTarget, column: "target" },
-    { key: "activeModel", label: "Model", get: (w) => w.activeModel, column: "activeModel" },
-    { key: "labels", label: "Labels", get: (w) => labelText(w.labels), column: "labels" },
-    { key: "adapters", label: "Adapters", get: (w) => w.adapters.join(", "), column: "adapters" },
-    { key: "run", label: "Current run", get: (w) => w.currentRun ?? "", column: "run" },
-    { key: "started", label: "Started", get: (w) => w.startedAt ?? "", defaultDir: "desc", column: "uptime" },
-    { key: "lastSeen", label: "Last seen", get: (w) => w.lastSeen ?? "", defaultDir: "desc", column: "heartbeat" },
+    {
+      key: "agent",
+      label: "Agent",
+      get: (w) => w.activeAgent,
+      column: "agent",
+    },
+    {
+      key: "target",
+      label: "Target",
+      get: (w) => w.activeTarget,
+      column: "target",
+    },
+    {
+      key: "activeModel",
+      label: "Model",
+      get: (w) => w.activeModel,
+      column: "activeModel",
+    },
+    {
+      key: "labels",
+      label: "Labels",
+      get: (w) => labelText(w.labels),
+      column: "labels",
+    },
+    {
+      key: "adapters",
+      label: "Adapters",
+      get: (w) => w.adapters.join(", "),
+      column: "adapters",
+    },
+    {
+      key: "run",
+      label: "Current run",
+      get: (w) => w.currentRun ?? "",
+      column: "run",
+    },
+    {
+      key: "started",
+      label: "Started",
+      get: (w) => w.startedAt ?? "",
+      defaultDir: "desc",
+      column: "uptime",
+    },
+    {
+      key: "lastSeen",
+      label: "Last seen",
+      get: (w) => w.lastSeen ?? "",
+      defaultDir: "desc",
+      column: "heartbeat",
+    },
   ],
   columns: [
     { key: "worker", label: "Worker", always: true },
@@ -288,12 +365,19 @@ function HeartbeatCell({ w, now }: { w: Worker; now: number }) {
 /** How much of the window is spent — the glance; `StaleClock` is the number. */
 function HeartbeatMeter({ hb }: { hb: Heartbeat }) {
   if (hb.kind === "none") return null;
-  const spent = hb.kind === "stale" ? 1 : 1 - hb.remainingMs / HEARTBEAT_STALE_MS;
+  const spent =
+    hb.kind === "stale" ? 1 : 1 - hb.remainingMs / HEARTBEAT_STALE_MS;
   return (
-    <div className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)" aria-hidden="true">
+    <div
+      className="mt-2 h-1 overflow-hidden rounded-full bg-(--surface-2)"
+      aria-hidden="true"
+    >
       <div
         className="h-full rounded-full transition-[width,background-color] duration-1000 ease-linear"
-        style={{ width: `${Math.min(100, Math.max(2, spent * 100))}%`, background: heartbeatHue(hb) ?? "var(--hue-ok)" }}
+        style={{
+          width: `${Math.min(100, Math.max(2, spent * 100))}%`,
+          background: heartbeatHue(hb) ?? "var(--hue-ok)",
+        }}
       />
     </div>
   );
@@ -328,25 +412,44 @@ export function CapacityBand({ capacity }: { capacity: WorkerCapacity }) {
           compact
           label="Running"
           value={capacity.running}
-          suffix={<span className="text-(--text-dim)"> / {capacity.capacity}</span>}
+          suffix={
+            <span className="text-(--text-dim)"> / {capacity.capacity}</span>
+          }
           hue={runningHue}
         />
         <StatCard compact label="Queued" value={capacity.queued} />
         <StatCard compact label="Idle" value={capacity.idle} />
-        <StatCard compact label="Target" value={capacity.target} caption={targetCaption} />
+        <StatCard
+          compact
+          label="Target"
+          value={capacity.target}
+          caption={targetCaption}
+        />
       </div>
       {constrained && (
-        <div className="mt-2 flex items-center gap-2 text-[12px]" style={{ color: WORKER_HUES.busy }}>
-          <span className="size-1.5 rounded-full" style={{ background: WORKER_HUES.busy }} />
+        <div
+          className="mt-2 flex items-center gap-2 text-[12px]"
+          style={{ color: WORKER_HUES.busy }}
+        >
+          <span
+            className="size-1.5 rounded-full"
+            style={{ background: WORKER_HUES.busy }}
+          />
           <span>
             Queue is waiting: <strong>{capacity.limitingFactor}</strong>
           </span>
         </div>
       )}
       {capacity.classes.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Worker class capacity">
+        <div
+          className="mt-2 flex flex-wrap gap-1.5"
+          aria-label="Worker class capacity"
+        >
           {capacity.classes.map((workerClass) => (
-            <span key={workerClass.name} className="mono rounded-full bg-(--surface-2) px-2 py-0.5 text-[11px] text-(--text-dim)">
+            <span
+              key={workerClass.name}
+              className="mono rounded-full bg-(--surface-2) px-2 py-0.5 text-[11px] text-(--text-dim)"
+            >
               {workerClass.name} {workerClass.running}/{workerClass.capacity}
             </span>
           ))}
@@ -389,8 +492,7 @@ function FleetStatusBanner({ banner }: { banner: FleetBanner }) {
         <span>{title}</span>
       </div>
       <div className="mt-1 text-(--text-dim)">
-        {lead}{" "}
-        Queued runs will remain waiting until a worker is started with{" "}
+        {lead} Queued runs will remain waiting until a worker is started with{" "}
         <code className="mono rounded bg-(--surface-2) px-1.5 py-0.5 text-[11px] text-(--text)">
           bun event-runtime/cli.mjs work
         </code>
@@ -420,16 +522,31 @@ export function Workers({
   onFocusHealthChange?: (health: WorkerHealthFilter | null) => void;
 }) {
   const now = useNow();
-  const query = useQuery({ queryKey: ["workers"], queryFn: api.workers, ...refetchIntervals.primary });
-  const runsQuery = useQuery({ queryKey: ["runs"], queryFn: () => api.runs(), ...refetchIntervals.secondary });
+  const query = useQuery({
+    queryKey: ["workers"],
+    queryFn: api.workers,
+    ...refetchIntervals.primary,
+  });
+  const runsQuery = useQuery({
+    queryKey: ["runs"],
+    queryFn: () => api.runs(),
+    ...refetchIntervals.secondary,
+  });
   const runs = runsQuery.data?.runs ?? [];
-  const runMap = useMemo(() => new Map<string, RunListItem>(runs.map((r) => [r.runId, r])), [runs]);
+  const runMap = useMemo(
+    () => new Map<string, RunListItem>(runs.map((r) => [r.runId, r])),
+    [runs],
+  );
 
   // GET /workers gained capacity without changing the legacy client method's
   // minimum response contract; older servers simply exercise the fallback.
-  const response = query.data as ({ workers: Worker[]; capacity?: WorkerCapacity } | undefined);
+  const response = query.data as
+    { workers: Worker[]; capacity?: WorkerCapacity } | undefined;
   const rawRows = response?.workers ?? [];
-  const rows = useMemo(() => rawRows.map((w) => enrichWorker(w, runMap)), [rawRows, runMap]);
+  const rows = useMemo(
+    () => rawRows.map((w) => enrichWorker(w, runMap)),
+    [rawRows, runMap],
+  );
   const capacity = response?.capacity ?? capacityFromWorkers(rawRows);
 
   const parts = useMemo(() => partitionWorkers(rows), [rows]);
@@ -466,7 +583,11 @@ export function Workers({
   // top of whatever the active tab lets through.
   const byTab = useMemo(
     () =>
-      tab === "ALL" ? [...parts.live, ...parts.stopped] : tab === "LIVE" ? parts.live : parts.stopped,
+      tab === "ALL"
+        ? [...parts.live, ...parts.stopped]
+        : tab === "LIVE"
+          ? parts.live
+          : parts.stopped,
     [tab, parts],
   );
 
@@ -481,7 +602,10 @@ export function Workers({
   }, [focusHealth]);
 
   const byHealth = useMemo(
-    () => (focusHealth ? byTab.filter((worker) => workerMatchesHealth(worker, focusHealth)) : byTab),
+    () =>
+      focusHealth
+        ? byTab.filter((worker) => workerMatchesHealth(worker, focusHealth))
+        : byTab,
     [byTab, focusHealth],
   );
   const visible = useMemo(() => {
@@ -499,9 +623,7 @@ export function Workers({
         w.activeAgent,
         w.activeTarget,
         w.activeModel,
-      ].some(
-        (v) => (v ?? "").toLowerCase().includes(q),
-      ),
+      ].some((v) => (v ?? "").toLowerCase().includes(q)),
     );
   }, [byHealth, filter]);
 
@@ -527,13 +649,20 @@ export function Workers({
     [flat, selectedId],
   );
   const sel = useMemo(
-    () => (selectedId ? (visible.find((w) => w.workerId === selectedId) ?? null) : null),
+    () =>
+      selectedId
+        ? (visible.find((w) => w.workerId === selectedId) ?? null)
+        : null,
     [visible, selectedId],
   );
-  const selHeartbeat: Heartbeat = sel ? heartbeatOf(sel, now) : { kind: "none" };
+  const selHeartbeat: Heartbeat = sel
+    ? heartbeatOf(sel, now)
+    : { kind: "none" };
 
   useEffect(() => {
-    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
+    document
+      .querySelector("tr.row-selected")
+      ?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
   useEffect(() => {
@@ -569,7 +698,11 @@ export function Workers({
         pendingC.current = Date.now();
       },
       l: () => {
-        if (sel && pendingC.current > 0 && Date.now() - pendingC.current < 800) {
+        if (
+          sel &&
+          pendingC.current > 0 &&
+          Date.now() - pendingC.current < 800
+        ) {
           copyLink();
           pendingC.current = 0;
         }
@@ -583,9 +716,19 @@ export function Workers({
       setContextActions([]);
     } else {
       setContextActions([
-        { label: `Copy ${sel.workerId}`, hint: "c", run: () => copyText(sel.workerId, "worker id") },
+        {
+          label: `Copy ${sel.workerId}`,
+          hint: "c",
+          run: () => copyText(sel.workerId, "worker id"),
+        },
         ...(sel.currentRun
-          ? [{ label: `Open run ${sel.currentRun}`, hint: "o", run: () => openRun(sel.currentRun!) }]
+          ? [
+              {
+                label: `Open run ${sel.currentRun}`,
+                hint: "o",
+                run: () => openRun(sel.currentRun!),
+              },
+            ]
           : []),
         { label: "Copy link to this worker", hint: "c l", run: copyLink },
       ]);
@@ -614,11 +757,16 @@ export function Workers({
               >
                 {WORKER_TABS.map((t) => (
                   <option key={t} value={t}>
-                    {t === "ALL" ? "All" : t === "LIVE" ? "Live" : "Stopped"} {tabCounts[t]}
+                    {t === "ALL" ? "All" : t === "LIVE" ? "Live" : "Stopped"}{" "}
+                    {tabCounts[t]}
                   </option>
                 ))}
               </select>
-              <div className="hidden min-w-0 flex-1 gap-1 sm:flex" role="tablist" aria-label="Worker state">
+              <div
+                className="hidden min-w-0 flex-1 gap-1 sm:flex"
+                role="tablist"
+                aria-label="Worker state"
+              >
                 {WORKER_TABS.map((t, idx) => (
                   <button
                     key={t}
@@ -629,14 +777,29 @@ export function Workers({
                       setTabChoice(t);
                       if (focusHealth) onFocusHealthChange(null);
                     }}
-                    title={t === "LIVE" ? "idle, busy, or stale" : t === "STOPPED" ? "cleanly stopped — history" : undefined}
+                    title={
+                      t === "LIVE"
+                        ? "idle, busy, or stale"
+                        : t === "STOPPED"
+                          ? "cleanly stopped — history"
+                          : undefined
+                    }
                     className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                      tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
+                      tab === t
+                        ? "bg-(--surface-3) text-(--text)"
+                        : "text-(--text-faint) hover:bg-(--surface-1)"
                     }`}
                   >
                     {t === "ALL" ? "All" : t === "LIVE" ? "Live" : "Stopped"}
-                    {tabCounts[t] > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{tabCounts[t]}</span>}
-                    <span aria-hidden="true" className="mono ml-1 text-(--text-faint) text-[10px] opacity-70">
+                    {tabCounts[t] > 0 && (
+                      <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                        {tabCounts[t]}
+                      </span>
+                    )}
+                    <span
+                      aria-hidden="true"
+                      className="mono ml-1 text-(--text-faint) text-[10px] opacity-70"
+                    >
                       {idx + 1}
                     </span>
                   </button>
@@ -657,7 +820,9 @@ export function Workers({
                   value={focusHealth ?? ""}
                   onChange={(event) => {
                     const value = event.target.value;
-                    onFocusHealthChange(isWorkerHealthFilter(value) ? value : null);
+                    onFocusHealthChange(
+                      isWorkerHealthFilter(value) ? value : null,
+                    );
                   }}
                   className="rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text)"
                 >
@@ -682,18 +847,34 @@ export function Workers({
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
               {cols.map((c) => {
-                const sort = WORKERS_DISPLAY.sorts.find((s) => s.column === c.key);
+                const sort = WORKERS_DISPLAY.sorts.find(
+                  (s) => s.column === c.key,
+                );
                 const isCustom = c.isCustom || c.key.startsWith("custom:");
                 const customPath = c.key.replace(/^custom:/, "");
-                const isCurrentSort = isCustom ? display.sortBy === c.key : (sort && display.sortBy === sort.key);
+                const isCurrentSort = isCustom
+                  ? display.sortBy === c.key
+                  : sort && display.sortBy === sort.key;
                 return (
                   <Th
                     key={c.key}
                     label={c.label}
                     dir={isCurrentSort ? display.sortDir : null}
                     naturalDir={sort?.defaultDir ?? "asc"}
-                    onSort={sort || isCustom ? () => setDisplay((s) => cycleColumnSort(WORKERS_DISPLAY, s, c.key)) : undefined}
-                    onRemove={isCustom ? () => setDisplay((s) => removeCustomColumn(s, customPath)) : undefined}
+                    onSort={
+                      sort || isCustom
+                        ? () =>
+                            setDisplay((s) =>
+                              cycleColumnSort(WORKERS_DISPLAY, s, c.key),
+                            )
+                        : undefined
+                    }
+                    onRemove={
+                      isCustom
+                        ? () =>
+                            setDisplay((s) => removeCustomColumn(s, customPath))
+                        : undefined
+                    }
                   />
                 );
               })}
@@ -712,24 +893,36 @@ export function Workers({
                 >
                   <td
                     className={`mono max-w-52 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap ${
-                      w.state === "stopped" && !w.stale ? "text-(--text-faint)" : ""
+                      w.state === "stopped" && !w.stale
+                        ? "text-(--text-faint)"
+                        : ""
                     }`}
                     title={w.workerId}
                   >
                     {w.workerId}
                   </td>
                   {show.has("host") && (
-                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">{w.host}</td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
+                      {w.host}
+                    </td>
                   )}
                   {show.has("pid") && (
-                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap tabular-nums text-(--text-faint)">{w.pid}</td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap tabular-nums text-(--text-faint)">
+                      {w.pid}
+                    </td>
                   )}
                   {show.has("state") && (
                     <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
                       <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-                        <StateBadge state={workerDisplayState(w)} hues={WORKER_STATE_HUES} />
+                        <StateBadge
+                          state={workerDisplayState(w)}
+                          hues={WORKER_STATE_HUES}
+                        />
                         {w.stale && (
-                          <span className="text-[11px] text-(--text-faint) whitespace-nowrap" title="What the worker last reported before its heartbeat stopped">
+                          <span
+                            className="text-[11px] text-(--text-faint) whitespace-nowrap"
+                            title="What the worker last reported before its heartbeat stopped"
+                          >
                             reported {w.state}
                           </span>
                         )}
@@ -739,10 +932,14 @@ export function Workers({
                   {show.has("agent") && (
                     <td
                       className="max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)"
-                      title={w.activeAgent !== EMPTY ? w.activeAgent : undefined}
+                      title={
+                        w.activeAgent !== EMPTY ? w.activeAgent : undefined
+                      }
                     >
                       {w.activeAgent !== EMPTY ? (
-                        <span className="mono font-medium text-(--text)">{w.activeAgent}</span>
+                        <span className="mono font-medium text-(--text)">
+                          {w.activeAgent}
+                        </span>
                       ) : (
                         <span className="text-(--text-faint)">{EMPTY}</span>
                       )}
@@ -751,7 +948,9 @@ export function Workers({
                   {show.has("target") && (
                     <td
                       className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)"
-                      title={w.activeTarget !== EMPTY ? w.activeTarget : undefined}
+                      title={
+                        w.activeTarget !== EMPTY ? w.activeTarget : undefined
+                      }
                     >
                       {w.activeTarget !== EMPTY ? (
                         <span>{w.activeTarget}</span>
@@ -762,13 +961,19 @@ export function Workers({
                   )}
                   {show.has("activeModel") && (
                     <td className="max-w-40 border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                      <ModelCell model={w.activeModel} className="text-(--text-faint)" />
+                      <ModelCell
+                        model={w.activeModel}
+                        className="text-(--text-faint)"
+                      />
                     </td>
                   )}
                   {show.has("run") && (
                     <td className="mono max-w-56 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)">
                       {w.currentRun ? (
-                        <JumpLink onClick={() => openRun(w.currentRun!)} title={`Open ${w.currentRun}`}>
+                        <JumpLink
+                          onClick={() => openRun(w.currentRun!)}
+                          title={`Open ${w.currentRun}`}
+                        >
                           {shortId(w.currentRun)}
                         </JumpLink>
                       ) : (
@@ -779,7 +984,11 @@ export function Workers({
                   {show.has("adapters") && (
                     <td
                       className="max-w-40 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
-                      title={w.adapters.length > 0 ? w.adapters.join(", ") : undefined}
+                      title={
+                        w.adapters.length > 0
+                          ? w.adapters.join(", ")
+                          : undefined
+                      }
                     >
                       {w.adapters.length > 0
                         ? `${w.adapters.length} adapter${w.adapters.length === 1 ? "" : "s"}`
@@ -787,7 +996,10 @@ export function Workers({
                     </td>
                   )}
                   {show.has("labels") && (
-                    <td className="max-w-48 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)" title={labelText(w.labels)}>
+                    <td
+                      className="max-w-48 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)"
+                      title={labelText(w.labels)}
+                    >
                       {labelText(w.labels)}
                     </td>
                   )}
@@ -796,7 +1008,9 @@ export function Workers({
                       className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap tabular-nums text-(--text-faint)"
                       title={`Started ${w.startedAt}`}
                     >
-                      <span title={w.startedAt}>{formatRelative(w.startedAt, now)}</span>
+                      <span title={w.startedAt}>
+                        {formatRelative(w.startedAt, now)}
+                      </span>
                     </td>
                   )}
                   {show.has("heartbeat") && (
@@ -804,9 +1018,15 @@ export function Workers({
                       <HeartbeatCell w={w} now={now} />
                     </td>
                   )}
-                  {cols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
-                    <CustomCell key={c.key} row={w} path={c.key.replace(/^custom:/, "")} />
-                  ))}
+                  {cols
+                    .filter((c) => c.isCustom || c.key.startsWith("custom:"))
+                    .map((c) => (
+                      <CustomCell
+                        key={c.key}
+                        row={w}
+                        path={c.key.replace(/^custom:/, "")}
+                      />
+                    ))}
                 </tr>
               );
               if (!grouped(display)) return sections[0]?.rows.map(renderRow);
@@ -818,19 +1038,27 @@ export function Workers({
                       colSpan={cols.length}
                       section={s}
                       collapsed={closed}
-                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                      onToggle={() =>
+                        setDisplay((st) => toggleCollapsed(st, s.key))
+                      }
                     />
                     {!closed &&
                       (s.subsections
                         ? s.subsections.map((child) => {
-                            const childClosed = display.collapsed.includes(child.key);
+                            const childClosed = display.collapsed.includes(
+                              child.key,
+                            );
                             return (
                               <Fragment key={child.key}>
                                 <GroupHeaderRow
                                   colSpan={cols.length}
                                   section={child}
                                   collapsed={childClosed}
-                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
+                                  onToggle={() =>
+                                    setDisplay((st) =>
+                                      toggleCollapsed(st, child.key),
+                                    )
+                                  }
                                   sub
                                 />
                                 {!childClosed && child.rows.map(renderRow)}
@@ -874,7 +1102,10 @@ export function Workers({
           widthClass="w-[460px]"
           title={
             <span className="flex min-w-0 items-center gap-2">
-              <StateBadge state={workerDisplayState(sel)} hues={WORKER_STATE_HUES} />
+              <StateBadge
+                state={workerDisplayState(sel)}
+                hues={WORKER_STATE_HUES}
+              />
               <span className="mono truncate" title={sel.workerId}>
                 {sel.workerId}
               </span>
@@ -883,7 +1114,13 @@ export function Workers({
           actions={
             sel.currentRun ? (
               <Button onClick={() => openRun(sel.currentRun!)}>
-                Open run <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">o</span>
+                Open run{" "}
+                <span
+                  className="mono ml-1 text-(--text-faint)"
+                  aria-hidden="true"
+                >
+                  o
+                </span>
               </Button>
             ) : undefined
           }
@@ -895,11 +1132,17 @@ export function Workers({
               className="mb-4 rounded-md px-2.5 py-1.5 text-[12px]"
               style={{
                 color: "var(--hue-err)",
-                background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
+                background:
+                  "color-mix(in oklch, var(--hue-err) 10%, transparent)",
               }}
             >
-              Heartbeat went stale {formatDuration(selHeartbeat.overdueMs / 1000)} ago — this process is gone, whatever it last reported
-              {sel.currentRun ? ` (it still holds ${sel.currentRun}; the run is reclaimed when its lease expires)` : ""}.
+              Heartbeat went stale{" "}
+              {formatDuration(selHeartbeat.overdueMs / 1000)} ago — this process
+              is gone, whatever it last reported
+              {sel.currentRun
+                ? ` (it still holds ${sel.currentRun}; the run is reclaimed when its lease expires)`
+                : ""}
+              .
             </div>
           )}
 
@@ -908,23 +1151,49 @@ export function Workers({
               <KV
                 k="runId"
                 v={
-                  <JumpLink onClick={() => openRun(sel.currentRun!)} title={`Open ${sel.currentRun}`}>
+                  <JumpLink
+                    onClick={() => openRun(sel.currentRun!)}
+                    title={`Open ${sel.currentRun}`}
+                  >
                     {shortId(sel.currentRun)}
                   </JumpLink>
                 }
               />
               {sel.runItem?.agent && (
-                <KV k="agent" v={<span className="mono font-medium">{sel.runItem.agent}</span>} />
+                <KV
+                  k="agent"
+                  v={
+                    <span className="mono font-medium">
+                      {sel.runItem.agent}
+                    </span>
+                  }
+                />
               )}
-              {sel.activeTarget !== EMPTY && <KV k="target" v={sel.activeTarget} />}
+              {sel.activeTarget !== EMPTY && (
+                <KV k="target" v={sel.activeTarget} />
+              )}
               {sel.runItem && (
                 <KV
                   k="model"
-                  v={<ModelCell model={pinnedModelText(sel.runItem.adapter, sel.runItem.model)} />}
+                  v={
+                    <ModelCell
+                      model={pinnedModelText(
+                        sel.runItem.adapter,
+                        sel.runItem.model,
+                      )}
+                    />
+                  }
                 />
               )}
-              {sel.runItem && <KV k="adapter" v={<span className="mono">{sel.runItem.adapter}</span>} />}
-              {sel.runItem?.state && <KV k="state" v={<StateBadge state={sel.runItem.state} />} />}
+              {sel.runItem && (
+                <KV
+                  k="adapter"
+                  v={<span className="mono">{sel.runItem.adapter}</span>}
+                />
+              )}
+              {sel.runItem?.state && (
+                <KV k="state" v={<StateBadge state={sel.runItem.state} />} />
+              )}
             </Section>
           )}
 
@@ -932,15 +1201,19 @@ export function Workers({
             <div className="rounded-md border border-(--border) px-3 py-2 tabular-nums">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-(--text-faint)">
-                  last check-in <span className="text-(--text-dim)" title={sel.lastSeen}>{formatRelative(sel.lastSeen, now)}</span>
+                  last check-in{" "}
+                  <span className="text-(--text-dim)" title={sel.lastSeen}>
+                    {formatRelative(sel.lastSeen, now)}
+                  </span>
                 </span>
                 <StaleClock hb={selHeartbeat} />
               </div>
               <HeartbeatMeter hb={selHeartbeat} />
               {selHeartbeat.kind !== "none" && (
                 <div className="mt-2 text-[11px] text-(--text-faint)">
-                  A worker that has not checked in for {formatDuration(HEARTBEAT_STALE_MS / 1000)} is treated as gone, whatever its
-                  last reported state was.
+                  A worker that has not checked in for{" "}
+                  {formatDuration(HEARTBEAT_STALE_MS / 1000)} is treated as
+                  gone, whatever its last reported state was.
                 </div>
               )}
             </div>
@@ -953,7 +1226,13 @@ export function Workers({
             <KV
               k="state"
               v={
-                <span style={{ color: WORKER_STATE_HUES[workerDisplayState(sel)] ?? "var(--hue-idle)" }}>
+                <span
+                  style={{
+                    color:
+                      WORKER_STATE_HUES[workerDisplayState(sel)] ??
+                      "var(--hue-idle)",
+                  }}
+                >
                   {workerDisplayState(sel)}
                   {sel.stale ? ` (last reported ${sel.state})` : ""}
                 </span>
@@ -963,7 +1242,10 @@ export function Workers({
               k="currentRun"
               v={
                 sel.currentRun ? (
-                  <JumpLink onClick={() => openRun(sel.currentRun!)} title={`Open ${sel.currentRun}`}>
+                  <JumpLink
+                    onClick={() => openRun(sel.currentRun!)}
+                    title={`Open ${sel.currentRun}`}
+                  >
                     {shortId(sel.currentRun)}
                   </JumpLink>
                 ) : (
@@ -971,17 +1253,38 @@ export function Workers({
                 )
               }
             />
-            <KV k="startedAt" v={<span title={sel.startedAt}>{formatRelative(sel.startedAt, now)}</span>} />
-            {sel.stoppedAt && <KV k="stoppedAt" v={<span title={sel.stoppedAt}>{formatRelative(sel.stoppedAt, now)}</span>} />}
+            <KV
+              k="startedAt"
+              v={
+                <span title={sel.startedAt}>
+                  {formatRelative(sel.startedAt, now)}
+                </span>
+              }
+            />
+            {sel.stoppedAt && (
+              <KV
+                k="stoppedAt"
+                v={
+                  <span title={sel.stoppedAt}>
+                    {formatRelative(sel.stoppedAt, now)}
+                  </span>
+                }
+              />
+            )}
           </Section>
 
           <Section title="Adapters" card={false}>
             {sel.adapters.length === 0 ? (
-              <div className="text-(--text-faint)">No adapters declared — this worker claims nothing.</div>
+              <div className="text-(--text-faint)">
+                No adapters declared — this worker claims nothing.
+              </div>
             ) : (
               <div className="rounded-md border border-(--border) px-3 py-1">
                 {sel.adapters.map((a) => (
-                  <div key={a} className="mono border-b border-(--border) py-1.5 last:border-0">
+                  <div
+                    key={a}
+                    className="mono border-b border-(--border) py-1.5 last:border-0"
+                  >
                     {a}
                   </div>
                 ))}
@@ -991,8 +1294,8 @@ export function Workers({
 
           <Section title="Labels" card={false}>
             <div className="mb-1.5 text-[11px] text-(--text-faint)">
-              Placement labels the worker declared at registration — what a run&apos;s placement
-              constraints are matched against.
+              Placement labels the worker declared at registration — what a
+              run&apos;s placement constraints are matched against.
             </div>
             <JsonBlock value={sel.labels} />
           </Section>

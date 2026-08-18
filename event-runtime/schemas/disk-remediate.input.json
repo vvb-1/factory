@@ -23,7 +23,11 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "enum": ["docker-builder-prune", "docker-system-prune", "journal-vacuum-3d"],
+            "enum": [
+              "docker-builder-prune",
+              "docker-system-prune",
+              "journal-vacuum-3d"
+            ],
             "description": "Remediation command from the fixed safe-action allowlist"
           },
           "expectedReclaimBytes": {

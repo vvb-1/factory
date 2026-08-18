@@ -10,7 +10,9 @@ import type { ChainEvent, ChainRun } from "../types";
 
 const at = (n: number) => new Date(Date.UTC(2026, 7, 17, 12, n)).toISOString();
 
-function event(overrides: Partial<ChainEvent> & { eventId: string }): ChainEvent {
+function event(
+  overrides: Partial<ChainEvent> & { eventId: string },
+): ChainEvent {
   return {
     source: "chain",
     type: "factory.work.requested",
@@ -54,15 +56,41 @@ function run(overrides: Partial<ChainRun> & { runId: string }): ChainRun {
  */
 const tree = {
   events: [
-    event({ source: "test", eventId: "origin", type: "clock.tick.work-scan", runId: "run-1" }),
+    event({
+      source: "test",
+      eventId: "origin",
+      type: "clock.tick.work-scan",
+      runId: "run-1",
+    }),
     event({ eventId: "chain-1-A", causationId: "run-1", runId: "run-2" }),
-    event({ eventId: "chain-1-B", causationId: "run-1", status: "dead_lettered" }),
-    event({ eventId: "chain-2", causationId: "run-2", runId: "run-3", type: "factory.merge.scan.requested" }),
+    event({
+      eventId: "chain-1-B",
+      causationId: "run-1",
+      status: "dead_lettered",
+    }),
+    event({
+      eventId: "chain-2",
+      causationId: "run-2",
+      runId: "run-3",
+      type: "factory.merge.scan.requested",
+    }),
   ],
   runs: [
-    run({ runId: "run-1", agent: "work-scan@1", eventSource: "test", eventId: "origin" }),
+    run({
+      runId: "run-1",
+      agent: "work-scan@1",
+      eventSource: "test",
+      eventId: "origin",
+    }),
     run({ runId: "run-2", eventSource: "chain", eventId: "chain-1-A" }),
-    run({ runId: "run-3", agent: "merge-scan@1", state: "RUNNING", eventSource: "chain", eventId: "chain-2", finishedAt: null }),
+    run({
+      runId: "run-3",
+      agent: "merge-scan@1",
+      state: "RUNNING",
+      eventSource: "chain",
+      eventId: "chain-2",
+      finishedAt: null,
+    }),
   ],
 };
 
@@ -70,7 +98,9 @@ describe("buildChainGraph (WM-527)", () => {
   test("one node per event and run; edges follow event→run and run→emitted event", () => {
     const g = buildChainGraph(tree);
     expect(g.nodes).toHaveLength(7);
-    const edges = g.edges.map((e) => `${e.kind}:${e.source}>${e.target}`).sort();
+    const edges = g.edges
+      .map((e) => `${e.kind}:${e.source}>${e.target}`)
+      .sort();
     expect(edges).toEqual(
       [
         `produced:${eventNodeId("test", "origin")}>${runNodeId("run-1")}`,
@@ -95,7 +125,9 @@ describe("buildChainGraph (WM-527)", () => {
     expect(depth[eventNodeId("chain", "chain-2")]).toBe(4);
     expect(depth[runNodeId("run-3")]).toBe(5);
     expect(g.maxDepth).toBe(5);
-    expect(g.nodes.find((n) => n.id === eventNodeId("test", "origin"))?.root).toBe(true);
+    expect(
+      g.nodes.find((n) => n.id === eventNodeId("test", "origin"))?.root,
+    ).toBe(true);
     expect(g.nodes.filter((n) => n.root)).toHaveLength(1);
     expect(chainOriginLabel(g)).toBe("clock.tick.work-scan · test");
   });
@@ -106,14 +138,23 @@ describe("buildChainGraph (WM-527)", () => {
       runs: [run({ runId: "run-1", eventSource: "test", eventId: "origin" })],
     });
     expect(g.edges).toHaveLength(1);
-    expect(g.edges[0]).toMatchObject({ kind: "produced", source: eventNodeId("test", "origin"), target: runNodeId("run-1") });
+    expect(g.edges[0]).toMatchObject({
+      kind: "produced",
+      source: eventNodeId("test", "origin"),
+      target: runNodeId("run-1"),
+    });
     expect(g.rootIds).toEqual([eventNodeId("test", "origin")]);
   });
 
   test("a causation parent outside the correlation becomes a root run", () => {
     const g = buildChainGraph({
-      events: [event({ eventId: "chain-2", causationId: "run-2", runId: "run-3" })],
-      runs: [run({ runId: "run-2" }), run({ runId: "run-3", eventSource: "chain", eventId: "chain-2" })],
+      events: [
+        event({ eventId: "chain-2", causationId: "run-2", runId: "run-3" }),
+      ],
+      runs: [
+        run({ runId: "run-2" }),
+        run({ runId: "run-3", eventSource: "chain", eventId: "chain-2" }),
+      ],
     });
     expect(g.rootIds).toEqual([runNodeId("run-2")]);
     expect(chainOriginLabel(g)).toBe("dispatch@1 · run");
@@ -122,7 +163,9 @@ describe("buildChainGraph (WM-527)", () => {
 
   test("dangling ids never produce edges; a self-referencing cycle does not hang", () => {
     const g = buildChainGraph({
-      events: [event({ eventId: "e", causationId: "ghost", runId: "also-ghost" })],
+      events: [
+        event({ eventId: "e", causationId: "ghost", runId: "also-ghost" }),
+      ],
       runs: [],
     });
     expect(g.edges).toEqual([]);
@@ -139,7 +182,9 @@ describe("buildChainGraph (WM-527)", () => {
   });
 
   test("chainKeyOfEvent mirrors the emitter: correlation id, else the event's own id", () => {
-    expect(chainKeyOfEvent({ correlationId: "corr-1", eventId: "x" })).toBe("corr-1");
+    expect(chainKeyOfEvent({ correlationId: "corr-1", eventId: "x" })).toBe(
+      "corr-1",
+    );
     expect(chainKeyOfEvent({ correlationId: null, eventId: "x" })).toBe("x");
     expect(chainKeyOfEvent({ eventId: "x" })).toBe("x");
   });

@@ -1,4 +1,10 @@
-import type { AdmittedEvent, AgentsView, Proposal, RunListItem, StatusView } from "../types";
+import type {
+  AdmittedEvent,
+  AgentsView,
+  Proposal,
+  RunListItem,
+  StatusView,
+} from "../types";
 
 // The capability map: what this runtime can do, derived from the registry,
 // overlaid with live runtime state (OPS-227 phase 2): active run state badges,
@@ -69,14 +75,23 @@ export const agentNodeId = (ref: string) => `agent:${ref}`;
 export const proposalNodeId = (id: string) => `proposal:${id}`;
 
 /** How an agent actually executes — the honest distinction for the map. */
-function executionOf(def: AgentsView["agents"][number]): "model" | "command" | "actions" {
+function executionOf(
+  def: AgentsView["agents"][number],
+): "model" | "command" | "actions" {
   if (def.actionRegistry) return "actions";
   if (def.command) return "command";
   return "model";
 }
 
 /** Active run states to highlight on agent nodes in priority order */
-const ACTIVE_RUN_STATES = ["RUNNING", "QUEUED", "LEASED", "VERIFYING", "APPROVED", "PROPOSED"];
+const ACTIVE_RUN_STATES = [
+  "RUNNING",
+  "QUEUED",
+  "LEASED",
+  "VERIFYING",
+  "APPROVED",
+  "PROPOSED",
+];
 
 /**
  * Build the capability map overlaid with optional live state.
@@ -85,7 +100,10 @@ const ACTIVE_RUN_STATES = ["RUNNING", "QUEUED", "LEASED", "VERIFYING", "APPROVED
  * proposal ghost nodes.
  * Edges: routing, recommendations (with causation invocation counts), and ghost proposal edges.
  */
-export function buildCapabilityGraph(view: AgentsView, live?: LiveGraphState): CapabilityGraph {
+export function buildCapabilityGraph(
+  view: AgentsView,
+  live?: LiveGraphState,
+): CapabilityGraph {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
@@ -96,10 +114,14 @@ export function buildCapabilityGraph(view: AgentsView, live?: LiveGraphState): C
   // 1. Registered event types
   for (const route of routes) {
     const admittedCount = live?.events
-      ? live.events.filter((e) => e.type === route.type && e.status === "admitted").length
+      ? live.events.filter(
+          (e) => e.type === route.type && e.status === "admitted",
+        ).length
       : undefined;
     const plannedCount = live?.events
-      ? live.events.filter((e) => e.type === route.type && e.status === "planned").length
+      ? live.events.filter(
+          (e) => e.type === route.type && e.status === "planned",
+        ).length
       : undefined;
 
     nodes.push({
@@ -173,7 +195,8 @@ export function buildCapabilityGraph(view: AgentsView, live?: LiveGraphState): C
           if (ev.type === edge.eventType) {
             const causation =
               (ev as { causationId?: string | null }).causationId ??
-              (ev.envelope as { causationId?: string | null } | undefined)?.causationId;
+              (ev.envelope as { causationId?: string | null } | undefined)
+                ?.causationId;
             if (causation) {
               const run = runsByRunId.get(causation);
               if (run ? run.agent === agentRef : ev.subject === agentRef) {
@@ -185,7 +208,8 @@ export function buildCapabilityGraph(view: AgentsView, live?: LiveGraphState): C
       }
 
       const baseLabel = `${rule.recommendationField} = ${value}`;
-      const label = invocations > 0 ? `${baseLabel} (${invocations})` : baseLabel;
+      const label =
+        invocations > 0 ? `${baseLabel} (${invocations})` : baseLabel;
 
       edges.push({
         id: `rec:${agentRef}:${value}`,
@@ -203,8 +227,7 @@ export function buildCapabilityGraph(view: AgentsView, live?: LiveGraphState): C
     const rule = view.edges?.[def.ref];
     if (!rule) continue;
     const schema = def.outputSchema as
-      | { properties?: Record<string, { enum?: string[] }> }
-      | undefined;
+      { properties?: Record<string, { enum?: string[] }> } | undefined;
     const declared = schema?.properties?.[rule.recommendationField]?.enum ?? [];
     const unmapped = declared.filter((value) => !(value in (rule.edges ?? {})));
     if (unmapped.length === 0) continue;
@@ -234,7 +257,9 @@ export function buildCapabilityGraph(view: AgentsView, live?: LiveGraphState): C
       let eventType: string | null = null;
       if (p.eventId && live.events) {
         const ev = live.events.find(
-          (e) => (p.eventSource ? e.source === p.eventSource : true) && e.eventId === p.eventId,
+          (e) =>
+            (p.eventSource ? e.source === p.eventSource : true) &&
+            e.eventId === p.eventId,
         );
         if (ev) eventType = ev.type;
       }

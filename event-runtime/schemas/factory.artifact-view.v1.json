@@ -21,7 +21,9 @@
         "tone": {
           "type": "object",
           "description": "artifact value → tone",
-          "additionalProperties": { "enum": ["ok", "warn", "error", "muted", "neutral"] }
+          "additionalProperties": {
+            "enum": ["ok", "warn", "error", "muted", "neutral"]
+          }
         }
       }
     },
@@ -35,7 +37,9 @@
         "additionalProperties": false,
         "properties": {
           "path": { "type": "string", "pattern": "^(/|$)" },
-          "as": { "enum": ["table", "keyvalue", "list", "badge", "code", "prose"] },
+          "as": {
+            "enum": ["table", "keyvalue", "list", "badge", "code", "prose"]
+          },
           "label": { "type": "string", "minLength": 1, "maxLength": 60 },
           "columns": {
             "type": "array",
@@ -75,7 +79,19 @@
             "type": "object",
             "description": "column/key (or \"\" for the section value itself) → format",
             "additionalProperties": {
-              "enum": ["issue", "pr", "url", "sha", "repo", "run", "duration", "datetime", "state", "bytes", "count"]
+              "enum": [
+                "issue",
+                "pr",
+                "url",
+                "sha",
+                "repo",
+                "run",
+                "duration",
+                "datetime",
+                "state",
+                "bytes",
+                "count"
+              ]
             }
           },
           "tone": {

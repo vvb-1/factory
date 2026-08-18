@@ -67,14 +67,14 @@ was right.
 
 ## Actions — the closed set
 
-| action              | when                                                                                               |
-| :------------------ | :------------------------------------------------------------------------------------------------- |
+| action              | when                                                                                                          |
+| :------------------ | :------------------------------------------------------------------------------------------------------------ |
 | `label-agent-ready` | fully specified: acceptance criteria, owned paths, verification command, and complete criterion→path coverage |
-| `move-to-todo`      | specified and ready to queue (usually alongside agent-ready)                                       |
-| `write-detail`      | missing template sections can be derived from this pinned checkout without making a product choice |
-| `needs-detail`      | real work, but an agent would have to guess — say what is missing                                  |
-| `mark-duplicate`    | another open issue covers it; name that issue in `reason`                                          |
-| `needs-human`       | a decision only the operator can make                                                              |
+| `move-to-todo`      | specified and ready to queue (usually alongside agent-ready)                                                  |
+| `write-detail`      | missing template sections can be derived from this pinned checkout without making a product choice            |
+| `needs-detail`      | real work, but an agent would have to guess — say what is missing                                             |
+| `mark-duplicate`    | another open issue covers it; name that issue in `reason`                                                     |
+| `needs-human`       | a decision only the operator can make                                                                         |
 
 Never invent an action id. Never propose changes to issues outside this repo.
 

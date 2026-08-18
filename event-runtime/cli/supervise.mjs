@@ -124,7 +124,8 @@ export function workerPassthroughArgs(args) {
     const v = flagValue(args, flag);
     if (v !== null && v !== undefined) passthrough.push(flag, v);
   }
-  if (args.includes("--reload-on-change")) passthrough.push("--reload-on-change");
+  if (args.includes("--reload-on-change"))
+    passthrough.push("--reload-on-change");
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === "--label")
       passthrough.push("--label", String(args[i + 1] ?? ""));

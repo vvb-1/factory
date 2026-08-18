@@ -13,7 +13,12 @@ export const JANITOR_MAX_BUFFER = 1_000_000;
  * yaml and tear down another.
  */
 export function janitorArgv(name, { apply = false } = {}) {
-  const args = [path.join(reposRoot(), "orchestrator", "janitor.mjs"), "--repo", name, "--json"];
+  const args = [
+    path.join(reposRoot(), "orchestrator", "janitor.mjs"),
+    "--repo",
+    name,
+    "--json",
+  ];
   if (apply === true) args.push("--apply");
   return args;
 }
@@ -26,7 +31,11 @@ export function janitorArgv(name, { apply = false } = {}) {
  */
 export async function spawnFactoryJanitor(
   name,
-  { apply = false, timeoutMs = JANITOR_TIMEOUT_MS, maxBuffer = JANITOR_MAX_BUFFER } = {},
+  {
+    apply = false,
+    timeoutMs = JANITOR_TIMEOUT_MS,
+    maxBuffer = JANITOR_MAX_BUFFER,
+  } = {},
 ) {
   const args = janitorArgv(name, { apply });
   const root = reposRoot();
@@ -46,11 +55,15 @@ export async function spawnFactoryJanitor(
       timedOut = true;
       try {
         child.kill("SIGTERM");
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
       killTimer = setTimeout(() => {
         try {
           child.kill("SIGKILL");
-        } catch { /* intentionally ignored */ }
+        } catch {
+          /* intentionally ignored */
+        }
       }, 2000);
     }, timeoutMs);
 
@@ -60,7 +73,9 @@ export async function spawnFactoryJanitor(
       if (stdout.length > maxBuffer) {
         try {
           child.kill("SIGKILL");
-        } catch { /* intentionally ignored */ }
+        } catch {
+          /* intentionally ignored */
+        }
       }
     });
 
@@ -70,7 +85,9 @@ export async function spawnFactoryJanitor(
       if (stderr.length > maxBuffer) {
         try {
           child.kill("SIGKILL");
-        } catch { /* intentionally ignored */ }
+        } catch {
+          /* intentionally ignored */
+        }
       }
     });
 
@@ -106,7 +123,9 @@ export async function spawnFactoryJanitor(
       try {
         parsed = JSON.parse(stdout.trim());
       } catch (e) {
-        const err = new Error(stderr.trim() || stdout.trim() || `invalid json: ${e.message}`);
+        const err = new Error(
+          stderr.trim() || stdout.trim() || `invalid json: ${e.message}`,
+        );
         err.status = 500;
         return reject(err);
       }

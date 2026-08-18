@@ -20,9 +20,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "linear:write"
-    ]
+    "services": ["linear:write"]
   },
   "limits": {
     "timeout_seconds": 300,

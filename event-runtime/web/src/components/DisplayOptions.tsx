@@ -34,10 +34,21 @@ import {
   type DiscoveredField,
 } from "../schemaDiscovery";
 
-function OptionRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
+function OptionRow({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="flex h-8 items-center justify-between gap-3">
-      <label htmlFor={htmlFor} className="shrink-0 text-[12px] text-(--text-dim)">
+      <label
+        htmlFor={htmlFor}
+        className="shrink-0 text-[12px] text-(--text-dim)"
+      >
         {label}
       </label>
       {children}
@@ -66,14 +77,19 @@ function ListboxSelect({
   const listRef = useRef<HTMLUListElement>(null);
   const internalRef = useRef<HTMLButtonElement>(null);
   const triggerRef = ref ?? internalRef;
-  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === value),
+  );
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(selectedIndex);
   const selected = options[selectedIndex] ?? options[0];
 
   useEffect(() => {
     if (!open) return;
-    (listRef.current?.children[highlight] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+    (
+      listRef.current?.children[highlight] as HTMLElement | undefined
+    )?.scrollIntoView({ block: "nearest" });
   }, [highlight, listId, open]);
 
   const show = () => {
@@ -98,7 +114,9 @@ function ListboxSelect({
         show();
       } else {
         const delta = event.key === "ArrowDown" ? 1 : -1;
-        setHighlight((index) => (index + delta + options.length) % options.length);
+        setHighlight(
+          (index) => (index + delta + options.length) % options.length,
+        );
       }
       return;
     }
@@ -136,14 +154,18 @@ function ListboxSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-activedescendant={open ? `${listId}-option-${highlight}` : undefined}
+        aria-activedescendant={
+          open ? `${listId}-option-${highlight}` : undefined
+        }
         onClick={() => (open ? setOpen(false) : show())}
         onBlur={() => setOpen(false)}
         onKeyDown={onKeyDown}
         className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-(--border) bg-(--surface-2) px-2 py-1 text-left text-[12px] text-(--text) outline-none hover:border-(--border-strong) focus:border-(--accent) disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span className="truncate">{selected?.label}</span>
-        <span aria-hidden className="shrink-0 text-[9px] text-(--text-faint)">▼</span>
+        <span aria-hidden className="shrink-0 text-[9px] text-(--text-faint)">
+          ▼
+        </span>
       </button>
       {open && (
         <ul
@@ -171,7 +193,11 @@ function ListboxSelect({
               }`}
             >
               <span className="truncate">{option.label}</span>
-              {option.value === value && <span aria-hidden className="text-(--accent)">✓</span>}
+              {option.value === value && (
+                <span aria-hidden className="text-(--accent)">
+                  ✓
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -224,7 +250,16 @@ function GroupLabel({ children }: { children: ReactNode }) {
 /** Slider-style glyph, drawn with the text color so every theme carries it. */
 function SlidersIcon() {
   return (
-    <svg aria-hidden width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+    <svg
+      aria-hidden
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    >
       <path d="M1 3h10M1 9h10" />
       <circle cx="4" cy="3" r="1.5" fill="var(--surface-1)" />
       <circle cx="8" cy="9" r="1.5" fill="var(--surface-1)" />
@@ -236,9 +271,10 @@ export function exportJson(filename: string, data: unknown): void {
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: "application/json" });
   if (typeof window !== "undefined" && typeof document !== "undefined") {
-    const url = typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
-      ? URL.createObjectURL(blob)
-      : "";
+    const url =
+      typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(blob)
+        : "";
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
@@ -252,7 +288,10 @@ export function exportJson(filename: string, data: unknown): void {
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable=true]"))
+  );
 }
 
 /** SuggestInput interaction model with richer, non-selectable discovery groups. */
@@ -279,8 +318,14 @@ function DiscoveredFieldSuggestInput({
     if (!query) return fields;
     return fields.filter((field) => field.path.toLowerCase().includes(query));
   }, [fields, value]);
-  const groups = useMemo(() => groupDiscoveredFields(filteredFields), [filteredFields]);
-  const selectableFields = useMemo(() => groups.flatMap((group) => group.fields), [groups]);
+  const groups = useMemo(
+    () => groupDiscoveredFields(filteredFields),
+    [filteredFields],
+  );
+  const selectableFields = useMemo(
+    () => groups.flatMap((group) => group.fields),
+    [groups],
+  );
   const indexedGroups = useMemo(() => {
     let index = 0;
     return groups.map((group) => ({
@@ -289,7 +334,8 @@ function DiscoveredFieldSuggestInput({
     }));
   }, [groups]);
   const show = open && selectableFields.length > 0;
-  const showNotSeenHint = value.trim().length > 0 && selectableFields.length === 0;
+  const showNotSeenHint =
+    value.trim().length > 0 && selectableFields.length === 0;
 
   useEffect(() => {
     setHighlight(0);
@@ -297,7 +343,9 @@ function DiscoveredFieldSuggestInput({
 
   useEffect(() => {
     if (!show || !listRef.current) return;
-    listRef.current.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+    listRef.current
+      .querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
   }, [highlight, show]);
 
   const pick = (field: DiscoveredField) => {
@@ -315,7 +363,11 @@ function DiscoveredFieldSuggestInput({
     if (event.key === "ArrowUp" && selectableFields.length > 0) {
       event.preventDefault();
       setOpen(true);
-      setHighlight((index) => (show ? (index - 1 + selectableFields.length) % selectableFields.length : selectableFields.length - 1));
+      setHighlight((index) =>
+        show
+          ? (index - 1 + selectableFields.length) % selectableFields.length
+          : selectableFields.length - 1,
+      );
       return;
     }
     if (event.key === "Enter") {
@@ -347,7 +399,11 @@ function DiscoveredFieldSuggestInput({
           aria-autocomplete="list"
           aria-expanded={show}
           aria-controls={show ? listId : undefined}
-          aria-activedescendant={show && selectableFields[highlight] ? `${listId}-option-${highlight}` : undefined}
+          aria-activedescendant={
+            show && selectableFields[highlight]
+              ? `${listId}-option-${highlight}`
+              : undefined
+          }
           value={value}
           placeholder={placeholder}
           spellCheck={false}
@@ -409,7 +465,10 @@ function DiscoveredFieldSuggestInput({
                     <div className="mono truncate">{field.path}</div>
                     <div className="flex items-center justify-between gap-2 text-[10px] text-(--text-faint)">
                       <span className="truncate">{field.sampleValue}</span>
-                      <span className="shrink-0">{field.occurrenceCount} {field.occurrenceCount === 1 ? "row" : "rows"}</span>
+                      <span className="shrink-0">
+                        {field.occurrenceCount}{" "}
+                        {field.occurrenceCount === 1 ? "row" : "rows"}
+                      </span>
                     </div>
                   </li>
                 ))}
@@ -437,7 +496,9 @@ export function DisplayOptions<T>({
 }: {
   config: DisplayConfig<T>;
   state: DisplayState;
-  onChange: (next: DisplayState | ((state: DisplayState) => DisplayState)) => void;
+  onChange: (
+    next: DisplayState | ((state: DisplayState) => DisplayState),
+  ) => void;
   onExport?: () => void;
   rows?: T[];
 }) {
@@ -501,7 +562,9 @@ export function DisplayOptions<T>({
 
   const customized = !isDefaultDisplayState(config, state);
   const activeGroup = config.groups.find((g) => g.key === state.groupBy);
-  const subOptions = (config.subGroups ?? []).filter((k) => k !== state.groupBy);
+  const subOptions = (config.subGroups ?? []).filter(
+    (k) => k !== state.groupBy,
+  );
   const toggleable = config.columns.filter((c) => !c.always);
   const groupLabel = (key: string) =>
     config.groups.find((g) => g.key === key)?.label ?? key;
@@ -516,7 +579,9 @@ export function DisplayOptions<T>({
       .slice(0, 2)
       .map((group) => group.fields[0]?.path)
       .filter(Boolean);
-    return examples.length > 0 ? `e.g. ${examples.join(", ")}` : "Enter a property path";
+    return examples.length > 0
+      ? `e.g. ${examples.join(", ")}`
+      : "Enter a property path";
   }, [discoveredFields]);
 
   const handleAddCustom = (pathToAdd?: string) => {
@@ -542,9 +607,18 @@ export function DisplayOptions<T>({
       >
         <SlidersIcon />
         Display
-        <span aria-hidden="true" className="mono ml-1 text-(--text-faint) text-[10px]">v</span>
+        <span
+          aria-hidden="true"
+          className="mono ml-1 text-(--text-faint) text-[10px]"
+        >
+          v
+        </span>
         {customized && (
-          <span aria-hidden className="size-1.5 rounded-full bg-(--accent)" title="Display options customized" />
+          <span
+            aria-hidden
+            className="size-1.5 rounded-full bg-(--accent)"
+            title="Display options customized"
+          />
         )}
       </button>
 
@@ -582,10 +656,15 @@ export function DisplayOptions<T>({
                 label="Sub-group by"
                 disabled={state.groupBy === NONE}
                 value={state.subGroupBy}
-                onChange={(subGroupBy) => onChange((s) => ({ ...s, subGroupBy, collapsed: [] }))}
+                onChange={(subGroupBy) =>
+                  onChange((s) => ({ ...s, subGroupBy, collapsed: [] }))
+                }
                 options={[
                   { value: NONE, label: "No sub-grouping" },
-                  ...subOptions.map((k) => ({ value: k, label: groupLabel(k) })),
+                  ...subOptions.map((k) => ({
+                    value: k,
+                    label: groupLabel(k),
+                  })),
                 ]}
               />
             </OptionRow>
@@ -602,12 +681,16 @@ export function DisplayOptions<T>({
                     ...s,
                     sortBy,
                     sortDir:
-                      config.sorts.find((f) => f.key === sortBy)?.defaultDir ?? "asc",
+                      config.sorts.find((f) => f.key === sortBy)?.defaultDir ??
+                      "asc",
                   }))
                 }
                 options={[
                   { value: DEFAULT_ORDER, label: "Default order" },
-                  ...config.sorts.map((f) => ({ value: f.key, label: f.label })),
+                  ...config.sorts.map((f) => ({
+                    value: f.key,
+                    label: f.label,
+                  })),
                   ...(state.customColumns ?? []).map((path) => ({
                     value: `custom:${path}`,
                     label: path,
@@ -626,15 +709,22 @@ export function DisplayOptions<T>({
                       key={direction}
                       type="button"
                       aria-pressed={pressed}
-                      aria-label={direction === "asc" ? "Ascending order" : "Descending order"}
-                      onClick={() => onChange((s) => ({ ...s, sortDir: direction }))}
+                      aria-label={
+                        direction === "asc"
+                          ? "Ascending order"
+                          : "Descending order"
+                      }
+                      onClick={() =>
+                        onChange((s) => ({ ...s, sortDir: direction }))
+                      }
                       className={`cursor-pointer rounded px-1.5 py-0.5 text-[10px] transition-colors ${
                         pressed
                           ? "bg-(--surface-2) text-(--text) shadow-sm"
                           : "text-(--text-faint) hover:text-(--text-dim)"
                       }`}
                     >
-                      <span aria-hidden>{direction === "asc" ? "↑" : "↓"}</span> {direction}
+                      <span aria-hidden>{direction === "asc" ? "↑" : "↓"}</span>{" "}
+                      {direction}
                     </button>
                   );
                 })}
@@ -676,9 +766,17 @@ export function DisplayOptions<T>({
                           ? "border-(--border-strong) bg-(--surface-2) text-(--text)"
                           : "border-(--border) bg-transparent hover:bg-(--surface-2)"
                       }`}
-                      style={shown ? undefined : { color: "var(--text-muted, var(--text-faint))" }}
+                      style={
+                        shown
+                          ? undefined
+                          : { color: "var(--text-muted, var(--text-faint))" }
+                      }
                     >
-                      {shown && <span aria-hidden className="text-(--accent)">✓</span>}
+                      {shown && (
+                        <span aria-hidden className="text-(--accent)">
+                          ✓
+                        </span>
+                      )}
                       {c.label}
                     </button>
                   );
@@ -722,7 +820,9 @@ export function DisplayOptions<T>({
                       type="button"
                       aria-label={`Remove column ${path}`}
                       title="Remove column"
-                      onClick={() => onChange((s) => removeCustomColumn(s, path))}
+                      onClick={() =>
+                        onChange((s) => removeCustomColumn(s, path))
+                      }
                       className="cursor-pointer text-(--text-faint) hover:text-(--text)"
                     >
                       ×
@@ -759,7 +859,9 @@ export function DisplayOptions<T>({
               {customized && (
                 <button
                   type="button"
-                  onClick={() => onChange({ ...defaultDisplayState(config), collapsed: [] })}
+                  onClick={() =>
+                    onChange({ ...defaultDisplayState(config), collapsed: [] })
+                  }
                   className="cursor-pointer rounded-md px-2 py-0.5 text-[11px] text-(--text-faint) hover:bg-(--surface-2) hover:text-(--text)"
                 >
                   Reset to defaults

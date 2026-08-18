@@ -36,7 +36,9 @@ function withSpec(row) {
 /** Open proposals, oldest first, annotated with `expired` and parsed `spec`. */
 export function openProposals(db, { now = Date.now() } = {}) {
   return db
-    .query(`SELECT * FROM proposals WHERE status = 'open' ORDER BY created_at, rowid`)
+    .query(
+      `SELECT * FROM proposals WHERE status = 'open' ORDER BY created_at, rowid`,
+    )
     .all()
     .map((row) => ({ ...withSpec(row), expired: isExpired(row, now) }));
 }
@@ -68,11 +70,19 @@ function loadEnvelope(db, proposal) {
   const event = db
     .query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`)
     .get(proposal.event_source, proposal.event_id);
-  if (!event) throw new Error(`proposal ${proposal.id} references missing event (${proposal.event_source}, ${proposal.event_id})`);
+  if (!event)
+    throw new Error(
+      `proposal ${proposal.id} references missing event (${proposal.event_source}, ${proposal.event_id})`,
+    );
   return JSON.parse(event.envelope_json);
 }
 
-function approveRun(db, proposal, envelope, { actor, now, policyVersion, reason }) {
+function approveRun(
+  db,
+  proposal,
+  envelope,
+  { actor, now, policyVersion, reason },
+) {
   const at = new Date(now).toISOString();
   const common = {
     runId: proposal.run_id,
@@ -85,7 +95,9 @@ function approveRun(db, proposal, envelope, { actor, now, policyVersion, reason 
   };
   transition(db, { ...common, to: "APPROVED", expectFrom: "PROPOSED" });
   transition(db, { ...common, to: "QUEUED", expectFrom: "APPROVED" });
-  db.query(`UPDATE proposals SET status = 'approved', decided_at = ?, decided_by = ? WHERE id = ?`).run(at, actor, proposal.id);
+  db.query(
+    `UPDATE proposals SET status = 'approved', decided_at = ?, decided_by = ? WHERE id = ?`,
+  ).run(at, actor, proposal.id);
   return { approved: true, runId: proposal.run_id };
 }
 
@@ -99,12 +111,27 @@ function approveRun(db, proposal, envelope, { actor, now, policyVersion, reason 
  * @returns {{ approved: true, runId: string }
  *         | { approved: false, replanned: true, proposal: object }}
  */
-export function approveProposal(db, registry, id, { actor, now = Date.now(), policyVersion = "unknown", adapterOverride, reason } = {}) {
+export function approveProposal(
+  db,
+  registry,
+  id,
+  {
+    actor,
+    now = Date.now(),
+    policyVersion = "unknown",
+    adapterOverride,
+    reason,
+  } = {},
+) {
   return tx(db, () => {
     const proposal = db.query(`SELECT * FROM proposals WHERE id = ?`).get(id);
     if (!proposal) throw new Error(`unknown proposal ${id}`);
-    if (proposal.status !== "open") throw new Error(`proposal ${id} is '${proposal.status}', not open`);
-    if (proposal.decision !== "run") throw new Error(`proposal ${id} decision is '${proposal.decision}' — only 'run' proposals are approvable`);
+    if (proposal.status !== "open")
+      throw new Error(`proposal ${id} is '${proposal.status}', not open`);
+    if (proposal.decision !== "run")
+      throw new Error(
+        `proposal ${id} decision is '${proposal.decision}' — only 'run' proposals are approvable`,
+      );
 
     const envelope = loadEnvelope(db, proposal);
     // Structural no-auto-approval (docs/event-runtime-dispatch.md §7, WM-111):
@@ -122,27 +149,48 @@ export function approveProposal(db, registry, id, { actor, now = Date.now(), pol
       throw err;
     }
     if (!isExpired(proposal, now)) {
-      return approveRun(db, proposal, envelope, { actor, now, policyVersion, reason: reason ?? "approved" });
+      return approveRun(db, proposal, envelope, {
+        actor,
+        now,
+        policyVersion,
+        reason: reason ?? "approved",
+      });
     }
 
     // Expired: re-plan against current registry state, reusing the runId.
-    if (!mapping) throw new Error(`proposal ${id} expired and event type ${envelope.type} is no longer registered`);
+    if (!mapping)
+      throw new Error(
+        `proposal ${id} expired and event type ${envelope.type} is no longer registered`,
+      );
     const fresh = buildRunSpec(registry, envelope, mapping, {
-      runId: proposal.run_id, policyVersion, adapterOverride, now,
+      runId: proposal.run_id,
+      policyVersion,
+      adapterOverride,
+      now,
     });
     const freshHash = hashJson(fresh);
     if (freshHash === proposal.spec_hash) {
-      return approveRun(db, proposal, envelope, { actor, now, policyVersion, reason: "approved_after_ttl_replan" });
+      return approveRun(db, proposal, envelope, {
+        actor,
+        now,
+        policyVersion,
+        reason: "approved_after_ttl_replan",
+      });
     }
 
     const state = runState(db, proposal.run_id);
-    if (state !== "PROPOSED") throw new Error(`proposal ${id} expired but run ${proposal.run_id} is ${state}, not PROPOSED`);
+    if (state !== "PROPOSED")
+      throw new Error(
+        `proposal ${id} expired but run ${proposal.run_id} is ${state}, not PROPOSED`,
+      );
     const at = new Date(now).toISOString();
-    db.query(`UPDATE proposals SET status = 'superseded', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`)
-      .run(at, actor, "superseded_by_ttl_replan", id);
+    db.query(
+      `UPDATE proposals SET status = 'superseded', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`,
+    ).run(at, actor, "superseded_by_ttl_replan", id);
     const freshJson = canonicalJson(fresh);
-    db.query(`UPDATE runs SET spec_json = ?, spec_hash = ?, updated_at = ? WHERE run_id = ?`)
-      .run(freshJson, freshHash, at, proposal.run_id);
+    db.query(
+      `UPDATE runs SET spec_json = ?, spec_hash = ?, updated_at = ? WHERE run_id = ?`,
+    ).run(freshJson, freshHash, at, proposal.run_id);
     const newId = newProposalId();
     db.query(
       `INSERT INTO proposals
@@ -150,11 +198,21 @@ export function approveProposal(db, registry, id, { actor, now = Date.now(), pol
           idempotency_key, status, reason, created_at, ttl_seconds)
        VALUES (?, ?, ?, ?, 'run', ?, ?, ?, 'open', 'replanned_after_ttl', ?, ?)`,
     ).run(
-      newId, proposal.event_source, proposal.event_id, proposal.run_id,
-      freshJson, freshHash, fresh.idempotencyKey, at,
+      newId,
+      proposal.event_source,
+      proposal.event_id,
+      proposal.run_id,
+      freshJson,
+      freshHash,
+      fresh.idempotencyKey,
+      at,
       mapping.proposalTtlSeconds ?? DEFAULT_PROPOSAL_TTL_SECONDS,
     );
-    return { approved: false, replanned: true, proposal: getProposal(db, newId) };
+    return {
+      approved: false,
+      replanned: true,
+      proposal: getProposal(db, newId),
+    };
   });
 }
 
@@ -172,12 +230,17 @@ export function approveProposal(db, registry, id, { actor, now = Date.now(), pol
  *         | { closed: false }
  *         | { closed: false, ambiguous: true, count: number }}
  */
-export function closeOpenProposalForRun(db, runId, { actor, now = Date.now() } = {}) {
+export function closeOpenProposalForRun(
+  db,
+  runId,
+  { actor, now = Date.now() } = {},
+) {
   const open = db
     .query(`SELECT id FROM proposals WHERE run_id = ? AND status = 'open'`)
     .all(runId);
   if (open.length === 0) return { closed: false };
-  if (open.length > 1) return { closed: false, ambiguous: true, count: open.length };
+  if (open.length > 1)
+    return { closed: false, ambiguous: true, count: open.length };
   const at = new Date(now).toISOString();
   db.query(
     `UPDATE proposals SET status = 'rejected', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`,
@@ -189,18 +252,29 @@ export function closeOpenProposalForRun(db, runId, { actor, now = Date.now() } =
  * Reject an open proposal. A run still sitting in PROPOSED is cancelled with
  * reason 'proposal_rejected' and the operator recorded as actor (§8).
  */
-export function rejectProposal(db, id, { actor, reason, now = Date.now(), policyVersion = "unknown" } = {}) {
+export function rejectProposal(
+  db,
+  id,
+  { actor, reason, now = Date.now(), policyVersion = "unknown" } = {},
+) {
   return tx(db, () => {
     const proposal = db.query(`SELECT * FROM proposals WHERE id = ?`).get(id);
     if (!proposal) throw new Error(`unknown proposal ${id}`);
-    if (proposal.status !== "open") throw new Error(`proposal ${id} is '${proposal.status}', not open`);
+    if (proposal.status !== "open")
+      throw new Error(`proposal ${id} is '${proposal.status}', not open`);
     const at = new Date(now).toISOString();
-    db.query(`UPDATE proposals SET status = 'rejected', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`)
-      .run(at, actor, reason ?? proposal.reason, id);
+    db.query(
+      `UPDATE proposals SET status = 'rejected', decided_at = ?, decided_by = ?, reason = ? WHERE id = ?`,
+    ).run(at, actor, reason ?? proposal.reason, id);
     if (proposal.run_id && runState(db, proposal.run_id) === "PROPOSED") {
       transition(db, {
-        runId: proposal.run_id, to: "CANCELLED", expectFrom: "PROPOSED",
-        actor, reason: "proposal_rejected", policyVersion, now,
+        runId: proposal.run_id,
+        to: "CANCELLED",
+        expectFrom: "PROPOSED",
+        actor,
+        reason: "proposal_rejected",
+        policyVersion,
+        now,
       });
     }
     return { rejected: true, runId: proposal.run_id ?? undefined };

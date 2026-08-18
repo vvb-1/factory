@@ -11,7 +11,9 @@ const T0 = Date.parse("2026-08-12T10:00:00Z");
 
 let seq = 0;
 function makeSpec(overrides = {}) {
-  const runId = overrides.runId ?? `run_reaper_${++seq}_${Math.random().toString(36).slice(2)}`;
+  const runId =
+    overrides.runId ??
+    `run_reaper_${++seq}_${Math.random().toString(36).slice(2)}`;
   const input = overrides.input ?? { repos: ["ok"] };
   return {
     schemaVersion: "factory.run-spec/v1",
@@ -45,9 +47,27 @@ function setupVerifyingRun(db, spec, { now = T0, expired = false } = {}) {
   });
   transition(db, { runId: spec.runId, to: "APPROVED", actor: "test", now });
   transition(db, { runId: spec.runId, to: "QUEUED", actor: "test", now });
-  transition(db, { runId: spec.runId, to: "LEASED", actor: "test", attempt: 1, now });
-  transition(db, { runId: spec.runId, to: "RUNNING", actor: "test", attempt: 1, now });
-  transition(db, { runId: spec.runId, to: "VERIFYING", actor: "test", attempt: 1, now });
+  transition(db, {
+    runId: spec.runId,
+    to: "LEASED",
+    actor: "test",
+    attempt: 1,
+    now,
+  });
+  transition(db, {
+    runId: spec.runId,
+    to: "RUNNING",
+    actor: "test",
+    attempt: 1,
+    now,
+  });
+  transition(db, {
+    runId: spec.runId,
+    to: "VERIFYING",
+    actor: "test",
+    attempt: 1,
+    now,
+  });
 
   const leaseExpiresAt = new Date(
     expired ? now - 1000 : now + (spec.timeoutSeconds + 120) * 1000,
@@ -73,11 +93,21 @@ describe("reaper (OPS-416)", () => {
     expect(runState(db, spec.runId)).toBe("QUEUED");
 
     const events = db
-      .query(`SELECT from_state, to_state, reason FROM lifecycle_events WHERE run_id = ? ORDER BY seq`)
+      .query(
+        `SELECT from_state, to_state, reason FROM lifecycle_events WHERE run_id = ? ORDER BY seq`,
+      )
       .all(spec.runId);
     const lastTwo = events.slice(-2);
-    expect(lastTwo[0]).toEqual({ from_state: "VERIFYING", to_state: "FAILED", reason: "failure:environment:lease_expired" });
-    expect(lastTwo[1]).toEqual({ from_state: "FAILED", to_state: "QUEUED", reason: "retry:environment" });
+    expect(lastTwo[0]).toEqual({
+      from_state: "VERIFYING",
+      to_state: "FAILED",
+      reason: "failure:environment:lease_expired",
+    });
+    expect(lastTwo[1]).toEqual({
+      from_state: "FAILED",
+      to_state: "QUEUED",
+      reason: "retry:environment",
+    });
   });
 
   test("reaps stranded VERIFYING run and dead-letters to FAILED when maxAttempts reached", () => {
@@ -91,7 +121,9 @@ describe("reaper (OPS-416)", () => {
     expect(reaped).toBe(1);
     expect(runState(db, spec.runId)).toBe("FAILED");
 
-    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    const attempt = db
+      .query(`SELECT * FROM attempts WHERE run_id = ?`)
+      .get(spec.runId);
     expect(attempt.terminal_state).toBe("FAILED");
     expect(attempt.reason_code).toBe("lease_expired");
   });
@@ -102,10 +134,16 @@ describe("reaper (OPS-416)", () => {
     setupVerifyingRun(db, spec, { now: T0, expired: false });
 
     expect(runState(db, spec.runId)).toBe("VERIFYING");
-    cancelRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    cancelRun(db, spec.runId, {
+      actor: "operator",
+      policyVersion: "test",
+      now: T0,
+    });
     expect(runState(db, spec.runId)).toBe("FAILED");
 
-    const attempt = db.query(`SELECT * FROM attempts WHERE run_id = ?`).get(spec.runId);
+    const attempt = db
+      .query(`SELECT * FROM attempts WHERE run_id = ?`)
+      .get(spec.runId);
     expect(attempt.terminal_state).toBe("FAILED");
     expect(attempt.reason_code).toBe("cancelled");
   });
@@ -115,11 +153,18 @@ describe("reaper (OPS-416)", () => {
     const spec = makeSpec();
     setupVerifyingRun(db, spec, { now: T0, expired: false });
 
-    forceFailRun(db, spec.runId, { actor: "operator", reason: "stuck_in_verification", policyVersion: "test", now: T0 });
+    forceFailRun(db, spec.runId, {
+      actor: "operator",
+      reason: "stuck_in_verification",
+      policyVersion: "test",
+      now: T0,
+    });
     expect(runState(db, spec.runId)).toBe("FAILED");
 
     const events = db
-      .query(`SELECT from_state, to_state, reason, actor FROM lifecycle_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1`)
+      .query(
+        `SELECT from_state, to_state, reason, actor FROM lifecycle_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1`,
+      )
       .get(spec.runId);
     expect(events.from_state).toBe("VERIFYING");
     expect(events.to_state).toBe("FAILED");
@@ -132,15 +177,29 @@ describe("reaper (OPS-416)", () => {
     const spec = makeSpec({ maxAttempts: 2 });
     setupVerifyingRun(db, spec, { now: T0, expired: false });
 
-    retryRun(db, spec.runId, { actor: "operator", policyVersion: "test", now: T0 });
+    retryRun(db, spec.runId, {
+      actor: "operator",
+      policyVersion: "test",
+      now: T0,
+    });
     expect(runState(db, spec.runId)).toBe("QUEUED");
 
     const events = db
-      .query(`SELECT from_state, to_state, reason FROM lifecycle_events WHERE run_id = ? ORDER BY seq`)
+      .query(
+        `SELECT from_state, to_state, reason FROM lifecycle_events WHERE run_id = ? ORDER BY seq`,
+      )
       .all(spec.runId);
     const lastTwo = events.slice(-2);
-    expect(lastTwo[0]).toEqual({ from_state: "VERIFYING", to_state: "FAILED", reason: "operator_retry_verifying" });
-    expect(lastTwo[1]).toEqual({ from_state: "FAILED", to_state: "QUEUED", reason: "operator_retry" });
+    expect(lastTwo[0]).toEqual({
+      from_state: "VERIFYING",
+      to_state: "FAILED",
+      reason: "operator_retry_verifying",
+    });
+    expect(lastTwo[1]).toEqual({
+      from_state: "FAILED",
+      to_state: "QUEUED",
+      reason: "operator_retry",
+    });
   });
 
   test("prunes stale stopped workers during reap cycle (OPS-431)", () => {

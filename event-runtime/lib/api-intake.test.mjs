@@ -284,15 +284,19 @@ describe("GitHub workflow_run merge trigger (WM-576)", () => {
       });
 
       const event = s.db
-        .query(`SELECT type,correlation_id,envelope_json FROM events WHERE source = 'github'`)
+        .query(
+          `SELECT type,correlation_id,envelope_json FROM events WHERE source = 'github'`,
+        )
         .get();
       expect(event.type).toBe("factory.merge.requested");
       expect(event.correlation_id).toBe(`merge-pr:factory:576:${headSha}`);
-      expect(JSON.parse(event.envelope_json).payload).toEqual({ repo: "factory", prNumbers: [576] });
-      expect(registry.eventTypes["factory.merge.requested"].idempotencyScope).toEqual([
-        "correlationId",
-        "inputHash",
-      ]);
+      expect(JSON.parse(event.envelope_json).payload).toEqual({
+        repo: "factory",
+        prNumbers: [576],
+      });
+      expect(
+        registry.eventTypes["factory.merge.requested"].idempotencyScope,
+      ).toEqual(["correlationId", "inputHash"]);
     } finally {
       s.close();
     }
@@ -301,14 +305,20 @@ describe("GitHub workflow_run merge trigger (WM-576)", () => {
   test("failed workflow runs retain the ci-log-capture event mapping", async () => {
     const s = await makeServer();
     try {
-      const response = await postWorkflow(s, {
-        action: "completed",
-        workflow_run: { id: 57602, conclusion: "failure" },
-        repository: { full_name: "watt-mind/factory" },
-      }, "delivery-failed-1");
+      const response = await postWorkflow(
+        s,
+        {
+          action: "completed",
+          workflow_run: { id: 57602, conclusion: "failure" },
+          repository: { full_name: "watt-mind/factory" },
+        },
+        "delivery-failed-1",
+      );
       expect(response.status).toBe(200);
       expect((await response.json()).admitted).toBe(true);
-      const event = s.db.query(`SELECT type,envelope_json FROM events WHERE source = 'github'`).get();
+      const event = s.db
+        .query(`SELECT type,envelope_json FROM events WHERE source = 'github'`)
+        .get();
       expect(event.type).toBe("github.workflow-run.failed");
       expect(JSON.parse(event.envelope_json).payload).toEqual({
         repo: "watt-mind/factory",

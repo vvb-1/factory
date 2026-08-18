@@ -28,7 +28,13 @@ anywhere.
   "terminalState": "completed",
   "artifact": {
     "repos": [
-      { "name": "...", "triage": 0, "agentReady": 0, "inProgress": 0, "blocked": 0 }
+      {
+        "name": "...",
+        "triage": 0,
+        "agentReady": 0,
+        "inProgress": 0,
+        "blocked": 0
+      }
     ],
     "recommendedAction": "wait"
   },

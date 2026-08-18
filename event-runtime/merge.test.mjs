@@ -83,24 +83,20 @@ function installMergeCommandFakes(fixture) {
       'echo "factory $*" >> "$COMMAND_LOG"',
       'if [ "${1:-}" = linear ] && [ "${2:-}" = get ]; then',
       '  case "${FAKE_LINEAR_MODE:-valid}" in',
-      '    error) exit 3 ;;',
-      '    empty) exit 0 ;;',
+      "    error) exit 3 ;;",
+      "    empty) exit 0 ;;",
       "    malformed) printf 'not-json\\n'; exit 0 ;;",
-      "    security) printf '{\"state\":{\"name\":\"In Progress\"},\"labels\":{\"nodes\":[{\"name\":\"type:security\"}]}}\\n'; exit 0 ;;",
-      "    *) printf '{\"state\":{\"name\":\"In Progress\"},\"labels\":{\"nodes\":[]}}\\n'; exit 0 ;;",
-      '  esac',
-      'fi',
+      '    security) printf \'{"state":{"name":"In Progress"},"labels":{"nodes":[{"name":"type:security"}]}}\\n\'; exit 0 ;;',
+      '    *) printf \'{"state":{"name":"In Progress"},"labels":{"nodes":[]}}\\n\'; exit 0 ;;',
+      "  esac",
+      "fi",
       'if [ "${1:-}" = branch-guard ]; then',
       '  exit "${FAKE_BRANCH_GUARD_STATUS:-2}"',
-      'fi',
-      'exit 0',
+      "fi",
+      "exit 0",
     ].join("\n"),
   );
-  writeExecutable(
-    fixture.bin,
-    "sleep",
-    String.raw`exit 0`,
-  );
+  writeExecutable(fixture.bin, "sleep", String.raw`exit 0`);
   writeExecutable(
     fixture.bin,
     "gh",
@@ -108,35 +104,35 @@ function installMergeCommandFakes(fixture) {
       'echo "gh $*" >> "$COMMAND_LOG"',
       'case "$*" in',
       '  *"pr view"*"state,isDraft,mergeable,headRefOid,headRefName,baseRefName,labels"*)',
-      "    printf '{\"state\":\"OPEN\",\"isDraft\":false,\"mergeable\":\"MERGEABLE\",\"headRefOid\":\"%s\",\"headRefName\":\"%s\",\"baseRefName\":\"develop\",\"labels\":[]}\\n' \"$FAKE_HEAD_SHA\" \"$FAKE_HEAD_REF\" ;;",
-      "  *\"git/ref/heads/develop\"*) printf '%s\\n' \"$FAKE_BASE_SHA\" ;;",
+      '    printf \'{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","headRefOid":"%s","headRefName":"%s","baseRefName":"develop","labels":[]}\\n\' "$FAKE_HEAD_SHA" "$FAKE_HEAD_REF" ;;',
+      '  *"git/ref/heads/develop"*) printf \'%s\\n\' "$FAKE_BASE_SHA" ;;',
       '  *"pr checks"*"--required --json name,bucket,state"*)',
       '    case "${FAKE_REQUIRED_MODE:-empty}" in',
-      "      green) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
-      "      pending) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pending\",\"state\":\"PENDING\"}]\\n' ;;",
-      "      duplicate) printf '[{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"},{\"name\":\"Protected Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]\\n' ;;",
+      '      green) printf \'[{"name":"Protected Verify","bucket":"pass","state":"SUCCESS"}]\\n\' ;;',
+      '      pending) printf \'[{"name":"Protected Verify","bucket":"pending","state":"PENDING"}]\\n\' ;;',
+      '      duplicate) printf \'[{"name":"Protected Verify","bucket":"pass","state":"SUCCESS"},{"name":"Protected Verify","bucket":"pass","state":"SUCCESS"}]\\n\' ;;',
       "      status-zero-empty) printf '[]\\n' ;;",
       "      unquoted) printf 'no required checks reported on the %s branch\\n' \"$FAKE_HEAD_REF\"; exit 1 ;;",
-      "      *) printf \"no required checks reported on the '%s' branch\\n\" \"$FAKE_HEAD_REF\"; exit 1 ;;",
-      '    esac ;;',
+      '      *) printf "no required checks reported on the \'%s\' branch\\n" "$FAKE_HEAD_REF"; exit 1 ;;',
+      "    esac ;;",
       '  *"pr merge"*) : ;;',
-      "  *\"pr view\"*\"--json headRefOid --jq .headRefOid\"*) printf '%s\\n' \"$FAKE_HEAD_SHA\" ;;",
-      "  *\"pr view\"*\"select(.state\"*) printf '%s\\n' \"$FAKE_MERGE_SHA\" ;;",
-      "  *\"pr view\"*\"@tsv\"*) printf 'MERGED\\t%s\\n' \"$FAKE_MERGE_SHA\" ;;",
-      "  *\"pr view\"*\"--jq .state\"*) printf 'MERGED\\n' ;;",
-      "  *\"pr view\"*\"--jq .mergeCommit.oid\"*) printf '%s\\n' \"$FAKE_MERGE_SHA\" ;;",
-      "  *\"pr checks\"*\"--json name,bucket,state,workflow\"*) printf '[{\"name\":\"Shadow runner fleet available\",\"bucket\":\"pass\",\"state\":\"SUCCESS\",\"workflow\":\"CI\"},{\"name\":\"Verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\",\"workflow\":\"CI\"}]\\n' ;;",
+      '  *"pr view"*"--json headRefOid --jq .headRefOid"*) printf \'%s\\n\' "$FAKE_HEAD_SHA" ;;',
+      '  *"pr view"*"select(.state"*) printf \'%s\\n\' "$FAKE_MERGE_SHA" ;;',
+      '  *"pr view"*"@tsv"*) printf \'MERGED\\t%s\\n\' "$FAKE_MERGE_SHA" ;;',
+      '  *"pr view"*"--jq .state"*) printf \'MERGED\\n\' ;;',
+      '  *"pr view"*"--jq .mergeCommit.oid"*) printf \'%s\\n\' "$FAKE_MERGE_SHA" ;;',
+      '  *"pr checks"*"--json name,bucket,state,workflow"*) printf \'[{"name":"Shadow runner fleet available","bucket":"pass","state":"SUCCESS","workflow":"CI"},{"name":"Verify","bucket":"pass","state":"SUCCESS","workflow":"CI"}]\\n\' ;;',
       '  *"run list"*"--workflow CI"*"--event pull_request"*)',
-      "    printf '[{\"databaseId\":81,\"status\":\"completed\",\"conclusion\":\"success\",\"headSha\":\"%s\",\"workflowName\":\"CI\"}]\\n' \"$FAKE_HEAD_SHA\" ;;",
+      '    printf \'[{"databaseId":81,"status":"completed","conclusion":"success","headSha":"%s","workflowName":"CI"}]\\n\' "$FAKE_HEAD_SHA" ;;',
       '  *"run list"*"--workflow CI"*"--event push"*)',
-      "    if [ \"${FAKE_CI_MODE:-success}\" = auxiliary ]; then printf '[]\\n'; else printf '[{\"databaseId\":91,\"status\":\"completed\",\"conclusion\":\"success\",\"headSha\":\"%s\",\"workflowName\":\"CI\"}]\\n' \"$FAKE_MERGE_SHA\"; fi ;;",
+      '    if [ "${FAKE_CI_MODE:-success}" = auxiliary ]; then printf \'[]\\n\'; else printf \'[{"databaseId":91,"status":"completed","conclusion":"success","headSha":"%s","workflowName":"CI"}]\\n\' "$FAKE_MERGE_SHA"; fi ;;',
       '  *"run view 81"*|*"run view 91"*)',
-      "    if [ \"${FAKE_CI_MODE:-success}\" = shadow-only ]; then printf '[{\"name\":\"Shadow runner fleet available\",\"status\":\"completed\",\"conclusion\":\"success\"}]\\n'; else printf '[{\"name\":\"Shadow runner fleet available\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"Verify\",\"status\":\"completed\",\"conclusion\":\"success\"}]\\n'; fi ;;",
-      "  *\"commits/\"*\"/check-runs\"*) printf '[[\"completed\",\"success\"]]\\n' ;;",
-      "  *\"git/ref/heads/\"*) printf '%s\\n' \"$FAKE_HEAD_SHA\" ;;",
+      '    if [ "${FAKE_CI_MODE:-success}" = shadow-only ]; then printf \'[{"name":"Shadow runner fleet available","status":"completed","conclusion":"success"}]\\n\'; else printf \'[{"name":"Shadow runner fleet available","status":"completed","conclusion":"success"},{"name":"Verify","status":"completed","conclusion":"success"}]\\n\'; fi ;;',
+      '  *"commits/"*"/check-runs"*) printf \'[["completed","success"]]\\n\' ;;',
+      '  *"git/ref/heads/"*) printf \'%s\\n\' "$FAKE_HEAD_SHA" ;;',
       '  *"git/refs/heads/"*) : ;;',
       '  *) echo "unexpected gh command: $*" >&2; exit 64 ;;',
-      'esac',
+      "esac",
     ].join("\n"),
   );
 }
@@ -148,8 +144,8 @@ function installBunGateFake(fixture) {
     [
       'case "$*" in',
       '  *"r.mergeCi"*) printf \'{"workflow":"CI","requiredChecks":["Shadow runner fleet available","Verify"]}\' ;;',
-      '  *) exit 0 ;;',
-      'esac',
+      "  *) exit 0 ;;",
+      "esac",
     ].join("\n"),
   );
 }
@@ -220,8 +216,13 @@ function admitEvent(db, registryForAdmission, env) {
         summary: "one selected merge",
       };
     } else if (recommendation === "FIX") {
-      const { repo, github, base, deployBranch = "master", ...fixItem } =
-        env.payload;
+      const {
+        repo,
+        github,
+        base,
+        deployBranch = "master",
+        ...fixItem
+      } = env.payload;
       artifact = {
         recommendation,
         repo,
@@ -247,10 +248,24 @@ function admitEvent(db, registryForAdmission, env) {
       artifact,
     });
   }
-  return persistEvent(
-    db,
-    registryForAdmission,
-    { ...env, causationId: parent },
+  return persistEvent(db, registryForAdmission, {
+    ...env,
+    causationId: parent,
+  });
+}
+
+function seedActiveDispatch(db, { runId, state, ticket, repo = "factory" }) {
+  const now = "2026-08-16T12:00:00.000Z";
+  db.query(
+    `INSERT INTO runs (run_id,idempotency_key,spec_json,spec_hash,state,attempts,created_at,updated_at)
+     VALUES (?,?,?,'hash',?,1,?,?)`,
+  ).run(
+    runId,
+    `idem-${runId}`,
+    canonicalJson({ agent: "dispatch@1", input: { repo, ticket } }),
+    state,
+    now,
+    now,
   );
 }
 
@@ -298,8 +313,7 @@ describe("merge-fix result contract (WM-447)", () => {
     for (const outcome of ["UPDATED", "BLOCKED"]) {
       const example = prompt.match(
         new RegExp(
-          `### ${outcome} artifact[\\s\\S]*?` +
-            "```json\\n([\\s\\S]*?)\\n```",
+          `### ${outcome} artifact[\\s\\S]*?` + "```json\\n([\\s\\S]*?)\\n```",
         ),
       );
 
@@ -425,20 +439,30 @@ describe("durable autonomous merge registry (WM-398/WM-403)", () => {
 
 describe("merge-scan selected PR contract (WM-426)", () => {
   test("the input schema declares an optional nonempty list of positive PR numbers", () => {
-    const prNumbers = registry.agents.get("merge-scan@2").inputSchema.properties.prNumbers;
+    const prNumbers =
+      registry.agents.get("merge-scan@2").inputSchema.properties.prNumbers;
     expect(prNumbers.type).toBe("array");
     expect(prNumbers.minItems).toBe(1);
     expect(prNumbers.items).toEqual({ type: "integer", minimum: 1 });
-    expect(registry.agents.get("merge-scan@2").inputSchema.required).not.toContain("prNumbers");
+    expect(
+      registry.agents.get("merge-scan@2").inputSchema.required,
+    ).not.toContain("prNumbers");
   });
 
   test("the prompt scopes selected scans exactly and fails invalid targets closed", () => {
-    const prompt = readFileSync(registry.agents.get("merge-scan@2").promptPath, "utf8");
+    const prompt = readFileSync(
+      registry.agents.get("merge-scan@2").promptPath,
+      "utf8",
+    );
     expect(prompt).toContain("`prNumbers` is absent");
     expect(prompt).toContain("exactly those PR numbers");
-    expect(prompt).toMatch(/missing, closed, draft, or targets a\s+base other than/);
+    expect(prompt).toMatch(
+      /missing, closed, draft, or targets a\s+base other than/,
+    );
     expect(prompt).toContain('"terminalState": "refused"');
-    expect(prompt).toMatch(/evidence clearly naming every invalid\s+selected PR/);
+    expect(prompt).toMatch(
+      /evidence clearly naming every invalid\s+selected PR/,
+    );
     expect(prompt).toMatch(/Do not\s+emit a merge-plan artifact/);
   });
 });
@@ -456,9 +480,7 @@ describe("merge-scan required-context resolution (WM-433)", () => {
     expect(prompt).toContain(
       'bun "$FACTORY_ROOT/event-runtime/lib/merge-ci-proof.mjs" resolve-required-contexts',
     );
-    expect(prompt).not.toContain(
-      "./repo/event-runtime/lib/merge-ci-proof.mjs",
-    );
+    expect(prompt).not.toContain("./repo/event-runtime/lib/merge-ci-proof.mjs");
     expect(prompt).toMatch(
       /Status 1 with exactly\s+`no required checks reported on the '<headRef>' branch`/,
     );
@@ -471,7 +493,9 @@ describe("merge-scan required-context resolution (WM-433)", () => {
   });
 
   test("the resolver executes when the selected non-Factory repo has no event-runtime tree", () => {
-    const fixture = mkdtempSync(path.join(os.tmpdir(), "merge-scan-cross-repo-"));
+    const fixture = mkdtempSync(
+      path.join(os.tmpdir(), "merge-scan-cross-repo-"),
+    );
     const target = path.join(fixture, "repo");
     mkdirSync(target);
     writeFileSync(path.join(target, "README.md"), "# non-Factory fixture\n");
@@ -487,8 +511,7 @@ describe("merge-scan required-context resolution (WM-433)", () => {
           cwd: fixture,
           encoding: "utf8",
           env: { ...process.env, FACTORY_ROOT: process.cwd() },
-          input:
-            "no required checks reported on the 'feat/WM-243' branch",
+          input: "no required checks reported on the 'feat/WM-243' branch",
         },
       );
 
@@ -509,7 +532,10 @@ describe("merge-scan repository workspace and result contract (WM-425)", () => {
       retainOnFailure: true,
     });
     expect(def.capabilities.services).toContain("repo:read");
-    expect(def.inputSchema.properties.repoPin.required).toEqual(["repo", "sha"]);
+    expect(def.inputSchema.properties.repoPin.required).toEqual([
+      "repo",
+      "sha",
+    ]);
     expect(def.inputSchema.properties.repoPin.properties.sha.pattern).toBe(
       "^[0-9a-f]{40}$",
     );
@@ -652,9 +678,11 @@ describe("merge-scan repository workspace and result contract (WM-425)", () => {
       });
       db.close();
     } finally {
-      if (previousReposRoot === undefined) delete process.env.FACTORY_REPOS_ROOT;
+      if (previousReposRoot === undefined)
+        delete process.env.FACTORY_REPOS_ROOT;
       else process.env.FACTORY_REPOS_ROOT = previousReposRoot;
-      if (previousEventHome === undefined) delete process.env.FACTORY_EVENT_HOME;
+      if (previousEventHome === undefined)
+        delete process.env.FACTORY_EVENT_HOME;
       else process.env.FACTORY_EVENT_HOME = previousEventHome;
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -672,13 +700,18 @@ describe("executable merge command safety (WM-412)", () => {
         commandEnv({ FAKE_LINEAR_MODE: mode }),
       );
       expect(result.status, `${mode}: ${result.stderr}`).not.toBe(0);
-      const log = existsSync(fixture.log) ? readFileSync(fixture.log, "utf8") : "";
+      const log = existsSync(fixture.log)
+        ? readFileSync(fixture.log, "utf8")
+        : "";
       expect(log).not.toContain("gh pr merge");
     }
   });
 
   test("merge-apply executes the configured fallback and requires every exact workflow job", () => {
-    for (const [mode, shouldMerge] of [["success", true], ["shadow-only", false]]) {
+    for (const [mode, shouldMerge] of [
+      ["success", true],
+      ["shadow-only", false],
+    ]) {
       const fixture = commandFixture(`merge-apply-config-${mode}-`);
       installMergeCommandFakes(fixture);
       installBunGateFake(fixture);
@@ -715,7 +748,11 @@ describe("executable merge command safety (WM-412)", () => {
   });
 
   test("merge-apply prefers nonempty GitHub required contexts and rejects pending ones", () => {
-    for (const [mode, shouldMerge] of [["green", true], ["pending", false], ["duplicate", false]]) {
+    for (const [mode, shouldMerge] of [
+      ["green", true],
+      ["pending", false],
+      ["duplicate", false],
+    ]) {
       const fixture = commandFixture(`merge-apply-required-${mode}-`);
       installMergeCommandFakes(fixture);
       installBunGateFake(fixture);
@@ -749,10 +786,14 @@ describe("executable merge command safety (WM-412)", () => {
     });
     expect(resolveChains(db, registry).emitted).toBe(1);
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const apply = db.query(
-      `SELECT run_id FROM runs WHERE json_extract(spec_json,'$.agent')='merge-apply@2'`,
-    ).get();
-    db.query(`UPDATE runs SET state='RUNNING' WHERE run_id=?`).run(apply.run_id);
+    const apply = db
+      .query(
+        `SELECT run_id FROM runs WHERE json_extract(spec_json,'$.agent')='merge-apply@2'`,
+      )
+      .get();
+    db.query(`UPDATE runs SET state='RUNNING' WHERE run_id=?`).run(
+      apply.run_id,
+    );
 
     const result = runCommand(
       applyCommand(applyPayload()),
@@ -760,14 +801,16 @@ describe("executable merge command safety (WM-412)", () => {
       commandEnv({ FACTORY_EVENT_HOME: fixture.root }),
     );
     expect(result.status, result.stderr).toBe(0);
-    const landed = db.query(
-      `SELECT causation_id FROM events WHERE type='factory.merge-landed'`,
-    ).get();
+    const landed = db
+      .query(
+        `SELECT causation_id FROM events WHERE type='factory.merge-landed'`,
+      )
+      .get();
     expect(landed.causation_id).toBe(apply.run_id);
 
-    db.query(`UPDATE runs SET state='COMPLETED', attempts=1 WHERE run_id=?`).run(
-      apply.run_id,
-    );
+    db.query(
+      `UPDATE runs SET state='COMPLETED', attempts=1 WHERE run_id=?`,
+    ).run(apply.run_id);
     db.query(
       `INSERT INTO results (run_id,attempt,result_json,artifact_hash,verification_json,receipt_json,accepted_at)
        VALUES (?,1,?,'hash','{}','{}',?)`,
@@ -783,9 +826,11 @@ describe("executable merge command safety (WM-412)", () => {
     );
     planAdmittedEvents(db, registry, { policyVersion: PV });
     expect(
-      db.query(
-        `SELECT state FROM runs WHERE json_extract(spec_json,'$.agent')='merge-verify@1'`,
-      ).get().state,
+      db
+        .query(
+          `SELECT state FROM runs WHERE json_extract(spec_json,'$.agent')='merge-verify@1'`,
+        )
+        .get().state,
     ).toBe("QUEUED");
     db.close();
   });
@@ -874,7 +919,16 @@ describe("executable merge command safety (WM-412)", () => {
       "utf8",
     );
     const protectedResult = runCommand(
-      ["bun", `${process.cwd()}/orchestrator/branch-guard.mjs`, "--repo", "fixture", "--pr", "1", "--head", "develop"],
+      [
+        "bun",
+        `${process.cwd()}/orchestrator/branch-guard.mjs`,
+        "--repo",
+        "fixture",
+        "--pr",
+        "1",
+        "--head",
+        "develop",
+      ],
       fixture,
       {
         PATH: process.env.PATH,
@@ -885,7 +939,16 @@ describe("executable merge command safety (WM-412)", () => {
     expect(protectedResult.status).toBe(2);
 
     const heldResult = runCommand(
-      ["bun", `${process.cwd()}/orchestrator/branch-guard.mjs`, "--repo", "fixture", "--pr", "1", "--head", "feat/shared"],
+      [
+        "bun",
+        `${process.cwd()}/orchestrator/branch-guard.mjs`,
+        "--repo",
+        "fixture",
+        "--pr",
+        "1",
+        "--head",
+        "feat/shared",
+      ],
       fixture,
       {
         PATH: process.env.PATH,
@@ -1018,7 +1081,9 @@ describe("merge transition chains", () => {
     });
     expect(
       db
-        .query(`SELECT event_id FROM events WHERE source='chain' ORDER BY event_id`)
+        .query(
+          `SELECT event_id FROM events WHERE source='chain' ORDER BY event_id`,
+        )
         .all()
         .map((row) => row.event_id),
     ).toEqual([
@@ -1116,7 +1181,9 @@ describe("merge transition chains", () => {
       errors: [],
     });
     const events = db
-      .query(`SELECT event_id,type FROM events WHERE source='chain' ORDER BY event_id`)
+      .query(
+        `SELECT event_id,type FROM events WHERE source='chain' ORDER BY event_id`,
+      )
       .all();
     expect(events.map((event) => event.type).sort()).toEqual([
       "factory.merge-apply.requested",
@@ -1147,9 +1214,11 @@ describe("merge transition chains", () => {
 
     planAdmittedEvents(db, registry, { policyVersion: PV });
     expect(
-      db.query(
-        `SELECT COUNT(*) AS n FROM runs WHERE state='QUEUED' AND json_extract(spec_json,'$.agent')='merge-apply@2'`,
-      ).get().n,
+      db
+        .query(
+          `SELECT COUNT(*) AS n FROM runs WHERE state='QUEUED' AND json_extract(spec_json,'$.agent')='merge-apply@2'`,
+        )
+        .get().n,
     ).toBe(1);
     expect(resolveChains(db, registry)).toEqual({
       emitted: 0,
@@ -1180,6 +1249,123 @@ describe("merge transition chains", () => {
       .get();
     expect(row.type).toBe("factory.merge.requested");
     expect(JSON.parse(row.envelope_json).payload).toEqual({ repo: "factory" });
+  });
+});
+
+describe("merge-fix dispatch worktree exclusion (WM-526)", () => {
+  test("RUNNING and VERIFYING dispatches for the same ticket defer merge-fix with a typed noop", () => {
+    for (const state of ["RUNNING", "VERIFYING"]) {
+      const db = openDb(":memory:");
+      const eventId = `fix-during-${state.toLowerCase()}`;
+      const ticket = `WM-${state === "RUNNING" ? "601" : "602"}`;
+      const dispatchRunId = `dispatch-${state.toLowerCase()}`;
+      const payload = {
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        pr: state === "RUNNING" ? 101 : 102,
+        headSha: SHA,
+        baseSha: BASE_SHA,
+        headRef: `feat/${ticket}`,
+        ticket,
+        finding: "mechanical conflict correction",
+        findingHash: FINDING_HASH,
+        round: 1,
+        mechanical: true,
+        withinOwnedPaths: true,
+        ownedPaths: ["event-runtime/merge.test.mjs"],
+      };
+
+      admitEvent(
+        db,
+        registry,
+        envelope("factory.merge-fix.requested", payload, eventId),
+      );
+      seedActiveDispatch(db, {
+        runId: dispatchRunId,
+        state,
+        ticket,
+      });
+
+      planAdmittedEvents(db, registry, { policyVersion: PV });
+
+      expect(
+        db
+          .query(
+            `SELECT status FROM events WHERE source='chain' AND event_id=?`,
+          )
+          .get(eventId).status,
+      ).toBe("noop");
+      expect(
+        db
+          .query(
+            `SELECT decision,reason,run_id FROM proposals WHERE event_source='chain' AND event_id=?`,
+          )
+          .get(eventId),
+      ).toMatchObject({
+        decision: "noop",
+        reason: "ticket_dispatch_in_flight",
+        run_id: dispatchRunId,
+      });
+      expect(
+        db
+          .query(
+            `SELECT COUNT(*) AS n FROM runs
+           WHERE json_extract(spec_json,'$.agent')='merge-fix@1'`,
+          )
+          .get().n,
+      ).toBe(0);
+      db.close();
+    }
+  });
+
+  test("a terminal dispatch releases the ticket for merge-fix planning", () => {
+    const db = openDb(":memory:");
+    const payload = {
+      repo: "factory",
+      github: "watt-mind/factory",
+      base: "develop",
+      pr: 103,
+      headSha: SHA,
+      baseSha: BASE_SHA,
+      headRef: "feat/WM-603",
+      ticket: "WM-603",
+      finding: "mechanical conflict correction",
+      findingHash: FINDING_HASH,
+      round: 1,
+      mechanical: true,
+      withinOwnedPaths: true,
+      ownedPaths: ["event-runtime/merge.test.mjs"],
+    };
+    admitEvent(
+      db,
+      registry,
+      envelope("factory.merge-fix.requested", payload, "fix-after-dispatch"),
+    );
+    seedActiveDispatch(db, {
+      runId: "dispatch-completed",
+      state: "COMPLETED",
+      ticket: payload.ticket,
+    });
+
+    planAdmittedEvents(db, registry, { policyVersion: PV });
+
+    expect(
+      db
+        .query(
+          `SELECT COUNT(*) AS n FROM runs
+         WHERE json_extract(spec_json,'$.agent')='merge-fix@1'`,
+        )
+        .get().n,
+    ).toBe(1);
+    expect(
+      db
+        .query(
+          `SELECT status FROM events WHERE source='chain' AND event_id='fix-after-dispatch'`,
+        )
+        .get().status,
+    ).toBe("planned");
+    db.close();
   });
 });
 
@@ -1319,7 +1505,10 @@ describe("policy approval and global merge barrier", () => {
       withinOwnedPaths: true,
       ownedPaths: ["event-runtime/merge.test.mjs"],
     });
-    for (const [id, round] of [["fix-1", 1], ["fix-2", 2]]) {
+    for (const [id, round] of [
+      ["fix-1", 1],
+      ["fix-2", 2],
+    ]) {
       admitEvent(
         db,
         registry,
@@ -1339,9 +1528,11 @@ describe("policy approval and global merge barrier", () => {
     );
     expect(third.reason).toContain("merge_fix_round_not_durable");
     expect(
-      db.query(
-        `SELECT COUNT(*) AS n FROM runs WHERE state='QUEUED' AND json_extract(spec_json,'$.agent')='merge-fix@1'`,
-      ).get().n,
+      db
+        .query(
+          `SELECT COUNT(*) AS n FROM runs WHERE state='QUEUED' AND json_extract(spec_json,'$.agent')='merge-fix@1'`,
+        )
+        .get().n,
     ).toBe(2);
   });
 

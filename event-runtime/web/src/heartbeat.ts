@@ -27,27 +27,35 @@ export const heartbeatOf = (w: Worker, now: number): Heartbeat => {
   // Floored to a second, because `dur` renders the first sub-second of overdue as
   // `0:00` and "stale for no time at all" reads as a broken badge rather than a
   // fresh one. Same floor the countdown below uses, so the flip reads 0:01 next.
-  if (w.stale) return { kind: "stale", overdueMs: Math.max(1000, now - deadline) };
+  if (w.stale)
+    return { kind: "stale", overdueMs: Math.max(1000, now - deadline) };
   if (w.state === "stopped") return { kind: "none" };
   // Whole seconds, rounded up: the last fraction of a second reads 0:01, and only
   // a genuinely spent window reads 0 — which is what `overdue` keys off.
-  return { kind: "live", remainingMs: Math.max(0, Math.ceil((deadline - now) / 1000) * 1000) };
+  return {
+    kind: "live",
+    remainingMs: Math.max(0, Math.ceil((deadline - now) / 1000) * 1000),
+  };
 };
 
 /** One hue per clock, so the age, the countdown and the meter never disagree. */
 export const heartbeatHue = (hb: Heartbeat): string | undefined => {
   if (hb.kind === "stale") return "var(--hue-err)";
-  if (hb.kind === "live" && hb.remainingMs <= HEARTBEAT_WARN_MS) return "var(--hue-warn)";
+  if (hb.kind === "live" && hb.remainingMs <= HEARTBEAT_WARN_MS)
+    return "var(--hue-warn)";
   return undefined;
 };
 
 /** `m:ss` while seconds decide, coarser once they stop mattering. */
 export const dur = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  if (s < 3600)
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  if (s < 86400)
+    return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
   return `${Math.floor(s / 86400)}d${Math.floor((s % 86400) / 3600)}h`;
 };
 
 /** Whether the live countdown has spent the window but the server has not marked stale yet. */
-export const isOverdue = (hb: Heartbeat): boolean => hb.kind === "live" && hb.remainingMs === 0;
+export const isOverdue = (hb: Heartbeat): boolean =>
+  hb.kind === "live" && hb.remainingMs === 0;

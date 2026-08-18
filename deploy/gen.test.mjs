@@ -47,7 +47,9 @@ test("plist includes EnvironmentVariables with a launchd-safe PATH", () => {
         <key>PATH</key>
         <string>${environmentPath}</string>
     </dict>`);
-  expect((rendered.match(/<key>EnvironmentVariables<\/key>/g) ?? []).length).toBe(1);
+  expect(
+    (rendered.match(/<key>EnvironmentVariables<\/key>/g) ?? []).length,
+  ).toBe(1);
   expect((rendered.match(/<key>PATH<\/key>/g) ?? []).length).toBe(1);
 });
 
@@ -74,9 +76,15 @@ test("rendering ignores the renderer's PATH and home: sentinel never leaks", () 
     const rendered = plist(job, defaults);
     expect(rendered).not.toContain(sentinel);
     expect(rendered).not.toContain(homedir());
-    expect(rendered).toContain(`<string>${DEFAULT_PATH}:~/.bun/bin:~/.local/bin</string>`);
-    expect(rendered).toContain("<string>~/Library/Logs/triage.out.log</string>");
-    expect(rendered).toContain("<string>~/Library/Logs/triage.err.log</string>");
+    expect(rendered).toContain(
+      `<string>${DEFAULT_PATH}:~/.bun/bin:~/.local/bin</string>`,
+    );
+    expect(rendered).toContain(
+      "<string>~/Library/Logs/triage.out.log</string>",
+    );
+    expect(rendered).toContain(
+      "<string>~/Library/Logs/triage.err.log</string>",
+    );
     // Same bytes regardless of the environment the renderer runs in.
     process.env.PATH = "/usr/bin";
     expect(plist(job, defaults)).toBe(rendered);
@@ -88,8 +96,12 @@ test("rendering ignores the renderer's PATH and home: sentinel never leaks", () 
 test("materialize expands ~/ only where launchd would need an absolute path", () => {
   const rendered = plist(job, defaults);
   const installed = materialize(rendered, "/Users/factory");
-  expect(installed).toContain(`<string>${DEFAULT_PATH}:/Users/factory/.bun/bin:/Users/factory/.local/bin</string>`);
-  expect(installed).toContain("<string>/Users/factory/Library/Logs/triage.out.log</string>");
+  expect(installed).toContain(
+    `<string>${DEFAULT_PATH}:/Users/factory/.bun/bin:/Users/factory/.local/bin</string>`,
+  );
+  expect(installed).toContain(
+    "<string>/Users/factory/Library/Logs/triage.out.log</string>",
+  );
   expect(installed).not.toContain("~/");
   // The runtime deploy root is still resolved by the job's shell, not the installer.
   expect(installed).toContain('cd "${FACTORY_ROOT:-$HOME/Develop/factory}"');
@@ -105,7 +117,10 @@ test("installPlists creates a missing LaunchAgents directory before copying", ()
 
   try {
     mkdirSync(outDir, { recursive: true });
-    writeFileSync(source, "<plist><string>~/Library/Logs/x.log</string></plist>\n");
+    writeFileSync(
+      source,
+      "<plist><string>~/Library/Logs/x.log</string></plist>\n",
+    );
     expect(existsSync(agentsDir)).toBe(false);
 
     installPlists([job], defaults, {
@@ -124,7 +139,10 @@ test("installPlists creates a missing LaunchAgents directory before copying", ()
     expect(existsSync(path.join(root, "home", "Library", "Logs"))).toBe(true);
     expect(calls).toEqual([
       ["launchctl", ["bootout", `gui/501/${label}`]],
-      ["launchctl", ["bootstrap", "gui/501", path.join(agentsDir, `${label}.plist`)]],
+      [
+        "launchctl",
+        ["bootstrap", "gui/501", path.join(agentsDir, `${label}.plist`)],
+      ],
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -153,10 +171,15 @@ test("installPlists prefers rendered label/file over the prefix concatenation", 
       },
     });
 
-    expect(readFileSync(path.join(agentsDir, `${label}.plist`), "utf8")).toBe("<plist>custom</plist>\n");
+    expect(readFileSync(path.join(agentsDir, `${label}.plist`), "utf8")).toBe(
+      "<plist>custom</plist>\n",
+    );
     expect(calls).toEqual([
       ["launchctl", ["bootout", `gui/501/${label}`]],
-      ["launchctl", ["bootstrap", "gui/501", path.join(agentsDir, `${label}.plist`)]],
+      [
+        "launchctl",
+        ["bootstrap", "gui/501", path.join(agentsDir, `${label}.plist`)],
+      ],
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -168,12 +191,21 @@ test("--install never bootstraps the event daemons (scheduled jobs only)", () =>
   const log = console.log;
   console.log = () => {};
   try {
-    main({ install: true, installer(jobs) { installed.push(...jobs); } });
+    main({
+      install: true,
+      installer(jobs) {
+        installed.push(...jobs);
+      },
+    });
   } finally {
     console.log = log;
   }
-  expect(installed.some((j) => String(j.name).startsWith("factory.event-"))).toBe(false);
-  expect(installed.some((j) => String(j.label ?? "").includes(".factory.event-"))).toBe(false);
+  expect(
+    installed.some((j) => String(j.name).startsWith("factory.event-")),
+  ).toBe(false);
+  expect(
+    installed.some((j) => String(j.label ?? "").includes(".factory.event-")),
+  ).toBe(false);
 });
 
 test("event-runtime plists are portable, secret-free, persistent user agents", () => {
@@ -183,7 +215,9 @@ test("event-runtime plists are portable, secret-free, persistent user agents", (
   for (const rendered of [serve, work]) {
     expect(rendered).toContain("<key>RunAtLoad</key>\n    <true/>");
     expect(rendered).toContain("<key>KeepAlive</key>\n    <true/>");
-    expect(rendered).toContain("<key>LimitLoadToSessionType</key>\n    <string>Aqua</string>");
+    expect(rendered).toContain(
+      "<key>LimitLoadToSessionType</key>\n    <string>Aqua</string>",
+    );
     expect(rendered).not.toContain(ROOT);
     expect(rendered).not.toContain("FACTORY_EVENT_SECRET</key>");
   }
@@ -214,8 +248,12 @@ test("event-runtime renderer writes the two committed launchd definitions", () =
       "com.wattmind.factory.event-serve.plist",
       "com.wattmind.factory.event-work.plist",
     ]);
-    expect(readFileSync(rendered[0].file, "utf8")).toContain('event-runtime-daemon" serve');
-    expect(readFileSync(rendered[1].file, "utf8")).toContain('event-runtime-daemon" work 2:2');
+    expect(readFileSync(rendered[0].file, "utf8")).toContain(
+      'event-runtime-daemon" serve',
+    );
+    expect(readFileSync(rendered[1].file, "utf8")).toContain(
+      'event-runtime-daemon" work 2:2',
+    );
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
@@ -241,7 +279,10 @@ function daemonFixture() {
   const fakeBun = path.join(home, ".bun", "bin", "bun");
   mkdirSync(path.dirname(fakeBun), { recursive: true });
   mkdirSync(path.join(checkout, "event-runtime"), { recursive: true });
-  writeFileSync(fakeBun, '#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$CALLS_FILE"\n');
+  writeFileSync(
+    fakeBun,
+    '#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$CALLS_FILE"\n',
+  );
   chmodSync(fakeBun, 0o755);
   return { root, home, checkout, calls };
 }
@@ -264,15 +305,25 @@ function daemonEnv(fixture, port) {
 test("daemon preflight failures land in the err log, not launchd's dropped stderr", async () => {
   const fixture = daemonFixture();
   try {
-    rmSync(path.join(fixture.checkout, "event-runtime"), { recursive: true, force: true });
-    const child = Bun.spawn([path.join(ROOT, "bin", "event-runtime-daemon"), "serve"], {
-      env: daemonEnv(fixture, 1),
-      stdout: "ignore",
-      stderr: "ignore",
+    rmSync(path.join(fixture.checkout, "event-runtime"), {
+      recursive: true,
+      force: true,
     });
+    const child = Bun.spawn(
+      [path.join(ROOT, "bin", "event-runtime-daemon"), "serve"],
+      {
+        env: daemonEnv(fixture, 1),
+        stdout: "ignore",
+        stderr: "ignore",
+      },
+    );
     expect(await child.exited).toBe(66);
-    expect(readFileSync(path.join(fixture.root, "logs", "factory-event-serve.err.log"), "utf8"))
-      .toContain("event-runtime checkout not found");
+    expect(
+      readFileSync(
+        path.join(fixture.root, "logs", "factory-event-serve.err.log"),
+        "utf8",
+      ),
+    ).toContain("event-runtime checkout not found");
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -280,19 +331,30 @@ test("daemon preflight failures land in the err log, not launchd's dropped stder
 
 test("daemon worker never invokes supervise when health is unavailable", async () => {
   const fixture = daemonFixture();
-  const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("ok") });
+  const probe = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response("ok"),
+  });
   const port = probe.port;
   probe.stop(true);
   try {
-    const child = Bun.spawn([path.join(ROOT, "bin", "event-runtime-daemon"), "work", "2:4"], {
-      env: daemonEnv(fixture, port),
-      stdout: "ignore",
-      stderr: "ignore",
-    });
+    const child = Bun.spawn(
+      [path.join(ROOT, "bin", "event-runtime-daemon"), "work", "2:4"],
+      {
+        env: daemonEnv(fixture, port),
+        stdout: "ignore",
+        stderr: "ignore",
+      },
+    );
     expect(await child.exited).toBe(75);
     expect(existsSync(fixture.calls)).toBe(false);
-    expect(readFileSync(path.join(fixture.root, "logs", "factory-event-work.err.log"), "utf8"))
-      .toContain("control API did not become healthy");
+    expect(
+      readFileSync(
+        path.join(fixture.root, "logs", "factory-event-work.err.log"),
+        "utf8",
+      ),
+    ).toContain("control API did not become healthy");
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -314,11 +376,14 @@ test("daemon worker waits for healthy serve, then forwards the configured range"
     },
   });
   try {
-    const child = Bun.spawn([path.join(ROOT, "bin", "event-runtime-daemon"), "work", "2:4"], {
-      env: daemonEnv(fixture, server.port),
-      stdout: "ignore",
-      stderr: "ignore",
-    });
+    const child = Bun.spawn(
+      [path.join(ROOT, "bin", "event-runtime-daemon"), "work", "2:4"],
+      {
+        env: daemonEnv(fixture, server.port),
+        stdout: "ignore",
+        stderr: "ignore",
+      },
+    );
     expect(await child.exited).toBe(0);
     expect(requests).toBeGreaterThanOrEqual(2);
     expect(superviseStartedBeforeHealth).toBe(false);

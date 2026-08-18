@@ -26,13 +26,18 @@ import { recommendNext } from "../lib/next-recommend.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
-const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
+const val = (f) => {
+  const i = argv.indexOf(f);
+  return i === -1 ? null : argv[i + 1];
+};
 const has = (f) => argv.includes(f);
 
 if (has("record")) {
   const type = val("--type");
   if (!type) {
-    console.error("record requires --type (start|complete|recommend|friction|session-start|session-end)");
+    console.error(
+      "record requires --type (start|complete|recommend|friction|session-start|session-end)",
+    );
     process.exit(2);
   }
   const repo = val("--repo");
@@ -40,7 +45,10 @@ if (has("record")) {
     console.error("record requires --repo");
     process.exit(2);
   }
-  const issues = (val("--issues") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const issues = (val("--issues") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const row = appendEvent({
     type,
     repo,
@@ -61,11 +69,15 @@ if (has("record")) {
   process.exit(0);
 }
 
-const only = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
+const only = (val("--repo") || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const JSON_OUT = has("--json");
 const sinceArg = val("--since");
 const sinceMs = sinceArg
-  ? Date.now() - (/\d+d$/.test(sinceArg) ? Number(sinceArg) * 86_400_000 : Number(sinceArg))
+  ? Date.now() -
+    (/\d+d$/.test(sinceArg) ? Number(sinceArg) * 86_400_000 : Number(sinceArg))
   : Date.now() - 7 * 86_400_000;
 const NO_LIVE = has("--no-live");
 
@@ -90,7 +102,7 @@ if (!NO_LIVE) {
       const plan = recommendNext(s);
       const slash = plan.command
         ? `/factory-${String(plan.command).replace(/^factory-/, "")}${plan.args ? ` ${plan.args}` : ""}`
-        : plan.exec ?? "(wait)";
+        : (plan.exec ?? "(wait)");
       liveNext = {
         slash,
         reason: plan.reason,
@@ -103,12 +115,14 @@ if (!NO_LIVE) {
 
 const output = {
   repo: repoName,
-  session: session ? {
-    id: session.id,
-    harness: session.harness,
-    ageMs: Date.now() - session.startedAt,
-    events: session.events.length,
-  } : null,
+  session: session
+    ? {
+        id: session.id,
+        harness: session.harness,
+        ageMs: Date.now() - session.startedAt,
+        events: session.events.length,
+      }
+    : null,
   timeline: (session?.events ?? events.slice(-20)).map((e) => ({
     ts: e.ts,
     type: e.type,
@@ -119,7 +133,8 @@ const output = {
   recentSessions: recentSessions.map((s) => ({
     id: s.id,
     harness: s.harness,
-    stages: s.events.filter((e) => e.type === "start" || e.type === "complete").length,
+    stages: s.events.filter((e) => e.type === "start" || e.type === "complete")
+      .length,
     lastAt: s.lastAt,
   })),
   liveNext,
@@ -141,11 +156,15 @@ console.log(c.bold(`\nfactory state — ${repoName}\n`));
 
 if (session) {
   const age = formatDuration(Date.now() - session.startedAt);
-  console.log(`Session  ${session.id}  ${c.green("active")}, ${age}, harness: ${session.harness}`);
+  console.log(
+    `Session  ${session.id}  ${c.green("active")}, ${age}, harness: ${session.harness}`,
+  );
   for (const e of session.events.slice(-12)) {
     console.log(`  ${formatClock(e.ts)}  ${eventLabel(e)}`);
-    if (e.reason && e.type === "recommend") console.log(c.dim(`           ${e.reason}`));
-    if (e.summary && e.type === "complete") console.log(c.dim(`           ${e.summary}`));
+    if (e.reason && e.type === "recommend")
+      console.log(c.dim(`           ${e.reason}`));
+    if (e.summary && e.type === "complete")
+      console.log(c.dim(`           ${e.summary}`));
   }
 } else {
   console.log(c.dim("No active session (idle > 4h or none recorded)."));
@@ -162,11 +181,20 @@ if (liveNext) {
   console.log(c.bold("\nNext now:"));
   console.log(`  ${c.green(liveNext.slash)}`);
   console.log(c.dim(`  ${liveNext.reason}`));
-  if (liveNext.constraint) console.log(c.dim(`  constraint: ${liveNext.constraint}`));
+  if (liveNext.constraint)
+    console.log(c.dim(`  constraint: ${liveNext.constraint}`));
 } else if (!NO_LIVE) {
   console.log(c.dim("\nNext: (could not compute — check queue/network)"));
 }
 
 const stageCount = events.filter((e) => e.type === "complete").length;
-console.log(c.dim(`\nSince ${Math.round((Date.now() - sinceMs) / 86_400_000)}d: ${recentSessions.length} session(s), ${stageCount} completed stage(s)`));
-console.log(c.dim(`Record: bun orchestrator/state.mjs record --type complete --repo ${repoName} --command ... --summary "..."\n`));
+console.log(
+  c.dim(
+    `\nSince ${Math.round((Date.now() - sinceMs) / 86_400_000)}d: ${recentSessions.length} session(s), ${stageCount} completed stage(s)`,
+  ),
+);
+console.log(
+  c.dim(
+    `Record: bun orchestrator/state.mjs record --type complete --repo ${repoName} --command ... --summary "..."\n`,
+  ),
+);

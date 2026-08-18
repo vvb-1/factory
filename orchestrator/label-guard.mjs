@@ -59,7 +59,8 @@ function sections(description = "") {
  */
 // "None", "N/A", or "no ... path(s)" within a short span -- covers "None in
 // this repo", "No repository paths", "None — infra/deploy verification only".
-const NOT_APPLICABLE = /\b(none|n\/a|not applicable)\b|\bno\b[^.]{0,30}\bpaths?\b/i;
+const NOT_APPLICABLE =
+  /\b(none|n\/a|not applicable)\b|\bno\b[^.]{0,30}\bpaths?\b/i;
 
 /**
  * Which of the two *mechanically load-bearing* §5 sections a description is
@@ -88,7 +89,8 @@ export function templateGaps(description = "") {
   // explicit "not applicable" declaration in the section body.
   const owned = secs.find((s) => /\bowned\s+paths\b/i.test(s.heading));
   const ownedNA = owned && NOT_APPLICABLE.test(owned.body);
-  if (!parseOwnedPaths(description).length && !ownedNA) gaps.push("Owned Paths");
+  if (!parseOwnedPaths(description).length && !ownedNA)
+    gaps.push("Owned Paths");
 
   // "Evidence Required" / "Evidence line" is the accepted non-code substitute
   // for a Verification Command (linear.md §5's non-code-work exception).
@@ -97,7 +99,8 @@ export function templateGaps(description = "") {
   // method and must not satisfy this.
   const verified = secs.some((s) => {
     return (
-      (/\bverification\s+command\b/i.test(s.heading) || /\bevidence\b.*\b(required|line)\b/i.test(s.heading)) &&
+      (/\bverification\s+command\b/i.test(s.heading) ||
+        /\bevidence\b.*\b(required|line)\b/i.test(s.heading)) &&
       s.body.length > 0
     );
   });
@@ -121,7 +124,8 @@ function ownedPathsClosureCheck(description = "", repo, manifestCache) {
   }
 
   const key = JSON.stringify(owned.sort());
-  if (cached.messagesByOwned.has(key)) return { messages: cached.messagesByOwned.get(key), gaps: [] };
+  if (cached.messagesByOwned.has(key))
+    return { messages: cached.messagesByOwned.get(key), gaps: [] };
 
   const gaps = ownedPathsClosureGaps({
     ownedPaths: owned,
@@ -164,7 +168,7 @@ export async function demote(issue, triageStateId, gaps, apply) {
 
   await gql(
     `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`,
-    { id: issue.id, input: { stateId: triageStateId, labelIds: keepLabelIds } }
+    { id: issue.id, input: { stateId: triageStateId, labelIds: keepLabelIds } },
   );
 
   const body =
@@ -177,20 +181,28 @@ export async function demote(issue, triageStateId, gaps, apply) {
 
   await gql(
     `mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }`,
-    { input: { issueId: issue.id, body } }
+    { input: { issueId: issue.id, body } },
   );
 }
 
 export function parseArgs(argv = process.argv.slice(2)) {
   const apply = argv.includes("--apply");
-  const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
-  const repos = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const val = (f) => {
+    const i = argv.indexOf(f);
+    return i === -1 ? null : argv[i + 1];
+  };
+  const repos = (val("--repo") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return { apply, repos };
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const allRepos = [...loadRepos().values()].filter((r) => !args.repos.length || args.repos.includes(r.name));
+  const allRepos = [...loadRepos().values()].filter(
+    (r) => !args.repos.length || args.repos.includes(r.name),
+  );
   const repos = allRepos.map((r) => ({
     name: r.name,
     team: r.team,
@@ -200,11 +212,17 @@ export async function main(argv = process.argv.slice(2)) {
   }));
 
   if (!repos.length) {
-    console.error(args.repos.length ? `no repo named "${args.repos.join(",")}" in config/repos.yaml` : "no repos configured");
+    console.error(
+      args.repos.length
+        ? `no repo named "${args.repos.join(",")}" in config/repos.yaml`
+        : "no repos configured",
+    );
     process.exit(2);
   }
 
-  console.log(`=== ai:agent-ready template guard [${args.apply ? "APPLY" : "DRY RUN"}] ===\n`);
+  console.log(
+    `=== ai:agent-ready template guard [${args.apply ? "APPLY" : "DRY RUN"}] ===\n`,
+  );
 
   let teams = null;
   let violations = 0;
@@ -216,7 +234,11 @@ export async function main(argv = process.argv.slice(2)) {
       .map((issue) => {
         const gapNames = [...templateGaps(issue.description ?? "")];
         try {
-          const closure = ownedPathsClosureCheck(issue.description ?? "", repo, closureRequirements);
+          const closure = ownedPathsClosureCheck(
+            issue.description ?? "",
+            repo,
+            closureRequirements,
+          );
           gapNames.push(...closure.messages);
           return { issue, gaps: gapNames };
         } catch (err) {
@@ -226,19 +248,27 @@ export async function main(argv = process.argv.slice(2)) {
       })
       .filter((r) => r.gaps.length);
 
-    console.log(`${repo.name}  ${repo.team} / ${repo.project}  --  ${issues.length} ai:agent-ready ticket(s), ${bad.length} failing §5`);
+    console.log(
+      `${repo.name}  ${repo.team} / ${repo.project}  --  ${issues.length} ai:agent-ready ticket(s), ${bad.length} failing §5`,
+    );
 
     if (!bad.length) continue;
     violations += bad.length;
 
     if (args.apply && !teams) teams = await fetchTeams();
-    const triageStateId = args.apply ? teams?.[repo.team]?.states?.["triage"] : null;
+    const triageStateId = args.apply
+      ? teams?.[repo.team]?.states?.["triage"]
+      : null;
     if (args.apply && !triageStateId) {
-      console.log(`  ! no 'Triage' state on team ${repo.team}, skipping demotion for this repo`);
+      console.log(
+        `  ! no 'Triage' state on team ${repo.team}, skipping demotion for this repo`,
+      );
     }
 
     for (const { issue, gaps } of bad) {
-      console.log(`  ${issue.identifier.padEnd(10)} ${issue.title.slice(0, 60)}`);
+      console.log(
+        `  ${issue.identifier.padEnd(10)} ${issue.title.slice(0, 60)}`,
+      );
       for (const g of gaps) console.log(`      missing: ${g}`);
 
       if (args.apply && triageStateId) {
@@ -252,8 +282,11 @@ export async function main(argv = process.argv.slice(2)) {
     }
   }
 
-  console.log(`\n=== ${args.apply ? "Demoted" : "Would demote"}: ${violations} ===`);
-  if (!args.apply && violations) console.log("Run again with --apply to demote these.");
+  console.log(
+    `\n=== ${args.apply ? "Demoted" : "Would demote"}: ${violations} ===`,
+  );
+  if (!args.apply && violations)
+    console.log("Run again with --apply to demote these.");
 }
 
 if (import.meta.main || process.argv[1]?.endsWith("label-guard.mjs")) {

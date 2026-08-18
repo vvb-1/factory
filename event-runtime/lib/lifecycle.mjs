@@ -9,12 +9,26 @@ import { hashJson } from "./canonical.mjs";
 import { tx, txImmediate } from "./db.mjs";
 
 export const STATES = [
-  "PROPOSED", "APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING",
-  "COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED",
+  "PROPOSED",
+  "APPROVED",
+  "QUEUED",
+  "LEASED",
+  "RUNNING",
+  "VERIFYING",
+  "COMPLETED",
+  "REFUSED",
+  "FAILED",
+  "TIMED_OUT",
+  "CANCELLED",
 ];
 
 /** Terminal for the run. FAILED may still be re-queued while attempts remain. */
-export const TERMINAL_STATES = new Set(["COMPLETED", "REFUSED", "TIMED_OUT", "CANCELLED"]);
+export const TERMINAL_STATES = new Set([
+  "COMPLETED",
+  "REFUSED",
+  "TIMED_OUT",
+  "CANCELLED",
+]);
 
 const LEGAL = {
   PROPOSED: ["APPROVED", "CANCELLED"],
@@ -47,9 +61,17 @@ function appendJournal(db, record) {
        (run_id, from_state, to_state, actor, reason, attempt, correlation_id, causation_id, policy_version, at, record_hash)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    record.runId, record.from, record.to, record.actor, record.reason ?? null,
-    record.attempt ?? null, record.correlationId ?? null, record.causationId ?? null,
-    record.policyVersion ?? null, record.at, record_hash,
+    record.runId,
+    record.from,
+    record.to,
+    record.actor,
+    record.reason ?? null,
+    record.attempt ?? null,
+    record.correlationId ?? null,
+    record.causationId ?? null,
+    record.policyVersion ?? null,
+    record.at,
+    record_hash,
   );
 }
 
@@ -62,7 +84,21 @@ function resolveNow(now) {
  * UNIQUE constraint is the §5.4 guarantee — a duplicate plan throws here and
  * the caller resolves to the existing run.
  */
-export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash, actor, correlationId, causationId, policyVersion, now = () => Date.now() }) {
+export function createRun(
+  db,
+  {
+    runId,
+    idempotencyKey,
+    spec,
+    specJson,
+    specHash,
+    actor,
+    correlationId,
+    causationId,
+    policyVersion,
+    now = () => Date.now(),
+  },
+) {
   const at = new Date(resolveNow(now)).toISOString();
   return txImmediate(db, () => {
     db.query(
@@ -70,8 +106,15 @@ export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash,
        VALUES (?, ?, ?, ?, 'PROPOSED', 0, ?, ?)`,
     ).run(runId, idempotencyKey, specJson, specHash, at, at);
     appendJournal(db, {
-      runId, from: null, to: "PROPOSED", actor,
-      reason: "planned", correlationId, causationId, policyVersion, at,
+      runId,
+      from: null,
+      to: "PROPOSED",
+      actor,
+      reason: "planned",
+      correlationId,
+      causationId,
+      policyVersion,
+      at,
     });
     return { runId, state: "PROPOSED" };
   });
@@ -82,16 +125,47 @@ export function createRun(db, { runId, idempotencyKey, spec, specJson, specHash,
  * `expectFrom` when the caller must not race another mover (worker vs
  * operator): the transition then only applies if the state is still that one.
  */
-export function transition(db, { runId, to, expectFrom, actor, reason, attempt, correlationId, causationId, policyVersion, now = () => Date.now() }) {
+export function transition(
+  db,
+  {
+    runId,
+    to,
+    expectFrom,
+    actor,
+    reason,
+    attempt,
+    correlationId,
+    causationId,
+    policyVersion,
+    now = () => Date.now(),
+  },
+) {
   const at = new Date(resolveNow(now)).toISOString();
   return txImmediate(db, () => {
     const run = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId);
     if (!run) throw new IllegalTransition(runId, undefined, to);
     const from = run.state;
-    if (expectFrom && from !== expectFrom) throw new IllegalTransition(runId, from, to);
-    if (!(LEGAL[from] ?? []).includes(to)) throw new IllegalTransition(runId, from, to);
-    db.query(`UPDATE runs SET state = ?, updated_at = ? WHERE run_id = ?`).run(to, at, runId);
-    appendJournal(db, { runId, from, to, actor, reason, attempt, correlationId, causationId, policyVersion, at });
+    if (expectFrom && from !== expectFrom)
+      throw new IllegalTransition(runId, from, to);
+    if (!(LEGAL[from] ?? []).includes(to))
+      throw new IllegalTransition(runId, from, to);
+    db.query(`UPDATE runs SET state = ?, updated_at = ? WHERE run_id = ?`).run(
+      to,
+      at,
+      runId,
+    );
+    appendJournal(db, {
+      runId,
+      from,
+      to,
+      actor,
+      reason,
+      attempt,
+      correlationId,
+      causationId,
+      policyVersion,
+      at,
+    });
     return { runId, from, to };
   });
 }
@@ -101,20 +175,24 @@ export function runState(db, runId) {
 }
 
 export function lifecycleOf(db, runId) {
-  return db.query(`SELECT * FROM lifecycle_events WHERE run_id = ? ORDER BY seq`).all(runId);
+  return db
+    .query(`SELECT * FROM lifecycle_events WHERE run_id = ? ORDER BY seq`)
+    .all(runId);
 }
 
 const IDEMPOTENCY_TRIGGER_MARKER = ":trigger:";
 
 function idempotencyFamily(db, idempotencyKey) {
-  return db.query(
-    `SELECT run_id, idempotency_key, state, created_at, rowid
+  return db
+    .query(
+      `SELECT run_id, idempotency_key, state, created_at, rowid
        FROM runs
       WHERE idempotency_key = ?
          OR instr(idempotency_key, ? || ?) = 1
       ORDER BY CASE WHEN state IN ('COMPLETED', 'REFUSED', 'TIMED_OUT', 'CANCELLED') THEN 1 ELSE 0 END,
                created_at DESC, rowid DESC`,
-  ).all(idempotencyKey, idempotencyKey, IDEMPOTENCY_TRIGGER_MARKER);
+    )
+    .all(idempotencyKey, idempotencyKey, IDEMPOTENCY_TRIGGER_MARKER);
 }
 
 /**
@@ -123,7 +201,10 @@ function idempotencyFamily(db, idempotencyKey) {
  * triggering event identity, allowing a fresh run after the prior generation
  * is terminal without weakening the schema's per-run UNIQUE guarantee.
  */
-export function idempotencyKeyForNewRun(db, { idempotencyKey, source, eventId }) {
+export function idempotencyKeyForNewRun(
+  db,
+  { idempotencyKey, source, eventId },
+) {
   if (idempotencyFamily(db, idempotencyKey).length === 0) return idempotencyKey;
   return `${idempotencyKey}${IDEMPOTENCY_TRIGGER_MARKER}${hashJson({ source, eventId })}`;
 }
@@ -135,7 +216,10 @@ export function idempotencyKeyForNewRun(db, { idempotencyKey, source, eventId })
  * causation resolves to the terminal run; a distinct trigger returns null so
  * the planner can create a new generation with its own concrete UNIQUE key.
  */
-export function resolveIdempotency(db, { idempotencyKey, correlationId, causationId, eventId } = {}) {
+export function resolveIdempotency(
+  db,
+  { idempotencyKey, correlationId, causationId, eventId } = {},
+) {
   if (!idempotencyKey) return null;
   const family = idempotencyFamily(db, idempotencyKey);
   if (family.length === 0) return null;
@@ -148,7 +232,9 @@ export function resolveIdempotency(db, { idempotencyKey, correlationId, causatio
   if (!correlation && !causationId) return run;
 
   const journal = db
-    .query(`SELECT correlation_id, causation_id FROM lifecycle_events WHERE run_id = ? AND from_state IS NULL LIMIT 1`)
+    .query(
+      `SELECT correlation_id, causation_id FROM lifecycle_events WHERE run_id = ? AND from_state IS NULL LIMIT 1`,
+    )
     .get(run.run_id);
   if (!journal) return run;
 

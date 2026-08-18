@@ -42,23 +42,52 @@ describe("buildCapabilityGraph", () => {
       view({
         agents: [agent({ ref: "doctor@1" })],
         eventTypes: [
-          { type: "gh.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: ["inputHash"], proposalTtlSeconds: 1800 },
+          {
+            type: "gh.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: ["inputHash"],
+            proposalTtlSeconds: 1800,
+          },
         ],
       }),
     );
-    expect(g.nodes.map((n) => n.id)).toEqual(["event:gh.failed", "agent:doctor@1"]);
+    expect(g.nodes.map((n) => n.id)).toEqual([
+      "event:gh.failed",
+      "agent:doctor@1",
+    ]);
     expect(g.edges).toEqual([
-      { id: "routes:gh.failed", source: "event:gh.failed", target: "agent:doctor@1", kind: "routes" },
+      {
+        id: "routes:gh.failed",
+        source: "event:gh.failed",
+        target: "agent:doctor@1",
+        kind: "routes",
+      },
     ]);
   });
 
   test("draws recommendation edges from an agent to follow-up event types", () => {
     const g = buildCapabilityGraph(
       view({
-        agents: [agent({ ref: "doctor@1" }), agent({ ref: "rerun@1", mutating: true, command: ["gh", "run"] })],
+        agents: [
+          agent({ ref: "doctor@1" }),
+          agent({ ref: "rerun@1", mutating: true, command: ["gh", "run"] }),
+        ],
         eventTypes: [
-          { type: "gh.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
-          { type: "ci.rerun", agent: "rerun@1", adapter: "command", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "gh.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "ci.rerun",
+            agent: "rerun@1",
+            adapter: "command",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
         edges: {
           "doctor@1": {
@@ -69,9 +98,17 @@ describe("buildCapabilityGraph", () => {
       }),
     );
     const rec = g.edges.find((e) => e.kind === "recommends");
-    expect(rec).toMatchObject({ source: "agent:doctor@1", target: "event:ci.rerun", label: "verdict = FLAKE" });
+    expect(rec).toMatchObject({
+      source: "agent:doctor@1",
+      target: "event:ci.rerun",
+      label: "verdict = FLAKE",
+    });
     const rerun = g.nodes.find((n) => n.id === "agent:rerun@1");
-    expect(rerun).toMatchObject({ kind: "agent", mutating: true, execution: "command" });
+    expect(rerun).toMatchObject({
+      kind: "agent",
+      mutating: true,
+      execution: "command",
+    });
   });
 
   test("unmapped enum values become one terminal — 'the chain ends here' is topology", () => {
@@ -80,21 +117,41 @@ describe("buildCapabilityGraph", () => {
         agents: [
           agent({
             ref: "doctor@1",
-            outputSchema: { properties: { verdict: { enum: ["TICKET", "ENV", "FLAKE"] } } },
+            outputSchema: {
+              properties: { verdict: { enum: ["TICKET", "ENV", "FLAKE"] } },
+            },
           }),
           agent({ ref: "rerun@1" }),
         ],
         eventTypes: [
-          { type: "gh.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
-          { type: "ci.rerun", agent: "rerun@1", adapter: "command", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "gh.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "ci.rerun",
+            agent: "rerun@1",
+            adapter: "command",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
         edges: {
-          "doctor@1": { recommendationField: "verdict", edges: { FLAKE: { eventType: "ci.rerun", input: {} } } },
+          "doctor@1": {
+            recommendationField: "verdict",
+            edges: { FLAKE: { eventType: "ci.rerun", input: {} } },
+          },
         },
       }),
     );
     const terminal = g.nodes.find((n) => n.kind === "terminal");
-    expect(terminal).toMatchObject({ id: "terminal:doctor@1", reason: "TICKET, ENV" });
+    expect(terminal).toMatchObject({
+      id: "terminal:doctor@1",
+      reason: "TICKET, ENV",
+    });
     expect(g.edges.some((e) => e.target === "terminal:doctor@1")).toBe(true);
   });
 
@@ -102,13 +159,27 @@ describe("buildCapabilityGraph", () => {
     const g = buildCapabilityGraph(
       view({
         agents: [
-          agent({ ref: "d@1", outputSchema: { properties: { r: { enum: ["GO"] } } } }),
+          agent({
+            ref: "d@1",
+            outputSchema: { properties: { r: { enum: ["GO"] } } },
+          }),
           agent({ ref: "next@1" }),
         ],
         eventTypes: [
-          { type: "t.next", agent: "next@1", adapter: "command", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "t.next",
+            agent: "next@1",
+            adapter: "command",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
-        edges: { "d@1": { recommendationField: "r", edges: { GO: { eventType: "t.next", input: {} } } } },
+        edges: {
+          "d@1": {
+            recommendationField: "r",
+            edges: { GO: { eventType: "t.next", input: {} } },
+          },
+        },
       }),
     );
     expect(g.nodes.some((n) => n.kind === "terminal")).toBe(false);
@@ -118,7 +189,12 @@ describe("buildCapabilityGraph", () => {
     const g = buildCapabilityGraph(
       view({
         agents: [agent({ ref: "d@1" })],
-        edges: { "d@1": { recommendationField: "r", edges: { GO: { eventType: "nope.missing", input: {} } } } },
+        edges: {
+          "d@1": {
+            recommendationField: "r",
+            edges: { GO: { eventType: "nope.missing", input: {} } },
+          },
+        },
       }),
     );
     expect(g.edges).toEqual([]);
@@ -131,7 +207,11 @@ describe("buildCapabilityGraph", () => {
           agent({
             ref: "remediate@1",
             mutating: true,
-            actionRegistry: { "docker-builder-prune": { remote: "sudo docker builder prune -af" } },
+            actionRegistry: {
+              "docker-builder-prune": {
+                remote: "sudo docker builder prune -af",
+              },
+            },
             hosts: ["lab", "web"],
           }),
         ],
@@ -149,14 +229,74 @@ describe("buildCapabilityGraph", () => {
     const g = buildCapabilityGraph(
       view({
         agents: [agent({ ref: "doctor@1" }), agent({ ref: "idle@1" })],
-        eventTypes: [{ type: "gh.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null }],
+        eventTypes: [
+          {
+            type: "gh.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+        ],
       }),
       {
         runs: [
-          { runId: "r1", state: "RUNNING", agent: "doctor@1", attempts: 1, maxAttempts: 3, adapter: "claude", reasonCode: null, eventId: null, eventSource: null, created_at: "", updated_at: "", repos: [] },
-          { runId: "r2", state: "QUEUED", agent: "doctor@1", attempts: 1, maxAttempts: 3, adapter: "claude", reasonCode: null, eventId: null, eventSource: null, created_at: "", updated_at: "", repos: [] },
-          { runId: "r3", state: "QUEUED", agent: "doctor@1", attempts: 1, maxAttempts: 3, adapter: "claude", reasonCode: null, eventId: null, eventSource: null, created_at: "", updated_at: "", repos: [] },
-          { runId: "r4", state: "COMPLETED", agent: "doctor@1", attempts: 1, maxAttempts: 3, adapter: "claude", reasonCode: null, eventId: null, eventSource: null, created_at: "", updated_at: "", repos: [] },
+          {
+            runId: "r1",
+            state: "RUNNING",
+            agent: "doctor@1",
+            attempts: 1,
+            maxAttempts: 3,
+            adapter: "claude",
+            reasonCode: null,
+            eventId: null,
+            eventSource: null,
+            created_at: "",
+            updated_at: "",
+            repos: [],
+          },
+          {
+            runId: "r2",
+            state: "QUEUED",
+            agent: "doctor@1",
+            attempts: 1,
+            maxAttempts: 3,
+            adapter: "claude",
+            reasonCode: null,
+            eventId: null,
+            eventSource: null,
+            created_at: "",
+            updated_at: "",
+            repos: [],
+          },
+          {
+            runId: "r3",
+            state: "QUEUED",
+            agent: "doctor@1",
+            attempts: 1,
+            maxAttempts: 3,
+            adapter: "claude",
+            reasonCode: null,
+            eventId: null,
+            eventSource: null,
+            created_at: "",
+            updated_at: "",
+            repos: [],
+          },
+          {
+            runId: "r4",
+            state: "COMPLETED",
+            agent: "doctor@1",
+            attempts: 1,
+            maxAttempts: 3,
+            adapter: "claude",
+            reasonCode: null,
+            eventId: null,
+            eventSource: null,
+            created_at: "",
+            updated_at: "",
+            repos: [],
+          },
         ],
       },
     );
@@ -176,15 +316,75 @@ describe("buildCapabilityGraph", () => {
       view({
         agents: [agent({ ref: "doctor@1" })],
         eventTypes: [
-          { type: "ci.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
-          { type: "ci.passed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "ci.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "ci.passed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
       }),
       {
         events: [
-          { source: "gh", eventId: "e1", type: "ci.failed", subject: null, status: "admitted", occurredAt: "", receivedAt: "", correlationId: null, planFailures: 0, lastPlanError: null, admittedAt: "", proposalId: null, runId: null, envelope: {}, repos: [] },
-          { source: "gh", eventId: "e2", type: "ci.failed", subject: null, status: "admitted", occurredAt: "", receivedAt: "", correlationId: null, planFailures: 0, lastPlanError: null, admittedAt: "", proposalId: null, runId: null, envelope: {}, repos: [] },
-          { source: "gh", eventId: "e3", type: "ci.failed", subject: null, status: "planned", occurredAt: "", receivedAt: "", correlationId: null, planFailures: 0, lastPlanError: null, admittedAt: "", proposalId: null, runId: null, envelope: {}, repos: [] },
+          {
+            source: "gh",
+            eventId: "e1",
+            type: "ci.failed",
+            subject: null,
+            status: "admitted",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: null,
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: null,
+            runId: null,
+            envelope: {},
+            repos: [],
+          },
+          {
+            source: "gh",
+            eventId: "e2",
+            type: "ci.failed",
+            subject: null,
+            status: "admitted",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: null,
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: null,
+            runId: null,
+            envelope: {},
+            repos: [],
+          },
+          {
+            source: "gh",
+            eventId: "e3",
+            type: "ci.failed",
+            subject: null,
+            status: "planned",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: null,
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: null,
+            runId: null,
+            envelope: {},
+            repos: [],
+          },
         ],
       },
     );
@@ -203,8 +403,20 @@ describe("buildCapabilityGraph", () => {
       view({
         agents: [agent({ ref: "doctor@1" }), agent({ ref: "rerun@1" })],
         eventTypes: [
-          { type: "ci.failed", agent: "doctor@1", adapter: "claude", idempotencyScope: [], proposalTtlSeconds: null },
-          { type: "ci.rerun", agent: "rerun@1", adapter: "command", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "ci.failed",
+            agent: "doctor@1",
+            adapter: "claude",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
+          {
+            type: "ci.rerun",
+            agent: "rerun@1",
+            adapter: "command",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
         edges: {
           "doctor@1": {
@@ -215,12 +427,72 @@ describe("buildCapabilityGraph", () => {
       }),
       {
         runs: [
-          { runId: "run-doc-101", state: "COMPLETED", agent: "doctor@1", attempts: 1, maxAttempts: 1, adapter: "claude", reasonCode: null, eventId: null, eventSource: null, created_at: "", updated_at: "", repos: [] },
-          { runId: "run-doc-102", state: "COMPLETED", agent: "doctor@1", attempts: 1, maxAttempts: 1, adapter: "claude", reasonCode: null, eventId: null, eventSource: null, created_at: "", updated_at: "", repos: [] },
+          {
+            runId: "run-doc-101",
+            state: "COMPLETED",
+            agent: "doctor@1",
+            attempts: 1,
+            maxAttempts: 1,
+            adapter: "claude",
+            reasonCode: null,
+            eventId: null,
+            eventSource: null,
+            created_at: "",
+            updated_at: "",
+            repos: [],
+          },
+          {
+            runId: "run-doc-102",
+            state: "COMPLETED",
+            agent: "doctor@1",
+            attempts: 1,
+            maxAttempts: 1,
+            adapter: "claude",
+            reasonCode: null,
+            eventId: null,
+            eventSource: null,
+            created_at: "",
+            updated_at: "",
+            repos: [],
+          },
         ],
         events: [
-          { source: "factory.chain", eventId: "chain-1", type: "ci.rerun", subject: "doctor@1", status: "admitted", occurredAt: "", receivedAt: "", correlationId: "c1", causationId: "run-doc-101", planFailures: 0, lastPlanError: null, admittedAt: "", proposalId: null, runId: null, envelope: {}, repos: [] } as any,
-          { source: "factory.chain", eventId: "chain-2", type: "ci.rerun", subject: "doctor@1", status: "planned", occurredAt: "", receivedAt: "", correlationId: "c2", causationId: "run-doc-102", planFailures: 0, lastPlanError: null, admittedAt: "", proposalId: null, runId: null, envelope: {}, repos: [] } as any,
+          {
+            source: "factory.chain",
+            eventId: "chain-1",
+            type: "ci.rerun",
+            subject: "doctor@1",
+            status: "admitted",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: "c1",
+            causationId: "run-doc-101",
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: null,
+            runId: null,
+            envelope: {},
+            repos: [],
+          } as any,
+          {
+            source: "factory.chain",
+            eventId: "chain-2",
+            type: "ci.rerun",
+            subject: "doctor@1",
+            status: "planned",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: "c2",
+            causationId: "run-doc-102",
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: null,
+            runId: null,
+            envelope: {},
+            repos: [],
+          } as any,
         ],
       },
     );
@@ -236,12 +508,34 @@ describe("buildCapabilityGraph", () => {
       view({
         agents: [agent({ ref: "rerun@1" })],
         eventTypes: [
-          { type: "ci.rerun", agent: "rerun@1", adapter: "command", idempotencyScope: [], proposalTtlSeconds: null },
+          {
+            type: "ci.rerun",
+            agent: "rerun@1",
+            adapter: "command",
+            idempotencyScope: [],
+            proposalTtlSeconds: null,
+          },
         ],
       }),
       {
         events: [
-          { source: "factory.chain", eventId: "ev-100", type: "ci.rerun", subject: null, status: "planned", occurredAt: "", receivedAt: "", correlationId: null, planFailures: 0, lastPlanError: null, admittedAt: "", proposalId: "prop-99", runId: null, envelope: {}, repos: [] },
+          {
+            source: "factory.chain",
+            eventId: "ev-100",
+            type: "ci.rerun",
+            subject: null,
+            status: "planned",
+            occurredAt: "",
+            receivedAt: "",
+            correlationId: null,
+            planFailures: 0,
+            lastPlanError: null,
+            admittedAt: "",
+            proposalId: "prop-99",
+            runId: null,
+            envelope: {},
+            repos: [],
+          },
         ],
         proposals: [
           {
@@ -270,11 +564,15 @@ describe("buildCapabilityGraph", () => {
     expect(propNode?.kind).toBe("proposal");
     expect(propNode?.label).toBe("pending: rerun@1");
 
-    const eventToPropEdge = g.edges.find((e) => e.source === "event:ci.rerun" && e.target === "proposal:prop-99");
+    const eventToPropEdge = g.edges.find(
+      (e) => e.source === "event:ci.rerun" && e.target === "proposal:prop-99",
+    );
     expect(eventToPropEdge).toBeDefined();
     expect(eventToPropEdge?.kind).toBe("proposal");
 
-    const propToAgentEdge = g.edges.find((e) => e.source === "proposal:prop-99" && e.target === "agent:rerun@1");
+    const propToAgentEdge = g.edges.find(
+      (e) => e.source === "proposal:prop-99" && e.target === "agent:rerun@1",
+    );
     expect(propToAgentEdge).toBeDefined();
     expect(propToAgentEdge?.kind).toBe("proposal");
   });

@@ -4,21 +4,36 @@
  */
 import { extractRowValue } from "../pathExtractor";
 
-export function formatCellValue(value: unknown): { text: string; isComplex: boolean; title?: string } {
-  if (value === undefined || value === null) return { text: "—", isComplex: false };
-  if (typeof value === "boolean") return { text: value ? "true" : "false", isComplex: false };
-  if (typeof value === "number") return { text: String(value), isComplex: false };
+export function formatCellValue(value: unknown): {
+  text: string;
+  isComplex: boolean;
+  title?: string;
+} {
+  if (value === undefined || value === null)
+    return { text: "—", isComplex: false };
+  if (typeof value === "boolean")
+    return { text: value ? "true" : "false", isComplex: false };
+  if (typeof value === "number")
+    return { text: String(value), isComplex: false };
   if (typeof value === "string") {
     return { text: value, isComplex: false, title: value };
   }
   if (Array.isArray(value)) {
     const preview = `[${value.length}]`;
-    return { text: preview, isComplex: true, title: JSON.stringify(value, null, 2) };
+    return {
+      text: preview,
+      isComplex: true,
+      title: JSON.stringify(value, null, 2),
+    };
   }
   if (typeof value === "object") {
     const keys = Object.keys(value as object);
     const preview = `{${keys.slice(0, 2).join(", ")}${keys.length > 2 ? "…" : ""}}`;
-    return { text: preview, isComplex: true, title: JSON.stringify(value, null, 2) };
+    return {
+      text: preview,
+      isComplex: true,
+      title: JSON.stringify(value, null, 2),
+    };
   }
   return { text: String(value), isComplex: false };
 }
