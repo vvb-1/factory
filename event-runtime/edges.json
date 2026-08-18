@@ -79,6 +79,17 @@
       }
     }
   },
+  "janitor-scan@1": {
+    "recommendationField": "exitCode",
+    "edges": {
+      "0": {
+        "eventType": "factory.janitor-apply.requested",
+        "input": {
+          "repo": "$.input.repo"
+        }
+      }
+    }
+  },
   "work-scan@1": {
     "recommendationField": "recommendation",
     "edges": {

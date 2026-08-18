@@ -15,7 +15,15 @@
  * misses: they release themselves as soon as the holding PR closes.
  */
 import { test, expect, describe } from "bun:test";
-import { parseWorktreeBranches, openPrHold, listOpenPrs, ticketBranches, reclaim, survey } from "./janitor.mjs";
+import {
+  daemonPids,
+  parseWorktreeBranches,
+  openPrHold,
+  listOpenPrs,
+  ticketBranches,
+  reclaim,
+  survey,
+} from "./janitor.mjs";
 
 /** A spawnSync stand-in that records every call and never touches the disk. */
 function recorder(handler = () => ({ status: 0, stdout: "", stderr: "" })) {
@@ -27,6 +35,31 @@ function recorder(handler = () => ({ status: 0, stdout: "", stderr: "" })) {
   run.calls = calls;
   return run;
 }
+
+const noActivity = (_repo, tickets) => ({
+  byTicket: Object.fromEntries(tickets.map((ticket) => [ticket, { nonTerminalRuns: [], liveLeases: [] }])),
+  error: null,
+});
+
+describe("daemonPids", () => {
+  test("reports only live daemon pids from a fake pid table", () => {
+    const table = {
+      "/wt/CLNT-1/.factory/run/serve.pid": "101\n",
+      "/wt/CLNT-1/.factory/run/worker.pid": "202\n",
+      "/wt/CLNT-1/.factory/run/web.pid": "not-a-pid\n",
+    };
+    const pids = daemonPids("/wt/CLNT-1", {
+      readdir: () => ["worker.pid", "serve.pid", "web.pid", "serve.log"],
+      readFile: (file) => table[file],
+      pidAlive: (pid) => pid === 101,
+    });
+    expect(pids).toEqual([{ name: "serve", pid: 101 }]);
+  });
+
+  test("a missing run directory has no live daemons", () => {
+    expect(daemonPids("/wt/CLNT-404", { readdir: () => { throw new Error("ENOENT"); } })).toEqual([]);
+  });
+});
 
 describe("parseWorktreeBranches", () => {
   test("maps each worktree path to its checked-out branch", () => {
@@ -215,6 +248,8 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
     ],
     getBranches: () => ({ "CLNT-520": "feat/CLNT-520", "CLNT-600": "fix/CLNT-600" }),
     getOpenPrs: () => [{ number: 261, headRefName: "feat/CLNT-520" }],
+    getDaemonPids: () => [],
+    getRuntimeActivity: noActivity,
   };
 
   test("batches more than 250 ticket numbers and categorizes every worktree", async () => {
@@ -244,6 +279,8 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
       queryIssues,
       getBranches: () => ({}),
       getOpenPrs: () => [],
+      getDaemonPids: () => [],
+      getRuntimeActivity: noActivity,
     });
 
     expect(calls.map((nums) => nums.length)).toEqual([250, 250, 1]);
@@ -317,5 +354,119 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
     expect(apply.reclaimable).toEqual([]);
     expect(apply.held).toEqual([]);
     expect(apply.skippedApplyReason).toContain("could not list worktree branches");
+  });
+
+  test("reports daemon and runtime ownership per worktree", async () => {
+    const res = await survey(repo, { apply: false }, {
+      ...defaultDeps,
+      getDaemonPids: (worktree) => worktree.endsWith("CLNT-520") ? [{ name: "serve", pid: 101 }] : [],
+      getRuntimeActivity: (_repo, tickets) => ({
+        byTicket: Object.fromEntries(tickets.map((ticket) => [ticket, {
+          nonTerminalRuns: ticket === "CLNT-520" ? [{ runId: "run-live", state: "RUNNING" }] : [],
+          liveLeases: ticket === "CLNT-600" ? [{ owner: "run-worker", pid: 303 }] : [],
+        }])),
+        error: null,
+      }),
+    });
+    expect(res.worktrees).toEqual([
+      {
+        id: "CLNT-520",
+        state: "Done",
+        daemonPids: [{ name: "serve", pid: 101 }],
+        nonTerminalRuns: [{ runId: "run-live", state: "RUNNING" }],
+        liveLeases: [],
+        hasNonTerminalRun: true,
+        hasLiveLease: false,
+        daemonStopEligible: false,
+      },
+      {
+        id: "CLNT-600",
+        state: "Done",
+        daemonPids: [],
+        nonTerminalRuns: [],
+        liveLeases: [{ owner: "run-worker", pid: 303 }],
+        hasNonTerminalRun: false,
+        hasLiveLease: true,
+        daemonStopEligible: false,
+      },
+    ]);
+  });
+
+  test("apply never stops a worktree with a non-terminal run or live lease", async () => {
+    const stopCalls = [];
+    const res = await survey(repo, { apply: true }, {
+      ...defaultDeps,
+      getOpenPrs: () => [],
+      getDaemonPids: () => [{ name: "serve", pid: 101 }],
+      getRuntimeActivity: (_repo, tickets) => ({
+        byTicket: Object.fromEntries(tickets.map((ticket) => [ticket, {
+          nonTerminalRuns: ticket === "CLNT-520" ? [{ runId: "run-live", state: "VERIFYING" }] : [],
+          liveLeases: ticket === "CLNT-600" ? [{ owner: "run-worker", pid: 303 }] : [],
+        }])),
+        error: null,
+      }),
+      doStopDaemons: (tickets) => {
+        stopCalls.push(...tickets);
+        return { stopped: tickets, refused: [] };
+      },
+      doReclaim: (finished) => ({ removed: finished, refused: [], held: [] }),
+    });
+    expect(stopCalls).toEqual([]);
+    expect(res.daemonsStopped).toEqual([]);
+    expect(res.removed).toEqual([]);
+    expect(res.held.map((item) => item.id).sort()).toEqual(["CLNT-520", "CLNT-600"]);
+  });
+
+  test("apply stops daemons for an inactive non-Done ticket without reclaiming its worktree", async () => {
+    const stopped = [];
+    const activeRepo = { ...repo };
+    const res = await survey(activeRepo, { apply: true }, {
+      readdir: () => ["CLNT-700"],
+      exists: () => true,
+      queryIssues: async () => [{ identifier: "CLNT-700", state: { name: "In Review", type: "started" } }],
+      getBranches: () => ({}),
+      getOpenPrs: () => [],
+      getDaemonPids: () => [{ name: "serve", pid: 707 }],
+      getRuntimeActivity: noActivity,
+      doStopDaemons: (tickets) => {
+        stopped.push(...tickets);
+        return { stopped: tickets, refused: [] };
+      },
+      doReclaim: () => { throw new Error("non-Done worktree must not be reclaimed"); },
+    });
+    expect(stopped).toEqual(["CLNT-700"]);
+    expect(res.daemonsStopped).toEqual(["CLNT-700"]);
+    expect(res.kept).toEqual([{ id: "CLNT-700", state: "In Review" }]);
+    expect(res.removed).toEqual([]);
+  });
+
+  test("apply re-checks ownership and refuses teardown when a run appears after survey", async () => {
+    let activityReads = 0;
+    let reclaimed = null;
+    const res = await survey(repo, { apply: true }, {
+      ...defaultDeps,
+      getOpenPrs: () => [],
+      getRuntimeActivity: (_repo, tickets) => {
+        activityReads += 1;
+        return {
+          byTicket: Object.fromEntries(tickets.map((ticket) => [ticket, {
+            nonTerminalRuns: activityReads === 2 && ticket === "CLNT-520"
+              ? [{ runId: "run-new", state: "QUEUED" }]
+              : [],
+            liveLeases: [],
+          }])),
+          error: null,
+        };
+      },
+      doReclaim: (tickets) => {
+        reclaimed = tickets;
+        return { removed: [], refused: [], held: [] };
+      },
+    });
+    expect(activityReads).toBe(2);
+    expect(reclaimed).toEqual(["CLNT-600"]);
+    expect(res.removed).toEqual([]);
+    expect(res.reclaimable).toEqual([{ id: "CLNT-600", state: "Done" }]);
+    expect(res.held.find((item) => item.id === "CLNT-520")?.reason).toContain("run-new (QUEUED)");
   });
 });

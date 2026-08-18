@@ -4,6 +4,7 @@
 #   bin/worktree-daemons.sh status [WT]       # report pid liveness, /health status & anomalies
 #   bin/worktree-daemons.sh check [WT]        # exit 0 if healthy, non-zero on dead daemon / anomaly
 #   bin/worktree-daemons.sh anomalies [WT]    # print list of anomalies
+#   bin/worktree-daemons.sh stop [WT]         # stop all tracked daemons, TERM then KILL
 #   bin/worktree-daemons.sh supervise [WT]    # watch daemons and restart dead workers with bounded retries
 #   bin/worktree-daemons.sh rotate-logs [WT]  # rotate oversized .factory/run/*.log files
 #
@@ -190,6 +191,21 @@ if [[ -z "${_WORKTREE_DAEMONS_LOADED:-}" ]]; then
     fi
   }
 
+  # Stop all tracked daemons. Signal every process first so their graceful
+  # shutdown windows overlap, then wait for each and let await_daemon apply the
+  # bounded SIGKILL fallback. Stale pidfiles are removed by await_daemon too.
+  stop_daemons() { # <worktree>
+    local wt="$1" rdir daemon
+    rdir="$(run_dir "$wt")"
+    for daemon in serve worker web; do
+      term_daemon "$rdir/$daemon.pid" "$daemon daemon"
+    done
+    for daemon in serve worker web; do
+      await_daemon "$rdir/$daemon.pid" "$daemon daemon"
+    done
+    release_worktree_ports_if_idle "$wt"
+  }
+
   # Helper to restart a specific daemon
   restart_daemon() { # <worktree> <daemon_name: serve|worker|web>
     local wt="$1" daemon="$2"
@@ -346,6 +362,7 @@ Commands:
   status [WT]       Check and display daemon liveness and anomalies
   check [WT]        Exit 0 if healthy, 1 if any daemon is dead or anomalous
   anomalies [WT]    Print list of anomalies
+  stop [WT]         Stop tracked daemons (SIGTERM, then SIGKILL after grace)
   supervise [WT]    Run supervisor loop (or --once for single pass)
   rotate-logs [WT]  Rotate oversized log files (> 10MB or custom bytes)
 
@@ -385,6 +402,9 @@ EOF
       ;;
     anomalies)
       daemon_anomalies "$WT"
+      ;;
+    stop)
+      stop_daemons "$WT"
       ;;
     supervise)
       if [[ "$once_flag" -eq 1 ]]; then

@@ -314,3 +314,34 @@ test("worktree-daemons CLI subcommands (status, check, anomalies, rotate-logs)",
     rmSync(testDir, { recursive: true, force: true });
   }
 });
+
+test("stop command terminates all tracked daemons and clears pidfiles", () => {
+  const testDir = mkdtempSync(path.join(tmpdir(), "daemons-stop-test-"));
+  const runDir = path.join(testDir, ".factory", "run");
+  mkdirSync(runDir, { recursive: true });
+  const pids = [];
+
+  try {
+    for (const daemon of ["serve", "worker", "web"]) {
+      const pidfile = path.join(runDir, `${daemon}.pid`);
+      const logfile = path.join(runDir, `${daemon}.log`);
+      const spawned = sh(`spawn_daemon "${pidfile}" "${logfile}" "${testDir}" sleep 30`);
+      expect(spawned.status).toBe(0);
+      pids.push(Number(readFileSync(pidfile, "utf8").trim()));
+    }
+
+    const stopped = runScript(["stop", testDir]);
+    expect(stopped.status).toBe(0);
+    for (const daemon of ["serve", "worker", "web"]) {
+      expect(existsSync(path.join(runDir, `${daemon}.pid`))).toBe(false);
+    }
+    for (const pid of pids) {
+      expect(Bun.spawnSync({ cmd: ["kill", "-0", String(pid)] }).exitCode).not.toBe(0);
+    }
+  } finally {
+    for (const pid of pids) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});

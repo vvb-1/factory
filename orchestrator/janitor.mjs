@@ -44,9 +44,14 @@ import { readFileSync, existsSync, readdirSync, mkdirSync, appendFileSync } from
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { homedir } from "node:os";
+import { Database } from "bun:sqlite";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
 import { emitFactoryEvent } from "../lib/emit-event.mjs";
+import { liveWorkerLeases } from "../lib/worker-leases.mjs";
+import { dbPath } from "../event-runtime/lib/config.mjs";
+
+const NON_TERMINAL_RUN_STATES = new Set(["QUEUED", "LEASED", "RUNNING", "VERIFYING"]);
 
 export function parseArgs(argv) {
   const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
@@ -132,6 +137,81 @@ export function ticketBranches(repoPath, root, tickets, run = spawnSync) {
   return byTicket;
 }
 
+/** Live daemon pidfiles under one ticket worktree, with injectable process IO. */
+export function daemonPids(worktree, {
+  readdir = readdirSync,
+  readFile = readFileSync,
+  pidAlive = (pid) => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  },
+} = {}) {
+  const runDir = path.join(worktree, ".factory", "run");
+  let names;
+  try { names = readdir(runDir); } catch { return []; }
+  return names
+    .filter((name) => name.endsWith(".pid"))
+    .sort()
+    .flatMap((name) => {
+      let pid;
+      try { pid = Number(String(readFile(path.join(runDir, name), "utf8")).trim()); } catch { return []; }
+      if (!Number.isInteger(pid) || pid < 1 || !pidAlive(pid)) return [];
+      return [{ name: name.slice(0, -4), pid }];
+    });
+}
+
+/**
+ * Runtime ownership for each ticket. The runtime DB closes the pre-lease gap;
+ * the shared worker lease closes the gap where a child is live independently
+ * of its run row. An unreadable ledger fails closed for daemon cleanup.
+ */
+export function runtimeActivity(repo, tickets, {
+  databasePath = dbPath(),
+  exists = existsSync,
+  leases = liveWorkerLeases(repo),
+  DatabaseClass = Database,
+} = {}) {
+  const byTicket = Object.fromEntries(tickets.map((ticket) => [ticket, { nonTerminalRuns: [], liveLeases: [] }]));
+  for (const lease of leases) {
+    if (lease?.repo !== repo || !byTicket[lease.ticket]) continue;
+    byTicket[lease.ticket].liveLeases.push({ owner: lease.owner ?? null, pid: lease.pid ?? null });
+  }
+  if (!exists(databasePath)) return { byTicket, error: null };
+
+  let db;
+  try {
+    db = new DatabaseClass(databasePath, { readonly: true });
+    for (const row of db.query(`SELECT run_id, state, spec_json FROM runs`).all()) {
+      if (!NON_TERMINAL_RUN_STATES.has(row.state)) continue;
+      let input;
+      try { input = JSON.parse(row.spec_json)?.input; } catch { continue; }
+      if (input?.repo === repo && byTicket[input.ticket]) {
+        byTicket[input.ticket].nonTerminalRuns.push({ runId: row.run_id, state: row.state });
+      }
+    }
+    return { byTicket, error: null };
+  } catch (err) {
+    return { byTicket, error: `runtime ownership ledger unreadable: ${err.message}` };
+  } finally {
+    db?.close();
+  }
+}
+
+/** Stop daemons without removing their worktrees. */
+export function stopWorktreeDaemons(tickets, { root, run = spawnSync } = {}) {
+  const stopped = [];
+  const refused = [];
+  const script = path.join(ROOT, "bin", "worktree-daemons.sh");
+  for (const ticket of tickets) {
+    const r = run("/bin/bash", [script, "stop", path.join(root, ticket)], { cwd: ROOT, encoding: "utf8" });
+    if (r.status === 0) stopped.push(ticket);
+    else {
+      const reason = (r.stderr || r.stdout || "").trim().split("\n").pop() || `exit ${r.status}`;
+      refused.push({ id: ticket, reason });
+    }
+  }
+  return { stopped, refused };
+}
+
 /**
  * Tear down the finished worktrees that nothing else is using.
  *
@@ -176,6 +256,11 @@ function emptySurvey(repo, apply) {
     removed: [],
     refused: [],
     held: [],
+    worktrees: [],
+    daemonStopCandidates: [],
+    daemonsStopped: [],
+    daemonStopRefused: [],
+    runtimeCheckError: null,
     skippedApplyReason: null,
   };
 }
@@ -187,6 +272,9 @@ export async function survey(repo, { apply }, {
   getBranches = ticketBranches,
   getOpenPrs = listOpenPrs,
   doReclaim = reclaim,
+  getDaemonPids = daemonPids,
+  getRuntimeActivity = runtimeActivity,
+  doStopDaemons = stopWorktreeDaemons,
 } = {}) {
   const result = emptySurvey(repo, apply);
   const root = expand(repo.worktree_root ?? "");
@@ -221,11 +309,72 @@ export async function survey(repo, { apply }, {
     states = Object.fromEntries(nodes.map((n) => [n.identifier, n.state]));
   }
 
-  const allFinished = tickets.filter((t) => ["completed", "canceled"].includes(states[t]?.type));
+  const finishedByState = tickets.filter((t) => ["completed", "canceled"].includes(states[t]?.type));
   result.kept = tickets
     .filter((t) => states[t] && !["completed", "canceled"].includes(states[t].type))
     .map((t) => ({ id: t, state: states[t].name }));
   result.unknown = tickets.filter((t) => !states[t]);
+
+  const activity = getRuntimeActivity(repo.name, tickets);
+  result.runtimeCheckError = activity.error;
+  result.worktrees = tickets.map((id) => {
+    const ownership = activity.byTicket[id] ?? { nonTerminalRuns: [], liveLeases: [] };
+    const daemons = getDaemonPids(path.join(root, id));
+    const hasNonTerminalRun = ownership.nonTerminalRuns.length > 0;
+    const hasLiveLease = ownership.liveLeases.length > 0;
+    return {
+      id,
+      state: states[id]?.name ?? null,
+      daemonPids: daemons,
+      nonTerminalRuns: ownership.nonTerminalRuns,
+      liveLeases: ownership.liveLeases,
+      hasNonTerminalRun,
+      hasLiveLease,
+      daemonStopEligible: daemons.length > 0 && !activity.error && !hasNonTerminalRun && !hasLiveLease,
+    };
+  });
+  result.daemonStopCandidates = result.worktrees.filter((t) => t.daemonStopEligible).map((t) => t.id);
+
+  if (apply && result.daemonStopCandidates.length) {
+    // Re-read immediately before mutation. Scan and apply are separate runtime
+    // runs and a worker may have acquired the ticket in between them.
+    const refreshed = getRuntimeActivity(repo.name, result.daemonStopCandidates);
+    if (refreshed.error) {
+      result.runtimeCheckError = refreshed.error;
+      result.daemonStopCandidates = [];
+    } else {
+      const safe = result.daemonStopCandidates.filter((id) => {
+        const owner = refreshed.byTicket[id] ?? { nonTerminalRuns: [], liveLeases: [] };
+        return owner.nonTerminalRuns.length === 0 && owner.liveLeases.length === 0;
+      });
+      result.daemonStopCandidates = safe;
+      const stopped = doStopDaemons(safe, { root, repoPath });
+      result.daemonsStopped = stopped.stopped;
+      result.daemonStopRefused = stopped.refused;
+    }
+  }
+
+  // Runtime ownership protects teardown as well as daemon stopping. A Done
+  // ticket may still have a live merge/dispatch attempt; removing its checkout
+  // would be strictly worse than leaving its daemons alive. Ledger uncertainty
+  // therefore holds every finished worktree rather than falling back to the
+  // older ticket-state-only behavior.
+  const ownershipByTicket = Object.fromEntries(result.worktrees.map((worktree) => [worktree.id, worktree]));
+  const allFinished = finishedByState.filter((id) => {
+    const ownership = ownershipByTicket[id];
+    return !activity.error && !ownership?.hasNonTerminalRun && !ownership?.hasLiveLease;
+  });
+  result.held.push(...finishedByState
+    .filter((id) => !allFinished.includes(id))
+    .map((id) => {
+      const ownership = ownershipByTicket[id];
+      const reason = activity.error
+        ? `${activity.error} — refusing teardown blind`
+        : ownership?.hasNonTerminalRun
+          ? `ticket has non-terminal run ${ownership.nonTerminalRuns.map((run) => `${run.runId} (${run.state})`).join(", ")}`
+          : "ticket has a live worker lease";
+      return { id, state: states[id].name, branch: null, reason };
+    }));
 
   // WM-17: the open-PR hold is evaluated in the survey, not just under --apply,
   // so a held worktree is neither reported as reclaimable nor allowed to keep
@@ -245,14 +394,41 @@ export async function survey(repo, { apply }, {
     return result;
   }
   const finished = allFinished.filter((t) => !openPrHold(branches[t], openPrs));
-  result.held = allFinished
+  result.held.push(...allFinished
     .filter((t) => !finished.includes(t))
-    .map((t) => ({ id: t, state: states[t].name, branch: branches[t], reason: openPrHold(branches[t], openPrs) }));
+    .map((t) => ({ id: t, state: states[t].name, branch: branches[t], reason: openPrHold(branches[t], openPrs) })));
   result.reclaimable = finished.map((t) => ({ id: t, state: states[t].name }));
 
   if (!apply || !allFinished.length) return result;
 
   if (!finished.length) return result;
+
+  // Re-check teardown ownership at the last practical point, independently
+  // from the daemon-stop refresh above (a finished worktree may have no live
+  // pidfiles at all). This narrows the survey-to-worktree_down race and makes
+  // a newly queued run a hold rather than a checkout deletion.
+  const teardownActivity = getRuntimeActivity(repo.name, finished);
+  if (teardownActivity.error) {
+    result.skippedApplyReason = `${teardownActivity.error} — refusing to tear down worktrees blind`;
+    result.reclaimable = [];
+    return result;
+  }
+  const teardownFinished = finished.filter((id) => {
+    const owner = teardownActivity.byTicket[id] ?? { nonTerminalRuns: [], liveLeases: [] };
+    return owner.nonTerminalRuns.length === 0 && owner.liveLeases.length === 0;
+  });
+  result.held.push(...finished
+    .filter((id) => !teardownFinished.includes(id))
+    .map((id) => {
+      const owner = teardownActivity.byTicket[id];
+      const reason = owner.nonTerminalRuns.length
+        ? `ticket acquired non-terminal run ${owner.nonTerminalRuns.map((run) => `${run.runId} (${run.state})`).join(", ")} before teardown`
+        : "ticket acquired a live worker lease before teardown";
+      return { id, state: states[id].name, branch: branches[id] ?? null, reason };
+    }));
+  result.reclaimable = teardownFinished.map((id) => ({ id, state: states[id].name }));
+
+  if (!teardownFinished.length) return result;
 
   // `report_only` disables dispatch, not safe cleanup. A repo with its own
   // configured teardown script can be reclaimed; one without it is surveyed
@@ -270,7 +446,7 @@ export async function survey(repo, { apply }, {
 
   // `finished` is already free of open-PR heads; reclaim() re-checks anyway so
   // the guard travels with the teardown call rather than with this caller.
-  const outcome = doReclaim(finished, { repoPath, down, branches, openPrs });
+  const outcome = doReclaim(teardownFinished, { repoPath, down, branches, openPrs });
   result.removed = outcome.removed;
   result.refused = outcome.refused;
   return result;
@@ -283,6 +459,16 @@ function printHuman(repo, result) {
   if (result.kept.length) {
     console.log(c.dim(`  keeping ${result.kept.length} live: ${result.kept.map((t) => `${t.id} (${t.state})`).join(", ")}`));
   }
+  for (const t of result.worktrees.filter((item) => item.daemonPids.length)) {
+    const pids = t.daemonPids.map((daemon) => `${daemon.name}:${daemon.pid}`).join(", ");
+    const ownership = t.hasNonTerminalRun
+      ? `non-terminal run ${t.nonTerminalRuns.map((run) => `${run.runId} (${run.state})`).join(", ")}`
+      : t.hasLiveLease ? "live worker lease" : "no live run or lease";
+    console.log(c.dim(`  daemons ${t.id}: ${pids} — ${ownership}`));
+  }
+  for (const ticket of result.daemonsStopped) console.log(`    ${c.green("stopped daemons")} ${ticket} (worktree preserved unless Done)`);
+  for (const t of result.daemonStopRefused) console.log(`    ${c.yellow("daemon stop refused")} ${t.id} — ${t.reason}`);
+  if (result.runtimeCheckError) console.log(c.yellow(`  ${result.runtimeCheckError} — refusing daemon cleanup`));
   if (result.named.length) console.log(c.dim(`  ignoring ${result.named.length} named worktree(s): ${result.named.join(", ")}`));
   if (result.unknown.length) {
     console.log(c.yellow(`  ${result.unknown.length} worktree(s) with no matching ticket — left alone: ${result.unknown.join(", ")}`));

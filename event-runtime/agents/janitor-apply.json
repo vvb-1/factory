@@ -29,7 +29,7 @@
   },
   "mutating": true,
   "pins": {
-    "agents/janitor-apply.md": "sha256:b39c76f7970935eaa03c2eb841843ba7b08cbe4b8441efa32a2745f40ecfde17",
+    "agents/janitor-apply.md": "sha256:ebc34f484bc864d0419649180ef4c3c351e2bfc815c4ae677bdb2566c213924f",
     "schemas/janitor.input.json": "sha256:c12bdeced00f288a612d71400d3535bb9e39754d9921c9bc39cd99d985670634",
     "schemas/command-result.output.json": "sha256:56ef20577453f0162f1a0a22e8214e8c734fc0fbab4f65d1e1dcae9614acc272"
   }

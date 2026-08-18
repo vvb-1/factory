@@ -13,6 +13,9 @@ chain_auto_approval:
     - factory.triage.requested
     - factory.triage-apply.requested
     - factory.dispatch.requested
+    # Daemon janitor: deterministic scan followed by a closed command apply.
+    - factory.janitor-scan.requested
+    - factory.janitor-apply.requested
     # Autonomous merge lifecycle. Mutating stages are independently rechecked.
     - factory.merge.requested
     - factory.merge-fix.requested

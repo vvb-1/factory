@@ -7,7 +7,8 @@ deterministic command adapter (`lib/adapters/command.mjs`). No model runs.
 factory janitor --repo {repo} --apply --json
 ```
 
-Reclaims finished/canceled ticket worktrees in the repository's configured
-worktree root on the worker host by executing the repository's `worktree_down`
-script without `--force`. Preserves any checkout containing uncommitted or
-unpushed work.
+Stops tracked daemons for ticket worktrees that have neither a non-terminal
+runtime run nor a live worker lease. Non-Done worktrees remain on disk for
+debugging. Finished/canceled worktrees are then reclaimed by executing the
+repository's `worktree_down` script without `--force`, preserving any checkout
+containing uncommitted or unpushed work.
