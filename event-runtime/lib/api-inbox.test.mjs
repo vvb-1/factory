@@ -95,16 +95,33 @@ describe("human inbox API (WM-285)", () => {
       listed = await (await fetch(s.url("/inbox?status=acked"))).json();
       expect(listed.items).toHaveLength(1);
 
+      for (const reason of [undefined, "", "   "]) {
+        const invalid = await fetch(s.url(`/inbox/${body.item.id}/resolve`), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(reason === undefined ? {} : { reason }),
+        });
+        expect(invalid.status).toBe(422);
+        expect((await invalid.json()).error).toBe(
+          "reason must be a non-empty string",
+        );
+      }
+
       const resolved = await fetch(s.url(`/inbox/${body.item.id}/resolve`), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reason: "handled" }),
       });
       expect(resolved.status).toBe(200);
-      expect((await resolved.json()).item.resolvedBy).toBe("operator");
-      expect(
-        (await (await fetch(s.url("/inbox?status=resolved"))).json()).items,
-      ).toHaveLength(1);
+      expect((await resolved.json()).item).toMatchObject({
+        resolvedBy: "operator",
+        resolvedReason: "handled",
+      });
+      const resolvedItems = (
+        await (await fetch(s.url("/inbox?status=resolved"))).json()
+      ).items;
+      expect(resolvedItems).toHaveLength(1);
+      expect(resolvedItems[0].resolvedReason).toBe("handled");
     } finally {
       s.close();
     }

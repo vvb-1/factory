@@ -794,6 +794,8 @@ export interface InboxItem {
   ackedAt: string | null;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  /** Resolution audit note; absent only in fixtures or responses from pre-migration runtimes. */
+  resolvedReason?: string | null;
   delivery: InboxDelivery;
   decision?: DecisionRequest | null;
   response?: InboxDecisionResponse | null;

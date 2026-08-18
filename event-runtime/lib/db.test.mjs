@@ -214,6 +214,7 @@ describe("schema migration runner and assertions (OPS-415)", () => {
       "decided_at",
       "decided_by",
       "dedupe_key",
+      "resolved_reason",
     ]);
     upgraded.close();
   });
@@ -236,12 +237,13 @@ describe("schema migration runner and assertions (OPS-415)", () => {
       .query("PRAGMA table_info(inbox_items)")
       .all()
       .map((row) => row.name);
-    expect(columns.slice(-5)).toEqual([
+    expect(columns.slice(-6)).toEqual([
       "decision_json",
       "response_json",
       "decided_at",
       "decided_by",
       "dedupe_key",
+      "resolved_reason",
     ]);
     expect(
       upgraded.query("SELECT title FROM inbox_items WHERE id = 'legacy'").get()

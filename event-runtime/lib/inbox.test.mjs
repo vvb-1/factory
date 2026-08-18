@@ -336,10 +336,18 @@ describe("human inbox ledger (WM-285)", () => {
     expect(ackInboxItem(db, "one", { now: 3000 }).ackedAt).toBe(
       new Date(3000).toISOString(),
     );
-    expect(
-      resolveInboxItem(db, "two", { now: 4000, resolvedBy: "operator" })
-        .resolvedBy,
-    ).toBe("operator");
+    const resolved = resolveInboxItem(db, "two", {
+      now: 4000,
+      resolvedBy: "operator",
+      reason: "  Follow-up completed  ",
+    });
+    expect(resolved).toMatchObject({
+      resolvedBy: "operator",
+      resolvedReason: "  Follow-up completed  ",
+    });
+    expect(getInboxItem(db, "two").resolvedReason).toBe(
+      "  Follow-up completed  ",
+    );
     expect(listInboxItems(db, { status: "open" }).map((i) => i.id)).toEqual([]);
     expect(listInboxItems(db, { status: "acked" }).map((i) => i.id)).toEqual([
       "one",

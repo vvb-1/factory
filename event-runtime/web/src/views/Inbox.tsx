@@ -106,6 +106,13 @@ const OTHER_GROUP: InboxGroup = {
   kinds: [],
 };
 
+const INBOX_RESOLVE_REASONS = [
+  "Handled manually",
+  "No longer actionable",
+  "Superseded",
+  "Duplicate",
+] as const;
+
 export function groupOf(kind: string): InboxGroup {
   return INBOX_GROUPS.find((g) => g.kinds.includes(kind)) ?? OTHER_GROUP;
 }
@@ -425,6 +432,8 @@ export function Inbox({
   const [bulkAcking, setBulkAcking] = useState(false);
   const [bulkResolving, setBulkResolving] = useState(false);
   const [bulkResolveOpen, setBulkResolveOpen] = useState(false);
+  const [bulkResolveReason, setBulkResolveReason] = useState("");
+  const bulkResolveReasonRef = useRef<HTMLTextAreaElement>(null);
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   const pendingStar = useRef(0);
 
@@ -508,11 +517,15 @@ export function Inbox({
     onError: (err) => notify(`Ack failed: ${(err as Error).message}`, "err"),
   });
   const [confirmResolve, setConfirmResolve] = useState(false);
+  const [resolveReason, setResolveReason] = useState("");
+  const resolveReasonRef = useRef<HTMLTextAreaElement>(null);
   const resolve = useMutation({
-    mutationFn: (id: string) => api.resolveInbox(id),
-    onSuccess: (_out, id) => {
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.resolveInbox(id, reason),
+    onSuccess: (_out, { id }) => {
       invalidate();
       setConfirmResolve(false);
+      setResolveReason("");
       notify(`Resolved ${shortId(id)}`, "ok");
     },
     onError: (err) =>
@@ -531,6 +544,17 @@ export function Inbox({
     connected &&
     itemStatus(sel) !== "resolved" &&
     !resolve.isPending;
+  const canSubmitResolve = canResolve && resolveReason.trim().length > 0;
+
+  const openResolve = () => {
+    setResolveReason("");
+    setConfirmResolve(true);
+  };
+
+  const openBulkResolve = () => {
+    setBulkResolveReason("");
+    setBulkResolveOpen(true);
+  };
 
   const handleBulkAck = async () => {
     if (!connected || bulkAcking || ackableSelected.length === 0) return;
@@ -552,13 +576,20 @@ export function Inbox({
   };
 
   const handleBulkResolve = async () => {
-    if (!connected || bulkResolving || resolvableSelected.length === 0) return;
+    const reason = bulkResolveReason.trim();
+    if (
+      !connected ||
+      bulkResolving ||
+      resolvableSelected.length === 0 ||
+      !reason
+    )
+      return;
     setBulkResolving(true);
     let done = 0;
     let failed = 0;
     for (const item of resolvableSelected) {
       try {
-        await api.resolveInbox(item.id);
+        await api.resolveInbox(item.id, reason);
         done++;
       } catch {
         failed++;
@@ -568,6 +599,7 @@ export function Inbox({
     setSelectedIds(new Set());
     setBulkResolving(false);
     setBulkResolveOpen(false);
+    setBulkResolveReason("");
     notify(`Resolve: ${done} done / ${failed} failed`, failed ? "err" : "ok");
   };
 
@@ -581,13 +613,14 @@ export function Inbox({
         bulkResolveOpen &&
         connected &&
         !bulkResolving &&
-        resolvableSelected.length > 0
+        resolvableSelected.length > 0 &&
+        bulkResolveReason.trim()
       ) {
         e.preventDefault();
         void handleBulkResolve();
-      } else if (confirmResolve && sel && canResolve) {
+      } else if (confirmResolve && sel && canSubmitResolve) {
         e.preventDefault();
-        resolve.mutate(sel.id);
+        resolve.mutate({ id: sel.id, reason: resolveReason.trim() });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -596,10 +629,12 @@ export function Inbox({
     confirmResolve,
     bulkResolveOpen,
     sel,
-    canResolve,
+    canSubmitResolve,
     resolve,
+    resolveReason,
     connected,
     bulkResolving,
+    bulkResolveReason,
     resolvableSelected,
   ]);
 
@@ -641,7 +676,7 @@ export function Inbox({
         if (!starActive && canAck && sel) ack.mutate(sel.id);
       },
       x: () => {
-        if (canResolve) setConfirmResolve(true);
+        if (canResolve) openResolve();
       },
     },
   });
@@ -699,7 +734,7 @@ export function Inbox({
         if (!connected || bulkResolving || resolvableSelected.length === 0)
           return;
         e.preventDefault();
-        setBulkResolveOpen(true);
+        openBulkResolve();
       }
     }
 
@@ -1066,10 +1101,7 @@ export function Inbox({
           actions={
             !sel.decision && itemStatus(sel) !== "resolved" ? (
               <div className="flex items-center gap-1.5">
-                <Button
-                  disabled={!canResolve}
-                  onClick={() => setConfirmResolve(true)}
-                >
+                <Button disabled={!canResolve} onClick={openResolve}>
                   Resolve…{" "}
                   <span
                     className="mono ml-1 text-(--text-faint)"
@@ -1114,7 +1146,15 @@ export function Inbox({
               <KV k="acked" v={<Ago iso={sel.ackedAt} now={now} />} />
             )}
             {sel.resolvedAt && (
-              <KV k="resolved" v={<Ago iso={sel.resolvedAt} now={now} />} />
+              <KV
+                k="resolved"
+                v={
+                  <span>
+                    <Ago iso={sel.resolvedAt} now={now} />
+                    {sel.resolvedReason && <> · {sel.resolvedReason}</>}
+                  </span>
+                }
+              />
             )}
             {sel.resolvedBy && <KV k="resolved by" v={sel.resolvedBy} />}
             <KV
@@ -1264,7 +1304,7 @@ export function Inbox({
             disabled={
               !connected || bulkResolving || resolvableSelected.length === 0
             }
-            onClick={() => setBulkResolveOpen(true)}
+            onClick={openBulkResolve}
           >
             Resolve…
             <span
@@ -1287,13 +1327,19 @@ export function Inbox({
             They leave Open or Acked and stay in the ledger under Resolved. This
             does not act on their underlying runs, proposals, or PRs.
           </p>
+          <ResolveReasonField
+            value={bulkResolveReason}
+            onChange={setBulkResolveReason}
+            inputRef={bulkResolveReasonRef}
+          />
           <div className="flex justify-end gap-2">
             <Button onClick={() => setBulkResolveOpen(false)}>Cancel</Button>
             <Button
               variant="primary"
-              disabled={!connected || bulkResolving}
+              disabled={
+                !connected || bulkResolving || !bulkResolveReason.trim()
+              }
               onClick={() => void handleBulkResolve()}
-              autoFocus
             >
               {bulkResolving
                 ? "Resolving…"
@@ -1313,12 +1359,19 @@ export function Inbox({
             It leaves Open and Acked and stays in the ledger under Resolved.
             This does not act on the underlying run, proposal or PR.
           </p>
+          <ResolveReasonField
+            value={resolveReason}
+            onChange={setResolveReason}
+            inputRef={resolveReasonRef}
+          />
           <div className="flex justify-end gap-2">
             <Button onClick={() => setConfirmResolve(false)}>Cancel</Button>
             <Button
               variant="primary"
-              disabled={!canResolve}
-              onClick={() => resolve.mutate(sel.id)}
+              disabled={!canSubmitResolve}
+              onClick={() =>
+                resolve.mutate({ id: sel.id, reason: resolveReason.trim() })
+              }
               autoFocus
             >
               Resolve
@@ -1326,6 +1379,56 @@ export function Inbox({
           </div>
         </Dialog>
       )}
+    </div>
+  );
+}
+
+function ResolveReasonField({
+  value,
+  onChange,
+  inputRef,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  return (
+    <div className="mb-4">
+      <div className="mb-2 text-[11px] font-medium text-(--text-faint)">
+        Common reasons
+      </div>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {INBOX_RESOLVE_REASONS.map((reason) => (
+          <button
+            key={reason}
+            type="button"
+            onClick={() => {
+              onChange(reason);
+              inputRef.current?.focus();
+            }}
+            className={`rounded border px-2 py-0.5 text-[11px] transition-colors ${
+              value === reason
+                ? "border-(--accent) bg-(--surface-3) text-(--text)"
+                : "border-(--border) bg-(--surface-1) text-(--text-dim) hover:bg-(--surface-2)"
+            }`}
+          >
+            {reason}
+          </button>
+        ))}
+      </div>
+      <label className="block text-[11px] font-medium text-(--text-faint)">
+        Resolution reason
+        <textarea
+          ref={inputRef}
+          autoFocus
+          required
+          rows={3}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Reason required — resolutions are audit records"
+          className="mt-1 w-full resize-y rounded-md border border-(--border-strong) bg-(--surface-0) px-2.5 py-1.5 text-[12px] text-(--text) outline-none focus:border-(--accent)"
+        />
+      </label>
     </div>
   );
 }

@@ -45,6 +45,7 @@ function item(
     ackedAt: null,
     resolvedAt: null,
     resolvedBy: null,
+    resolvedReason: null,
     delivery: {},
     ...overrides,
   };
@@ -275,9 +276,16 @@ beforeEach(() => {
     ledger = ledger.map((it) => (it.id === id ? { ...it, ackedAt: T2 } : it));
     return { item: ledger.find((it) => it.id === id)! };
   });
-  api.resolveInbox = mock(async (id: string) => {
+  api.resolveInbox = mock(async (id: string, reason: string) => {
     ledger = ledger.map((it) =>
-      it.id === id ? { ...it, resolvedAt: T2, resolvedBy: "operator" } : it,
+      it.id === id
+        ? {
+            ...it,
+            resolvedAt: T2,
+            resolvedBy: "operator",
+            resolvedReason: reason,
+          }
+        : it,
     );
     return { item: ledger.find((it) => it.id === id)! };
   });
@@ -559,7 +567,7 @@ describe("Inbox view", () => {
     expect(view.queryByRole("button", { name: /^Ack(?:\s|$)/ })).toBeNull();
   });
 
-  test("x opens the resolve confirm; Enter resolves", async () => {
+  test("x opens the resolve dialog; Enter requires a reason before resolving", async () => {
     const { view } = renderInbox({ focusItemId: "inbox_open_1" });
     await waitFor(() => view.getByRole("button", { name: /Resolve…/ }));
     act(() => {
@@ -573,8 +581,31 @@ describe("Inbox view", () => {
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
       );
     });
+    expect(api.resolveInbox).not.toHaveBeenCalled();
+    expect(view.getByRole("dialog")).toBeTruthy();
+
+    act(() => {
+      changeInput(
+        view.getByLabelText("Resolution reason"),
+        "Handled after operator follow-up",
+      );
+    });
     await waitFor(() =>
-      expect(api.resolveInbox).toHaveBeenCalledWith("inbox_open_1"),
+      expect(
+        (view.getByRole("button", { name: "Resolve" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    act(() => {
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    await waitFor(() =>
+      expect(api.resolveInbox).toHaveBeenCalledWith(
+        "inbox_open_1",
+        "Handled after operator follow-up",
+      ),
     );
     await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
     await waitFor(() =>
@@ -582,6 +613,7 @@ describe("Inbox view", () => {
         "Resolved",
       ),
     );
+    expect(view.getByText(/Handled after operator follow-up/)).toBeTruthy();
   });
 
   test("select-all selects every visible actionable inbox item", async () => {

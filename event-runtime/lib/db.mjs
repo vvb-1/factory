@@ -267,6 +267,19 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    name: "inbox_resolved_reason",
+    up(db) {
+      const columns = db
+        .query(`PRAGMA table_info(inbox_items)`)
+        .all()
+        .map((row) => row.name);
+      if (!columns.includes("resolved_reason")) {
+        db.exec(`ALTER TABLE inbox_items ADD COLUMN resolved_reason TEXT;`);
+      }
+    },
+  },
 ];
 
 export const CURRENT_SCHEMA_VERSION =
