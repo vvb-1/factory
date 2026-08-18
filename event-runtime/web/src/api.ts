@@ -31,6 +31,33 @@ export class ApiError extends Error {
   }
 }
 
+export type ConfigReload = "hot" | "restart" | "cli-only";
+export interface ConfigEntry {
+  key: string;
+  value: unknown;
+  reload?: ConfigReload;
+  note?: string;
+}
+export interface ConfigSection {
+  id: string;
+  title: string;
+  source: { file: string; kind: "yaml" | "json" | "registry" };
+  reload: ConfigReload;
+  entries: ConfigEntry[];
+}
+export interface ConfigView {
+  generatedAt: string;
+  policyVersion: string;
+  registry: {
+    loadedAt: string;
+    agentCount: number;
+    eventTypeCount: number;
+    edgeCount: number;
+    scheduleCount: number;
+  };
+  sections: ConfigSection[];
+}
+
 type CachedResponse = { etag: string; body: unknown };
 const responseCache = new Map<string, CachedResponse>();
 
@@ -80,6 +107,9 @@ async function call<T>(
   }
   return json as T;
 }
+
+/** Every published config source, read-only and allow-listed by the server. */
+export const fetchConfig = () => call<ConfigView>("GET", "/config");
 
 export function fetchArtifacts(filters?: {
   kind?: string;
