@@ -6,7 +6,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { createElement as h, useState } from "react";
+import { createElement as h, useEffect, useState } from "react";
 import { api } from "./api";
 import {
   modal,
@@ -169,8 +169,13 @@ function ThemeProbe() {
 type PollRequeue = ReturnType<typeof useRequeuePoll>;
 let exposedPollRequeue: PollRequeue | null = null;
 
-function RequeuePollProbe(props: { onJumpProposal: (proposalId: string) => void }) {
-  exposedPollRequeue = useRequeuePoll(props.onJumpProposal);
+function RequeuePollProbe(props: {
+  onJumpProposal: (proposalId: string) => void;
+}) {
+  const pollRequeue = useRequeuePoll(props.onJumpProposal);
+  useEffect(() => {
+    exposedPollRequeue = pollRequeue;
+  }, [pollRequeue]);
   return null;
 }
 
@@ -189,7 +194,9 @@ function requeueProposal(id: string, eventId: string): Proposal {
 describe("useRequeuePoll", () => {
   test("a matched task and source-view unmount do not drop a concurrent task", async () => {
     const originalProposals = api.proposals;
-    const requests: ReturnType<typeof deferred<Awaited<ReturnType<typeof api.proposals>>>>[] = [];
+    const requests: ReturnType<
+      typeof deferred<Awaited<ReturnType<typeof api.proposals>>>
+    >[] = [];
     api.proposals = mock(() => {
       const request = deferred<Awaited<ReturnType<typeof api.proposals>>>();
       requests.push(request);
@@ -197,11 +204,10 @@ describe("useRequeuePoll", () => {
     });
 
     try {
-      let view!: ReturnType<typeof render>;
       const onJumpProposal = mock((proposalId: string) => {
         if (proposalId === "prop_first") view.unmount();
       });
-      view = render(h(RequeuePollProbe, { onJumpProposal }));
+      const view = render(h(RequeuePollProbe, { onJumpProposal }));
       const pollRequeue = exposedPollRequeue!;
 
       const first = pollRequeue("github", "evt_first");
@@ -209,19 +215,22 @@ describe("useRequeuePoll", () => {
       expect(requests).toHaveLength(2);
 
       await act(async () => {
-        requests[0]!.resolve({ proposals: [requeueProposal("prop_first", "evt_first")] });
+        requests[0]!.resolve({
+          proposals: [requeueProposal("prop_first", "evt_first")],
+        });
         await first;
       });
       expect(onJumpProposal).toHaveBeenCalledWith("prop_first");
 
       await act(async () => {
-        requests[1]!.resolve({ proposals: [requeueProposal("prop_second", "evt_second")] });
+        requests[1]!.resolve({
+          proposals: [requeueProposal("prop_second", "evt_second")],
+        });
         await second;
       });
-      expect(onJumpProposal.mock.calls.map(([proposalId]) => proposalId)).toEqual([
-        "prop_first",
-        "prop_second",
-      ]);
+      expect(
+        onJumpProposal.mock.calls.map(([proposalId]) => proposalId),
+      ).toEqual(["prop_first", "prop_second"]);
     } finally {
       api.proposals = originalProposals;
       exposedPollRequeue = null;

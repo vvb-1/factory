@@ -723,25 +723,28 @@ describe("Overview anomaly deck (WM-95)", () => {
     });
 
     try {
-      let view!: ReturnType<typeof renderOverview>;
       const onJumpProposal = mock((proposalId: string) => {
         if (proposalId === "prop_concurrent_first") view.unmount();
       });
-      view = renderOverview({ kind: "all" }, { onJumpProposal });
+      const view = renderOverview({ kind: "all" }, { onJumpProposal });
 
-      fireEvent.click(await waitFor(() => view.getByRole("button", { name: "Requeue all" })));
+      fireEvent.click(
+        await waitFor(() => view.getByRole("button", { name: "Requeue all" })),
+      );
       fireEvent.click(view.getByRole("button", { name: "Requeue 2 events" }));
       await waitFor(() => expect(api.requeue).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(pollRequests).toHaveLength(2));
 
       await act(async () => {
         pollRequests[0]!.resolve({
-          proposals: [{
-            ...stubProposal,
-            id: "prop_concurrent_first",
-            eventId: eventIds[0]!,
-            eventSource: "github",
-          }],
+          proposals: [
+            {
+              ...stubProposal,
+              id: "prop_concurrent_first",
+              eventId: eventIds[0]!,
+              eventSource: "github",
+            },
+          ],
         });
       });
       await waitFor(() =>
@@ -750,19 +753,20 @@ describe("Overview anomaly deck (WM-95)", () => {
 
       await act(async () => {
         pollRequests[1]!.resolve({
-          proposals: [{
-            ...stubProposal,
-            id: "prop_concurrent_second",
-            eventId: eventIds[1]!,
-            eventSource: "github",
-          }],
+          proposals: [
+            {
+              ...stubProposal,
+              id: "prop_concurrent_second",
+              eventId: eventIds[1]!,
+              eventSource: "github",
+            },
+          ],
         });
       });
       await waitFor(() =>
-        expect(onJumpProposal.mock.calls.map(([proposalId]) => proposalId)).toEqual([
-          "prop_concurrent_first",
-          "prop_concurrent_second",
-        ]),
+        expect(
+          onJumpProposal.mock.calls.map(([proposalId]) => proposalId),
+        ).toEqual(["prop_concurrent_first", "prop_concurrent_second"]),
       );
     } finally {
       api.status = originals.status;
