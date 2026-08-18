@@ -66,7 +66,8 @@ export function navIsCurrent(key: NavKey, view?: string): boolean {
     key === view ||
     (key === "runs" && view === "run") ||
     (key === "tickets" && view === "prs") ||
-    (key === "chains" && view === "chain")
+    (key === "chains" && view === "chain") ||
+    (key === "artifacts" && view === "artifact")
   );
 }
 
@@ -110,6 +111,9 @@ export function listSelectionPath(
 
 const Artifacts = lazy(() =>
   import("./views/Artifacts").then((m) => ({ default: m.Artifacts })),
+);
+const ArtifactFull = lazy(() =>
+  import("./views/ArtifactFull").then((m) => ({ default: m.ArtifactFull })),
 );
 const Metrics = lazy(() =>
   import("./views/Metrics").then((m) => ({ default: m.Metrics })),
@@ -320,6 +324,8 @@ export function App() {
   // `#/run/:id` is the full-page run view — a distinct first segment, so
   // crossing from `#/runs/:id` pushes history and Back restores the panel.
   const fullRunId = view === "run" ? (route[1] ?? null) : null;
+  // `#/artifact/:digest` is the full-page artifact reader view (WM-828).
+  const fullArtifactDigest = view === "artifact" ? (route[1] ?? null) : null;
   const focusProposalId = view === "proposals" ? (route[1] ?? null) : null;
   const focusRepoName = view === "projects" ? (route[1] ?? null) : null;
   const focusAgentRef = view === "agents" ? (route[1] ?? null) : null;
@@ -378,6 +384,8 @@ export function App() {
     navigate(hashPath("runs", runId));
   };
   const openRunFull = (runId: string) => navigate(hashPath("run", runId));
+  const openArtifactFull = (digest: string) =>
+    navigate(hashPath("artifact", digest));
   const jumpToTicket = (ticketId: string) =>
     navigate(hashPath("tickets", ticketId));
   const jumpToPr = (number: number) =>
@@ -557,7 +565,9 @@ export function App() {
         ? "Chain"
         : view === "prs"
           ? "PR"
-          : "Overview");
+          : view === "artifact"
+            ? "Artifact"
+            : "Overview");
 
   useEffect(() => {
     const id = route.length > 1 ? route[route.length - 1] : null;
@@ -1102,7 +1112,21 @@ export function App() {
                   }
                 />
               </Suspense>
-            ) : view === "artifacts" ? (
+            ) : view === "artifact" && fullArtifactDigest ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading artifact…
+                  </div>
+                }
+              >
+                <ArtifactFull
+                  digest={fullArtifactDigest}
+                  onBack={() => navigate("artifacts")}
+                  onJumpRun={jumpToRun}
+                />
+              </Suspense>
+            ) : view === "artifacts" || view === "artifact" ? (
               <Suspense
                 fallback={
                   <div className="p-5 text-(--text-faint)">
@@ -1117,6 +1141,7 @@ export function App() {
                     navigate(artifactsHash(filters))
                   }
                   onJumpRun={jumpToRun}
+                  onOpenFull={openArtifactFull}
                 />
               </Suspense>
             ) : view === "metrics" ? (

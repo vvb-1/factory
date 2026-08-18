@@ -687,6 +687,7 @@ export function ArtifactPanel({
   raw: rawProp,
   onRawChange,
   rawFallback,
+  onOpenFull,
 }: {
   artifact: unknown;
   schema?: unknown;
@@ -697,6 +698,7 @@ export function ArtifactPanel({
   onRawChange?: (raw: boolean) => void;
   /** What Raw shows; defaults to `JsonBlock` over the artifact. */
   rawFallback?: ReactNode;
+  onOpenFull?: () => void;
 }) {
   const [rawState, setRawState] = useState(loadArtifactRaw);
   const raw = rawProp ?? rawState;
@@ -707,11 +709,41 @@ export function ArtifactPanel({
   };
   const applies = viewApplies(view, artifact);
   const fallback = rawFallback ?? <JsonBlock value={artifact} />;
-  if (!applies) return <>{fallback}</>;
+
+  const openFullAction = onOpenFull && (
+    <PrimitiveButton
+      bare
+      type="button"
+      onClick={onOpenFull}
+      title="Open in full page (o)"
+      className="cursor-pointer rounded px-2 py-0.5 text-[11px] font-medium text-(--text-dim) hover:bg-(--surface-2) hover:text-(--text)"
+    >
+      <span>Open in full page</span>
+      <span
+        aria-hidden="true"
+        className="mono ml-1 text-(--text-faint) text-xs"
+      >
+        o
+      </span>
+    </PrimitiveButton>
+  );
+
+  if (!applies) {
+    if (openFullAction) {
+      return (
+        <div>
+          <div className="mb-2 flex justify-end">{openFullAction}</div>
+          {fallback}
+        </div>
+      );
+    }
+    return <>{fallback}</>;
+  }
   if (raw) {
     return (
       <div>
-        <div className="mb-2 flex justify-end">
+        <div className="mb-2 flex items-center justify-end gap-1.5">
+          {openFullAction}
           <RawToggle raw onChange={setRaw} />
         </div>
         {fallback}
@@ -724,7 +756,12 @@ export function ArtifactPanel({
       schema={schema}
       view={view}
       onJumpRun={onJumpRun}
-      actions={<RawToggle raw={false} onChange={setRaw} />}
+      actions={
+        <div className="flex items-center gap-1.5">
+          {openFullAction}
+          <RawToggle raw={false} onChange={setRaw} />
+        </div>
+      }
     />
   );
 }

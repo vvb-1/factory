@@ -77,6 +77,7 @@ function renderArtifacts(
   onJumpRun = mock(() => {}),
   initialFilters: ArtifactFilters = { kind: null, orphan: null, search: "" },
   seed: { items?: ArtifactInventoryItem[]; agents?: unknown[] } = {},
+  onOpenFull = mock(() => {}),
 ) {
   const client = new QueryClient({
     defaultOptions: {
@@ -127,11 +128,12 @@ function renderArtifacts(
           filters={filters}
           onFiltersChange={setFilters}
           onJumpRun={onJumpRun}
+          onOpenFull={onOpenFull}
         />
       </QueryClientProvider>
     );
   }
-  return { ...render(<Harness />), onJumpRun };
+  return { ...render(<Harness />), onJumpRun, onOpenFull };
 }
 
 // happy-dom mutates this controlled input without reaching React's onChange;
@@ -656,5 +658,51 @@ describe("Artifacts inspector renders a view for the producing agent's artifact 
     expect(
       view.queryByRole("group", { name: "Artifact rendering" }),
     ).toBeNull();
+  });
+});
+
+describe("Full-page artifact reader view navigation & 'o' shortcut (WM-828)", () => {
+  const SHA_A = "a".repeat(64);
+
+  test("pressing 'o' on selected artifact row navigates to full page reader view", async () => {
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.endsWith("/api/artifacts") || u.includes("/api/artifacts?")) {
+        return new Response(JSON.stringify({ artifacts: ITEMS }), {
+          status: 200,
+        });
+      }
+      return new Response("line one\nline two", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    window.location.hash = `#/artifacts/${SHA_A}`;
+    const view = renderArtifacts();
+    await view.findByRole("region", { name: "Artifact content" });
+
+    fireEvent.keyDown(document.body, { key: "o" });
+    expect(view.onOpenFull).toHaveBeenCalledWith(SHA_A);
+  });
+
+  test("detail pane includes Open in full page action with 'o' shortcut hint", async () => {
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.endsWith("/api/artifacts") || u.includes("/api/artifacts?")) {
+        return new Response(JSON.stringify({ artifacts: ITEMS }), {
+          status: 200,
+        });
+      }
+      return new Response("line one\nline two", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    window.location.hash = `#/artifacts/${SHA_A}`;
+    const view = renderArtifacts();
+    await view.findByRole("region", { name: "Artifact content" });
+
+    const openBtns = view.getAllByRole("button", { name: "Open in full page" });
+    expect(openBtns.length).toBeGreaterThanOrEqual(1);
+    expect(openBtns[0].getAttribute("title")).toBe("Open in full page (o)");
+
+    fireEvent.click(openBtns[0]);
+    expect(view.onOpenFull).toHaveBeenCalledWith(SHA_A);
   });
 });
