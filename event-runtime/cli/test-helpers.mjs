@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +13,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { policyVersion } from "../lib/config.mjs";
 import { openDb } from "../lib/db.mjs";
+export {
+  cleanupTrackedProcesses,
+  processOwnerWatchdogSource,
+  spawnTracked,
+  trackMarkedFakeRuntimeGroups,
+  trackProcess,
+  trackProcessGroupForPid,
+  trackProcessGroupsMatching,
+} from "../lib/test-helpers-process.mjs";
+import { spawnTracked, trackProcess } from "../lib/test-helpers-process.mjs";
 
 export const CLI = fileURLToPath(new URL("../cli.mjs", import.meta.url));
 
@@ -80,21 +90,22 @@ export function writeGatedNotifier(dir, { exitCode = 0 } = {}) {
   const outFile = path.join(dir, "pushes.txt");
   const startedFile = path.join(dir, "notifier-started");
   const releaseFile = path.join(dir, "notifier-release");
+  const pidFile = path.join(dir, "notifier.pid");
   const stub = path.join(dir, "notify-stub.sh");
   // The child advertises that it is pending, then waits for the test's explicit
   // release condition. A visible message alone is deliberately insufficient.
   writeFileSync(
     stub,
-    `#!/bin/sh\nprintf '%s\\n' "$1" >> ${outFile}\n: > ${startedFile}\nwhile [ ! -f ${releaseFile} ]; do sleep 0.01; done\nexit ${exitCode}\n`,
+    `#!/bin/sh\nprintf '%s\\n' "$$" > ${pidFile}\nprintf '%s\\n' "$1" >> ${outFile}\n: > ${startedFile}\nwhile [ ! -f ${releaseFile} ]; do sleep 0.01; done\nexit ${exitCode}\n`,
   );
   spawnSync("chmod", ["+x", stub]);
-  return { outFile, startedFile, releaseFile, stub };
+  return { outFile, pidFile, startedFile, releaseFile, stub };
 }
 
 export async function assertHealthyLiveServe() {
   const home = mkdtempSync(path.join(os.tmpdir(), "evrt-doc-healthy-"));
   const port = String(59700 + (process.pid % 100));
-  const child = spawn("bun", [CLI, "serve", "--port", port], {
+  const child = spawnTracked("bun", [CLI, "serve", "--port", port], {
     env: {
       ...process.env,
       FACTORY_EVENT_HOME: home,
@@ -141,7 +152,7 @@ export async function runNotifierDeliveryCase({
   const { tick } = await import("../cli.mjs");
   const { loadRegistry } = await import("../lib/registry.mjs");
   const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-tick-notify-"));
-  const { outFile, startedFile, releaseFile, stub } = writeGatedNotifier(dir);
+  const { outFile, pidFile, startedFile, releaseFile, stub } = writeGatedNotifier(dir);
   const db = openDb(path.join(dir, "runtime.db"));
   const at = new Date().toISOString();
   db.query(
@@ -171,6 +182,7 @@ export async function runNotifierDeliveryCase({
     });
     deliveryStarted = true;
     await awaitFile(startedFile, "notifier start");
+    trackProcess(Number(readFileSync(pidFile, "utf8").trim()), { group: false });
     if (failWhilePending)
       throw new Error(
         "intentional assertion failure while notifier delivery is pending",
@@ -178,11 +190,17 @@ export async function runNotifierDeliveryCase({
     writeFileSync(releaseFile, "release\n");
     const delivery = await awaitNotifierDelivery(db, "test/evt-tick");
     deliverySettled = true;
-    expect(readFileSync(outFile, "utf8").trim()).toBe(
+    // The parked-event projection carries its decision question and options
+    // (WM-390), so one delivery is a four-line message.
+    const expectedMessage = [
       "BLOCKED linear.ticket.agent_ready evt-tick: no_worktree_scripts",
-    );
+      "Should this parked event be requeued?",
+      "1. Requeue the event",
+      "2. Not now",
+    ].join("\n");
+    expect(readFileSync(outFile, "utf8").trim()).toBe(expectedMessage);
     expect(
-      logs.some((l) => l.includes("notify human_needed test/evt-tick")),
+      logs.some((l) => l.includes("notify BLOCKED test/evt-tick")),
     ).toBe(true);
     await tick({
       db,
@@ -190,7 +208,8 @@ export async function runNotifierDeliveryCase({
       policyVersion: "git:test",
       log: () => {},
     });
-    expect(readFileSync(outFile, "utf8").trim().split("\n")).toHaveLength(1);
+    // Exactly one delivery: the file still holds the single message.
+    expect(readFileSync(outFile, "utf8").trim()).toBe(expectedMessage);
     return { delivery };
   } finally {
     // This is the critical cleanup contract: first unblock an in-flight child,
@@ -240,7 +259,7 @@ export function editStampRoot(root, body) {
 
 /** Spawn a worker, collecting stdout+stderr into one buffer. */
 export function spawnWorker(args, env) {
-  const child = spawn("bun", [CLI, "work", ...args], {
+  const child = spawnTracked("bun", [CLI, "work", ...args], {
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -304,7 +323,7 @@ export async function seedRun(home, { runId, input = {}, timeoutSeconds = 5 }) {
 }
 
 export function spawnSupervisor(args, env) {
-  const child = spawn("bun", [CLI, "supervise", ...args], {
+  const child = spawnTracked("bun", [CLI, "supervise", ...args], {
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });

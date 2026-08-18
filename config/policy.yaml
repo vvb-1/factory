@@ -1,6 +1,10 @@
 # Limits the dispatcher enforces. Changing these changes how much autonomy the
 # factory has, so they live in git and move by PR — not by editing a running box.
 
+# Explicit extension allowlist (WM-470). Empty preserves the built-in registry
+# exactly; packs are never discovered by scanning the filesystem.
+packs: []
+
 chain_auto_approval:
   # Only internally admitted chain events in this closed set may be approved
   # unattended. Every other proposal remains watched by default.
@@ -19,6 +23,20 @@ chain_auto_approval:
 
 merge:
   max_fix_rounds: 2
+
+dispatch:
+  # Owned Paths collision handling at dispatch (WM-677).
+  #   strict   — any overlap with an in-flight ticket refuses dispatch. Fail-closed
+  #              default when this key is absent.
+  #   advisory — the overlap is recorded on the proposal/run as evidence and
+  #              dispatch proceeds; only an IDENTICAL concrete file claim, or a
+  #              `**` claim on either side, still refuses (owned_paths_conflict_hard).
+  # Operator decision 2026-08-18: textual overlap is what rebase and merge-fix
+  # already resolve — six overlapping PRs rebased clean that day — and refusing
+  # it at dispatch was starving the pool (2 running workers from 9 attempts).
+  # Merging stays serialized (max_concurrent_merges below), which is where real
+  # conflicts are caught.
+  owned_paths_collision: advisory
 
 concurrency:
   # Per-repo admission ceiling. Actual execution remains bounded by worker

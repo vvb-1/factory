@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { api, ApiError } from "../api";
-import { keyGuard, useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import { keyGuard, refetchIntervals, tableTokens, useDisplayOptions, useListKeys, useNow, useTabKeys, useTableWindow } from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -36,8 +36,8 @@ import { matchesInFlight, matchesRepo } from "../context";
 import { RUN_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import type { Proposal, RunListItem, RunState } from "../types";
+import { EMPTY, formatRelative } from "../format";
 import {
-  Ago,
   Button,
   CopyActions,
   Dialog,
@@ -51,6 +51,7 @@ import {
   StateBadge,
   STATE_HUES,
   GroupHeaderRow,
+  TableWindowFooter,
   Th,
   VerbError,
   copyText,
@@ -163,6 +164,7 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   sorts: [
     { key: "run", label: "Run", get: (r) => r.runId, column: "run" },
     { key: "state", label: "State", get: (r) => r.state, column: "state" },
+    { key: "remaining", label: "Remaining", get: (r) => r.deadlineAt ?? "", column: "remaining" },
     { key: "agent", label: "Agent", get: (r) => r.agent, column: "agent" },
     { key: "adapter", label: "Adapter", get: (r) => r.adapter, column: "adapter" },
     { key: "model", label: "Model", get: rowModel, column: "model" },
@@ -180,6 +182,7 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   columns: [
     { key: "run", label: "Run", always: true },
     { key: "state", label: "State" },
+    { key: "remaining", label: "Remaining" },
     { key: "agent", label: "Agent" },
     { key: "adapter", label: "Adapter" },
     { key: "model", label: "Model" },
@@ -190,9 +193,21 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   ],
 };
 
+function RemainingCell({ deadlineAt, now }: { deadlineAt?: string | null; now: number }) {
+  if (!deadlineAt) return <span>—</span>;
+  const left = Math.max(0, Date.parse(deadlineAt) - now);
+  if (!Number.isFinite(left)) return <span>—</span>;
+  const minutes = Math.ceil(left / 60_000);
+  return <span title={deadlineAt}>{minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`}</span>;
+}
+
 function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
-  const { startedAt, leaseExpiresAt, timeoutSeconds = 0 } = r as { startedAt?: string | null; leaseExpiresAt?: string | null; timeoutSeconds?: number };
-  const t = startedAt && timeoutSeconds > 0 ? clockTo(startedAt, timeoutSeconds * 1000, now) : null;
+  const { startedAt, leaseExpiresAt, deadlineAt, timeoutSeconds = 0 } = r;
+  const t = deadlineAt
+    ? clockTo(deadlineAt, 0, now)
+    : startedAt && timeoutSeconds > 0
+      ? clockTo(startedAt, timeoutSeconds * 1000, now)
+      : null;
   const l = leaseExpiresAt ? clockTo(leaseExpiresAt, 0, now) : null;
   const hasT = t && t.kind !== "off";
   const hasL = l && l.kind !== "off";
@@ -257,7 +272,7 @@ export function Runs({
   const proposalsQ = useQuery({
     queryKey: ["proposals", "open"],
     queryFn: () => api.proposals(),
-    refetchInterval: 2000,
+    ...refetchIntervals.secondary,
   });
 
   const proposalByRunId = useMemo(() => {
@@ -274,9 +289,9 @@ export function Runs({
   const list = useQuery({
     queryKey: ["runs", fetchAll ? "ALL" : tab],
     queryFn: () => api.runs(),
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
+  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, ...refetchIntervals.fast });
   const rows = list.data?.runs ?? [];
   const scoped = useMemo(
     () =>
@@ -332,6 +347,13 @@ export function Runs({
   // Keyboard index walks the open sections; the detail pane keys off the row
   // itself so collapsing the group under a selection never closes the pane.
   const selectedIndex = useMemo(() => flat.findIndex((r) => r.runId === selectedId), [flat, selectedId]);
+  const tokens = tableTokens(sections, display.collapsed, grouped(display));
+  const [windowTokens, windowStart, windowEnd, moveWindow] = useTableWindow(
+    tokens,
+    selectedId,
+    (row) => row.runId,
+    JSON.stringify([tab, filter, context, display]),
+  );
 
   // Deep link / jump: switch to ALL if the run isn't on this tab. Hash stays put.
   // Reveal (clear filter) once per focus id, after the run is on the tab so a
@@ -424,19 +446,19 @@ export function Runs({
   // decision-bearing columns instead of forcing a horizontal scrollbar; the
   // pane and the unselected list retain every configured column.
   const listCols = sel
-    ? cols.filter((c) => ["run", "state", "reason", "origin", "updated"].includes(c.key))
+    ? cols.filter((c) => ["run", "state", "remaining", "reason", "origin", "updated"].includes(c.key))
     : cols;
   const show = useMemo(() => new Set(listCols.map((c) => c.key)), [listCols]);
 
   useEffect(() => {
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+  }, [selectedIndex, windowStart]);
 
   const detail = useQuery({
     queryKey: ["run", selectedId],
     queryFn: () => api.run(selectedId as string),
     enabled: sel !== null,
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
 
   const invalidate = () => queryClient.invalidateQueries();
@@ -772,6 +794,11 @@ export function Runs({
                       {IN_FLIGHT.includes(r.state) && <RowDeadlines r={r} now={now} />}
                     </td>
                   )}
+                  {show.has("remaining") && (
+                    <td className="max-w-24 whitespace-nowrap border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                      {IN_FLIGHT.includes(r.state) ? <RemainingCell deadlineAt={r.deadlineAt} now={now} /> : ""}
+                    </td>
+                  )}
                   {show.has("agent") && (
                     <td className="max-w-32 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
                       <AgentHoverCard
@@ -800,7 +827,7 @@ export function Runs({
                       className="mono max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
                       title={r.reasonCode && r.reasonCode.toLowerCase() !== "ok" ? r.reasonCode : undefined}
                     >
-                      {r.reasonCode && r.reasonCode.toLowerCase() !== "ok" ? r.reasonCode : ""}
+                      {r.reasonCode && r.reasonCode.toLowerCase() !== "ok" ? r.reasonCode : EMPTY}
                     </td>
                   )}
                   {show.has("origin") && (
@@ -816,13 +843,13 @@ export function Runs({
                           {shortId(r.eventId)}
                         </JumpLink>
                       ) : (
-                        (r.eventId ? shortId(r.eventId) : "-")
+                        (r.eventId ? shortId(r.eventId) : EMPTY)
                       )}
                     </td>
                   )}
                   {show.has("updated") && (
                     <td className="max-w-24 whitespace-nowrap border-b border-(--border) px-3 py-1.5 text-(--text-faint)">
-                      <Ago iso={r.updated_at} now={now} />
+                      <span title={r.updated_at}>{formatRelative(r.updated_at, now)}</span>
                     </td>
                   )}
                   {listCols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
@@ -830,39 +857,26 @@ export function Runs({
                   ))}
                 </tr>
               );
-              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
-              return sections.map((s) => {
-                const closed = display.collapsed.includes(s.key);
+              return windowTokens.map((token) => {
+                if (token.length === 1) return renderRow(token[0]);
+                const [s, sub] = token;
                 return (
-                  <Fragment key={s.key}>
-                    <GroupHeaderRow
-                      colSpan={listCols.length}
-                      section={s}
-                      collapsed={closed}
-                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
-                    />
-                    {!closed &&
-                      (s.subsections
-                        ? s.subsections.map((child) => {
-                            const childClosed = display.collapsed.includes(child.key);
-                            return (
-                              <Fragment key={child.key}>
-                                <GroupHeaderRow
-                                  colSpan={listCols.length}
-                                  section={child}
-                                  collapsed={childClosed}
-                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
-                                  sub
-                                />
-                                {!childClosed && child.rows.map(renderRow)}
-                              </Fragment>
-                            );
-                          })
-                        : s.rows.map(renderRow))}
-                  </Fragment>
+                  <GroupHeaderRow
+                    key={`group:${s.key}`}
+                    colSpan={listCols.length}
+                    section={s}
+                    collapsed={display.collapsed.includes(s.key)}
+                    onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                    sub={sub}
+                  />
                 );
               });
             })()}
+            <TableWindowFooter
+              colSpan={listCols.length}
+              range={[windowStart, windowEnd, tokens.length]}
+              move={moveWindow}
+            />
             {visible.length === 0 && (
               <ListEmpty
                 colSpan={listCols.length}

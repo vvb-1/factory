@@ -1,6 +1,6 @@
 import "../test-dom";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Inbox,
@@ -16,10 +16,13 @@ import {
   sourceRunId,
 } from "./Inbox";
 import { api } from "../api";
+import { clearToasts, ToastContainer } from "../components/ui";
 import type { InboxItem } from "../types";
+import { changeInput } from "../test-render";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
 });
 
 function item(overrides: Partial<InboxItem> & Pick<InboxItem, "id" | "kind">): InboxItem {
@@ -144,8 +147,10 @@ const origResolve = api.resolveInbox;
 let ledger: InboxItem[] = [];
 
 beforeEach(() => {
+  clearToasts();
+  localStorage.clear();
   ledger = [
-    item({ id: "inbox_open_1", kind: "BLOCKED", title: "BLOCKED WM-1: decide X", createdAt: T0, refs: { runId: "run_a", issue: "WM-1" } }),
+    item({ id: "inbox_open_1", kind: "BLOCKED", title: "BLOCKED WM-1: decide X", body: "Choose a safe recovery", createdAt: T0, refs: { runId: "run_a", issue: "WM-1", repo: "factory" } }),
     item({ id: "inbox_open_2", kind: "CI RED", title: "CI RED WM-2/PR #9", createdAt: T1, refs: { pr: "https://github.com/watt-mind/factory/pull/9" } }),
     item({ id: "inbox_acked_1", kind: "ESCALATED", title: "ESCALATED merge", createdAt: T0, ackedAt: T1 }),
     item({ id: "inbox_resolved_1", kind: "RC READY", title: "RC READY factory", createdAt: T0, ackedAt: T1, resolvedAt: T2, resolvedBy: "operator" }),
@@ -183,9 +188,10 @@ function renderInbox(props: Partial<React.ComponentProps<typeof Inbox>> = {}) {
         {...jumps}
         {...props}
       />
+      <ToastContainer />
     </QueryClientProvider>,
   );
-  return { view, jumps };
+  return { view, jumps, client };
 }
 
 describe("Inbox view", () => {
@@ -207,52 +213,70 @@ describe("Inbox view", () => {
     expect(view.getByText("Red")).toBeTruthy();
   });
 
-  test("column headers cycle ascending, descending, and default order while keyboard selection follows rendered rows", async () => {
-    ledger = [
-      item({ id: "inbox_middle", kind: "BLOCKED", title: "Mike", createdAt: T0 }),
-      item({ id: "inbox_zulu", kind: "ESCALATED", title: "Zulu", createdAt: T1 }),
-      item({ id: "inbox_alpha", kind: "human_needed", title: "Alpha", createdAt: T2 }),
-    ];
-    const onSelectItem = mock(() => {});
-    const { view } = renderInbox({ onSelectItem });
-    await waitFor(() => view.getByText("Alpha"));
+  test("filters with inbox facets and free text, with an Esc-hinted empty state", async () => {
+    const { view } = renderInbox();
+    const input = await waitFor(() => view.getByLabelText("Filter inbox")) as HTMLInputElement;
 
+    act(() => changeInput(input, "kind:blocked repo:factory issue:WM-1 is:open"));
+    expect(view.getByText("decide X")).toBeTruthy();
+    expect(view.queryByText("WM-2/PR #9")).toBeNull();
+
+    act(() => changeInput(input, "safe recovery"));
+    expect(view.getByText("decide X")).toBeTruthy();
+
+    act(() => changeInput(input, "kind:no-such-kind"));
+    expect(view.getByText("No inbox items match this filter.")).toBeTruthy();
+    expect(view.getByText("Esc clears the filter")).toBeTruthy();
+  });
+
+  test("Display groups by kind or none and shared group headers collapse rows", async () => {
+    const { view } = renderInbox();
+    await waitFor(() => view.getByText("decide X"));
+
+    const decide = view.getByRole("button", { name: /Decide 1/ });
+    expect(decide.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(decide);
+    expect(decide.getAttribute("aria-expanded")).toBe("false");
+    expect(view.queryByText("decide X")).toBeNull();
+
+    fireEvent.click(view.getByRole("button", { name: /Display/ }));
+    const chooseGroup = (name: string) => {
+      fireEvent.click(view.getByRole("combobox", { name: "Group by" }));
+      fireEvent.mouseDown(within(view.getByRole("listbox", { name: "Group by options" })).getByRole("option", { name }));
+    };
+    chooseGroup("Kind");
+    expect(view.getByRole("button", { name: /BLOCKED 1/ })).toBeTruthy();
+    expect(view.getByRole("button", { name: /CI RED 1/ })).toBeTruthy();
+
+    chooseGroup("No grouping");
+    expect(view.queryByRole("button", { name: /BLOCKED 1/ })).toBeNull();
+    expect(view.getByText("decide X")).toBeTruthy();
+    expect(view.getByText("WM-2/PR #9")).toBeTruthy();
+  });
+
+  test("Kind and Age headers are sortable and persist ordering through display state", async () => {
+    const { view } = renderInbox();
+    await waitFor(() => view.getByText("decide X"));
+    const age = view.getByRole("button", { name: "Age" }).closest("th")!;
+    expect(age.getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(view.getByRole("button", { name: "Kind" }));
+    expect(view.getByRole("button", { name: "Kind" }).closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+    const persisted = JSON.parse(localStorage.getItem("evrt-display-inbox") ?? "{}");
+    expect(persisted.sortBy).toBe("kind");
+  });
+
+  test("keeps Title visible when every display property is toggled off", async () => {
+    const { view } = renderInbox();
+    await waitFor(() => view.getByText("decide X"));
+    fireEvent.click(view.getByRole("button", { name: /Display/ }));
+    const dialog = view.getByRole("dialog", { name: "Display options" });
     for (const label of ["Kind", "Title", "Age", "Refs", "Sent"]) {
-      const header = view.getByRole("columnheader", { name: new RegExp(label) });
-      expect(header.getAttribute("aria-sort")).toBe("none");
-      expect(header.querySelector("button")).toBeTruthy();
+      fireEvent.click(within(dialog).getByRole("button", { name: label }));
     }
-
-    const renderedTitles = () => Array.from(view.container.querySelectorAll("tbody tr[aria-selected]"))
-      .map((row) => row.querySelector("td:nth-child(2)")?.textContent);
-    const titleHeader = view.getByRole("columnheader", { name: /Title/ });
-    expect(renderedTitles()).toEqual(["Mike", "Zulu", "Alpha"]);
-
-    fireEvent.click(view.getByRole("button", { name: /Title/ }));
-    expect(titleHeader.getAttribute("aria-sort")).toBe("ascending");
-    expect(renderedTitles()).toEqual(["Alpha", "Mike", "Zulu"]);
-    act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "j", bubbles: true }));
-    });
-    expect(onSelectItem).toHaveBeenLastCalledWith("inbox_alpha");
-
-    fireEvent.click(view.getByRole("button", { name: /Title/ }));
-    expect(titleHeader.getAttribute("aria-sort")).toBe("descending");
-    expect(renderedTitles()).toEqual(["Zulu", "Mike", "Alpha"]);
-
-    fireEvent.click(view.getByRole("button", { name: /Title/ }));
-    expect(titleHeader.getAttribute("aria-sort")).toBe("none");
-    expect(renderedTitles()).toEqual(["Mike", "Zulu", "Alpha"]);
-
-    const ageHeader = view.getByRole("columnheader", { name: /Age/ });
-    fireEvent.click(view.getByRole("button", { name: /Age/ }));
-    expect(ageHeader.getAttribute("aria-sort")).toBe("ascending");
-    expect(renderedTitles()).toEqual(["Alpha", "Zulu", "Mike"]);
-    fireEvent.click(view.getByRole("button", { name: /Age/ }));
-    expect(ageHeader.getAttribute("aria-sort")).toBe("descending");
-    expect(renderedTitles()).toEqual(["Mike", "Zulu", "Alpha"]);
-    fireEvent.click(view.getByRole("button", { name: /Age/ }));
-    expect(ageHeader.getAttribute("aria-sort")).toBe("none");
+    expect(view.getByRole("columnheader", { name: "Title" })).toBeTruthy();
+    expect(view.getByText("decide X")).toBeTruthy();
+    const persisted = JSON.parse(localStorage.getItem("evrt-display-inbox") ?? "{}");
+    expect(persisted.hiddenColumns).not.toContain("title");
   });
 
   test("empty Open tab is a sentence, not a table", async () => {
@@ -318,8 +342,8 @@ describe("Inbox view", () => {
 
   test("unknown deep link shows an inline notice, not a blank list", async () => {
     const { view } = renderInbox({ focusItemId: "inbox_nope" });
-    await waitFor(() => view.getByRole("status"));
-    expect(view.getByRole("status").textContent).toContain("No inbox item");
+    await waitFor(() => view.getByText(/^No inbox item/));
+    expect(view.getByText(/^No inbox item/).textContent).toContain("No inbox item");
     expect(view.getByText("decide X")).toBeTruthy();
   });
 
@@ -331,7 +355,7 @@ describe("Inbox view", () => {
     });
     await waitFor(() => expect(api.ackInbox).toHaveBeenCalledWith("inbox_open_1"));
     await waitFor(() => expect(view.getByRole("tab", { selected: true }).textContent).toContain("Acked"));
-    expect(view.queryByRole("button", { name: /^Ack/ })).toBeNull();
+    expect(view.queryByRole("button", { name: /^Ack(?:\s|$)/ })).toBeNull();
   });
 
   test("x opens the resolve confirm; Enter resolves", async () => {
@@ -347,6 +371,77 @@ describe("Inbox view", () => {
     await waitFor(() => expect(api.resolveInbox).toHaveBeenCalledWith("inbox_open_1"));
     await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(view.getByRole("tab", { selected: true }).textContent).toContain("Resolved"));
+  });
+
+  test("select-all selects every visible actionable inbox item", async () => {
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+
+    expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("2 selected");
+    expect((view.getByLabelText("Select inbox item inbox_open_1") as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText("Select inbox item inbox_open_2") as HTMLInputElement).checked).toBe(true);
+  });
+
+  test("* a selects all without acking the focused item", async () => {
+    const { view } = renderInbox({ focusItemId: "inbox_open_1" });
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "*", bubbles: true }));
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    });
+
+    await waitFor(() => expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("2 selected"));
+    expect(api.ackInbox).not.toHaveBeenCalled();
+  });
+
+  test("A acks each selected id sequentially", async () => {
+    const calls: string[] = [];
+    api.ackInbox = mock(async (id: string) => {
+      calls.push(id);
+      ledger = ledger.map((it) => (it.id === id ? { ...it, ackedAt: T2 } : it));
+      return { item: ledger.find((it) => it.id === id)! };
+    });
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "A", shiftKey: true, bubbles: true }));
+    });
+
+    await waitFor(() => expect(calls).toEqual(["inbox_open_1", "inbox_open_2"]));
+    expect(view.getByRole("button", { name: "Ack: 2 done / 0 failed" })).toBeTruthy();
+  });
+
+  test("bulk ack reports one done / failed summary toast", async () => {
+    api.ackInbox = mock(async (id: string) => {
+      if (id === "inbox_open_2") throw new Error("race");
+      return { item: ledger.find((it) => it.id === id)! };
+    });
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+
+    fireEvent.click(view.getByRole("button", { name: /^Ack$/ }));
+
+    await waitFor(() => expect(api.ackInbox).toHaveBeenCalledTimes(2));
+    expect(view.getByRole("button", { name: "Ack: 1 done / 1 failed" })).toBeTruthy();
+  });
+
+  test("background refetch preserves selected ids and prunes ids that leave the tab", async () => {
+    const { view, client } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+    fireEvent.click(view.getByLabelText("Select all inbox items"));
+    expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("2 selected");
+
+    ledger = ledger.filter((it) => it.id !== "inbox_open_2");
+    await client.invalidateQueries({ queryKey: ["inbox"] });
+
+    await waitFor(() => expect(view.getByRole("toolbar", { name: "Bulk actions" }).textContent).toContain("1 selected"));
+    expect((view.getByLabelText("Select inbox item inbox_open_1") as HTMLInputElement).checked).toBe(true);
   });
 
   test("verbs are disabled while disconnected", async () => {

@@ -7,6 +7,7 @@ import {
   saveDisplayState,
   type DisplayConfig,
   type DisplayState,
+  type Section as DisplaySection,
 } from "./displayOptions";
 import type { HashWriter } from "./hash";
 import {
@@ -19,6 +20,31 @@ import {
 
 /** Open-modal depth: global list-navigation keys stand down while a dialog is up. */
 export const modal = { depth: 0 };
+
+const HIDDEN_REFETCH_INTERVAL = 15_000;
+
+function pollingOptions(visibleInterval: number) {
+  return {
+    refetchInterval: () =>
+      typeof document !== "undefined" && document.hidden
+        ? HIDDEN_REFETCH_INTERVAL
+        : visibleInterval,
+    // The interval callback backs hidden tabs off explicitly. Keeping the
+    // observer active lets it recompute that cadence after the next tick;
+    // TanStack Query's visibility listener refetches active queries as soon
+    // as the tab becomes visible again, even if a hidden poll just refreshed
+    // one and left it temporarily fresh.
+    refetchIntervalInBackground: true as const,
+    refetchOnWindowFocus: "always" as const,
+  };
+}
+
+/** Shared collection polling policy: one live primary plus slower joins. */
+export const refetchIntervals = {
+  primary: pollingOptions(2_000),
+  fast: pollingOptions(5_000),
+  secondary: pollingOptions(10_000),
+} as const;
 
 /** True when a global shortcut should be ignored (typing, or a modal is open). */
 export function keyGuard(e: KeyboardEvent): boolean {
@@ -148,6 +174,74 @@ export function useListKeys(opts: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [count, selected, onSelect, onOpen, onClose, keys]);
+}
+
+export type TableToken<T> = [row: T] | [section: DisplaySection<T>, sub: boolean];
+
+/** Flatten table rows and group headers into their exact DOM order. */
+export function tableTokens<T>(sections: DisplaySection<T>[], collapsed: readonly string[], grouped: boolean) {
+  if (!grouped) return (sections[0]?.rows ?? []).map((row): TableToken<T> => [row]);
+  const closed = new Set(collapsed);
+  const out: TableToken<T>[] = [];
+  for (const section of sections) {
+    out.push([section, false]);
+    if (closed.has(section.key)) continue;
+    if (!section.subsections) out.push(...section.rows.map((row): TableToken<T> => [row]));
+    else for (const child of section.subsections) {
+      out.push([child, true]);
+      if (!closed.has(child.key)) out.push(...child.rows.map((row): TableToken<T> => [row]));
+    }
+  }
+  return out;
+}
+
+/** Repeat a page's group ancestry so a window never starts with contextless rows. */
+function sliceTableWindow<T>(tokens: TableToken<T>[], start: number, end: number) {
+  const page = tokens.slice(start, end);
+  if (start && (page[0].length === 1 || page[0][1])) {
+    // Only the page's own ancestry belongs here: at most one sub header (the
+    // row's) plus its parent. Unshifting every header walked past would render
+    // earlier sub headers with zero rows beneath them.
+    let haveSub = page[0].length === 2 && page[0][1];
+    for (start--; start >= 0; start--) {
+      const token = tokens[start];
+      if (token.length !== 2) continue;
+      if (token[1]) {
+        if (haveSub) continue;
+        page.unshift(token);
+        haveSub = true;
+      } else {
+        page.unshift(token);
+        break;
+      }
+    }
+  }
+  return page;
+}
+
+/** Keep a 100-token DOM window while selection still addresses the full list. */
+export function useTableWindow<T>(
+  tokens: TableToken<T>[],
+  selectedKey: string | null,
+  rowKey: (row: T) => string,
+  resetKey: unknown,
+) {
+  const selected = tokens.findIndex((token) => token.length === 1 && rowKey(token[0]) === selectedKey);
+  const [start, setStart] = useState(0);
+  const count = tokens.length;
+  const max = count ? Math.floor((count - 1) / 100) * 100 : 0;
+  const safe = Math.min(start, max);
+  const end = Math.min(safe + 100, count);
+  useEffect(() => setStart((value) => Math.min(value, max)), [max]);
+  useEffect(() => {
+    setStart(selected < 0 ? 0 : Math.floor(selected / 100) * 100);
+  }, [selected, resetKey]);
+  return [
+    sliceTableWindow(tokens, safe, end),
+    safe,
+    end,
+    (direction: number) => setStart(Math.max(0, Math.min(max, safe + direction * 100))),
+  ] as const;
 }
 
 /**

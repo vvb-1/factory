@@ -1,7 +1,7 @@
 import "../test-dom";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { Proposals } from "./Proposals";
+import { filterOpenProposals, Proposals } from "./Proposals";
 import { api } from "../api";
 import {
   changeInput,
@@ -457,6 +457,234 @@ describe("Proposals component harness: filter retention", () => {
   });
 });
 
+describe("Proposals expiration and reason presentation (WM-547)", () => {
+  test("filterOpenProposals keeps TTL-expired proposals out of Open", () => {
+    const now = Date.now();
+    const expired = stubProposal("prop_expired", "open", {
+      created_at: new Date(now - 10_000).toISOString(),
+      ttl_seconds: 1,
+    });
+    const active = stubProposal("prop_active", "open", {
+      created_at: new Date(now - 1_000).toISOString(),
+      ttl_seconds: 300,
+    });
+
+    expect(filterOpenProposals([expired, active], now, false).map((p) => p.id)).toEqual([
+      "prop_active",
+    ]);
+    expect(filterOpenProposals([expired, active], now, true).map((p) => p.id)).toEqual([
+      "prop_expired",
+    ]);
+  });
+
+  test("expired detail disables approval with a reason and the Expired filter can be cleared", async () => {
+    const now = Date.now();
+    const rawReason = "auto_approval_ineligible:proposal_expired";
+    const expired = stubProposal("prop_expired", "open", {
+      agent: "expired-agent",
+      created_at: new Date(now - 10_000).toISOString(),
+      ttl_seconds: 1,
+      reason: rawReason,
+      spec: createRunSpecFixture("run_expired"),
+    });
+    const active = stubProposal("prop_active", "open", {
+      agent: "active-agent",
+      created_at: new Date(now).toISOString(),
+      ttl_seconds: 300,
+    });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [expired, active] }),
+        proposalHistory: async () => ({ proposals: [] }),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({ focusProposalId: expired.id });
+        const approve = await waitFor(
+          () => r.getByRole("button", { name: /^Approve/ }) as HTMLButtonElement,
+        );
+
+        expect(approve.disabled).toBe(true);
+        expect(approve.parentElement?.getAttribute("title")).toBe(
+          "This proposal has expired and can no longer be approved.",
+        );
+        // Rendered through the shared reason table (WM-594), not a local map.
+        expect(r.getAllByText("Not eligible for auto-approval — Proposal expired").length).toBeGreaterThan(0);
+        expect(r.getAllByTitle(rawReason).length).toBeGreaterThan(0);
+        expect(r.getByText("Safety & blast radius")).toBeTruthy();
+
+        const expiredRow = r.getAllByText("expired-agent").find((node) => node.closest("tr"))?.closest("tr");
+        expect(
+          Array.from(expiredRow?.querySelectorAll("td") ?? []).some(
+            (cell) =>
+              cell.classList.contains("min-w-24") &&
+              cell.classList.contains("truncate") &&
+              cell.classList.contains("whitespace-nowrap"),
+          ),
+        ).toBe(true);
+
+        // Clearing the chip brings the live proposals back. The focused one is
+        // exempt from the chip so the operator keeps the pane they are reading.
+        act(() => {
+          fireEvent.click(r.getByRole("button", { name: /^Expired/ }));
+        });
+        await waitFor(() => {
+          expect(r.getByText("active-agent")).toBeTruthy();
+          expect(r.getAllByText("expired-agent").length).toBeGreaterThan(0);
+        });
+      },
+    );
+  });
+});
+
+describe("Proposals selection safety under focus and expiry (WM-547)", () => {
+  /** Re-render with a different focused row, the way the hash/parent does. */
+  function refocus(r: ReturnType<typeof renderProposals>, focusProposalId: string | null) {
+    r.rerender(
+      <Proposals
+        connected={true}
+        context={{ kind: "all" }}
+        onRunQueued={noop}
+        focusProposalId={focusProposalId}
+        onSelectProposal={noop}
+        focusExpired={false}
+        onFocusExpiredConsumed={noop}
+        onJumpAgent={noop}
+        onJumpEvent={noop}
+      />,
+    );
+  }
+
+  test("opening a row to read it keeps the bulk selection", async () => {
+    const p1 = stubProposal("prop_bulk_1", "open", { agent: "agent-one" });
+    const p2 = stubProposal("prop_bulk_2", "open", { agent: "agent-two" });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1, p2] }),
+        proposalHistory: async () => ({ proposals: [] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({ focusProposalId: null });
+        await waitFor(() => expect(r.getByLabelText("Select proposal prop_bulk_1")).toBeTruthy());
+
+        act(() => {
+          fireEvent.click(r.getByLabelText("Select proposal prop_bulk_1"));
+          fireEvent.click(r.getByLabelText("Select proposal prop_bulk_2"));
+        });
+        expect(r.getByText("Approve selected (2)")).toBeTruthy();
+
+        // Open one of the ticked rows to read its spec before bulk-approving.
+        act(() => refocus(r, "prop_bulk_1"));
+        await waitFor(() => expect(r.container.querySelector("tr.row-selected")).toBeTruthy());
+
+        expect(r.getByRole("toolbar", { name: /bulk actions/i })).toBeTruthy();
+        expect(r.getByText("Approve selected (2)")).toBeTruthy();
+        expect((r.getByLabelText("Select proposal prop_bulk_2") as HTMLInputElement).checked).toBe(true);
+
+        // And moving on to the next row keeps it too.
+        act(() => refocus(r, "prop_bulk_2"));
+        await waitFor(() => expect(r.getByText("Approve selected (2)")).toBeTruthy());
+      },
+    );
+  });
+
+  test("losing the selection disarms the approve dialog", async () => {
+    const p1 = stubProposal("prop_armed_1", "open", {
+      agent: "armed-agent",
+      spec: createRunSpecFixture("run_armed_1"),
+    });
+    const p2 = stubProposal("prop_armed_2", "open", {
+      agent: "other-agent",
+      spec: createRunSpecFixture("run_armed_2"),
+    });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1, p2] }),
+        proposalHistory: async () => ({ proposals: [] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({ focusProposalId: "prop_armed_1" });
+        const openApprove = await waitFor(
+          () => r.getByRole("button", { name: /^Approve…/ }) as HTMLButtonElement,
+        );
+        act(() => {
+          fireEvent.click(openApprove);
+        });
+        expect(r.getByText("Approve and queue this run?")).toBeTruthy();
+
+        // The armed proposal is decided elsewhere and leaves the open list, so
+        // the dialog unmounts with the detail pane.
+        api.proposals = async () => ({ proposals: [p2] });
+        await act(async () => {
+          await r.queryClient.invalidateQueries({ queryKey: ["proposals"] });
+        });
+        await waitFor(() => expect(r.queryByText("Approve and queue this run?")).toBeNull());
+
+        // Selecting another proposal must not re-open an approve dialog the
+        // operator never armed — Enter is bound to its confirm button.
+        act(() => refocus(r, "prop_armed_2"));
+        await waitFor(() => expect(r.getAllByText("prop_armed_2").length).toBeGreaterThan(0));
+        expect(r.queryByText("Approve and queue this run?")).toBeNull();
+      },
+    );
+  });
+
+  test("a TTL that passes while the row is selected keeps the pane and its expired banner", async () => {
+    const t0 = new Date("2026-03-01T00:00:00Z").getTime();
+    setSystemTime(new Date(t0));
+    try {
+      const live = stubProposal("prop_ticking", "open", {
+        agent: "ticking-agent",
+        created_at: new Date(t0).toISOString(),
+        ttl_seconds: 60,
+        spec: createRunSpecFixture("run_ticking"),
+      });
+
+      await withApi(
+        {
+          proposals: async () => ({ proposals: [live] }),
+          proposalHistory: async () => ({ proposals: [] }),
+          status: async () => createStatusFixture(),
+          runs: async () => ({ runs: [] }),
+          events: async () => ({ events: [] }),
+        },
+        async () => {
+          const r = renderProposals({ focusProposalId: "prop_ticking" });
+          const approve = await waitFor(
+            () => r.getByRole("button", { name: /^Approve…/ }) as HTMLButtonElement,
+          );
+          expect(approve.disabled).toBe(false);
+
+          // The TTL passes under the operator, on the next useNow tick.
+          setSystemTime(new Date(t0 + 120_000));
+          await waitFor(
+            () => {
+              const b = r.getByRole("button", { name: /^Approve…/ }) as HTMLButtonElement;
+              expect(b.disabled).toBe(true);
+              expect(b.parentElement?.getAttribute("title")).toBe(
+                "This proposal has expired and can no longer be approved.",
+              );
+            },
+            { timeout: 4000 },
+          );
+        },
+      );
+    } finally {
+      setSystemTime();
+    }
+  }, 15_000);
+});
+
 describe("Proposals component harness: cross-tab reveal", () => {
   test("switches tab to History when focusProposalId is a decided proposal", async () => {
     const pOpen = stubProposal("prop_open_1", "open", { agent: "agent-open" });
@@ -615,8 +843,18 @@ describe("Proposals component harness: cross-tab reveal", () => {
 
   test("focusExpired prop sets open tab, filters to expired proposals, and calls onFocusExpiredConsumed", async () => {
     const onFocusExpiredConsumed = mock(() => {});
-    const pExpired = stubProposal("prop_exp", "open", { expired: true, agent: "agent-expired" });
-    const pActive = stubProposal("prop_act", "open", { expired: false, agent: "agent-active" });
+    const pExpired = stubProposal("prop_exp", "open", {
+      expired: true,
+      agent: "agent-expired",
+      created_at: new Date(Date.now() - 10_000).toISOString(),
+      ttl_seconds: 1,
+    });
+    const pActive = stubProposal("prop_act", "open", {
+      expired: false,
+      agent: "agent-active",
+      created_at: new Date().toISOString(),
+      ttl_seconds: 300,
+    });
 
     await withApi(
       {
@@ -792,6 +1030,8 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     const p2 = stubProposal("prop_2", "open", { agent: "security-scan" });
     const replacement = stubProposal("prop_1b", "open", {
       agent: "triage-scan",
+      created_at: new Date(Date.now() - 10_000).toISOString(),
+      ttl_seconds: 1,
       spec: createRunSpecFixture("run_prop_1b", { timeoutSeconds: 900, agent: "triage-scan" }),
     });
     api.proposals = async () => ({ proposals: [p1, p2] });
@@ -823,6 +1063,11 @@ describe("Proposals bulk confirm, reject reason, replan halt (WM-141)", () => {
     expect(approveCalls).toEqual(["prop_1"]);
     expect(r.getByText(/re-planned against current state/i)).toBeTruthy();
     expect(r.getByText(/nothing runs until you approve the new proposal explicitly/i)).toBeTruthy();
+    const approveReplacement = r.getByRole("button", { name: /Approve new proposal/i }) as HTMLButtonElement;
+    expect(approveReplacement.disabled).toBe(true);
+    expect(approveReplacement.parentElement?.getAttribute("title")).toBe(
+      "This replacement proposal has expired and can no longer be approved.",
+    );
   });
 
   test("repo context shows a persistent caption that the list is scoped to that repo", async () => {
@@ -1049,6 +1294,29 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
     // Press Enter to confirm approval
     fireEvent.keyDown(document.body, { key: "Enter" });
     await waitFor(() => expect(approvedCalls).toEqual(["prop_approve_hotkey"]));
+  });
+});
+
+describe("Proposals long-list window (WM-563)", () => {
+  test("a 2,000-row fixture mounts fewer than 200 table rows and pages forward", async () => {
+    const proposals = Array.from({ length: 2000 }, (_, i) => stubProposal(`prop_window_${i}`));
+    await withApi(
+      {
+        proposals: async () => ({ proposals }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderProposals();
+        const next = await r.findByRole("button", { name: "Next" });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(200);
+        expect(r.queryByLabelText("Select proposal prop_window_100")).toBeNull();
+        fireEvent.click(next);
+        await waitFor(() => {
+          expect(r.getByLabelText("Select proposal prop_window_100")).toBeTruthy();
+        });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(200);
+      },
+    );
   });
 });
 

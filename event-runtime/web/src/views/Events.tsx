@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { keyGuard, useDisplayOptions, useListKeys, useNow, useRequeuePoll, useTabKeys } from "../hooks";
+import { keyGuard, refetchIntervals, tableTokens, useDisplayOptions, useListKeys, useNow, useRequeuePoll, useTabKeys, useTableWindow } from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -50,6 +50,7 @@ import {
   GroupHeaderRow,
   Section,
   StateBadge,
+  TableWindowFooter,
   Th,
   VerbError,
   copyText,
@@ -320,17 +321,17 @@ export function Events({
   const list = useQuery({
     queryKey: ["events", fetchAll ? "all" : tab],
     queryFn: () => api.events(fetchAll || tab === "all" ? undefined : tab),
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2000 });
+  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, ...refetchIntervals.fast });
   // The reason behind a noop / refused row lives on the proposal and the run,
   // not the event (WM-594); both lists are already cached by other views.
   const proposalsQ = useQuery({
     queryKey: ["proposals", "history"],
     queryFn: () => api.proposalHistory("all"),
-    refetchInterval: 10_000,
+    ...refetchIntervals.secondary,
   });
-  const runsQ = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), refetchInterval: 10_000 });
+  const runsQ = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), ...refetchIntervals.secondary });
   const decisions = useMemo(() => {
     const byId = new Map<string, Proposal>();
     const byEvent = new Map<string, Proposal>();
@@ -472,6 +473,13 @@ export function Events({
     () => flat.findIndex((e) => keyOf(e) === selectedKey),
     [flat, selectedKey],
   );
+  const tokens = tableTokens(sections, display.collapsed, grouped(display));
+  const [windowTokens, windowStart, windowEnd, moveWindow] = useTableWindow(
+    tokens,
+    selectedKey,
+    keyOf,
+    JSON.stringify([tab, filter, context, display]),
+  );
   const sel = useMemo(
     () => (selectedKey ? (visible.find((e) => keyOf(e) === selectedKey) ?? null) : null),
     [visible, selectedKey],
@@ -486,7 +494,7 @@ export function Events({
 
   useEffect(() => {
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+  }, [selectedIndex, windowStart]);
 
   // Ephemeral Overview/Graph jumps: apply tab/type then drop them so the hash
   // (if any) is the only remaining selection source.
@@ -952,39 +960,26 @@ export function Events({
                   </tr>
                 );
               };
-              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
-              return sections.map((s) => {
-                const closed = display.collapsed.includes(s.key);
+              return windowTokens.map((token) => {
+                if (token.length === 1) return renderRow(token[0]);
+                const [s, sub] = token;
                 return (
-                  <Fragment key={s.key}>
-                    <GroupHeaderRow
-                      colSpan={listCols.length}
-                      section={s}
-                      collapsed={closed}
-                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
-                    />
-                    {!closed &&
-                      (s.subsections
-                        ? s.subsections.map((child) => {
-                            const childClosed = display.collapsed.includes(child.key);
-                            return (
-                              <Fragment key={child.key}>
-                                <GroupHeaderRow
-                                  colSpan={listCols.length}
-                                  section={child}
-                                  collapsed={childClosed}
-                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
-                                  sub
-                                />
-                                {!childClosed && child.rows.map(renderRow)}
-                              </Fragment>
-                            );
-                          })
-                        : s.rows.map(renderRow))}
-                  </Fragment>
+                  <GroupHeaderRow
+                    key={`group:${s.key}`}
+                    colSpan={listCols.length}
+                    section={s}
+                    collapsed={display.collapsed.includes(s.key)}
+                    onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                    sub={sub}
+                  />
                 );
               });
             })()}
+            <TableWindowFooter
+              colSpan={listCols.length}
+              range={[windowStart, windowEnd, tokens.length]}
+              move={moveWindow}
+            />
             {visible.length === 0 && (
               <ListEmpty
                 colSpan={listCols.length}

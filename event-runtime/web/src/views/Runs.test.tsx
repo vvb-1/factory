@@ -1,6 +1,7 @@
 import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { Runs, statesForRunTab } from "./Runs";
 import {
   changeInput,
@@ -878,6 +879,148 @@ describe("Runs copy chords and hints (WM-233)", () => {
 
         // The link text is rendered in full, not cut short.
         expect(link.textContent).toContain("proposal");
+      },
+    );
+  });
+});
+
+describe("Runs long-list window (WM-563)", () => {
+  test("a 2,000-row fixture mounts fewer than 200 table rows and pages forward", async () => {
+    const runs = Array.from({ length: 2000 }, (_, i) => stubListItem(`run_window_${i}`, "COMPLETED"));
+    await withApi(
+      {
+        runs: async () => ({ runs }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        const next = await r.findByRole("button", { name: "Next" });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(200);
+        expect(r.container.querySelector('td[title="run_window_100"]')).toBeNull();
+        fireEvent.click(next);
+        await waitFor(() => {
+          expect(r.container.querySelector('td[title="run_window_100"]')).toBeTruthy();
+        });
+        expect(r.container.querySelector("tbody tr:last-child")?.textContent).toContain("101–200/2000");
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(200);
+      },
+    );
+  });
+
+  test("group headers share the DOM cap even when 2,000 unique groups are collapsed", async () => {
+    const runs = Array.from({ length: 2000 }, (_, i) =>
+      stubListItem(`run_group_${i}`, "COMPLETED", { agent: `agent-${i}` }),
+    );
+    localStorage.setItem("evrt-display-runs", JSON.stringify({
+      groupBy: "agent",
+      subGroupBy: "none",
+      sortBy: "default",
+      sortDir: "asc",
+      showEmpty: false,
+      hiddenColumns: [],
+      collapsed: runs.map((run) => run.agent),
+      customColumns: [],
+    }));
+    await withApi(
+      { runs: async () => ({ runs }), status: async () => createStatusFixture() },
+      async () => {
+        const r = renderRuns();
+        await r.findByRole("button", { name: /agent-0/ });
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(200);
+        fireEvent.click(r.getByRole("button", { name: "Next" }));
+        await waitFor(() => expect(r.getByRole("button", { name: /agent-100/ })).toBeTruthy());
+        expect(r.container.querySelectorAll("tbody tr").length).toBeLessThan(200);
+      },
+    );
+  });
+
+  test("a sub-grouped page repeats only its own ancestry, never earlier sub headers", async () => {
+    // 5 agents x 50 runs, all COMPLETED: token 100 (the second page's first
+    // token) lands mid-way inside the second agent's subsection, so the window
+    // has to replay exactly two headers — COMPLETED and that agent — and no
+    // sub header whose rows all live on the previous page.
+    const runs = Array.from({ length: 250 }, (_, i) =>
+      stubListItem(`run_sub_${i}`, "COMPLETED", { agent: `agent-${Math.floor(i / 50)}` }),
+    );
+    localStorage.setItem("evrt-display-runs", JSON.stringify({
+      groupBy: "state",
+      subGroupBy: "agent",
+      sortBy: "default",
+      sortDir: "asc",
+      showEmpty: false,
+      hiddenColumns: [],
+      collapsed: [],
+      customColumns: [],
+    }));
+    await withApi(
+      { runs: async () => ({ runs }), status: async () => createStatusFixture() },
+      async () => {
+        const r = renderRuns();
+        fireEvent.click(await r.findByRole("button", { name: "Next" }));
+        await waitFor(() => {
+          expect(r.container.querySelector('td[title="run_sub_100"]')).toBeTruthy();
+        });
+
+        // Walk the rendered body: every expanded sub header must own at least
+        // one run row before the next header. A header with a count badge and
+        // nothing under it is the phantom this guards against.
+        const rows = [...r.container.querySelectorAll("tbody tr")];
+        const phantoms: string[] = [];
+        rows.forEach((row, i) => {
+          const header = row.querySelector("button[aria-expanded]");
+          if (!header || header.getAttribute("aria-expanded") !== "true") return;
+          const next = rows[i + 1];
+          if (!next || !next.querySelector('td[title^="run_sub_"]')) {
+            if (header.className.includes("pl-8")) phantoms.push(header.textContent ?? "");
+          }
+        });
+        expect(phantoms).toEqual([]);
+
+        // Positively: the page's own ancestry is replayed — its state header
+        // and its own agent — and the subsection that ended on the previous
+        // page is gone entirely.
+        const headers = [...r.container.querySelectorAll("tbody tr button[aria-expanded]")]
+          .map((el) => el.textContent ?? "");
+        expect(headers[0]).toStartWith("COMPLETED");
+        expect(headers[1]).toStartWith("agent-1");
+        expect(headers.filter((label) => label.startsWith("agent-0"))).toEqual([]);
+      },
+    );
+  });
+
+  test("j crosses a page boundary, Enter opens that row, and footer Enter does not", async () => {
+    const runs = Array.from({ length: 250 }, (_, i) => stubListItem(`run_keys_${i}`, "COMPLETED"));
+    const onOpenFull = mock(() => {});
+    function Harness() {
+      const [focusRunId, setFocusRunId] = useState<string | null>("run_keys_99");
+      return (
+        <Runs
+          connected
+          context={{ kind: "all" }}
+          focusRunId={focusRunId}
+          onSelectRun={setFocusRunId}
+          onOpenFull={onOpenFull}
+          focusState={null}
+          onFocusStateConsumed={noop}
+          onJumpAgent={noop}
+          onJumpEvent={noop}
+        />
+      );
+    }
+    await withApi(
+      { runs: async () => ({ runs }), status: async () => createStatusFixture() },
+      async () => {
+        const r = renderWithClient(<Harness />);
+        await waitFor(() => expect(r.container.querySelector('td[title="run_keys_99"]')).toBeTruthy());
+        fireEvent.keyDown(document.body, { key: "j" });
+        await waitFor(() => {
+          expect(r.container.querySelector('td[title="run_keys_100"]')?.closest("tr")?.className).toContain("row-selected");
+        });
+        fireEvent.keyDown(document.body, { key: "Enter" });
+        expect(onOpenFull).toHaveBeenCalledWith("run_keys_100");
+        onOpenFull.mockClear();
+        fireEvent.keyDown(r.getByRole("button", { name: "Next" }), { key: "Enter" });
+        expect(onOpenFull).not.toHaveBeenCalled();
       },
     );
   });

@@ -1,23 +1,36 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { keyGuard, useListKeys, useNow, useTabKeys } from "../hooks";
+import { keyGuard, refetchIntervals, useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
+  buildSections,
   cycleColumnSort,
-  defaultDisplayState,
+  flattenSections,
+  grouped,
+  removeCustomColumn,
   sortRows,
+  toggleCollapsed,
+  visibleColumns,
   type DisplayConfig,
+  type DisplayState,
 } from "../displayOptions";
+import { DisplayOptions, exportJson } from "../components/DisplayOptions";
+import { CustomCell } from "../components/CustomCell";
+import { INBOX_FACETS, matchesFilterQuery, parseFilterQuery } from "../filterQuery";
 import type { InboxItem } from "../types";
 import {
   Ago,
+  BulkActionBar,
   Button,
   CopyActions,
   DetailPane,
   Dialog,
+  FilterInput,
+  GroupHeaderRow,
   JumpLink,
   KV,
+  ListEmpty,
   ListPane,
   Section,
   StateBadge,
@@ -72,6 +85,48 @@ export const INBOX_KIND_HUES: Record<string, string> = Object.fromEntries(
   INBOX_GROUPS.flatMap((g) => g.kinds.map((k) => [k, g.hue])),
 );
 
+const INBOX_GROUP_HUES = Object.fromEntries(
+  [...INBOX_GROUPS, OTHER_GROUP].map((group) => [group.label, group.hue]),
+);
+
+/** Shared display grammar for Inbox: triage grouping and oldest-first age are the operator defaults. */
+export const INBOX_DISPLAY: DisplayConfig<InboxItem> = {
+  view: "inbox",
+  groups: [
+    {
+      key: "attention",
+      label: "Group (Decide/Red/Ready)",
+      get: (item) => groupOf(item.kind).label,
+      order: [...INBOX_GROUPS.map((group) => group.label), OTHER_GROUP.label],
+      hue: INBOX_GROUP_HUES,
+    },
+    { key: "kind", label: "Kind", get: (item) => item.kind, hue: INBOX_KIND_HUES },
+    { key: "repo", label: "Repo", get: (item) => item.refs.repo ?? "—" },
+  ],
+  sorts: [
+    { key: "age", label: "Age", get: (item) => item.createdAt, column: "age" },
+    { key: "kind", label: "Kind", get: (item) => item.kind, column: "kind" },
+  ],
+  columns: [
+    { key: "kind", label: "Kind" },
+    { key: "title", label: "Title" },
+    { key: "age", label: "Age" },
+    { key: "refs", label: "Refs" },
+    { key: "sent", label: "Sent" },
+  ],
+  defaults: { groupBy: "attention", sortBy: "age", sortDir: "asc" },
+};
+
+/** Keep one identity column visible while allowing every Inbox property to be toggled. */
+export function ensureInboxColumn(state: DisplayState): DisplayState {
+  const visibleBuiltIn = INBOX_DISPLAY.columns.some((column) => !state.hiddenColumns.includes(column.key));
+  const visibleCustom = state.customColumns.some(
+    (path) => !state.hiddenColumns.includes(`custom:${path}`),
+  );
+  if (visibleBuiltIn || visibleCustom) return state;
+  return { ...state, hiddenColumns: state.hiddenColumns.filter((key) => key !== "title") };
+}
+
 export type InboxItemStatus = Exclude<InboxTab, "all">;
 
 export function itemStatus(item: InboxItem): InboxItemStatus {
@@ -106,34 +161,6 @@ const DELIVERY_HUES: Record<DeliveryState, string> = {
   sent: "var(--hue-ok)",
   failed: "var(--hue-err)",
   none: "var(--hue-idle)",
-};
-
-const refSortValue = (item: InboxItem): string => {
-  const r = item.refs;
-  return [r.runId, r.proposalId, r.eventSource, r.eventId, r.issue, r.pr, r.repo]
-    .filter((value): value is string => Boolean(value))
-    .join(" ");
-};
-
-const INBOX_SORT: DisplayConfig<InboxItem> = {
-  view: "inbox",
-  groups: [],
-  sorts: [
-    { key: "kind", label: "Kind", get: (item) => item.kind, column: "kind" },
-    { key: "title", label: "Title", get: (item) => item.title, column: "title" },
-    // Age increases as the creation timestamp recedes, so negate the timestamp:
-    // aria-sort="ascending" must mean the displayed ages are ascending too.
-    { key: "age", label: "Age", get: (item) => -Date.parse(item.createdAt), column: "age" },
-    { key: "refs", label: "Refs", get: refSortValue, column: "refs" },
-    { key: "sent", label: "Sent", get: (item) => deliveryState(item), column: "sent" },
-  ],
-  columns: [
-    { key: "kind", label: "Kind" },
-    { key: "title", label: "Title" },
-    { key: "age", label: "Age" },
-    { key: "refs", label: "Refs" },
-    { key: "sent", label: "Sent" },
-  ],
 };
 
 /** Group in triage order, oldest first inside a group; empty groups are dropped. */
@@ -276,23 +303,88 @@ export function Inbox({
   const queryClient = useQueryClient();
   // One fetch of the whole ledger: it is small, every tab is a client-side
   // filter, and a deep link to a resolved item still resolves from the Open tab.
-  const query = useQuery({ queryKey: ["inbox", "all"], queryFn: () => api.inbox("all"), refetchInterval: 2000 });
+  const query = useQuery({ queryKey: ["inbox", "all"], queryFn: () => api.inbox("all"), ...refetchIntervals.primary });
   const items = query.data?.items ?? [];
 
   const [tab, setTab] = useState<InboxTab>("open");
-  const [sort, setSort] = useState(() => defaultDisplayState(INBOX_SORT));
+  const [filter, setFilter] = useState("");
   const counts = useMemo(() => {
     const c: Record<InboxTab, number> = { open: 0, acked: 0, resolved: 0, all: items.length };
     for (const it of items) c[itemStatus(it)] += 1;
     return c;
   }, [items]);
 
-  const visibleGroups = useMemo(
-    () => groupItems(items.filter((it) => matchesTab(it, tab)))
-      .map(({ group, items: rows }) => ({ group, items: sortRows(rows, INBOX_SORT, sort) })),
-    [items, tab, sort],
+  const byTab = useMemo(() => items.filter((item) => matchesTab(item, tab)), [items, tab]);
+  const parsed = useMemo(() => parseFilterQuery(filter, INBOX_FACETS), [filter]);
+  const filtered = useMemo(
+    () => byTab.filter((item) => matchesFilterQuery(item, parsed, INBOX_FACETS, undefined)),
+    [byTab, parsed],
   );
-  const visible = useMemo(() => visibleGroups.flatMap((g) => g.items), [visibleGroups]);
+  const [display, updateDisplay] = useDisplayOptions(INBOX_DISPLAY);
+  const setDisplay = (next: DisplayState | ((state: DisplayState) => DisplayState)) => {
+    updateDisplay((state) => ensureInboxColumn(typeof next === "function" ? next(state) : next));
+  };
+  const sections = useMemo(
+    () => buildSections(filtered, INBOX_DISPLAY, display),
+    [filtered, display],
+  );
+  const visible = useMemo(
+    () => flattenSections(sections, display.collapsed),
+    [sections, display.collapsed],
+  );
+  const cols = visibleColumns(INBOX_DISPLAY, display);
+  const show = useMemo(() => new Set(cols.map((column) => column.key)), [cols]);
+
+  const selectionEnabled = tab === "open" || tab === "acked";
+  const actionableVisible = selectionEnabled ? visible : [];
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAcking, setBulkAcking] = useState(false);
+  const [bulkResolving, setBulkResolving] = useState(false);
+  const [bulkResolveOpen, setBulkResolveOpen] = useState(false);
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const pendingStar = useRef(0);
+
+  const allActionableSelected =
+    actionableVisible.length > 0 && actionableVisible.every((it) => selectedIds.has(it.id));
+  const someActionableSelected =
+    actionableVisible.some((it) => selectedIds.has(it.id)) && !allActionableSelected;
+  const selectedRows = useMemo(
+    () => visible.filter((it) => selectedIds.has(it.id)),
+    [visible, selectedIds],
+  );
+  const ackableSelected = selectedRows.filter((it) => itemStatus(it) === "open");
+  const resolvableSelected = selectedRows.filter((it) => itemStatus(it) !== "resolved");
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = someActionableSelected;
+  }, [someActionableSelected]);
+
+  // IDs survive ordinary polling, while items that leave the active tab are
+  // pruned once the refetch establishes the new visible set.
+  useEffect(() => {
+    const visibleIds = new Set(actionableVisible.map((it) => it.id));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [actionableVisible]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+  const selectAllActionable = () => setSelectedIds(new Set(actionableVisible.map((it) => it.id)));
+  const toggleSelectAll = () => {
+    if (allActionableSelected) setSelectedIds(new Set());
+    else selectAllActionable();
+  };
 
   const sel = focusItemId ? (items.find((it) => it.id === focusItemId) ?? null) : null;
   const selectedIndex = sel ? visible.findIndex((it) => it.id === sel.id) : -1;
@@ -335,23 +427,67 @@ export function Inbox({
   const canAck = !!sel && connected && itemStatus(sel) === "open" && !ack.isPending;
   const canResolve = !!sel && connected && itemStatus(sel) !== "resolved" && !resolve.isPending;
 
-  // Enter confirms the resolve dialog (same idiom as the Proposals confirms):
-  // the Dialog primitive parks focus on its root, so a focused button is not
-  // something we can rely on.
+  const handleBulkAck = async () => {
+    if (!connected || bulkAcking || ackableSelected.length === 0) return;
+    setBulkAcking(true);
+    let done = 0;
+    let failed = 0;
+    for (const item of ackableSelected) {
+      try {
+        await api.ackInbox(item.id);
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    invalidate();
+    setSelectedIds(new Set());
+    setBulkAcking(false);
+    notify(`Ack: ${done} done / ${failed} failed`, failed ? "err" : "ok");
+  };
+
+  const handleBulkResolve = async () => {
+    if (!connected || bulkResolving || resolvableSelected.length === 0) return;
+    setBulkResolving(true);
+    let done = 0;
+    let failed = 0;
+    for (const item of resolvableSelected) {
+      try {
+        await api.resolveInbox(item.id);
+        done++;
+      } catch {
+        failed++;
+      }
+    }
+    invalidate();
+    setSelectedIds(new Set());
+    setBulkResolving(false);
+    setBulkResolveOpen(false);
+    notify(`Resolve: ${done} done / ${failed} failed`, failed ? "err" : "ok");
+  };
+
+  // Enter confirms either resolve dialog. Dialog focus parks on its root, so a
+  // focused button is not something the keyboard contract can rely on.
   useEffect(() => {
-    if (!confirmResolve) return;
+    if (!confirmResolve && !bulkResolveOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Enter" || !sel || !canResolve) return;
-      e.preventDefault();
-      resolve.mutate(sel.id);
+      if (e.key !== "Enter") return;
+      if (bulkResolveOpen && connected && !bulkResolving && resolvableSelected.length > 0) {
+        e.preventDefault();
+        void handleBulkResolve();
+      } else if (confirmResolve && sel && canResolve) {
+        e.preventDefault();
+        resolve.mutate(sel.id);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [confirmResolve, sel, canResolve, resolve]);
+  }, [confirmResolve, bulkResolveOpen, sel, canResolve, resolve, connected, bulkResolving, resolvableSelected]);
 
   const selectTab = (t: InboxTab) => {
     setTab(t);
     onSelectItem(null);
+    setSelectedIds(new Set());
   };
   useTabKeys(INBOX_TABS, tab, selectTab);
   useEffect(() => {
@@ -375,11 +511,14 @@ export function Inbox({
     onSelect: (i) => onSelectItem(visible[i]?.id ?? null),
     onClose: () => {
       if (confirmResolve) setConfirmResolve(false);
+      else if (bulkResolveOpen) setBulkResolveOpen(false);
+      else if (selectedIds.size > 0) setSelectedIds(new Set());
       else if (sel) onSelectItem(null);
     },
     keys: {
       a: () => {
-        if (canAck && sel) ack.mutate(sel.id);
+        const starActive = pendingStar.current > 0 && Date.now() - pendingStar.current < 800;
+        if (!starActive && canAck && sel) ack.mutate(sel.id);
       },
       x: () => {
         if (canResolve) setConfirmResolve(true);
@@ -387,8 +526,74 @@ export function Inbox({
     },
   });
 
+  useEffect(() => {
+    function onSelectionKey(e: KeyboardEvent) {
+      if (keyGuard(e) || e.altKey || goPrefixActive() || e.repeat) return;
+      const now = Date.now();
+      const starActive = pendingStar.current > 0 && now - pendingStar.current < 800;
+
+      if (!e.metaKey && !e.ctrlKey && e.key === "*") {
+        e.preventDefault();
+        pendingStar.current = now;
+        return;
+      }
+      if (!e.metaKey && !e.ctrlKey && starActive && (e.key === "a" || e.key === "n")) {
+        e.preventDefault();
+        pendingStar.current = 0;
+        if (e.key === "a") selectAllActionable();
+        else setSelectedIds(new Set());
+        return;
+      }
+      pendingStar.current = 0;
+
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "a") {
+        if (actionableVisible.length === 0) return;
+        e.preventDefault();
+        selectAllActionable();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey) return;
+
+      if ((e.key === " " || e.key === "Spacebar") && selectionEnabled && sel) {
+        e.preventDefault();
+        toggleSelect(sel.id);
+        return;
+      }
+      if (e.key === "A" && selectedIds.size > 0) {
+        if (!connected || bulkAcking || ackableSelected.length === 0) return;
+        e.preventDefault();
+        void handleBulkAck();
+        return;
+      }
+      if (e.key === "X" && selectedIds.size > 0) {
+        if (!connected || bulkResolving || resolvableSelected.length === 0) return;
+        e.preventDefault();
+        setBulkResolveOpen(true);
+      }
+    }
+
+    window.addEventListener("keydown", onSelectionKey);
+    return () => window.removeEventListener("keydown", onSelectionKey);
+  }, [
+    actionableVisible,
+    ackableSelected,
+    bulkAcking,
+    bulkResolving,
+    connected,
+    resolvableSelected,
+    sel,
+    selectedIds.size,
+    selectionEnabled,
+  ]);
+
   const tdCls = "border-b border-(--border) px-3 py-1.5 whitespace-nowrap";
-  const openEmpty = tab === "open" && visible.length === 0 && query.isSuccess;
+  const openEmpty = tab === "open" && byTab.length === 0 && !filter.trim() && query.isSuccess;
+  const handleExport = () => {
+    const sorted = sortRows(filtered, INBOX_DISPLAY, display);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportJson(`inbox-export-${dateStr}.json`, sorted);
+    notify(`Exported ${sorted.length} inbox item${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+  };
 
   return (
     <div className="flex h-full min-w-0">
@@ -398,7 +603,7 @@ export function Inbox({
             <>
               <h1 className="display mb-4 text-lg font-semibold">Inbox</h1>
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                <div className="flex gap-1" role="tablist" aria-label="Inbox status">
+                <div className="flex min-w-0 flex-1 flex-wrap gap-1" role="tablist" aria-label="Inbox status">
                   {INBOX_TABS.map((t, idx) => (
                     <button
                       key={t}
@@ -421,6 +626,23 @@ export function Inbox({
                     </button>
                   ))}
                 </div>
+                <span className="ml-auto">
+                  <DisplayOptions
+                    config={INBOX_DISPLAY}
+                    state={display}
+                    onChange={setDisplay}
+                    onExport={filtered.length > 0 ? handleExport : undefined}
+                    rows={byTab}
+                  />
+                </span>
+                <FilterInput
+                  value={filter}
+                  onChange={setFilter}
+                  placeholder="kind:… is:open repo:… issue:…"
+                  label="Filter inbox"
+                  query={parsed}
+                  facets={INBOX_FACETS}
+                />
               </div>
             </>
           }
@@ -450,55 +672,143 @@ export function Inbox({
             <table className="w-full border-separate border-spacing-0">
               <thead>
                 <tr className="text-left text-[11px] text-(--text-faint)">
-                  {INBOX_SORT.columns.map((column) => {
-                    const field = INBOX_SORT.sorts.find((candidate) => candidate.column === column.key)!;
+                  {selectionEnabled && (
+                    <th className="sticky top-0 z-10 h-7 w-8 bg-(--surface-0) px-3 shadow-[inset_0_-1px_0_var(--border)]">
+                      <input
+                        ref={headerCheckboxRef}
+                        type="checkbox"
+                        aria-label="Select all inbox items"
+                        checked={allActionableSelected}
+                        disabled={actionableVisible.length === 0}
+                        onChange={toggleSelectAll}
+                        className="cursor-pointer"
+                      />
+                    </th>
+                  )}
+                  {cols.map((column) => {
+                    const sort = INBOX_DISPLAY.sorts.find((field) => field.column === column.key);
+                    const isCustom = column.isCustom || column.key.startsWith("custom:");
+                    const customPath = column.key.replace(/^custom:/, "");
+                    const isCurrentSort = isCustom
+                      ? display.sortBy === column.key
+                      : sort && display.sortBy === sort.key;
                     return (
                       <Th
                         key={column.key}
                         label={column.label}
                         title={column.key === "sent" ? "Telegram delivery: sent, failed, or not attempted" : undefined}
-                        dir={sort.sortBy === field.key ? sort.sortDir : null}
-                        naturalDir={field.defaultDir ?? "asc"}
-                        onSort={() => setSort((state) => cycleColumnSort(INBOX_SORT, state, column.key))}
+                        dir={isCurrentSort ? display.sortDir : null}
+                        naturalDir={sort?.defaultDir ?? "asc"}
+                        onSort={sort || isCustom
+                          ? () => setDisplay((state) => cycleColumnSort(INBOX_DISPLAY, state, column.key))
+                          : undefined}
+                        onRemove={isCustom
+                          ? () => setDisplay((state) => removeCustomColumn(state, customPath))
+                          : undefined}
                       />
                     );
                   })}
                 </tr>
               </thead>
               <tbody>
-                {query.isPending && !query.data && (
-                  <tr>
-                    <td colSpan={5} className="px-3 py-8 text-center text-(--text-faint)">Loading inbox…</td>
-                  </tr>
-                )}
-                {query.isError && !query.data && (
-                  <tr>
-                    <td colSpan={5} className="px-3 py-8 text-center text-(--text-faint)">
-                      Cannot reach the control API — the inbox will appear when it is up.
-                    </td>
-                  </tr>
-                )}
-                {query.isSuccess && visible.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-3 py-8 text-center text-(--text-faint)">
-                      {tab === "acked" ? "No acked items." : tab === "resolved" ? "No resolved items yet." : "The ledger is empty."}
-                    </td>
-                  </tr>
-                )}
-                {visibleGroups.map(({ group, items: rows }) => (
-                  <GroupRows
-                    key={group.id}
-                    group={group}
-                    rows={rows}
-                    now={now}
-                    selectedId={sel?.id ?? null}
-                    onSelect={onSelectItem}
-                    onJumpRun={onJumpRun}
-                    onJumpProposal={onJumpProposal}
-                    onJumpEvent={onJumpEvent}
-                    tdCls={tdCls}
+                {(() => {
+                  const renderRow = (item: InboxItem) => {
+                    const delivery = deliveryState(item);
+                    return (
+                      <tr
+                        key={item.id}
+                        onClick={() => onSelectItem(item.id)}
+                        aria-selected={item.id === sel?.id}
+                        className={`cursor-pointer hover:bg-(--surface-1) ${item.id === sel?.id ? "row-selected" : ""}`}
+                      >
+                        {selectionEnabled && (
+                          <td className={`${tdCls} w-8`} onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select inbox item ${item.id}`}
+                              checked={selectedIds.has(item.id)}
+                              onChange={() => toggleSelect(item.id)}
+                              className="cursor-pointer"
+                            />
+                          </td>
+                        )}
+                        {show.has("kind") && (
+                          <td className={`${tdCls} w-32`}>
+                            <StateBadge state={item.kind} hues={INBOX_KIND_HUES} dot={false} />
+                          </td>
+                        )}
+                        {show.has("title") && (
+                          <td className={`${tdCls} min-w-40 max-w-0`}>
+                            <div className="truncate text-(--text)" title={item.title}>{displayTitle(item)}</div>
+                          </td>
+                        )}
+                        {show.has("age") && (
+                          <td className={`${tdCls} w-16 text-(--text-faint)`}>
+                            <Ago iso={item.createdAt} now={now} />
+                          </td>
+                        )}
+                        {show.has("refs") && (
+                          <td className={`${tdCls} w-40 max-w-40`}>
+                            <RefChips
+                              item={item}
+                              onJumpRun={onJumpRun}
+                              onJumpProposal={onJumpProposal}
+                              onJumpEvent={onJumpEvent}
+                            />
+                          </td>
+                        )}
+                        {show.has("sent") && (
+                          <td className={`${tdCls} w-12`}>
+                            <span
+                              role="img"
+                              aria-label={deliveryText(item)}
+                              title={deliveryText(item)}
+                              className="inline-block size-2 rounded-full"
+                              style={{ background: DELIVERY_HUES[delivery] }}
+                            />
+                          </td>
+                        )}
+                        {cols.filter((column) => column.isCustom || column.key.startsWith("custom:")).map((column) => (
+                          <CustomCell key={column.key} row={item} path={column.key.replace(/^custom:/, "")} />
+                        ))}
+                      </tr>
+                    );
+                  };
+                  if (!grouped(display)) return sections[0]?.rows.map(renderRow);
+                  return sections.map((section) => {
+                    const collapsed = display.collapsed.includes(section.key);
+                    return (
+                      <Fragment key={section.key}>
+                        <GroupHeaderRow
+                          colSpan={Math.max(cols.length + (selectionEnabled ? 1 : 0), 1)}
+                          section={section}
+                          collapsed={collapsed}
+                          onToggle={() => setDisplay((state) => toggleCollapsed(state, section.key))}
+                        />
+                        {!collapsed && section.rows.map(renderRow)}
+                      </Fragment>
+                    );
+                  });
+                })()}
+                {filtered.length === 0 && (
+                  <ListEmpty
+                    colSpan={Math.max(cols.length + (selectionEnabled ? 1 : 0), 1)}
+                    query={query}
+                    filtered={byTab.length > 0}
+                    onClear={filter.trim() ? () => setFilter("") : undefined}
+                    noun="inbox items"
+                    empty={
+                      tab === "acked"
+                        ? "No acked items."
+                        : tab === "resolved"
+                          ? "No resolved items yet."
+                          : tab === "open"
+                            ? "Nothing waiting on you."
+                            : "The ledger is empty."
+                    }
+                    escHint={Boolean(filter.trim())}
                   />
-                ))}
+                )}
               </tbody>
             </table>
           )}
@@ -618,6 +928,49 @@ export function Inbox({
         </DetailPane>
       )}
 
+      {selectedIds.size > 0 && selectionEnabled && (
+        <BulkActionBar count={selectedIds.size} onClear={() => setSelectedIds(new Set())}>
+          <Button
+            variant="primary"
+            disabled={!connected || bulkAcking || ackableSelected.length === 0}
+            onClick={() => void handleBulkAck()}
+          >
+            {bulkAcking ? "Acking…" : "Ack"}
+            <span className="mono ml-1 text-[10px] text-(--text-faint)" aria-hidden="true">A</span>
+          </Button>
+          <Button
+            disabled={!connected || bulkResolving || resolvableSelected.length === 0}
+            onClick={() => setBulkResolveOpen(true)}
+          >
+            Resolve…
+            <span className="mono ml-1 text-[10px] text-(--text-faint)" aria-hidden="true">X</span>
+          </Button>
+        </BulkActionBar>
+      )}
+
+      {bulkResolveOpen && resolvableSelected.length > 0 && (
+        <Dialog
+          title={`Resolve ${resolvableSelected.length} inbox item${resolvableSelected.length === 1 ? "" : "s"}?`}
+          onClose={() => setBulkResolveOpen(false)}
+        >
+          <p className="mb-3 text-[12px] text-(--text-dim)">
+            Marks all {resolvableSelected.length} selected items as dealt with. They leave Open or Acked and stay in the
+            ledger under Resolved. This does not act on their underlying runs, proposals, or PRs.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setBulkResolveOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={!connected || bulkResolving}
+              onClick={() => void handleBulkResolve()}
+              autoFocus
+            >
+              {bulkResolving ? "Resolving…" : `Resolve ${resolvableSelected.length} items`}
+            </Button>
+          </div>
+        </Dialog>
+      )}
+
       {confirmResolve && sel && (
         <Dialog title="Resolve inbox item?" onClose={() => setConfirmResolve(false)}>
           <p className="mb-3 text-[12px] text-(--text-dim)">
@@ -636,80 +989,6 @@ export function Inbox({
   );
 }
 
-function GroupRows({
-  group,
-  rows,
-  now,
-  selectedId,
-  onSelect,
-  onJumpRun,
-  onJumpProposal,
-  onJumpEvent,
-  tdCls,
-}: {
-  group: InboxGroup;
-  rows: InboxItem[];
-  now: number;
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  onJumpRun: (runId: string) => void;
-  onJumpProposal: (id: string) => void;
-  onJumpEvent: (source: string, eventId: string) => void;
-  tdCls: string;
-}) {
-  return (
-    <>
-      <tr>
-        <td
-          colSpan={5}
-          className="sticky top-7 z-10 border-b border-(--border) bg-(--surface-0) px-3 py-1 text-[11px] font-medium"
-          style={{ color: group.hue }}
-        >
-          <span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full align-middle" style={{ background: group.hue }} />
-          {group.label}
-          <span className="ml-1.5 tabular-nums text-(--text-faint)">{rows.length}</span>
-        </td>
-      </tr>
-      {rows.map((item) => {
-        const d = deliveryState(item);
-        return (
-          <tr
-            key={item.id}
-            onClick={() => onSelect(item.id)}
-            aria-selected={item.id === selectedId}
-            className={`cursor-pointer hover:bg-(--surface-1) ${item.id === selectedId ? "row-selected" : ""}`}
-          >
-            <td className={`${tdCls} w-32`}>
-              <StateBadge state={item.kind} hues={INBOX_KIND_HUES} dot={false} />
-            </td>
-            {/* Title is the decision text: it truncates last. `max-w-0` lets it
-                shrink-to-fit, `min-w-40` stops it collapsing to a glyph when
-                the pane opens at ~1100px — Refs gives up width first. */}
-            <td className={`${tdCls} min-w-40 max-w-0`}>
-              <div className="truncate text-(--text)" title={item.title}>{displayTitle(item)}</div>
-            </td>
-            <td className={`${tdCls} w-16 text-(--text-faint)`}>
-              <span className="tabular-nums" title={item.createdAt}>{inboxAge(item.createdAt, now)}</span>
-            </td>
-            <td className={`${tdCls} w-72 max-w-72`}>
-              <RefChips item={item} onJumpRun={onJumpRun} onJumpProposal={onJumpProposal} onJumpEvent={onJumpEvent} />
-            </td>
-            <td className={`${tdCls} w-12`}>
-              <span
-                role="img"
-                aria-label={deliveryText(item)}
-                title={deliveryText(item)}
-                className="inline-block size-2 rounded-full"
-                style={{ background: DELIVERY_HUES[d] }}
-              />
-            </td>
-          </tr>
-        );
-      })}
-    </>
-  );
-}
-
 function PrRef({ item, className }: { item: InboxItem; className?: string }) {
   const ref = item.refs.pr!;
   const href = prHref(item);
@@ -720,7 +999,6 @@ function PrRef({ item, className }: { item: InboxItem; className?: string }) {
     <span className={`mono ${className ?? ""}`} title={ref}>{ref}</span>
   );
 }
-
 /** Every ref is one click from the thing it is about; nothing here selects the row. */
 function RefChips({
   item,

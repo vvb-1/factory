@@ -29,6 +29,8 @@ import { traceRecorder } from "./trace.mjs";
 import { ContractViolation, verifyResult } from "./verify.mjs";
 import { HEARTBEAT_STALE_MS, satisfiesPlacement } from "./workers.mjs";
 import { createWorkspace, destroyWorkspace, PathViolation, safeJoin } from "./workspace.mjs";
+import { createInboxItem } from "./inbox.mjs";
+import { templateFor } from "./decision-templates.mjs";
 
 /**
  * Runtime-injected artifacts: adapters that capture the agent's output write
@@ -37,8 +39,248 @@ import { createWorkspace, destroyWorkspace, PathViolation, safeJoin } from "./wo
  */
 const RUNTIME_ARTIFACTS = [{ kind: "transcript", path: ".transcript.json" }];
 
-/** Grace added to the spec timeout before a lease is considered abandoned. */
-const LEASE_GRACE_SECONDS = 120;
+/** Grace added to the execution deadline before a lease is considered abandoned. */
+export const LEASE_GRACE_SECONDS = 120;
+
+/**
+ * Adapters that honor AbortSignal, so the worker's durable DB-backed deadline
+ * monitor — not the adapter's own TERM/KILL timer — is the authoritative
+ * timer and can move while an attempt is running (WM-566). Their `timeoutMs`
+ * is only a runaway backstop, but it must be a real one: agy forwards it out
+ * of process as `--print-timeout` and the gondolin guest timer uses it to
+ * stop a wedged runner from pinning the run slot open (WM-692).
+ */
+export const DYNAMIC_DEADLINE_ADAPTERS = new Set([
+  "agy", "claude", "command", "cursor", "fake", "pi",
+]);
+
+/** `limits.max_run_minutes` from config/policy.yaml, or null when unavailable. */
+export function policyMaxRunMinutes(root = FACTORY_ROOT) {
+  try {
+    const value = Bun.YAML.parse(
+      readFileSync(path.join(root, "config", "policy.yaml"), "utf8"),
+    )?.limits?.max_run_minutes;
+    return Number.isFinite(value) && value > 0 ? Number(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `timeoutMs` handed to `adapter.execute`. Dynamic-deadline adapters get
+ * the policy ceiling: no non-override extension can move a deadline past
+ * `started_at + max_run_minutes`, so `max(budget, max_run_minutes) + lease
+ * grace` keeps every policy-bounded extension alive while still bounding a
+ * wedged child. Every other adapter keeps its exact run budget.
+ */
+export function adapterExecuteTimeoutMs({ adapterKey, spec, maxRunMinutes = policyMaxRunMinutes() }) {
+  const budgetMs = spec.timeoutSeconds * 1000;
+  if (!DYNAMIC_DEADLINE_ADAPTERS.has(adapterKey)) return budgetMs;
+  const policyMs = Number.isFinite(maxRunMinutes) && maxRunMinutes > 0 ? maxRunMinutes * 60_000 : 0;
+  return Math.max(budgetMs, policyMs) + LEASE_GRACE_SECONDS * 1000;
+}
+const DEADLINE_POLL_MS = 100;
+
+function deadlineEventFromReason(reason, type) {
+  if (typeof reason !== "string" || !reason.startsWith("{")) return null;
+  try {
+    const value = JSON.parse(reason);
+    if (
+      value?.type === type &&
+      typeof value.deadlineAt === "string" &&
+      Number.isFinite(Date.parse(value.deadlineAt))
+    ) return value;
+  } catch { /* intentionally ignored */ }
+  return null;
+}
+
+function deadlineExtensionFromReason(reason) {
+  const value = deadlineEventFromReason(reason, "deadline_extended");
+  return value && Number.isInteger(value.seconds) && value.seconds > 0 ? value : null;
+}
+
+function deadlineExpiredFromReason(reason) {
+  return deadlineEventFromReason(reason, "deadline_expired");
+}
+
+/** Durable attempt deadline: latest extension, then the immutable initial budget. */
+export function attemptDeadline(db, runId, attempt, spec = null) {
+  const extensionRows = db.query(
+    `SELECT reason FROM lifecycle_events WHERE run_id = ? AND attempt = ? ORDER BY seq DESC`,
+  ).all(runId, attempt);
+  for (const row of extensionRows) {
+    const extension = deadlineExtensionFromReason(row.reason);
+    if (extension) return Date.parse(extension.deadlineAt);
+  }
+  const row = db.query(
+    `SELECT started_at, lease_expires_at FROM attempts WHERE run_id = ? AND attempt = ?`,
+  ).get(runId, attempt);
+  if (!row) return null;
+  const parsedSpec = spec ?? (() => {
+    const run = db.query(`SELECT spec_json FROM runs WHERE run_id = ?`).get(runId);
+    return run?.spec_json ? JSON.parse(run.spec_json) : null;
+  })();
+  if (row.started_at && Number.isFinite(Number(parsedSpec?.timeoutSeconds))) {
+    return Date.parse(row.started_at) + Number(parsedSpec.timeoutSeconds) * 1000;
+  }
+  if (row.lease_expires_at) {
+    return Date.parse(row.lease_expires_at) - LEASE_GRACE_SECONDS * 1000;
+  }
+  return null;
+}
+
+export function deadlineExtensions(db, runId) {
+  return db.query(
+    `SELECT seq, actor, reason, at FROM lifecycle_events WHERE run_id = ? ORDER BY seq`,
+  ).all(runId).flatMap((row) => {
+    const extension = deadlineExtensionFromReason(row.reason);
+    return extension ? [{ seq: row.seq, actor: row.actor, at: row.at, ...extension }] : [];
+  });
+}
+
+/** Append an audited extension and move the current attempt's lease atomically. */
+export function extendRunDeadline(db, runId, {
+  seconds,
+  actor,
+  override = false,
+  maxDeadlineMs = null,
+  policyVersion = "unknown",
+  now = Date.now(),
+} = {}) {
+  return txImmediate(db, () => {
+    const run = db.query(`SELECT state, attempts, spec_json FROM runs WHERE run_id = ?`).get(runId);
+    if (!run) return { refused: true, code: "unknown_run", status: 404 };
+    if (!["RUNNING", "VERIFYING"].includes(run.state)) {
+      return { refused: true, code: "run_not_extendable", status: 409, state: run.state };
+    }
+    const spec = JSON.parse(run.spec_json);
+    if (spec.adapter === "actions") {
+      return {
+        refused: true,
+        code: "adapter_deadline_not_extendable",
+        status: 409,
+        adapter: spec.adapter,
+      };
+    }
+    const deadlineRows = db.query(
+      `SELECT reason FROM lifecycle_events WHERE run_id = ? AND attempt = ? ORDER BY seq DESC`,
+    ).all(runId, run.attempts);
+    if (deadlineRows.some((row) => deadlineExpiredFromReason(row.reason))) {
+      return { refused: true, code: "deadline_already_expired", status: 409 };
+    }
+    const currentDeadline = attemptDeadline(db, runId, run.attempts, spec);
+    if (!Number.isFinite(currentDeadline)) {
+      return { refused: true, code: "deadline_unavailable", status: 409 };
+    }
+    // Serialize the edge decision under the same write lock as worker expiry.
+    // A delayed worker poll must not let an operator revive an already-spent
+    // deadline merely because the durable expiry marker has not landed yet.
+    if (resolveNow(now) >= currentDeadline) {
+      return {
+        refused: true,
+        code: "deadline_already_expired",
+        status: 409,
+        deadlineAt: new Date(currentDeadline).toISOString(),
+      };
+    }
+    const deadlineMs = currentDeadline + seconds * 1000;
+    if (!override && Number.isFinite(maxDeadlineMs) && deadlineMs > maxDeadlineMs) {
+      return {
+        refused: true,
+        code: "policy_run_limit",
+        status: 409,
+        deadlineAt: new Date(currentDeadline).toISOString(),
+        maxDeadlineAt: new Date(maxDeadlineMs).toISOString(),
+      };
+    }
+    const at = iso(now);
+    const deadlineAt = new Date(deadlineMs).toISOString();
+    const leaseExpiresAt = new Date(deadlineMs + LEASE_GRACE_SECONDS * 1000).toISOString();
+    const reason = canonicalJson({
+      type: "deadline_extended",
+      seconds,
+      deadlineAt,
+      override: override === true,
+    });
+    const record = {
+      runId,
+      from: run.state,
+      to: run.state,
+      actor,
+      reason,
+      attempt: run.attempts,
+      policyVersion,
+      at,
+    };
+    db.query(
+      `INSERT INTO lifecycle_events
+         (run_id, from_state, to_state, actor, reason, attempt, correlation_id, causation_id, policy_version, at, record_hash)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+    ).run(
+      runId, run.state, run.state, actor, reason, run.attempts,
+      policyVersion, at, hashJson(record),
+    );
+    db.query(
+      `UPDATE attempts SET lease_expires_at = ? WHERE run_id = ? AND attempt = ?`,
+    ).run(leaseExpiresAt, runId, run.attempts);
+    db.query(`UPDATE runs SET updated_at = ? WHERE run_id = ?`).run(at, runId);
+    return { runId, seconds, deadlineAt, leaseExpiresAt, override: override === true };
+  });
+}
+
+/**
+ * Durably claim expiry before signalling the adapter. This transaction races
+ * the extension transaction under the same SQLite write lock: an extension
+ * that commits first moves the deadline, while an expiry that commits first
+ * makes every later extension a typed refusal throughout TERM/KILL grace.
+ */
+export function expireRunDeadline(db, runId, attempt, fencingToken, {
+  actor,
+  policyVersion = "unknown",
+  now = Date.now(),
+} = {}) {
+  return txImmediate(db, () => {
+    const run = db.query(`SELECT state, attempts, spec_json FROM runs WHERE run_id = ?`).get(runId);
+    if (!run || run.attempts !== attempt || !["RUNNING", "VERIFYING"].includes(run.state)) {
+      return { expired: false, inactive: true };
+    }
+    if (!assertCurrentToken(db, runId, fencingToken)) return { expired: false, fenced: true };
+    const rows = db.query(
+      `SELECT reason FROM lifecycle_events WHERE run_id = ? AND attempt = ? ORDER BY seq DESC`,
+    ).all(runId, attempt);
+    const prior = rows.map((row) => deadlineExpiredFromReason(row.reason)).find(Boolean);
+    if (prior) return { expired: true, deadlineAt: prior.deadlineAt, existing: true };
+
+    const deadlineMs = attemptDeadline(db, runId, attempt, JSON.parse(run.spec_json));
+    const currentNow = resolveNow(now);
+    if (!Number.isFinite(deadlineMs) || currentNow < deadlineMs) {
+      return { expired: false, deadlineMs };
+    }
+
+    const at = iso(currentNow);
+    const deadlineAt = new Date(deadlineMs).toISOString();
+    const reason = canonicalJson({ type: "deadline_expired", deadlineAt });
+    const record = {
+      runId,
+      from: run.state,
+      to: run.state,
+      actor,
+      reason,
+      attempt,
+      policyVersion,
+      at,
+    };
+    db.query(
+      `INSERT INTO lifecycle_events
+         (run_id, from_state, to_state, actor, reason, attempt, correlation_id, causation_id, policy_version, at, record_hash)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+    ).run(
+      runId, run.state, run.state, actor, reason, attempt,
+      policyVersion, at, hashJson(record),
+    );
+    return { expired: true, deadlineAt };
+  });
+}
 
 /** Infrastructure retries are independent from the agent-error attempt budget. */
 export const DEFAULT_MAX_ENVIRONMENT_RETRIES = 3;
@@ -123,6 +365,47 @@ function iso(now) {
   return new Date(resolveNow(now)).toISOString();
 }
 
+// Must mirror the refs verify.mjs validated the authored decision against
+// (issue = input.ticket, repo, runId); a divergence here would let a decision
+// that passed verify fail createInboxItem's legality check at write time.
+function refusalInboxRefs(spec) {
+  const refs = { runId: spec.runId };
+  const input = spec.input ?? {};
+  const issue = input.ticket;
+  const repo = input.repo;
+  const pr = input.pr ?? input.prNumber;
+  if (issue !== undefined && issue !== null && String(issue).trim()) refs.issue = String(issue);
+  if (repo !== undefined && repo !== null && String(repo).trim()) refs.repo = String(repo);
+  if (pr !== undefined && pr !== null && String(pr).trim()) refs.pr = String(pr);
+  return refs;
+}
+
+function createRefusalInboxItem(db, spec, result, { now }) {
+  if (result.reasonCode !== "needs_human") return null;
+  const refs = refusalInboxRefs(spec);
+  const decision = result.decision ?? templateFor("ESCALATED", {
+    producer: "escalation",
+    refs,
+  });
+  const subject = refs.issue ?? refs.runId;
+  const body = result.decisionErrors?.length
+    ? `The agent's decision request was rejected:\n${result.decisionErrors.join("\n")}`
+    : null;
+  return createInboxItem(
+    db,
+    {
+      kind: "ESCALATED",
+      title: result.decision?.question ?? `ESCALATED ${subject}: ${result.reasonCode}`,
+      body,
+      refs,
+      source: `agent:${spec.runId}`,
+      decision,
+      dedupeKey: `ESCALATED:${refs.issue ?? refs.runId}`,
+    },
+    { now },
+  );
+}
+
 function finishAttempt(db, runId, attempt, terminalState, reasonCode, now, usage = {}) {
   const finishedAt = iso(now);
   db.query(
@@ -179,6 +462,14 @@ function latestJournalHash(db, runId) {
   return db
     .query(`SELECT record_hash FROM lifecycle_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1`)
     .get(runId)?.record_hash ?? null;
+}
+
+function receiptWithDeadlineExtensions(db, runId, options) {
+  const receipt = createReceipt(options);
+  const extensions = deadlineExtensions(db, runId);
+  return extensions.length > 0
+    ? { ...receipt, deadlineExtensions: canonicalJson(extensions) }
+    : receipt;
 }
 
 /** The admitted event this run was planned from, via its proposal (may be absent). */
@@ -425,6 +716,27 @@ function deferTransientDispatchGate(db, {
 
 function hasPlanTimeDispatchEvidence(spec) {
   return Boolean(spec?.approvalPolicy?.dispatchEvidence?.ticket?.descriptionHash);
+}
+
+/**
+ * A reaped lease leaves the Linear claim in place. Prove from the attempt
+ * ledger that this new attempt belongs to the same run and immediately follows
+ * a lease-expired claim before relaxing the Todo/unassigned dispatch gate.
+ */
+function claimedRetryFor(db, runId, attempt) {
+  if (!Number.isInteger(attempt) || attempt <= 1) return null;
+  const priorAttempt = attempt - 1;
+  const prior = db.query(
+    `SELECT terminal_state, reason_code FROM attempts WHERE run_id = ? AND attempt = ?`,
+  ).get(runId, priorAttempt);
+  if (prior?.terminal_state !== "FAILED" || prior?.reason_code !== "lease_expired") return null;
+  const requeue = db.query(
+    `SELECT reason FROM lifecycle_events
+     WHERE run_id = ? AND to_state = 'QUEUED' AND attempt = ?
+     ORDER BY seq DESC LIMIT 1`,
+  ).get(runId, priorAttempt);
+  if (requeue?.reason !== "retry:environment") return null;
+  return { runId, priorAttempt, reasonCode: "lease_expired" };
 }
 
 function contradictsPlanTimeOwnedPaths(spec, gateResult) {
@@ -718,7 +1030,7 @@ const ACTIVE_EXECUTIONS = new Map();
  */
 export async function executeClaimed(db, registry, adapters, claim, {
   workspacesRoot, artifactStore = artifactsRoot(), now = () => Date.now(), policyVersion = "unknown", adapterOverride, env = {},
-  dispatch, resolveLinearKey = resolveLinearApiKey,
+  dispatch, resolveLinearKey = resolveLinearApiKey, policyRoot = FACTORY_ROOT,
 } = {}) {
   const { runId, attempt, fencingToken, spec } = claim;
   const owner = db
@@ -729,12 +1041,29 @@ export async function executeClaimed(db, registry, adapters, claim, {
   let checkoutPath = null;
   let checkoutBaseline;
   let worktreeRecord;
+  const cleanupWorkspace = ({ retainWorkspace = false } = {}) => {
+    if (!workspaceDir) return;
+    const fenced = !assertCurrentToken(db, runId, fencingToken);
+    if (fenced && spec.workspace?.type === "worktree") {
+      // A newer attempt for this run uses the same delegated worktree. Remove
+      // only the stale attempt's teardown marker so destroyWorkspace cleans its
+      // wrapper directory without invoking worktree_down under the live retry.
+      try { unlinkSync(path.join(workspaceDir, ".worktree.json")); } catch { /* intentionally ignored */ }
+    }
+    destroyWorkspace(workspaceDir, {
+      retain: retainWorkspace,
+      checkout: fenced ? null : checkoutPath,
+      repoName,
+    });
+  };
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
   const ticketId = spec.input?.ticket ?? null;
   const isWorktree = spec.workspace?.type === "worktree";
 
   let leaseHeartbeat = null;
   let ticketClaimed = false;
+  const ticketLeaseOwner = `${owner}:${runId}:${fencingToken}`;
+  const mayMutateClaimedTicket = () => ticketClaimed && assertCurrentToken(db, runId, fencingToken);
   let attemptUsage = { adapter: adapterOverride ?? spec.adapter };
 
   let dispatchOpts = dispatch;
@@ -845,7 +1174,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
         runId, to: "REFUSED", expectFrom: "VERIFYING",
         actor: owner, reason: journalReason, attempt, policyVersion, now: currentNow,
       });
-      const receipt = createReceipt({
+      const receipt = receiptWithDeadlineExtensions(db, runId, {
         runId,
         spec,
         def,
@@ -955,7 +1284,13 @@ export async function executeClaimed(db, registry, adapters, claim, {
         return { runId, attempt, terminalState: "REFUSED", reasonCode, receipt: res?.receipt };
       };
 
-      const gate = def?.gate ?? "dispatch";
+      // WM-469 de-hardcoded the merge-fix role from the kernel: the definition
+      // declares `dispatchGateExempt: true` (validated by the registry) instead
+      // of a `gate: "merge-fix"` literal the worker string-matched. Keep the
+      // planner and worker keyed off the SAME declarative field — a legacy
+      // `gate` value is still honoured so an older pinned spec cannot silently
+      // fall through to the dispatch claim gate and refuse with ticket_assigned.
+      const gate = def?.dispatchGateExempt === true ? "merge-fix" : (def?.gate ?? "dispatch");
       if (!["dispatch", "merge-fix"].includes(gate)) {
         releaseClaimLock(lockFile);
         const reasonCode = "worktree_gate_unknown";
@@ -983,7 +1318,10 @@ export async function executeClaimed(db, registry, adapters, claim, {
             now: nowFn,
           });
         } else {
-          gateResult = worktreeDispatchAutoEligibility(spec.input, dispatchOpts);
+          gateResult = worktreeDispatchAutoEligibility(spec.input, {
+            ...(dispatchOpts ?? {}),
+            claimedRetry: claimedRetryFor(db, runId, attempt),
+          });
         }
       } catch (err) {
         if (gate === "dispatch" && hasPlanTimeDispatchEvidence(spec) && String(err?.message ?? err).startsWith("linear_read_failed:")) {
@@ -1014,25 +1352,34 @@ export async function executeClaimed(db, registry, adapters, claim, {
         // verb here would reject the valid run as ticket_assigned.
         releaseClaimLock(lockFile);
       } else {
-        let claimRes;
-        try {
-          claimRes = await claimTicketFn({ repo: repoName, ticket: ticketId, harness: spec.adapter ?? "claude" });
-        } finally {
+        // The retry gate has already re-read and authenticated the surviving
+        // claim. Do not run the mutating claim command again: besides being
+        // redundant, that could steal the ticket if ownership changed in the
+        // narrow interval after the gate read.
+        const resumedClaim = gateResult.evidence?.checks?.ticket_claim_retry === true;
+        if (!resumedClaim) {
+          let claimRes;
+          try {
+            claimRes = await claimTicketFn({ repo: repoName, ticket: ticketId, harness: spec.adapter ?? "claude" });
+          } finally {
+            releaseClaimLock(lockFile);
+          }
+
+          if (!claimRes?.ok) {
+            const reasonCode = claimRes?.reasonCode || "ticket_claim_lost";
+            const res = refuseTerminal(reasonCode, ["dispatch_claim"]);
+            if (res?.fenced) return { fenced: true };
+            return { runId, attempt, terminalState: "REFUSED", reasonCode, receipt: res?.receipt };
+          }
+        } else {
           releaseClaimLock(lockFile);
         }
 
-        if (!claimRes?.ok) {
-          const reasonCode = claimRes?.reasonCode || "ticket_claim_lost";
-          const res = refuseTerminal(reasonCode, ["dispatch_claim"]);
-          if (res?.fenced) return { fenced: true };
-          return { runId, attempt, terminalState: "REFUSED", reasonCode, receipt: res?.receipt };
-        }
-
         ticketClaimed = true;
-        writeWorkerLease({ repo: repoName, ticket: ticketId, owner, pid: process.pid, dir: leasesDir, now: nowFn() });
+        writeWorkerLease({ repo: repoName, ticket: ticketId, owner: ticketLeaseOwner, pid: process.pid, dir: leasesDir, now: nowFn() });
         leaseHeartbeat = setInterval(() => {
           try {
-            renewWorkerLease({ repo: repoName, ticket: ticketId, owner, dir: leasesDir, now: Date.now() });
+            renewWorkerLease({ repo: repoName, ticket: ticketId, owner: ticketLeaseOwner, dir: leasesDir, now: Date.now() });
           } catch { /* intentionally ignored */ }
         }, LEASE_HEARTBEAT_MS);
         leaseHeartbeat?.unref?.();
@@ -1054,7 +1401,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     const adapter = adapters[adapterKey];
     if (!adapter) {
       const res = failTerminal("FAILED", "unknown_adapter", "unknown_adapter");
-      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode: "unknown_adapter" };
     }
@@ -1062,7 +1409,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
 
     if (!verifyDefHash(spec, def)) {
       const refusedRes = refuseTerminal("agent_definition_mismatch", ["def_hash_mismatch"], { causeTyped: true });
-      destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      cleanupWorkspace();
       if (refusedRes?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "REFUSED", reasonCode: "agent_definition_mismatch", receipt: refusedRes.receipt };
     }
@@ -1085,24 +1432,95 @@ export async function executeClaimed(db, registry, adapters, claim, {
     const onUsage = (usage) => {
       attemptUsage = { adapter: adapterKey, ...(usage ?? {}) };
     };
+
+    // The extension endpoint changes the durable deadline while this promise
+    // is in flight. Re-read it both on a short cadence and at the timer edge:
+    // an extension committed just before the old edge must win the race.
+    const logicalBase = nowFn();
+    const wallBase = Date.now();
+    const logicalNow = () => logicalBase + (Date.now() - wallBase);
+    let deadlineTimer = null;
+    let deadlinePoll = null;
+    let deadlineExpired = false;
+    const refreshDeadline = () => {
+      if (abortController.signal.aborted) return;
+      const deadlineMs = attemptDeadline(db, runId, attempt, spec);
+      if (!Number.isFinite(deadlineMs)) return;
+      try {
+        const leaseExpiresAt = new Date(
+          deadlineMs + LEASE_GRACE_SECONDS * 1000,
+        ).toISOString();
+        db.query(
+          `UPDATE attempts SET lease_expires_at = ?
+            WHERE run_id = ? AND attempt = ? AND fencing_token = ?
+              AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
+        ).run(
+          leaseExpiresAt,
+          runId,
+          attempt,
+          fencingToken,
+          leaseExpiresAt,
+        );
+      } catch { /* intentionally ignored */ }
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      const leftMs = deadlineMs - logicalNow();
+      if (leftMs <= 0) {
+        const expiry = expireRunDeadline(db, runId, attempt, fencingToken, {
+          actor: owner,
+          policyVersion,
+          now: logicalNow(),
+        });
+        if (expiry.expired) {
+          deadlineExpired = true;
+          abortController.abort("deadline_expired");
+          return;
+        }
+        if (Number.isFinite(expiry.deadlineMs)) {
+          deadlineTimer = setTimeout(refreshDeadline, Math.max(1, expiry.deadlineMs - logicalNow()));
+          deadlineTimer.unref?.();
+        }
+        return;
+      }
+      deadlineTimer = setTimeout(refreshDeadline, leftMs);
+      deadlineTimer.unref?.();
+    };
+    refreshDeadline();
+    deadlinePoll = setInterval(refreshDeadline, DEADLINE_POLL_MS);
+    deadlinePoll.unref?.();
+    const stopDeadlineMonitor = () => {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (deadlinePoll) clearInterval(deadlinePoll);
+      deadlineTimer = null;
+      deadlinePoll = null;
+    };
+
     let outcome;
     try {
       outcome = await adapter.execute({
-        spec, def, workspaceDir, timeoutMs: spec.timeoutSeconds * 1000, env, onTrace, onUsage,
+        spec,
+        def,
+        workspaceDir,
+        timeoutMs: adapterExecuteTimeoutMs({ adapterKey, spec, maxRunMinutes: policyMaxRunMinutes(policyRoot) }),
+        env,
+        onTrace,
+        onUsage,
         resume: created.resume ?? null,
-        abortSignal: abortController.signal, signal: abortController.signal,
+        abortSignal: abortController.signal,
+        signal: abortController.signal,
       });
     } finally {
+      stopDeadlineMonitor();
       stopCancellationMonitor();
     }
 
     if (outcome?.usage) attemptUsage = { adapter: adapterKey, ...outcome.usage };
+    if (deadlineExpired) outcome = { ...(outcome ?? {}), timedOut: true };
 
-    if (abortController.signal.aborted) {
-      if (ticketClaimed) {
+    if (abortController.signal.aborted && !deadlineExpired) {
+      if (mayMutateClaimedTicket()) {
         try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: "cancelled", log: null }); } catch { /* intentionally ignored */ }
       }
-      if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      cleanupWorkspace();
       const res = txImmediate(db, () => {
         const currentNow = nowFn();
         if (!assertCurrentToken(db, runId, fencingToken)) {
@@ -1139,33 +1557,33 @@ export async function executeClaimed(db, registry, adapters, claim, {
       }
 
       if (!lateCompletion) {
-        if (ticketClaimed) {
+        if (mayMutateClaimedTicket()) {
           try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: "timeout", log: null }); } catch { /* intentionally ignored */ }
         }
         const res = failTerminal("TIMED_OUT", "timeout", "timeout");
-        destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+        cleanupWorkspace({ retainWorkspace: retain });
         if (res?.fenced) return { fenced: true };
         return { runId, attempt, terminalState: "TIMED_OUT", reasonCode: "timeout" };
       }
     }
     const denial = policyDenials[0];
     if (!lateCompletion && denial) {
-      if (ticketClaimed) {
+      if (mayMutateClaimedTicket()) {
         try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `policy_denied:${denial.tool}`, log: null }); } catch { /* intentionally ignored */ }
       }
       const reasonCode = `policy_denied:${denial.tool}`;
       const res = failTerminal("FAILED", reasonCode, reasonCode);
-      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
     if (!lateCompletion && exitCode !== 0) {
-      if (ticketClaimed) {
+      if (mayMutateClaimedTicket()) {
         try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `agent_exit_${exitCode}`, log: null }); } catch { /* intentionally ignored */ }
       }
       const reasonCode = `agent_exit_${exitCode}`;
       const res = failTerminal("FAILED", reasonCode, reasonCode);
-      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
@@ -1176,7 +1594,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
     if (!isWorktree && !def.mutating && checkoutPath && (checkoutBaseline === null || repositoryStatus(checkoutPath) !== checkoutBaseline)) {
       const reasonCode = "workspace_integrity_violation";
       const res = failTerminal("FAILED", reasonCode, reasonCode);
-      destroyWorkspace(workspaceDir, { retain: true, checkout: checkoutPath, repoName });
+      cleanupWorkspace({ retainWorkspace: true });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
@@ -1195,7 +1613,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       return { ok: true };
     });
     if (toVerifying?.fenced) {
-      destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      cleanupWorkspace();
       return { fenced: true };
     }
 
@@ -1208,7 +1626,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
       if (!(err instanceof ContractViolation)) throw err;
       const reasonCode = err.reasonCode === "baseline_red" ? "baseline_red" : "contract_violation";
       const failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
-      if (ticketClaimed) {
+      if (mayMutateClaimedTicket()) {
         if (reasonCode === "baseline_red") {
           try {
             blockTicketFn({
@@ -1248,13 +1666,13 @@ export async function executeClaimed(db, registry, adapters, claim, {
         }
         return { ok: true };
       });
-      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
+      cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
 
     if (verified.kind === "refused") {
-      if (ticketClaimed) {
+      if (mayMutateClaimedTicket()) {
         try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: `refused: ${verified.reasonCode}`, log: null }); } catch { /* intentionally ignored */ }
       }
       const collected = [];
@@ -1288,7 +1706,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
           runId, to: "REFUSED", expectFrom: "VERIFYING",
           actor: owner, reason: verified.reasonCode, attempt, policyVersion, now: currentNow,
         });
-        const receipt = createReceipt({
+        const receipt = receiptWithDeadlineExtensions(db, runId, {
           runId,
           spec,
           def,
@@ -1304,10 +1722,19 @@ export async function executeClaimed(db, registry, adapters, claim, {
           runId, attempt, canonicalJson(refusedResult), "none", null,
           canonicalJson(refusedResult.verification), canonicalJson(receipt), iso(currentNow),
         );
+        // Best-effort projection: the inbox row must never un-record the
+        // terminal REFUSED state or its result row by throwing out of this tx.
+        try {
+          createRefusalInboxItem(db, spec, refusedResult, { now: currentNow });
+        } catch (err) {
+          console.error(
+            `[worker] refusal inbox item not created for ${runId}: ${err?.message ?? err}`,
+          );
+        }
         finishAttempt(db, runId, attempt, "REFUSED", verified.reasonCode, currentNow, attemptUsage);
         return { ok: true, receipt };
       });
-      destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      cleanupWorkspace();
       if (res?.fenced) return { fenced: true };
       return { runId, attempt, terminalState: "REFUSED", reasonCode: verified.reasonCode, receipt: res.receipt };
     }
@@ -1326,7 +1753,7 @@ export async function executeClaimed(db, registry, adapters, claim, {
         return { fenced: true };
       }
 
-      const receipt = createReceipt({
+      const receipt = receiptWithDeadlineExtensions(db, runId, {
         runId,
         spec,
         def,
@@ -1369,18 +1796,18 @@ export async function executeClaimed(db, registry, adapters, claim, {
     });
 
     if (published.fenced) {
-      destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      cleanupWorkspace();
       return { fenced: true };
     }
-    destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+    cleanupWorkspace();
     return { runId, attempt, terminalState: "COMPLETED", reasonCode: "ok", receipt: published.receipt };
   } catch (err) {
-    if (ticketClaimed) {
+    if (mayMutateClaimedTicket()) {
       try { unclaimTicketFn({ repo: repoName, ticket: ticketId, why: err?.message ?? String(err), log: null }); } catch { /* intentionally ignored */ }
     }
     if (err instanceof IllegalTransition) {
       // Operator moved the run under us (cancel) — stop quietly, publish nothing.
-      if (workspaceDir) destroyWorkspace(workspaceDir, { checkout: checkoutPath, repoName });
+      cleanupWorkspace();
       const state = db.query(`SELECT state FROM runs WHERE run_id = ?`).get(runId)?.state;
       if (state === "CANCELLED") {
         return { cancelled: true };
@@ -1412,16 +1839,14 @@ export async function executeClaimed(db, registry, adapters, claim, {
     } catch {
       // if failTerminal could not transition, continue
     }
-    if (workspaceDir) {
-      destroyWorkspace(workspaceDir, { retain, checkout: checkoutPath, repoName });
-    }
+    cleanupWorkspace({ retainWorkspace: retain });
     if (res?.fenced) return { fenced: true };
     return { runId, attempt, terminalState: "FAILED", reasonCode, error: err?.message };
   } finally {
     stopCancellationMonitor();
     if (leaseHeartbeat) clearInterval(leaseHeartbeat);
     if (ticketClaimed) {
-      try { releaseWorkerLease({ repo: repoName, ticket: ticketId, owner, dir: leasesDir }); } catch { /* intentionally ignored */ }
+      try { releaseWorkerLease({ repo: repoName, ticket: ticketId, owner: ticketLeaseOwner, dir: leasesDir }); } catch { /* intentionally ignored */ }
     }
   }
 }

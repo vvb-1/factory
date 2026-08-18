@@ -554,12 +554,12 @@ describe("planEvent worktree gate (WM-108)", () => {
     payload,
   });
 
-  test("a gate-declared merge-fix agent bypasses dispatch-only planning checks", () => {
+  test("a dispatch-exempt worktree agent bypasses dispatch-only planning checks", () => {
     withReposRoot(`repos:\n  - name: repairable\n    path: /tmp/nowhere\n    base: develop\n`, () => {
       const synthetic = syntheticRegistry();
       synthetic.agents.set("test-worktree@1", {
         ...synthetic.agents.get("test-worktree@1"),
-        gate: "merge-fix",
+        dispatchGateExempt: true,
       });
       const db = openDb(":memory:");
       const ref = admit(db, dispatchEnvelope({ repo: "repairable", ticket: "WM-500" }));
@@ -569,6 +569,53 @@ describe("planEvent worktree gate (WM-108)", () => {
       });
       expect(outcome.decision).toBe("run");
     });
+  });
+
+  test("merge-fix@1 bypasses the tier-2 dispatch gate while dispatch@1 does not", () => {
+    const mergeFixDb = openDb(":memory:");
+    const mergeFix = admit(mergeFixDb, {
+      type: "factory.merge-fix.requested",
+      eventId: "merge-fix-dispatch-gate-characterization",
+      payload: {
+        repo: "factory",
+        github: "watt-mind/factory",
+        base: "develop",
+        pr: 469,
+        headSha: "a".repeat(40),
+        baseSha: "b".repeat(40),
+        headRef: "feat/WM-469",
+        ticket: "WM-469",
+        finding: "characterization fixture",
+        findingHash: "c".repeat(64),
+        round: 1,
+        mechanical: true,
+        withinOwnedPaths: true,
+        ownedPaths: ["event-runtime/lib/planner.mjs"],
+      },
+    });
+    expect(
+      planEvent(mergeFixDb, registry, mergeFix, {
+        now: NOW,
+        dispatch: {
+          fetchTicket: () => {
+            throw new Error("merge-fix must bypass the dispatch gate");
+          },
+        },
+      }).decision,
+    ).toBe("run");
+
+    const dispatchDb = openDb(":memory:");
+    const dispatch = admit(dispatchDb, {
+      type: "factory.dispatch.requested",
+      eventId: "dispatch-gate-characterization",
+      payload: { repo: "factory", ticket: "WM-469" },
+    });
+    const outcome = planEvent(dispatchDb, registry, dispatch, {
+      now: NOW,
+      dispatch: { fetchTicket: () => null },
+    });
+    expect(outcome.decision).toBe("human_needed");
+    expect(outcome.reason).toBe("ticket_not_found");
   });
 
   test("merge-fix eligibility expects assigned review tickets and returns merge-fix typed refusals", () => {
@@ -668,6 +715,60 @@ describe("planEvent worktree gate (WM-108)", () => {
         expect(result.evidence.ticket).toMatchObject({ ownedPaths: ["**"], ownedPathsParsed: false });
         expect(result.evidence.escalatePathIntersections).toEqual([]);
         expect(fetchedInFlight).toBe(false);
+      },
+    );
+  });
+
+  test("lease-loss retry accepts only the factory viewer's surviving In Progress claim (WM-621)", () => {
+    withReposRoot(
+      `repos:\n  - name: gated\n    path: /tmp/nowhere\n    base: develop\n` +
+      `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
+      `    worktree_root: /tmp/worktrees\n    escalate_paths: []\n`,
+      () => {
+        const claimedTicket = (assignee) => ({
+          identifier: "WM-621",
+          state: { name: "In Progress" },
+          assignee,
+          labels: { nodes: [{ name: "ai:in-progress" }, { name: "agent:claude-code" }] },
+          description: "## Owned Paths\n- event-runtime/lib/worker.mjs\n",
+        });
+        const baseDispatch = {
+          countLeases: () => 0,
+          budgetRefusal: () => null,
+          fetchViewer: () => ({ id: "factory-user", name: "Factory" }),
+          fetchInFlight: () => [],
+          claimedRetry: { runId: "run_same", priorAttempt: 1, reasonCode: "lease_expired" },
+        };
+
+        const resumed = worktreeDispatchAutoEligibility(
+          { repo: "gated", ticket: "WM-621" },
+          { ...baseDispatch, fetchTicket: () => claimedTicket({ id: "factory-user" }) },
+        );
+        expect(resumed.ok).toBe(true);
+        expect(resumed.evidence.checks).toMatchObject({
+          ticket_claim_retry: true,
+          ticket_in_progress_retry: true,
+          ticket_in_progress_label_retry: true,
+        });
+
+        const foreign = worktreeDispatchAutoEligibility(
+          { repo: "gated", ticket: "WM-621" },
+          { ...baseDispatch, fetchTicket: () => claimedTicket({ id: "someone-else" }) },
+        );
+        expect(foreign.refusal).toMatchObject({ decision: "noop", reason: "ticket_assigned" });
+
+        const ownAssignedTodo = worktreeDispatchAutoEligibility(
+          { repo: "gated", ticket: "WM-621" },
+          {
+            ...baseDispatch,
+            fetchTicket: () => ({
+              ...claimedTicket({ id: "factory-user" }),
+              state: { name: "Todo" },
+              labels: { nodes: [{ name: "ai:agent-ready" }] },
+            }),
+          },
+        );
+        expect(ownAssignedTodo.refusal).toMatchObject({ decision: "noop", reason: "ticket_assigned" });
       },
     );
   });
@@ -1130,5 +1231,3 @@ describe("planAdmittedEvents", () => {
     expect(replannedSpec.idempotencyKey).toBe(originalSpec.idempotencyKey);
   });
 });
-
-

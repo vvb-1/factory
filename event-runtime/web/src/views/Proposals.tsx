@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { keyGuard, useDisplayOptions, useListKeys, useNow, useTabKeys } from "../hooks";
+import { keyGuard, refetchIntervals, tableTokens, useDisplayOptions, useListKeys, useNow, useTabKeys, useTableWindow } from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -25,6 +25,7 @@ import { SpecDiff } from "../components/SpecDiff";
 import { AgentHoverCard } from "../components/AgentHoverCard";
 import { ApprovalRiskDetails, ApprovalSafetyCard } from "../components/ApprovalRisk";
 import { decideRevealFilters } from "../reveal";
+import { humanizeReason } from "../reasons";
 import {
   Ago,
   BulkActionBar,
@@ -45,6 +46,7 @@ import {
   PROPOSAL_STATUS_HUES,
   GroupHeaderRow,
   Section,
+  TableWindowFooter,
   StateBadge,
   Th,
   VerbError,
@@ -61,6 +63,20 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 const ttlExpiry = (p: Proposal) => new Date(p.created_at).getTime() + p.ttl_seconds * 1000;
+
+export function proposalIsExpired(p: Proposal, now = Date.now()): boolean {
+  return ttlExpiry(p) < now;
+}
+
+export function filterOpenProposals(
+  proposals: Proposal[],
+  now = Date.now(),
+  expiredOnly = false,
+): Proposal[] {
+  return proposals.filter(
+    (p) => p.status === "open" && proposalIsExpired(p, now) === expiredOnly,
+  );
+}
 
 /** Grouping/ordering/columns per tab (OPS-493) — two views, two persisted keys. */
 const OPEN_DISPLAY: DisplayConfig<Proposal> = {
@@ -171,20 +187,24 @@ export function Proposals({
   const query = useQuery({
     queryKey: ["proposals"],
     queryFn: () => api.proposals(),
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
   const history = useQuery({
     queryKey: ["proposals", "history"],
     queryFn: () => api.proposalHistory("all"),
-    refetchInterval: 2000,
+    ...refetchIntervals.primary,
   });
-  const rows = useMemo(
-    () =>
-      tab === "open"
-        ? (query.data?.proposals ?? [])
-        : (history.data?.proposals ?? []).filter((p) => p.status !== "open"),
-    [tab, query.data, history.data],
-  );
+  const [expiredOnly, setExpiredOnly] = useState(false);
+  const rows = useMemo(() => {
+    if (tab !== "open") return (history.data?.proposals ?? []).filter((p) => p.status !== "open");
+    const open = query.data?.proposals ?? [];
+    const shown = new Set(filterOpenProposals(open, now, expiredOnly).map((p) => p.id));
+    // The focused proposal never drops out from under the operator: a TTL that
+    // passes while it is selected would otherwise close the detail pane and take
+    // the expired banner with it, mid-read (WM-547). `scoped` exempts the focused
+    // id from repo scoping for the same reason.
+    return open.filter((p) => p.status === "open" && (shown.has(p.id) || p.id === focusProposalId));
+  }, [tab, query.data, history.data, now, expiredOnly, focusProposalId]);
   const scoped = useMemo(
     () => rows.filter((p) => p.id === focusProposalId || matchesRepo(p.repos, context)),
     [rows, context, focusProposalId],
@@ -192,11 +212,11 @@ export function Proposals({
   const hiddenOpenRepoCount = useMemo(
     () =>
       context.kind === "repo"
-        ? (query.data?.proposals ?? []).filter(
-            (p) => p.status === "open" && p.id !== focusProposalId && !matchesRepo(p.repos, context),
+        ? filterOpenProposals(query.data?.proposals ?? [], now).filter(
+            (p) => p.id !== focusProposalId && !matchesRepo(p.repos, context),
           ).length
         : 0,
-    [context, query.data, focusProposalId],
+    [context, query.data, focusProposalId, now],
   );
 
   // Origin event type, resolved from the shared events cache (cheap: same
@@ -204,7 +224,7 @@ export function Proposals({
   const eventsQuery = useQuery({
     queryKey: ["events", "all"],
     queryFn: () => api.events(),
-    refetchInterval: 2000,
+    ...refetchIntervals.secondary,
   });
   const eventTypes = useMemo(
     () => new Map((eventsQuery.data?.events ?? []).map((e) => [`${e.source}:${e.eventId}`, e.type])),
@@ -215,7 +235,7 @@ export function Proposals({
 
   // An open proposal's run should still be PROPOSED; anything else means it
   // was raced (e.g. cancelled from the Runs view) and can never be approved.
-  const runsQuery = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), refetchInterval: 2000 });
+  const runsQuery = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), ...refetchIntervals.fast });
   const runStates = useMemo(
     () => new Map((runsQuery.data?.runs ?? []).map((r) => [r.runId, r.state])),
     [runsQuery.data],
@@ -234,11 +254,10 @@ export function Proposals({
   const agentsQuery = useQuery({
     queryKey: ["agents"],
     queryFn: () => api.agents(),
-    refetchInterval: 5000,
+    ...refetchIntervals.secondary,
   });
 
   const [filter, setFilter] = useState("");
-  const [expiredOnly, setExpiredOnly] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [reason, setReason] = useState("");
@@ -254,21 +273,17 @@ export function Proposals({
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   const bulkReasonRef = useRef<HTMLInputElement>(null);
 
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: () => api.status(), refetchInterval: 2000 });
   // The expired chip only exists on Open; History rows have no live TTL. Derive
   // the gate once so the row filter and the empty copy can never disagree.
   const expiredFilter = expiredOnly && tab === "open";
-  const expiredCount =
-    context.kind === "repo"
-      ? scoped.filter((p) => p.expired).length
-      : (statusQ.data?.proposals.expired ?? 0);
+  const expiredCount = filterOpenProposals(query.data?.proposals ?? [], now, true).filter(
+    (p) => context.kind !== "repo" || matchesRepo(p.repos, context),
+  ).length;
   const parsed = useMemo(() => parseFilterQuery(filter, PROPOSAL_FACETS), [filter]);
-  const visible = useMemo(() => {
-    return scoped.filter((p) => {
-      if (expiredFilter && !p.expired) return false;
-      return matchesFilterQuery(p, parsed, PROPOSAL_FACETS, { runStates });
-    });
-  }, [scoped, parsed, expiredFilter, runStates]);
+  const visible = useMemo(
+    () => scoped.filter((p) => matchesFilterQuery(p, parsed, PROPOSAL_FACETS, { runStates })),
+    [scoped, parsed, runStates],
+  );
 
   const actionableVisible = useMemo(
     () => (tab === "open" ? visible.filter((p) => p.status === "open") : []),
@@ -319,8 +334,15 @@ export function Proposals({
     [rows, selectedIds],
   );
   const approvableSelected = useMemo(
-    () => selectedRows.filter((p) => p.status === "open" && p.decision === "run" && !staleState(p)),
-    [selectedRows, runStates],
+    () =>
+      selectedRows.filter(
+        (p) =>
+          p.status === "open" &&
+          p.decision === "run" &&
+          !proposalIsExpired(p, now) &&
+          !staleState(p),
+      ),
+    [selectedRows, runStates, now],
   );
   const rejectableSelected = useMemo(
     () => selectedRows.filter((p) => p.status === "open"),
@@ -335,6 +357,9 @@ export function Proposals({
     let err = 0;
     const processed = new Set<string>();
     let haltedOnReplan: { before: Proposal; after: Proposal } | null = null;
+    // `approvableSelected` already dropped the expired ones. A TTL that passes
+    // mid-loop is left to the server, which answers with a re-plan the operator
+    // reviews — a silent client-side failure count would hide that.
     for (const p of approvableSelected) {
       try {
         const o = await api.approve(p.id);
@@ -392,14 +417,10 @@ export function Proposals({
     if (err) notify(`Failed to reject ${err} proposal${err === 1 ? "" : "s"}`, "err");
   };
 
-  // What the list would show without the text filter. An empty list under the
-  // expired chip has two causes and needs two messages: no expired opens exist
-  // (chip copy, nothing for Esc to clear) or the text filter hid the expired
-  // ones (filter copy + the Esc hint).
-  const unfilteredCount = useMemo(
-    () => (expiredFilter ? scoped.filter((p) => p.expired).length : scoped.length),
-    [scoped, expiredFilter],
-  );
+  // What the list would show without the text filter — the tab and the expired
+  // chip are already applied to `scoped`. ListEmpty uses it to tell "the filter
+  // hid everything" (offer Esc to clear) from "there is nothing here" (say so).
+  const unfilteredCount = useMemo(() => scoped.length, [scoped]);
 
   // Esc clears the text filter and the expired chip together, so the hint is
   // owed whenever either is set — including when the unfiltered set is itself
@@ -427,6 +448,13 @@ export function Proposals({
   // Keyboard index walks the open sections; the detail pane keys off the row
   // itself so collapsing the group under a selection never closes the pane.
   const selectedIndex = useMemo(() => flat.findIndex((p) => p.id === selectedId), [flat, selectedId]);
+  const tokens = tableTokens(sections, display.collapsed, grouped(display));
+  const [windowTokens, windowStart, windowEnd, moveWindow] = useTableWindow(
+    tokens,
+    selectedId,
+    (row) => row.id,
+    JSON.stringify([tab, filter, expiredOnly, context, display]),
+  );
   const sel = useMemo(
     () => (selectedId ? (visible.find((p) => p.id === selectedId) ?? null) : null),
     [visible, selectedId],
@@ -449,9 +477,23 @@ export function Proposals({
     [agentsQuery.data, sel],
   );
 
+  /** Planner reason for the selection, humanized off the shared table (WM-594). */
+  const selReason = useMemo(() => (sel?.reason ? humanizeReason(sel.reason) : null), [sel]);
+
+  // Losing the selection must disarm its dialogs. Both render inside `sel`, so a
+  // proposal that leaves `visible` (decided elsewhere, scoped away) unmounts them
+  // while the flag stays true — the next selection would then open an approve
+  // dialog the operator never armed, with Enter bound to it (WM-547).
+  const noSelection = sel === null;
+  useEffect(() => {
+    if (!noSelection) return;
+    setConfirmApprove(false);
+    setRejecting(false);
+  }, [noSelection]);
+
   useEffect(() => {
     document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+  }, [selectedIndex, windowStart]);
 
   // Reveal a hash-selected proposal only when current filters hide it. Latch
   // until the row exists in `rows` (tab switch / re-plan / poll); decide once
@@ -493,22 +535,36 @@ export function Proposals({
   // Hash stays; we only switch tabs so the row is in `visible` — the selection
   // is the whole point of the deep link, so unlike selectTab we keep it. The
   // chip is cleared like selectTab does: it belongs to Open only.
+  const locatedFocusId = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusProposalId) return;
+    if (!focusProposalId) {
+      locatedFocusId.current = null;
+      return;
+    }
     if (query.isPending || history.isPending) return;
-    const inOpen = (query.data?.proposals ?? []).some((p) => p.id === focusProposalId);
+    const focusedOpen = (query.data?.proposals ?? []).find((p) => p.id === focusProposalId);
     const inHistory = (history.data?.proposals ?? []).some(
       (p) => p.id === focusProposalId && p.status !== "open",
     );
-    if (inOpen && tab !== "open") {
-      setTab("open");
-      setSelectedIds(new Set());
-    } else if (!inOpen && inHistory && tab === "open") {
+    const isNewFocus = locatedFocusId.current !== focusProposalId;
+    if (isNewFocus && (focusedOpen || inHistory)) locatedFocusId.current = focusProposalId;
+
+    if (focusedOpen) {
+      // Only a real tab switch drops the bulk selection (selectTab does the same).
+      // Moving focus between rows inside Open must keep it: ticking three rows,
+      // opening one to read its spec, then bulk-approving is the whole flow (WM-547).
+      if (tab !== "open") {
+        setTab("open");
+        setSelectedIds(new Set());
+      }
+      // A newly focused expired proposal needs the chip on to be reachable.
+      if (isNewFocus) setExpiredOnly(proposalIsExpired(focusedOpen, now));
+    } else if (inHistory && tab === "open") {
       setTab("history");
       setExpiredOnly(false);
       setSelectedIds(new Set());
     }
-  }, [focusProposalId, query.isPending, history.isPending, query.data, history.data, tab]);
+  }, [focusProposalId, query.isPending, history.isPending, query.data, history.data, tab, now]);
 
   useEffect(() => {
     if (!focusExpired) return;
@@ -526,7 +582,12 @@ export function Proposals({
   };
 
   const approve = useMutation({
-    mutationFn: (p: Proposal) => api.approve(p.id).then((outcome) => ({ p, outcome })),
+    mutationFn: (p: Proposal) => {
+      if (proposalIsExpired(p)) {
+        return Promise.reject(new Error("This proposal has expired and can no longer be approved."));
+      }
+      return api.approve(p.id).then((outcome) => ({ p, outcome }));
+    },
     onSuccess: ({ p, outcome }) => {
       invalidate();
       if (outcome.approved && outcome.runId) {
@@ -559,10 +620,29 @@ export function Proposals({
 
   // History rows are audit records — no verbs, ever (doc §10.2).
   const isOpen = sel !== null && sel.status === "open";
-  const canApprove = isOpen && sel.decision === "run" && !staleState(sel);
+  const selectionExpired = sel !== null && proposalIsExpired(sel, now);
+  const canApprove = isOpen && sel.decision === "run" && !selectionExpired && !staleState(sel);
+  const approvalDisabledReason = selectionExpired
+    ? "This proposal has expired and can no longer be approved."
+    : sel && staleState(sel)
+      ? `This proposal's run is already ${staleState(sel)} and can no longer be approved.`
+      : !connected
+        ? "Approval is unavailable while disconnected."
+        : undefined;
+  const openApprove = () => {
+    if (!sel || !connected || proposalIsExpired(sel) || staleState(sel)) return;
+    setConfirmApprove(true);
+  };
   const openReject = () => {
     setRejecting(true);
     setTimeout(() => reasonRef.current?.focus(), 0);
+  };
+  const replanExpired = replan !== null && proposalIsExpired(replan.after, now);
+  const approveReplan = () => {
+    if (!replan || !connected || proposalIsExpired(replan.after) || approve.isPending) return;
+    const fresh = replan.after;
+    setReplan(null);
+    approve.mutate(fresh);
   };
 
   const pendingC = useRef<number>(0);
@@ -587,7 +667,7 @@ export function Proposals({
     keys: {
       // §5: `a` opens the confirm with the spec in view — it never fires the verb directly.
       // When `*` is armed, the proposal-selection listener owns the same `a` key instead.
-      a: () => !starPrefixActive() && canApprove && connected && setConfirmApprove(true),
+      a: () => !starPrefixActive() && canApprove && connected && openApprove(),
       x: () => isOpen && connected && openReject(),
       c: () => {
         if (!sel) return;
@@ -683,7 +763,7 @@ export function Proposals({
       } else {
         setContextActions([
           ...(canApprove
-            ? [{ label: `Approve ${sel.agent ?? sel.id}…`, hint: "a", run: () => setConfirmApprove(true) }]
+            ? [{ label: `Approve ${sel.agent ?? sel.id}…`, hint: "a", run: openApprove }]
             : []),
           { label: `Reject ${sel.agent ?? sel.id}…`, hint: "x", run: openReject },
           ...copy,
@@ -722,13 +802,18 @@ export function Proposals({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        if (confirmApprove && sel && connected && !approve.isPending) {
+        if (
+          confirmApprove &&
+          sel &&
+          canApprove &&
+          connected &&
+          !proposalIsExpired(sel) &&
+          !approve.isPending
+        ) {
           setConfirmApprove(false);
           approve.mutate(sel);
-        } else if (replan && connected && !approve.isPending) {
-          const fresh = replan.after;
-          setReplan(null);
-          approve.mutate(fresh);
+        } else if (replan && connected && !replanExpired && !approve.isPending) {
+          approveReplan();
         } else if (bulkConfirmOpen && connected && !bulkApproving && approvableSelected.length > 0) {
           void handleBulkApprove();
         }
@@ -742,6 +827,8 @@ export function Proposals({
     bulkConfirmOpen,
     sel,
     connected,
+    canApprove,
+    replanExpired,
     approve,
     bulkApproving,
     approvableSelected,
@@ -768,7 +855,9 @@ export function Proposals({
           <div className="flex gap-1" role="tablist" aria-label="Proposal status">
             {PROPOSAL_TABS.map((t, idx) => {
               const count = t === "open"
-                ? (context.kind === "repo" ? (query.data?.proposals ?? []).filter((p) => matchesRepo(p.repos, context)).length : (statusQ.data?.proposals.open ?? 0))
+                ? filterOpenProposals(query.data?.proposals ?? [], now).filter(
+                    (p) => context.kind !== "repo" || matchesRepo(p.repos, context),
+                  ).length
                 : (history.data?.proposals ?? []).filter((p) => p.status !== "open" && matchesRepo(p.repos, context)).length;
               return (
                 <button
@@ -873,7 +962,7 @@ export function Proposals({
                   key={p.id}
                   onClick={() => onSelectProposal(p.id)}
                   aria-selected={p.id === selectedId}
-                  className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : p.expired ? "row-wash-warn" : ""} ${p.id === selectedId ? "row-selected" : ""}`}
+                  className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : proposalIsExpired(p, now) ? "row-wash-warn" : ""} ${p.id === selectedId ? "row-selected" : ""}`}
                 >
                   {tab === "open" && (
                     <td className={`${tdCls} w-8`} onClick={(e) => e.stopPropagation()}>
@@ -912,7 +1001,7 @@ export function Proposals({
                     </td>
                   )}
                   {show.has("ttl") && (
-                    <td className={`${tdCls} max-w-20 whitespace-nowrap`}>
+                    <td className={`${tdCls} min-w-24 max-w-28 truncate whitespace-nowrap`}>
                       <Countdown createdAt={p.created_at} ttlSeconds={p.ttl_seconds} />
                     </td>
                   )}
@@ -959,49 +1048,43 @@ export function Proposals({
                       <Ago iso={p.created_at} now={now} />
                     </td>
                   )}
-                  {show.has("reason") && (
-                    <td className={`max-w-48 truncate ${tdCls} text-(--text-dim)`} title={p.reason ?? undefined}>
-                      {p.reason ?? "-"}
-                    </td>
-                  )}
+                  {show.has("reason") &&
+                    (() => {
+                      const r = humanizeReason(p.reason);
+                      return (
+                        <td
+                          className={`max-w-48 truncate ${tdCls} text-(--text-dim)`}
+                          title={r.raw ?? undefined}
+                        >
+                          {r.text || "-"}
+                        </td>
+                      );
+                    })()}
                   {listCols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
                     <CustomCell key={c.key} row={p} path={c.key.replace(/^custom:/, "")} />
                   ))}
                 </tr>
               );
-              if (!grouped(display)) return sections[0]?.rows.map(renderRow);
-              return sections.map((s) => {
-                const closed = display.collapsed.includes(s.key);
+              return windowTokens.map((token) => {
+                if (token.length === 1) return renderRow(token[0]);
+                const [s, sub] = token;
                 return (
-                  <Fragment key={s.key}>
-                    <GroupHeaderRow
-                      colSpan={totalColSpan}
-                      section={s}
-                      collapsed={closed}
-                      onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
-                    />
-                    {!closed &&
-                      (s.subsections
-                        ? s.subsections.map((child) => {
-                            const childClosed = display.collapsed.includes(child.key);
-                            return (
-                              <Fragment key={child.key}>
-                                <GroupHeaderRow
-                                  colSpan={totalColSpan}
-                                  section={child}
-                                  collapsed={childClosed}
-                                  onToggle={() => setDisplay((st) => toggleCollapsed(st, child.key))}
-                                  sub
-                                />
-                                {!childClosed && child.rows.map(renderRow)}
-                              </Fragment>
-                            );
-                          })
-                        : s.rows.map(renderRow))}
-                  </Fragment>
+                  <GroupHeaderRow
+                    key={`group:${s.key}`}
+                    colSpan={totalColSpan}
+                    section={s}
+                    collapsed={display.collapsed.includes(s.key)}
+                    onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                    sub={sub}
+                  />
                 );
               });
             })()}
+            <TableWindowFooter
+              colSpan={listCols.length + (tab === "open" ? 1 : 0)}
+              range={[windowStart, windowEnd, tokens.length]}
+              move={moveWindow}
+            />
             {visible.length === 0 && (
               <ListEmpty
                 colSpan={listCols.length + (tab === "open" ? 1 : 0)}
@@ -1070,14 +1153,16 @@ export function Proposals({
                 >
                   Reject… <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">x</span>
                 </Button>
-                {canApprove && (
-                  <Button
-                    variant="primary"
-                    disabled={!connected || approve.isPending}
-                    onClick={() => setConfirmApprove(true)}
-                  >
-                    Approve… <span className="mono ml-1 opacity-80" aria-hidden="true">a</span>
-                  </Button>
+                {sel.decision === "run" && (
+                  <span title={approvalDisabledReason}>
+                    <Button
+                      variant="primary"
+                      disabled={!canApprove || !connected || approve.isPending}
+                      onClick={openApprove}
+                    >
+                      Approve… <span className="mono ml-1 opacity-80" aria-hidden="true">a</span>
+                    </Button>
+                  </span>
                 )}
               </div>
             ) : null
@@ -1120,12 +1205,15 @@ export function Proposals({
             <KV k="created" v={<Ago iso={sel.created_at} now={now} />} />
             {sel.decided_at && <KV k="decided at" v={<Ago iso={sel.decided_at} now={now} />} />}
             {sel.decided_by && <KV k="decided by" v={sel.decided_by} />}
-            {sel.reason && (
+            {selReason && (
               <KV
                 k="planner reason"
                 v={
-                  <span className="break-words whitespace-pre-wrap leading-relaxed text-(--text-dim)">
-                    {sel.reason}
+                  <span
+                    className="break-words whitespace-pre-wrap leading-relaxed text-(--text-dim)"
+                    title={selReason.raw ?? undefined}
+                  >
+                    {selReason.text}
                   </span>
                 }
               />
@@ -1155,7 +1243,7 @@ export function Proposals({
             const prev = (runsQuery.data?.runs ?? []).find((r) => r.agent === sel.agent && r.state === "COMPLETED");
 
             return (
-              <Section title="Summary Safety Card & Blast Radius Radar" card={false}>
+              <Section title="Safety & blast radius" card={false}>
                 {/*
                   Shared with the Runs view's approve dialog (WM-505) so both
                   approval paths present identical risk context.
@@ -1176,13 +1264,15 @@ export function Proposals({
                   }
                 />
                 <Disclosure label="immutable RunSpec" defaultOpen={isOpen}>
-                  <JsonBlock value={sel.spec} />
+                  <div className="min-w-0 overflow-x-auto">
+                    <JsonBlock value={sel.spec} />
+                  </div>
                 </Disclosure>
               </Section>
             );
           })()}
 
-          {isOpen && staleState(sel) && (
+          {isOpen && (selectionExpired || staleState(sel)) && (
             <div
               className="mb-3 rounded-md px-2.5 py-1.5 text-[12px]"
               style={{
@@ -1190,8 +1280,9 @@ export function Proposals({
                 background: "color-mix(in oklch, var(--hue-err) 10%, transparent)",
               }}
             >
-              This proposal&apos;s run is already {staleState(sel)} — it can no longer be approved.
-              Reject it to clear the queue.
+              {selectionExpired
+                ? "This proposal has expired — it can no longer be approved. Reject it to clear the queue."
+                : `This proposal's run is already ${staleState(sel)} — it can no longer be approved. Reject it to clear the queue.`}
             </div>
           )}
 
@@ -1263,16 +1354,19 @@ export function Proposals({
           <ApprovalRiskDetails proposal={sel} agent={selAgent} />
           <div className="mt-3 flex justify-end gap-2">
             <Button onClick={() => setConfirmApprove(false)}>Not yet</Button>
-            <Button
-              variant="primary"
-              disabled={!connected || approve.isPending}
-              onClick={() => {
-                setConfirmApprove(false);
-                approve.mutate(sel);
-              }}
-            >
-              Approve and queue <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
-            </Button>
+            <span title={approvalDisabledReason}>
+              <Button
+                variant="primary"
+                disabled={!canApprove || !connected || approve.isPending}
+                onClick={() => {
+                  if (!canApprove || proposalIsExpired(sel)) return;
+                  setConfirmApprove(false);
+                  approve.mutate(sel);
+                }}
+              >
+                Approve and queue <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
+              </Button>
+            </span>
           </div>
         </Dialog>
       )}
@@ -1288,17 +1382,15 @@ export function Proposals({
           </div>
           <div className="mt-3 flex justify-end gap-2">
             <Button onClick={() => setReplan(null)}>Not yet</Button>
-            <Button
-              variant="primary"
-              disabled={!connected || approve.isPending}
-              onClick={() => {
-                const fresh = replan.after;
-                setReplan(null);
-                approve.mutate(fresh);
-              }}
-            >
-              Approve new proposal <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
-            </Button>
+            <span title={replanExpired ? "This replacement proposal has expired and can no longer be approved." : undefined}>
+              <Button
+                variant="primary"
+                disabled={!connected || replanExpired || approve.isPending}
+                onClick={approveReplan}
+              >
+                Approve new proposal <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
+              </Button>
+            </span>
           </div>
         </Dialog>
       )}
@@ -1348,7 +1440,11 @@ export function Proposals({
                 <KV k="timeout" v={`${p.spec?.timeoutSeconds}s`} />
                 <KV k="attempts" v={String(p.spec?.maxAttempts)} />
                 <KV k="ttl" v={<Countdown createdAt={p.created_at} ttlSeconds={p.ttl_seconds} />} />
-                {p.spec && <JsonBlock value={p.spec} />}
+                {p.spec && (
+                  <div className="min-w-0 overflow-x-auto">
+                    <JsonBlock value={p.spec} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
