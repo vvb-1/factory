@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { createAdapterRegistry } from "../lib/adapters/index.mjs";
+import { loadExtensions } from "../lib/extensions.mjs";
 import {
   dbPath,
   ensureHome,
@@ -47,9 +48,12 @@ export default async function work(args) {
   if (!Number.isInteger(pollMs) || pollMs < 25 || pollMs > 5_000) {
     fail("work: --poll-ms must be an integer between 25 and 5000");
   }
-  // Built-ins only for now; the registry validates the contract and wraps
-  // every adapter in the sandbox seam (lib/adapters/index.mjs, WM-837).
+  // Built-ins first, then allow-listed extensions (lib/extensions.mjs,
+  // WM-838) — before toMap(), which is a snapshot. The registry validates the
+  // contract and wraps every adapter in the sandbox seam (WM-837); a broken
+  // extension is a configuration anomaly on /status, never a failed start.
   const adapterRegistry = createAdapterRegistry();
+  const extensions = await loadExtensions({ adapterRegistry });
   const adapters = adapterRegistry.toMap();
   if (adapterOverride && !adapterRegistry.has(adapterOverride)) {
     fail(
@@ -86,7 +90,8 @@ export default async function work(args) {
 
   ensureHome();
   const db = openDb();
-  const registry = loadRegistry();
+  const registry = loadRegistry({ packRoots: extensions.packRoots });
+  registry.anomalies.push(...extensions.anomalies);
   const pv = policyVersion();
   const workerId = flagValue(args, "--worker-id") ?? newWorkerId();
   const adapterNames = adapterOverride

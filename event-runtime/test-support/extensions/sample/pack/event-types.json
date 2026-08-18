@@ -1,0 +1,8 @@
+{
+  "sample-ext.echo.requested": {
+    "agent": "sample-ext/echo@1",
+    "adapter": "echo",
+    "idempotencyScope": ["correlationId"],
+    "proposalTtlSeconds": 1800
+  }
+}

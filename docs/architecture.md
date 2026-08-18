@@ -157,6 +157,10 @@ Triage is the live judgement call: a bad spec burns a full dispatch run, which a
 
 The plugin is a convenience layer, not the safety floor. It reaches Claude Code only, and a cloud sandbox without GitHub auth for this private repo gets nothing — failing closed without knowing it. So the non-negotiables live in `shared/floor.md` and are committed into each repo's `AGENTS.md`, the one channel every harness reads.
 
+### 2.12 Extensions are one unit, allow-listed, and never fatal
+
+Anything that adds to the running factory from outside its tree — an agent pack, a harness adapter, later a panel, a config schema, a hook — arrives as one **extension**: a directory with a `factory-extension.json` that declares what it contributes, enabled by one `extensions:` entry in `config/policy.yaml` ([`extensions.md`](extensions.md)). Three choices are deliberate. Discovery is allow-listed, never a directory scan, because the file that enables code in the worker process should be a committed one the operator edits. Data-only packs and operator-installed adapters share the manifest but not the trust: packs are held to the kernel's read-only, namespaced, pinned rules and are safe for an agent to author, while an adapter is code the operator has chosen to run and the registry still guards behind the sandbox seam. And a broken extension is a configuration anomaly on `/status`, not a failed `serve` — the factory should keep running when a third party ships a bad manifest, and say so where the operator looks.
+
 ---
 
 ## 3. Failure modes this design accepts

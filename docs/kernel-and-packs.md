@@ -22,6 +22,14 @@ loaded after the built-in root and in policy order. Each entry accepts only
 `name`, `path`, and optional `namespace`; malformed entries, duplicate names,
 or unreadable pack content fail registry startup closed.
 
+A pack can also arrive inside an **extension** — one directory whose
+`factory-extension.json` lists its packs (and adapters) and is enabled with a
+single `extensions:` entry instead of one `packs:` entry per pack. Extension
+packs go through this same loader with the same rules below; the pack's name
+and namespace come from its `pack.json`, and a pack the registry would refuse
+skips that extension as a configuration anomaly rather than failing startup.
+See [`extensions.md`](extensions.md).
+
 ## Pack format
 
 A filesystem pack has this layout:
