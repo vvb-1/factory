@@ -840,6 +840,7 @@ describe("work --drain-file (WM-226)", () => {
         expect(code).toBe(0); // a clean drain, not the reload code
         // Order is the guarantee: the run reached a terminal state BEFORE the exit.
         expect(box.out.indexOf("run_drain_busy → ")).toBeGreaterThan(-1);
+        expect(box.out.indexOf("drain requested")).toBeGreaterThan(-1);
         expect(box.out.indexOf("run_drain_busy → ")).toBeLessThan(
           box.out.indexOf("drain requested"),
         );

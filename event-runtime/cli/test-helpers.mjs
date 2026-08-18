@@ -301,15 +301,21 @@ export async function waitFor(box, needle, timeoutMs = 15_000) {
 }
 
 export function exitOf(child) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve({
-      code: child.exitCode,
-      signal: child.signalCode,
+  return new Promise((resolve) => {
+    let resolved = false;
+    const done = (code, signal) => {
+      if (resolved) return;
+      resolved = true;
+      resolve({
+        code: code ?? child.exitCode,
+        signal: signal ?? child.signalCode,
+      });
+    };
+    child.once("close", (code, signal) => done(code, signal));
+    child.once("exit", (code, signal) => {
+      setTimeout(() => done(code, signal), 50);
     });
-  }
-  return new Promise((resolve) =>
-    child.once("exit", (code, signal) => resolve({ code, signal })),
-  );
+  });
 }
 
 /** A QUEUED run in `home`'s database, straight through the real lifecycle. */
