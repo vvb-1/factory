@@ -32,7 +32,7 @@ For user-facing PRs, open the ticket's attached screenshots and judge the visual
 Then check CI (`gh pr checks <PR> --watch --fail-fast` — never sleep-and-poll) and whether the branch is behind or conflicting with its base. Verify checks actually exist: "no failures" because the repo has no required checks is not green.
 
 Inspect the failed steps/logs behind an umbrella `Verify` result. If every
-failure is Prettier or eslint only — `Formatting check (prettier)`, `Lint`, or
+failure is Prettier or eslint only — `Formatting check (prettier)`, `Lint (eslint)`, or
 tests failing solely with eslint diagnostics — report verdict `FIX`, canonical
 finding `format_and_lint`, and tag the finding `mechanical`. This tag is
 distinct from `fix-in-branch`: it sends deterministic formatting straight to

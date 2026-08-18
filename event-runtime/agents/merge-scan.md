@@ -95,7 +95,7 @@ and merge-fix already performs them:
   `rerun_ci_at_head` (rebase first if behind, then a fresh run). The evidence
   is not uncertain; it is old.
 - A red `Verify` whose only failing step is `Formatting check (prettier)` or
-  `Lint`, or whose complete failing-test set consists only of eslint
+  `Lint (eslint)`, or whose complete failing-test set consists only of eslint
   diagnostics → FIX, finding exactly `format_and_lint`. Inspect the failed job
   steps and logs; an umbrella `Verify` name alone is not enough. This is an
   auto-format operational condition, never ESCALATE and never a review FIX

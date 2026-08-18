@@ -536,7 +536,7 @@ describe("format and lint mechanical merge fixes (WM-769)", () => {
 
   test("scan fixtures route prettier and eslint-only Verify failures to format_and_lint", () => {
     expect(scanPrompt).toContain("Formatting check (prettier)");
-    expect(scanPrompt).toContain("`Lint`");
+    expect(scanPrompt).toContain("`Lint (eslint)`");
     expect(scanPrompt).toMatch(/eslint\s+diagnostics/);
     expect(scanPrompt).toMatch(
       /FIX, finding exactly `format_and_lint`[\s\S]*never ESCALATE[\s\S]*never a review FIX/,

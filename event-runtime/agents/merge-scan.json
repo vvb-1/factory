@@ -13,7 +13,11 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": ["gh:read", "linear:read", "repo:read"]
+    "services": [
+      "gh:read",
+      "linear:read",
+      "repo:read"
+    ]
   },
   "limits": {
     "timeout_seconds": 1500,
@@ -21,7 +25,7 @@
   },
   "mutating": false,
   "pins": {
-    "agents/merge-scan.md": "sha256:0bcea0aeb61be4588d8f99ecc26b2503a1dfaa71f66e13b7fe67d536df05c0e7",
+    "agents/merge-scan.md": "sha256:a68d5a886739be1acfeb392eaaacf5cce844a5c2c3c7c0f7cef1c276b0af6938",
     "schemas/merge-scan.input.json": "sha256:a1d63f0f667856195ca0cba6a7030b4f4ad0a3cb6a97284d48212934f3dff0f0",
     "schemas/merge-scan.output.json": "sha256:84791d0fcfe80716ffda27b1432cb8be7a003d1c7c967d4dc9445ae182b236a2"
   }
