@@ -757,6 +757,7 @@ export function App() {
               >
                 <Proposals
                   connected={connected}
+                  healthPending={health.isPending || health.isFetching}
                   context={context}
                   onRunQueued={jumpToRun}
                   focusProposalId={focusProposalId}

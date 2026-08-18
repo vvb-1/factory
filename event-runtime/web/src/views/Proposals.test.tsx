@@ -62,6 +62,7 @@ function renderProposals(props: Partial<Parameters<typeof Proposals>[0]> = {}) {
   return renderWithClient(
     <Proposals
       connected={true}
+      healthPending={false}
       context={{ kind: "all" }}
       onRunQueued={noop}
       focusProposalId={null}
@@ -74,6 +75,48 @@ function renderProposals(props: Partial<Parameters<typeof Proposals>[0]> = {}) {
     />,
   );
 }
+
+describe("Proposals approval availability (WM-738)", () => {
+  const proposal = stubProposal("prop_health_state");
+
+  async function approvalTitle(props: {
+    connected: boolean;
+    healthPending: boolean;
+  }) {
+    return withApi(
+      {
+        proposals: async () => ({ proposals: [proposal] }),
+        status: async () => stubStatus(),
+      },
+      async () => {
+        const r = renderProposals({
+          ...props,
+          focusProposalId: proposal.id,
+        });
+        const approve = await r.findByRole("button", { name: /^Approve/ });
+        return approve.parentElement?.getAttribute("title");
+      },
+    );
+  }
+
+  test("pending health says approval is waiting to connect", async () => {
+    expect(
+      await approvalTitle({ connected: false, healthPending: true }),
+    ).toBe("Approval is unavailable while connecting.");
+  });
+
+  test("failed health says approval is unavailable while disconnected", async () => {
+    expect(
+      await approvalTitle({ connected: false, healthPending: false }),
+    ).toBe("Approval is unavailable while disconnected.");
+  });
+
+  test("successful health leaves approval enabled without a tooltip", async () => {
+    expect(
+      await approvalTitle({ connected: true, healthPending: false }),
+    ).toBeNull();
+  });
+});
 
 describe("Proposals multi-row selection & bulk actions (WM-71)", () => {
   let origProposals: typeof api.proposals;
@@ -626,6 +669,7 @@ describe("Proposals selection safety under focus and expiry (WM-547)", () => {
     r.rerender(
       <Proposals
         connected={true}
+        healthPending={false}
         context={{ kind: "all" }}
         onRunQueued={noop}
         focusProposalId={focusProposalId}
@@ -813,6 +857,7 @@ describe("Proposals component harness: cross-tab reveal", () => {
         rerender(
           <Proposals
             connected={true}
+            healthPending={false}
             context={{ kind: "all" }}
             onRunQueued={noop}
             focusProposalId="prop_decided_1"
@@ -874,6 +919,7 @@ describe("Proposals component harness: cross-tab reveal", () => {
         rerender(
           <Proposals
             connected={true}
+            healthPending={false}
             context={{ kind: "all" }}
             onRunQueued={noop}
             focusProposalId="prop_2"
@@ -934,6 +980,7 @@ describe("Proposals component harness: cross-tab reveal", () => {
         rerender(
           <Proposals
             connected={true}
+            healthPending={false}
             context={{ kind: "all" }}
             onRunQueued={noop}
             focusProposalId="prop_1"
@@ -1471,6 +1518,7 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
     r.rerender(
       <Proposals
         connected={false}
+        healthPending={false}
         context={{ kind: "all" }}
         onRunQueued={noop}
         focusProposalId="prop_reject_disconn"

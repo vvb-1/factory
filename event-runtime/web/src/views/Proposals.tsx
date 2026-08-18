@@ -225,6 +225,7 @@ const HISTORY_DISPLAY: DisplayConfig<Proposal> = {
  */
 export function Proposals({
   connected,
+  healthPending,
   context,
   onRunQueued,
   focusProposalId,
@@ -236,6 +237,7 @@ export function Proposals({
   rejumpEpoch,
 }: {
   connected: boolean;
+  healthPending: boolean;
   context: OperatorContext;
   onRunQueued: (runId: string) => void;
   focusProposalId: string | null;
@@ -766,7 +768,9 @@ export function Proposals({
     : sel && staleState(sel)
       ? `This proposal's run is already ${staleState(sel)} and can no longer be approved.`
       : !connected
-        ? "Approval is unavailable while disconnected."
+        ? healthPending
+          ? "Approval is unavailable while connecting."
+          : "Approval is unavailable while disconnected."
         : undefined;
   const openApprove = () => {
     if (!sel || !connected || proposalIsExpired(sel) || staleState(sel)) return;
