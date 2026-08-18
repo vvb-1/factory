@@ -203,6 +203,58 @@ plane disappears. Manual `serve`, `work`, and `supervise` commands remain the
 development fallback; a sandboxed interactive shell may not carry a usable SSH
 context, which is precisely why that fallback is not the production setup.
 
+## 2c. Adapter registry and contract — **shipped, WM-837**
+
+A worker executes a run through a _harness adapter_ — `claude`, `pi`,
+`cursor`, `agy`, `command`, `actions`, and the test-only `fake`, all in
+`event-runtime/lib/adapters/`. Which adapters a worker carries used to be an
+object literal duplicated in `cli/work.mjs` and `cli/serve.mjs`; both now
+obtain the set from the registry in `event-runtime/lib/adapters/index.mjs`,
+which is also what a future extension loader (packs, out-of-tree adapters)
+registers into.
+
+**The contract.** An adapter is a module (an ES module namespace or any object
+with the same exports) that satisfies all of:
+
+- `execute(options)` — the async run entry point `lib/worker.mjs` invokes;
+  its options object and result shape are specified in
+  `docs/event-runtime-conventions.md` § "Adapter contract";
+- `SANDBOX_SUPPORT` — `"gondolin"` (the adapter runs the agent inside the
+  microVM via `runSandboxed()` when a definition carries `sandbox`) or
+  `"unsupported"` (it must refuse such a definition, WM-313); no third value;
+- a name matching `^[a-z][a-z0-9-]*$` — it appears in run specs, worker
+  labels, and `--adapter-override`.
+
+**The registry.** `builtinAdapters()` returns the seven shipped modules keyed
+by name. `createAdapterRegistry({ builtins = builtinAdapters() })` validates
+and registers them with source `builtin` and returns:
+
+- `register(name, module, { source, replace = false })` — validates the
+  contract; an invalid module throws `AdapterContractError`
+  (`code: "adapter_contract_invalid"`, `missing` naming the failed part:
+  `name`, `module`, `execute`, or `SANDBOX_SUPPORT`); a duplicate name throws
+  `AdapterRegistrationError` (`code: "adapter_duplicate"`) unless
+  `replace: true`; `source` is mandatory so the listing can always say where
+  an adapter came from;
+- `get(name)`, `has(name)`, `list()` (`{ name, source, sandboxSupport }`,
+  sorted by name);
+- `toMap()` — a frozen `name → adapter` snapshot, the shape
+  `runOnce(db, registry, adapters, opts)` / `executeClaimed` consume.
+
+**The sandbox seam is mandatory.** Nothing the registry hands out is the raw
+module: `get()` and `toMap()` return a frozen wrapper whose `execute` consults
+`sandboxed.mjs` first — an `unsupported` adapter is refused with
+`SandboxUnsupportedError` for a sandboxed definition before its own code runs,
+so an adapter that forgets `refuseSandbox()` still cannot execute on the host.
+`gondolin` adapters are delegated to and own the `runSandboxed()` call, and
+`sandboxed.test.mjs` proves each built-in reaches the VM boundary.
+`index.test.mjs` asserts that no unwrapped adapter escapes.
+
+**Inspecting it.** `bun event-runtime/cli.mjs adapters` (`--json` for
+machine-readable output) prints the registered adapters with their source and
+sandbox support — the same registry a worker builds, so it needs no running
+`serve`.
+
 ## 3. Stage 2 — workers on other nodes
 
 A `work` process on another machine talks to the authenticated `/worker/v1`

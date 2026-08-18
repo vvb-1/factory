@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { SandboxExecutionError } from "../sandbox/gondolin.mjs";
+import { builtinAdapters } from "./index.mjs";
 import {
   GUEST_BINARIES,
   GUEST_HOME,
@@ -295,9 +296,10 @@ describe("runSandboxed", () => {
  * means the adapter ignored the block, which is the WM-313 defect.
  */
 describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
-  // This is the adapter registry loaded by cli/work.mjs and cli/serve.mjs.
-  // Keep it explicit: helper modules added beside adapters must not silently
-  // become executable conformance targets merely because of their filename.
+  // These are the built-ins cli/work.mjs and cli/serve.mjs obtain through
+  // createAdapterRegistry(). Keep the list explicit: helper modules added
+  // beside adapters must not silently become executable conformance targets
+  // merely because of their filename.
   const modules = [
     "actions",
     "agy",
@@ -308,19 +310,8 @@ describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
     "pi",
   ];
 
-  test("the explicit sweep registry matches both production worker entry points", () => {
-    const registeredAdapters = (relativePath) => {
-      const source = readFileSync(
-        path.resolve(import.meta.dir, relativePath),
-        "utf8",
-      );
-      const declaration = source.match(/const adapters = \{([^}]+)\};/);
-      expect(declaration).not.toBeNull();
-      return declaration[1].split(",").map((name) => name.trim());
-    };
-
-    expect(registeredAdapters("../../cli/work.mjs")).toEqual(modules);
-    expect(registeredAdapters("../../cli/serve.mjs")).toEqual(modules);
+  test("the explicit sweep list matches the built-in set both worker entry points register (lib/adapters/index.mjs)", () => {
+    expect(Object.keys(builtinAdapters()).sort()).toEqual(modules);
   });
 
   for (const name of modules) {
