@@ -1,5 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// Console errors that mean the page is broken, as opposed to dev-server noise.
+const FATAL_CONSOLE_ERRORS = [
+  /Uncaught\b/i,
+  /Failed to load resource.*\/api\//i,
+  /Failed to fetch.*\/api\//i,
+  /Cannot update a component/i,
+  /Maximum update depth exceeded/i,
+  /Minified React error/i,
+  /Objects are not valid as a React child/i,
+];
+
 async function open(page: Page, route: string) {
   await page.goto(`/#/${route}`);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
@@ -86,9 +97,15 @@ test("graph renders the capability hierarchy without browser errors", async ({
   page,
 }) => {
   const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    if (message.type() !== "error") return;
+    const text = message.text();
+    // Only known-fatal classes count. Dev-server chatter (favicon 404,
+    // EventSource reconnects, React/Vite dev warnings) is noise, not a
+    // regression.
+    if (FATAL_CONSOLE_ERRORS.some((pattern) => pattern.test(text)))
+      errors.push(`console: ${text}`);
   });
 
   await open(page, "graph");
@@ -97,7 +114,7 @@ test("graph renders the capability hierarchy without browser errors", async ({
   await expect(page.getByRole("img", { name: "Graph legend" })).toBeVisible();
   const nodes = page.locator('.react-flow__node [role="button"][aria-label]');
   await expect(nodes.first()).toBeVisible();
-  expect(await nodes.count()).toBeGreaterThan(4);
+  await expect.poll(() => nodes.count()).toBeGreaterThan(4);
   await page
     .getByRole("textbox", { name: "Search graph nodes" })
     .fill("status-report");

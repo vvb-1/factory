@@ -89,15 +89,19 @@ cd event-runtime/web
 bun run test:e2e
 ```
 
-The helper owns and removes a temporary `FACTORY_EVENT_HOME`. By default it
-uses API port `7391` and web port `7392`; set `E2E_API_PORT` and
-`E2E_WEB_PORT` when either port is already allocated. Set
-`PLAYWRIGHT_CHANNEL=chromium` to use Playwright's downloaded Chromium instead
-of system Chrome.
+The helper owns and removes a temporary `FACTORY_EVENT_HOME`. It picks two
+free ports per run (so concurrent worktrees never collide or seed each other's
+runtime); set `E2E_API_PORT` and `E2E_WEB_PORT` to pin them. It fails fast if
+the API, worker, or Vite process dies during startup rather than seeding
+whatever else is listening on the port. Set `PLAYWRIGHT_CHANNEL=chromium` to
+use Playwright's downloaded Chromium instead of system Chrome. The pinned
+`@playwright/test` version lives in `e2e/playwright-version.mjs`, read by both
+`test:e2e` and the workflow.
 
 `.github/workflows/e2e.yml` is deliberately opt-in while the suite proves
 stable. It runs for a pull request only when that PR has the `run-e2e` label,
 and it can always be started manually with `workflow_dispatch`. The workflow
 uses the shared verify lock to serialize against every other test job on the
-self-hosted runner, installs Playwright's Chromium build, and runs the same
-`bun run test:e2e` command.
+self-hosted runner, installs Playwright's Chromium build (cached in the
+runner's `~/.cache/ms-playwright`, keyed on the pinned version), and runs the
+same `bun run test:e2e` command.

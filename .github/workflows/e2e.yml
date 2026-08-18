@@ -78,8 +78,51 @@ jobs:
           cd event-runtime/web
           bun install --frozen-lockfile
 
+      - name: Resolve pinned Playwright version
+        id: playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Single source: event-runtime/web/e2e/playwright-version.mjs (also
+          # read by package.json `test:e2e`), so the pin can never drift.
+          version="$(bun event-runtime/web/e2e/playwright-version.mjs)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "browsers_path=$HOME/.cache/ms-playwright" >> "$GITHUB_OUTPUT"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
+          echo "Playwright $version"
+
+      - name: Restore Playwright Chromium cache
+        id: playwright-cache
+        shell: bash
+        env:
+          PLAYWRIGHT_VERSION: ${{ steps.playwright.outputs.version }}
+          BROWSERS_PATH: ${{ steps.playwright.outputs.browsers_path }}
+        run: |
+          set -euo pipefail
+          # No `uses:` steps on the shadow runner (WM-573), so the cache is the
+          # runner's persistent ~/.cache/ms-playwright keyed on the pinned
+          # Playwright version: a marker per version says the matching
+          # Chromium build finished downloading.
+          marker="$BROWSERS_PATH/.factory-e2e-chromium-$PLAYWRIGHT_VERSION"
+          if [ -f "$marker" ]; then
+            echo "cache-hit=true" >> "$GITHUB_OUTPUT"
+            echo "Playwright $PLAYWRIGHT_VERSION Chromium already cached in $BROWSERS_PATH"
+          else
+            echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+            echo "No cached Chromium for Playwright $PLAYWRIGHT_VERSION"
+          fi
+
       - name: Install Playwright Chromium
-        run: cd event-runtime/web && bunx --bun @playwright/test@1.62.1 install chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          PLAYWRIGHT_VERSION: ${{ steps.playwright.outputs.version }}
+          BROWSERS_PATH: ${{ steps.playwright.outputs.browsers_path }}
+        run: |
+          set -euo pipefail
+          cd event-runtime/web
+          bunx --bun "@playwright/test@$PLAYWRIGHT_VERSION" install chromium
+          touch "$BROWSERS_PATH/.factory-e2e-chromium-$PLAYWRIGHT_VERSION"
 
       - name: Run browser smoke journeys
         env:

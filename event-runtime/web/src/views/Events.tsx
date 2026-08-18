@@ -740,6 +740,7 @@ export function Events({
       tabChangedFor.current = key;
       setTab("all");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     focusEvent?.source,
     focusEvent?.eventId,

@@ -2044,6 +2044,7 @@ export function Dialog({
       modal.depth -= 1;
       window.removeEventListener("keydown", onKey);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onClose lives in the ref
   }, []);
   return (
     <div

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "build:fast": "vite build",
-    "test:e2e": "bun add --no-save --exact @playwright/test@1.62.1 && bun playwright test --config playwright.config.ts"
+    "test:e2e": "bun add --no-save --exact \"@playwright/test@$(bun e2e/playwright-version.mjs)\" && bun playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.5",
