@@ -2077,7 +2077,12 @@ export function Tooltip({
 
   // Kept mounted (opacity-0 while closed) rather than conditionally rendered,
   // so callers/tests can find the tooltip by role without simulating hover,
-  // and so there is no mount flash the first time it opens.
+  // and so there is no mount flash the first time it opens. Depends on
+  // `label` too (not just `open`): a tooltip can stay open across a click
+  // that changes its own text (e.g. the theme toggle's label flips on
+  // click without the pointer/focus leaving the button) — without this,
+  // the position goes stale for the new (often wider) label and can clip
+  // off the edge it was just clamped away from.
   useLayoutEffect(() => {
     const position = () => {
       const trigger = triggerRef.current?.getBoundingClientRect();
@@ -2098,7 +2103,7 @@ export function Tooltip({
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", position, true);
     };
-  }, [open]);
+  }, [open, label]);
 
   return (
     <span

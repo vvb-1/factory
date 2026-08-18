@@ -248,6 +248,66 @@ describe("Tooltip viewport clamp (WM-589 follow-up)", () => {
     expect(left).toBeGreaterThanOrEqual(0);
     expect(left + 220).toBeLessThanOrEqual(1440);
   });
+
+  test("Tooltip recomputes position when its label changes while it stays open", () => {
+    // Regression for a follow-up finding on the theme toggle: the label can
+    // change (and grow) on click without the pointer/focus ever leaving the
+    // button, so the effect must react to the label content too, not just
+    // the open/closed transition.
+    Object.defineProperty(window, "innerWidth", {
+      value: 1440,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 900,
+      configurable: true,
+    });
+
+    function ToggleLabelHarness() {
+      const [long, setLong] = useState(false);
+      return (
+        <Tooltip label={long ? "A much longer label after the click" : "Short"}>
+          <button aria-label="Toggle" onClick={() => setLong(true)}>
+            T
+          </button>
+        </Tooltip>
+      );
+    }
+
+    const r = render(<ToggleLabelHarness />);
+    const button = r.getByRole("button", { name: "Toggle" });
+    const trigger = button.parentElement as HTMLElement;
+    const tooltip = r.getByRole("tooltip");
+    trigger.getBoundingClientRect = () =>
+      rect({
+        top: 40,
+        left: 1400,
+        right: 1432,
+        bottom: 68,
+        width: 32,
+        height: 28,
+      });
+    tooltip.getBoundingClientRect = () =>
+      rect({ top: 0, left: 0, right: 60, bottom: 26, width: 60, height: 26 });
+
+    act(() => {
+      fireEvent.mouseEnter(trigger);
+    });
+    const shortLeft = parseFloat(tooltip.style.left);
+    expect(shortLeft + 60).toBeLessThanOrEqual(1440);
+
+    // The click grows the label/tooltip without a mouseleave/mouseenter —
+    // pointer stays put, `open` never flips.
+    tooltip.getBoundingClientRect = () =>
+      rect({ top: 0, left: 0, right: 260, bottom: 26, width: 260, height: 26 });
+    act(() => {
+      fireEvent.click(button);
+    });
+
+    const left = parseFloat(tooltip.style.left);
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + 260).toBeLessThanOrEqual(1440);
+  });
 });
 
 describe("CopyActions (WM-302)", () => {
