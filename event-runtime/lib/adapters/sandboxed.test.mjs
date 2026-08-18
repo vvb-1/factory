@@ -8,13 +8,7 @@
  * behaviour is proven in pi.test.mjs behind `preflight()`.
  */
 import { describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SandboxExecutionError } from "../sandbox/gondolin.mjs";
@@ -301,26 +295,32 @@ describe("runSandboxed", () => {
  * means the adapter ignored the block, which is the WM-313 defect.
  */
 describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
-  const dir = import.meta.dir;
-  const modules = readdirSync(dir)
-    .filter(
-      (f) =>
-        f.endsWith(".mjs") && !f.endsWith(".test.mjs") && f !== "sandboxed.mjs",
-    )
-    .map((f) => f.replace(/\.mjs$/, ""));
+  // This is the adapter registry loaded by cli/work.mjs and cli/serve.mjs.
+  // Keep it explicit: helper modules added beside adapters must not silently
+  // become executable conformance targets merely because of their filename.
+  const modules = [
+    "actions",
+    "agy",
+    "claude",
+    "command",
+    "cursor",
+    "fake",
+    "pi",
+  ];
 
-  test("the sweep sees the adapters the worker can load", () => {
-    expect(modules).toEqual(
-      expect.arrayContaining([
-        "actions",
-        "agy",
-        "claude",
-        "command",
-        "cursor",
-        "fake",
-        "pi",
-      ]),
-    );
+  test("the explicit sweep registry matches both production worker entry points", () => {
+    const registeredAdapters = (relativePath) => {
+      const source = readFileSync(
+        path.resolve(import.meta.dir, relativePath),
+        "utf8",
+      );
+      const declaration = source.match(/const adapters = \{([^}]+)\};/);
+      expect(declaration).not.toBeNull();
+      return declaration[1].split(",").map((name) => name.trim());
+    };
+
+    expect(registeredAdapters("../../cli/work.mjs")).toEqual(modules);
+    expect(registeredAdapters("../../cli/serve.mjs")).toEqual(modules);
   });
 
   for (const name of modules) {
@@ -384,4 +384,60 @@ describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
       }
     });
   }
+});
+
+describe("pi sandbox prompt staging", () => {
+  test("invalid guest binary configuration leaves no prompt file", async () => {
+    const { execute, SANDBOX_PROMPT_FILE } = await import("./pi.mjs");
+    const workspaceDir = ws();
+    const promptPath = path.join(workspaceDir, "source-prompt.md");
+    writeFileSync(promptPath, "prompt", "utf8");
+
+    await expect(
+      execute({
+        spec: { agent: "pi-invalid-binary@1" },
+        def: {
+          ...sandboxDef({ ref: "pi-invalid-binary@1", promptPath }),
+          sandbox: {
+            provider: "gondolin",
+            allowedHosts: [],
+            guestBinaries: { pi: "pi" },
+          },
+        },
+        workspaceDir,
+        timeoutMs: 1000,
+        runSandbox: async () => {
+          throw new Error("VM boundary must not be reached");
+        },
+      }),
+    ).rejects.toThrow(/absolute guest path/);
+    expect(existsSync(path.join(workspaceDir, SANDBOX_PROMPT_FILE))).toBe(
+      false,
+    );
+  });
+
+  test("invalid sandbox policy leaves no prompt file", async () => {
+    const { execute, SANDBOX_PROMPT_FILE } = await import("./pi.mjs");
+    const workspaceDir = ws();
+    const promptPath = path.join(workspaceDir, "source-prompt.md");
+    writeFileSync(promptPath, "prompt", "utf8");
+
+    await expect(
+      execute({
+        spec: { agent: "pi-invalid-policy@1" },
+        def: {
+          ...sandboxDef({ ref: "pi-invalid-policy@1", promptPath }),
+          sandbox: { provider: "invalid", allowedHosts: [] },
+        },
+        workspaceDir,
+        timeoutMs: 1000,
+        runSandbox: async () => {
+          throw new Error("VM boundary must not be reached");
+        },
+      }),
+    ).rejects.toThrow(/unknown sandbox provider/);
+    expect(existsSync(path.join(workspaceDir, SANDBOX_PROMPT_FILE))).toBe(
+      false,
+    );
+  });
 });

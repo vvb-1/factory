@@ -12,7 +12,9 @@ import os from "node:os";
 import path from "node:path";
 import { Database } from "bun:sqlite";
 import {
+  assertSandboxWorkspaceSupported,
   PathViolation,
+  WorktreeSandboxUnsupportedError,
   WorktreeError,
   createWorkspace,
   destroyWorkspace,
@@ -313,6 +315,25 @@ describe("worktree workspaces (WM-108)", () => {
     expect(
       JSON.parse(readFileSync(path.join(dir, ".worktree.json"), "utf8")).ticket,
     ).toBe("WM-1");
+    expect(destroyWorkspace(dir)).toBe(true);
+  });
+
+  test("a sandboxed definition is refused when the workspace carries a worktree marker", () => {
+    const { dir } = make("wtrepo", "WM-1-SANDBOX", "run_wt1_sandbox");
+    expect(() =>
+      assertSandboxWorkspaceSupported(dir, {
+        sandbox: { provider: "gondolin" },
+      }),
+    ).toThrow(WorktreeSandboxUnsupportedError);
+    try {
+      assertSandboxWorkspaceSupported(dir, {
+        sandbox: { provider: "gondolin" },
+      });
+    } catch (err) {
+      expect(err.code).toBe("worktree_sandbox_unsupported");
+      expect(err.workspaceDir).toBe(dir);
+    }
+    expect(() => assertSandboxWorkspaceSupported(dir, {})).not.toThrow();
     expect(destroyWorkspace(dir)).toBe(true);
   });
 

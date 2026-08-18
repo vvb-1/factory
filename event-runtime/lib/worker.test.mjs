@@ -19,6 +19,7 @@ import {
 } from "./adapters/claude.mjs";
 import * as fake from "./adapters/fake.mjs";
 import { buildPiArgv, execute as executePi } from "./adapters/pi.mjs";
+import { SandboxUnsupportedError } from "./adapters/sandboxed.mjs";
 import { pinRunArtifact } from "./artifacts.mjs";
 import { admitEvent } from "./intake.mjs";
 import { planEvent } from "./planner.mjs";
@@ -550,6 +551,34 @@ describe("worker", () => {
       state: "REFUSED",
       agent: spec.agent,
     });
+  });
+
+  test("sandbox console is stored as a runtime artifact when present", async () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(db, makeSpec({ input: { repos: ["refuse"] } }));
+    const consoleAdapter = {
+      async execute(args) {
+        const outcome = await fake.execute(args);
+        writeFileSync(
+          path.join(args.workspaceDir, ".sandbox-console.log"),
+          "guest console evidence\n",
+          "utf8",
+        );
+        return outcome;
+      },
+    };
+
+    await runOnce(db, registry, { fake: consoleAdapter }, opts());
+    const parsed = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(spec.runId).result_json,
+    );
+    expect(parsed.artifacts.map((entry) => entry.kind)).toEqual([
+      "transcript",
+      "sandbox-console",
+    ]);
+    expect(parsed.artifacts[1].sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("needs_human preserves a valid authored ask, while an invalid ask falls back with its errors", async () => {
@@ -1618,6 +1647,8 @@ describe("worker", () => {
     expect(classifyFailureCause("contract_violation")).toBe("agent_error");
     for (const reason of [
       "cli_not_found",
+      "sandbox_unsupported",
+      "worktree_sandbox_unsupported",
       "unknown_adapter",
       "agent_definition_mismatch",
       "policy_denied:Bash",
@@ -1667,6 +1698,41 @@ describe("worker", () => {
         )
         .all(spec.runId),
     ).toEqual([{ reason_code: "adapter_error" }, { reason_code: "ok" }]);
+  });
+
+  test("SandboxUnsupportedError is fatal and never requeues", async () => {
+    const db = openDb(":memory:");
+    const unsupportedAdapter = {
+      async execute() {
+        throw new SandboxUnsupportedError("unsupported", "test adapter");
+      },
+    };
+    const spec = queueRun(
+      db,
+      makeSpec({
+        adapter: "unsupported",
+        maxAttempts: 5,
+        maxEnvironmentRetries: 5,
+      }),
+    );
+
+    const summary = await runOnce(
+      db,
+      registry,
+      { unsupported: unsupportedAdapter },
+      opts(),
+    );
+    expect(summary).toMatchObject({
+      terminalState: "FAILED",
+      reasonCode: "sandbox_unsupported",
+    });
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(claimNext(db, opts())).toBeNull();
+    expect(
+      lifecycleOf(db, spec.runId).some((event) =>
+        event.reason?.startsWith("retry:"),
+      ),
+    ).toBe(false);
   });
 
   test("repeated environment failures dead-letter after the dedicated retry ceiling", async () => {
@@ -4331,6 +4397,62 @@ describe("execute-side dispatch hardening (WM-115)", () => {
         .query(`SELECT reason_code FROM attempts WHERE run_id = ?`)
         .get(spec.runId).reason_code,
     ).toBe("workspace_provisioning_error");
+  });
+
+  test("sandboxed execution against a worktree workspace is refused typed before the adapter runs", async () => {
+    const db = openDb(":memory:");
+    const lockDir = mkdtempSync(
+      path.join(os.tmpdir(), "evrt-sandbox-wt-locks-"),
+    );
+    let executed = false;
+    const observingAdapter = {
+      async execute() {
+        executed = true;
+        return { exitCode: 0, timedOut: false };
+      },
+    };
+    const sandboxRegistry = {
+      ...registry,
+      agents: new Map(registry.agents),
+    };
+    sandboxRegistry.agents.set("dispatch@1", {
+      ...getAgent(registry, "dispatch@1"),
+      sandbox: { provider: "gondolin", allowedHosts: [] },
+    });
+    const spec = queueRun(
+      db,
+      makeDispatchSpec({
+        input: { repo: "wt-worker", ticket: "WM-733" },
+        maxEnvironmentRetries: 5,
+      }),
+    );
+
+    const summary = await runOnce(
+      db,
+      sandboxRegistry,
+      { fake: observingAdapter },
+      opts({
+        dispatch: {
+          locksDir: lockDir,
+          fetchTicket: () => readyDispatchTicket("WM-733"),
+          fetchInFlight: () => [],
+          countLeases: () => 0,
+          claimTicket: () => ({ ok: true }),
+        },
+      }),
+    );
+
+    expect(executed).toBe(false);
+    expect(summary).toMatchObject({
+      terminalState: "FAILED",
+      reasonCode: "worktree_sandbox_unsupported",
+    });
+    expect(runState(db, spec.runId)).toBe("FAILED");
+    expect(
+      lifecycleOf(db, spec.runId).some((event) =>
+        event.reason?.startsWith("retry:"),
+      ),
+    ).toBe(false);
   });
 
   test("filesystem failures after worktree_up remain typed workspace provisioning errors", async () => {
