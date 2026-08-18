@@ -528,6 +528,7 @@ describe("watched flow and operator verbs (§12, §13, §15)", () => {
 
     const list = await s.client.runs();
     expect(list.runs.map((r) => r.runId)).toContain(flowRunId);
+    expect(list.runs[0].spec).toEqual(done.run.spec);
     expect(list.runs[0].agent).toBe("factory-status-report@1");
     expect(list.runs[0].repos).toEqual(["ok"]);
     expect((await s.client.runs("COMPLETED")).runs).toHaveLength(1);

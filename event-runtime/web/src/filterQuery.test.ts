@@ -18,6 +18,22 @@ import type { AdmittedEvent, InboxItem, Proposal, RunListItem } from "./types";
 
 const run = (over: Partial<RunListItem> = {}): RunListItem => ({
   runId: "run_48ac91",
+  spec: {
+    schemaVersion: "factory.run-spec/v1",
+    runId: "run_48ac91",
+    agent: "factory/ci-doctor@2",
+    input: { repos: ["watt-mind/factory"], model: "claude-sonnet" },
+    inputHash: "sha256:input",
+    workspace: { type: "ephemeral" },
+    adapter: "claude",
+    promptVersion: "2",
+    policyVersion: "1",
+    outputContract: "factory.ci-doctor/v1",
+    capabilities: [],
+    timeoutSeconds: 600,
+    maxAttempts: 3,
+    idempotencyKey: "idem-run_48ac91",
+  },
   state: "FAILED",
   attempts: 1,
   maxAttempts: 3,
