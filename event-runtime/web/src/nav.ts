@@ -17,6 +17,7 @@ export const NAV = [
   { key: "schedules", label: "Schedules", go: "s" },
   { key: "workers", label: "Workers", go: "w" },
   { key: "graph", label: "Graph", go: "g" },
+  { key: "settings", label: "Settings", go: "c" },
 ] as const;
 
 export type NavItem = (typeof NAV)[number];

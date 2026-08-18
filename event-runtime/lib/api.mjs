@@ -22,6 +22,7 @@ import {
 } from "./api-http.mjs";
 import { handleIntakeApiRoute } from "./api-intake.mjs";
 import { handleChainApiRoute } from "./api-chain.mjs";
+import { handleConfigApiRoute } from "./api-config.mjs";
 import { handleMetricsApiRoute } from "./api-metrics.mjs";
 import { handleRegistryApiRoute } from "./api-registry.mjs";
 import {
@@ -45,7 +46,7 @@ import { decideInboxItem, getInboxItem, retryInboxDecision } from "./inbox.mjs";
 import { applyDecisionEffect } from "./decision-effects.mjs";
 import { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 import { notifyCommand, sendNotification } from "./notify.mjs";
-import { loadRepos } from "./repos.mjs";
+import { loadRepos, reposRoot } from "./repos.mjs";
 import { scheduleView } from "./schedules.mjs";
 import { handleStatusApiRoute, workerCapacityView } from "./status-view.mjs";
 import { loadWorkerPolicy } from "./workers.mjs";
@@ -81,10 +82,13 @@ export function createApi({
   inboxCommand = notifyCommand(),
   inboxWebUrl = process.env.FACTORY_WEB_URL,
   inboxApplyEffect = applyDecisionEffect,
+  // Config inventory follows the same checkout override as repos/registry.
+  configRoot = reposRoot(),
   // Root of the config/policy.yaml the run endpoints consult (tests point it elsewhere).
   policyRoot = FACTORY_ROOT,
 } = {}) {
   const actor = "operator";
+  const registryLoadedAt = new Date(now()).toISOString();
   const storeStatsTtlMs = 10_000;
   let cachedStoreStats = null;
   let cachedStoreStatsAt = 0;
@@ -210,6 +214,14 @@ export function createApi({
       }
       if (route === "GET /status" || route === "GET /workers") {
         return handleStatusApiRoute({ ...common, getStoreStats });
+      }
+      if (route === "GET /config") {
+        return handleConfigApiRoute({
+          ...common,
+          root: configRoot,
+          now: nowMs,
+          registryLoadedAt,
+        });
       }
       if (
         url.pathname === "/metrics" ||
