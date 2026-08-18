@@ -13,7 +13,7 @@ container every agent must live in, and not a replacement for the nav rail.
   It is the home for anything that is not a `repos.yaml` project: unscoped
   runs, registry agents, workers, the graph, inject.
 - **A factory repo tab** filters Events / Proposals / Runs (and Overview
-  lists that can be filtered honestly) to rows whose spec or envelope *names*
+  lists that can be filtered honestly) to rows whose spec or envelope _names_
   that repo. It does not remount a different app. A run's repo is optional
   input (`repoPin.repo` / `input.repo` / `input.repos[]`), not a foreign key.
 - **In flight** is a query tab, not a fake repo: Runs in `LEASED` or
@@ -31,8 +31,8 @@ container every agent must live in, and not a replacement for the nav rail.
 - `g e` / `g r` / `j`/`k` / Esc stay inside the current context. Do not steal
   `[` / `]` (status tabs). One poller; background tabs restore a filter on
   focus, they are not keep-alive iframes.
-- The Projects *view* (OPS-300) is a list of the registry, including janitor
-  later. Context tabs *use* `GET /repos`; they do not replace that view.
+- The Projects _view_ (OPS-300) is a list of the registry, including janitor
+  later. Context tabs _use_ `GET /repos`; they do not replace that view.
 - Pinning a specific run as a document tab on the same strip is OPS-357
   (v2) — not this decision.
 

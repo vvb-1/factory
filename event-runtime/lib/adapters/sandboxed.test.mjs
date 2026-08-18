@@ -8,7 +8,13 @@
  * behaviour is proven in pi.test.mjs behind `preflight()`.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SandboxExecutionError } from "../sandbox/gondolin.mjs";
@@ -27,7 +33,11 @@ import {
 } from "./sandboxed.mjs";
 
 const ws = () => mkdtempSync(path.join(os.tmpdir(), "evrt-sandboxed-"));
-const sandboxDef = (extra = {}) => ({ ref: "sandboxed@1", sandbox: { provider: "gondolin", allowedHosts: [] }, ...extra });
+const sandboxDef = (extra = {}) => ({
+  ref: "sandboxed@1",
+  sandbox: { provider: "gondolin", allowedHosts: [] },
+  ...extra,
+});
 
 describe("sandboxRequested / refuseSandbox", () => {
   test("absent or null means no sandbox; anything else is a request", () => {
@@ -52,32 +62,85 @@ describe("sandboxRequested / refuseSandbox", () => {
     expect(caught).toBeInstanceOf(SandboxUnsupportedError);
     expect(caught.code).toBe("sandbox_unsupported");
     expect(caught.adapter).toBe("claude");
-    expect(caught.message).toContain('adapter "claude" cannot honour a sandbox policy');
-    expect(caught.message).toContain("refused rather than executed on the host");
+    expect(caught.message).toContain(
+      'adapter "claude" cannot honour a sandbox policy',
+    );
+    expect(caught.message).toContain(
+      "refused rather than executed on the host",
+    );
     expect(caught.message).toContain("because reasons");
   });
 });
 
 describe("guest environment and binaries", () => {
   test("guestEnvironment is built from constants plus locale — the caller's env is not a source", () => {
-    const env = guestEnvironment({ PI_OFFLINE: "1" }, { LANG: "en_US.UTF-8", OPENAI_API_KEY: "sk-fake-not-real", GITHUB_TOKEN: "ghp-fake", HOME: "/Users/someone", PATH: "/opt/homebrew/bin" });
-    expect(env).toEqual({ HOME: GUEST_HOME, PATH: GUEST_PATH, TERM: "dumb", LANG: "en_US.UTF-8", PI_OFFLINE: "1" });
+    const env = guestEnvironment(
+      { PI_OFFLINE: "1" },
+      {
+        LANG: "en_US.UTF-8",
+        OPENAI_API_KEY: "sk-fake-not-real",
+        GITHUB_TOKEN: "ghp-fake",
+        HOME: "/Users/someone",
+        PATH: "/opt/homebrew/bin",
+      },
+    );
+    expect(env).toEqual({
+      HOME: GUEST_HOME,
+      PATH: GUEST_PATH,
+      TERM: "dumb",
+      LANG: "en_US.UTF-8",
+      PI_OFFLINE: "1",
+    });
     expect(GUEST_PATH.split(":")).toContain("/usr/local/bin");
   });
 
   test("guestBinary defaults to the image contract path and honours an absolute per-definition override", () => {
     expect(guestBinary(sandboxDef(), "pi")).toBe(GUEST_BINARIES.pi);
-    expect(guestBinary(sandboxDef({ sandbox: { provider: "gondolin", guestBinaries: { pi: "/opt/tools/pi" } } }), "pi")).toBe("/opt/tools/pi");
-    expect(() => guestBinary(sandboxDef({ sandbox: { provider: "gondolin", guestBinaries: { pi: "pi" } } }), "pi")).toThrow(/absolute guest path/);
+    expect(
+      guestBinary(
+        sandboxDef({
+          sandbox: {
+            provider: "gondolin",
+            guestBinaries: { pi: "/opt/tools/pi" },
+          },
+        }),
+        "pi",
+      ),
+    ).toBe("/opt/tools/pi");
+    expect(() =>
+      guestBinary(
+        sandboxDef({
+          sandbox: { provider: "gondolin", guestBinaries: { pi: "pi" } },
+        }),
+        "pi",
+      ),
+    ).toThrow(/absolute guest path/);
   });
 
   test("withStdinFile keeps the binary and args as positional parameters and refuses anything but a bare filename", () => {
-    expect(withStdinFile(["/usr/local/bin/pi", "-p", "--mode", "json"], ".prompt.md")).toEqual([
-      "/bin/sh", "-c", 'exec "$0" "$@" < ./.prompt.md', "/usr/local/bin/pi", "-p", "--mode", "json",
+    expect(
+      withStdinFile(
+        ["/usr/local/bin/pi", "-p", "--mode", "json"],
+        ".prompt.md",
+      ),
+    ).toEqual([
+      "/bin/sh",
+      "-c",
+      'exec "$0" "$@" < ./.prompt.md',
+      "/usr/local/bin/pi",
+      "-p",
+      "--mode",
+      "json",
     ]);
-    expect(() => withStdinFile(["/bin/true"], "../escape")).toThrow(/bare workspace filename/);
-    expect(() => withStdinFile(["/bin/true"], "/workspace/x")).toThrow(/bare workspace filename/);
-    expect(() => withStdinFile(["/bin/true"], "a b")).toThrow(/bare workspace filename/);
+    expect(() => withStdinFile(["/bin/true"], "../escape")).toThrow(
+      /bare workspace filename/,
+    );
+    expect(() => withStdinFile(["/bin/true"], "/workspace/x")).toThrow(
+      /bare workspace filename/,
+    );
+    expect(() => withStdinFile(["/bin/true"], "a b")).toThrow(
+      /bare workspace filename/,
+    );
   });
 });
 
@@ -85,7 +148,16 @@ describe("runSandboxed", () => {
   test("refuses a relative guest binary before the VM boundary is touched", async () => {
     let called = false;
     await expect(
-      runSandboxed({ adapter: "t", def: sandboxDef(), workspaceDir: ws(), argv: ["pi"], timeoutMs: 1000, runSandbox: async () => { called = true; } }),
+      runSandboxed({
+        adapter: "t",
+        def: sandboxDef(),
+        workspaceDir: ws(),
+        argv: ["pi"],
+        timeoutMs: 1000,
+        runSandbox: async () => {
+          called = true;
+        },
+      }),
     ).rejects.toThrow(/absolute guest path/);
     expect(called).toBe(false);
   });
@@ -115,25 +187,49 @@ describe("runSandboxed", () => {
     expect(seen.workspaceDir).toBe(workspaceDir);
     expect(seen.timeoutMs).toBe(4321);
     expect(seen.env).toEqual({ PI_OFFLINE: "1" });
-    expect(seen.command).toEqual(["/bin/sh", "-c", 'exec "$0" "$@" < ./.prompt.md', "/usr/local/bin/pi", "-p"]);
+    expect(seen.command).toEqual([
+      "/bin/sh",
+      "-c",
+      'exec "$0" "$@" < ./.prompt.md',
+      "/usr/local/bin/pi",
+      "-p",
+    ]);
 
-    const console_ = readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8");
-    expect(console_).toContain("[sandbox] adapter=pi definition=sandboxed@1 provider=gondolin");
+    const console_ = readFileSync(
+      path.join(workspaceDir, SANDBOX_CONSOLE_FILE),
+      "utf8",
+    );
+    expect(console_).toContain(
+      "[sandbox] adapter=pi definition=sandboxed@1 provider=gondolin",
+    );
     expect(console_).toContain("guest said something on stderr");
     expect(console_).toContain("boot=77ms exit=0 timedOut=false");
-    const lifecycle = trace.find((t) => t.kind === "lifecycle" && t.payload.note === "sandbox_console");
-    expect(lifecycle.payload).toMatchObject({ adapter: "pi", bootMs: 77, exitCode: 0, timedOut: false });
+    const lifecycle = trace.find(
+      (t) => t.kind === "lifecycle" && t.payload.note === "sandbox_console",
+    );
+    expect(lifecycle.payload).toMatchObject({
+      adapter: "pi",
+      bootMs: 77,
+      exitCode: 0,
+      timedOut: false,
+    });
     expect(lifecycle.payload.text).toContain("guest said something on stderr");
   });
 
   test("a guest timeout is reported exactly like a host timeout: null exit, timedOut true", async () => {
     const workspaceDir = ws();
     const outcome = await runSandboxed({
-      adapter: "t", def: sandboxDef(), workspaceDir, argv: ["/bin/sleep", "999"], timeoutMs: 10,
+      adapter: "t",
+      def: sandboxDef(),
+      workspaceDir,
+      argv: ["/bin/sleep", "999"],
+      timeoutMs: 10,
       runSandbox: async () => ({ exitCode: null, timedOut: true, bootMs: 5 }),
     });
     expect(outcome).toEqual({ exitCode: null, timedOut: true, bootMs: 5 });
-    expect(readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8")).toContain("timedOut=true");
+    expect(
+      readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8"),
+    ).toContain("timedOut=true");
   });
 
   test("a cooperative cancel resolves like a SIGTERMed host child, not as a runner crash", async () => {
@@ -143,15 +239,30 @@ describe("runSandboxed", () => {
     const ac = new AbortController();
     const workspaceDir = ws();
     const pending = runSandboxed({
-      adapter: "t", def: sandboxDef(), workspaceDir, argv: ["/bin/sleep", "999"], timeoutMs: 60_000, abortSignal: ac.signal,
-      runSandbox: ({ abortSignal }) => new Promise((_, reject) => {
-        abortSignal.addEventListener("abort", () => reject(new SandboxExecutionError("sandbox_runner_crashed", "runner exited (null) without reporting a guest exit code")));
-      }),
+      adapter: "t",
+      def: sandboxDef(),
+      workspaceDir,
+      argv: ["/bin/sleep", "999"],
+      timeoutMs: 60_000,
+      abortSignal: ac.signal,
+      runSandbox: ({ abortSignal }) =>
+        new Promise((_, reject) => {
+          abortSignal.addEventListener("abort", () =>
+            reject(
+              new SandboxExecutionError(
+                "sandbox_runner_crashed",
+                "runner exited (null) without reporting a guest exit code",
+              ),
+            ),
+          );
+        }),
     });
     setTimeout(() => ac.abort(), 5);
     const outcome = await pending;
     expect(outcome).toEqual({ exitCode: null, timedOut: false, bootMs: null });
-    expect(readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8")).toContain("cancelled=true");
+    expect(
+      readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8"),
+    ).toContain("cancelled=true");
   });
 
   test("the same crash WITHOUT an abort is a failure, rethrown typed and written to the console", async () => {
@@ -159,13 +270,26 @@ describe("runSandboxed", () => {
     const trace = [];
     await expect(
       runSandboxed({
-        adapter: "t", def: sandboxDef(), workspaceDir, argv: ["/bin/true"], timeoutMs: 1000,
+        adapter: "t",
+        def: sandboxDef(),
+        workspaceDir,
+        argv: ["/bin/true"],
+        timeoutMs: 1000,
         onTrace: (kind, payload) => trace.push({ kind, payload }),
-        runSandbox: async () => { throw new SandboxExecutionError("sandbox_runner_crashed", "runner exited (1)"); },
+        runSandbox: async () => {
+          throw new SandboxExecutionError(
+            "sandbox_runner_crashed",
+            "runner exited (1)",
+          );
+        },
       }),
     ).rejects.toMatchObject({ code: "sandbox_runner_crashed" });
-    expect(readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8")).toContain("failed after");
-    expect(trace.find((t) => t.payload?.note === "sandbox_console").payload.error).toContain("sandbox_runner_crashed");
+    expect(
+      readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8"),
+    ).toContain("failed after");
+    expect(
+      trace.find((t) => t.payload?.note === "sandbox_console").payload.error,
+    ).toContain("sandbox_runner_crashed");
   });
 });
 
@@ -179,11 +303,24 @@ describe("runSandboxed", () => {
 describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
   const dir = import.meta.dir;
   const modules = readdirSync(dir)
-    .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs") && f !== "sandboxed.mjs")
+    .filter(
+      (f) =>
+        f.endsWith(".mjs") && !f.endsWith(".test.mjs") && f !== "sandboxed.mjs",
+    )
     .map((f) => f.replace(/\.mjs$/, ""));
 
   test("the sweep sees the adapters the worker can load", () => {
-    expect(modules).toEqual(expect.arrayContaining(["actions", "agy", "claude", "command", "cursor", "fake", "pi"]));
+    expect(modules).toEqual(
+      expect.arrayContaining([
+        "actions",
+        "agy",
+        "claude",
+        "command",
+        "cursor",
+        "fake",
+        "pi",
+      ]),
+    );
   });
 
   for (const name of modules) {
@@ -198,7 +335,13 @@ describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
       let boundaryHit = false;
       const runSandbox = async ({ workspaceDir: dirSeen }) => {
         boundaryHit = true;
-        writeFileSync(path.join(dirSeen, "result.json"), JSON.stringify({ schemaVersion: "factory.agent-result/v1", terminalState: "completed" }));
+        writeFileSync(
+          path.join(dirSeen, "result.json"),
+          JSON.stringify({
+            schemaVersion: "factory.agent-result/v1",
+            terminalState: "completed",
+          }),
+        );
         return { exitCode: 0, timedOut: false, bootMs: 1 };
       };
       const def = {
@@ -234,7 +377,9 @@ describe("every adapter decides about def.sandbox (WM-313 conformance)", () => {
         expect(caught.adapter).toBe(name);
         expect(caught.code).toBe("sandbox_unsupported");
         // Refusal happens before anything touches the workspace.
-        expect(existsSync(path.join(workspaceDir, ".transcript.json"))).toBe(false);
+        expect(existsSync(path.join(workspaceDir, ".transcript.json"))).toBe(
+          false,
+        );
         expect(existsSync(path.join(workspaceDir, "result.json"))).toBe(false);
       }
     });

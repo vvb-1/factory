@@ -13,11 +13,17 @@ describe("validate", () => {
         tags: { type: "array", items: { type: "string" } },
       },
     };
-    expect(validate(schema, { name: "bj29", count: 2, tags: ["a"] }).valid).toBe(true);
+    expect(
+      validate(schema, { name: "bj29", count: 2, tags: ["a"] }).valid,
+    ).toBe(true);
   });
 
   test("rejects unknown properties when additionalProperties is false", () => {
-    const schema = { type: "object", additionalProperties: false, properties: { a: { type: "string" } } };
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      properties: { a: { type: "string" } },
+    };
     const { valid, errors } = validate(schema, { a: "x", extra: 1 });
     expect(valid).toBe(false);
     expect(errors[0]).toContain('"extra"');
@@ -34,9 +40,13 @@ describe("validate", () => {
   });
 
   test("const, enum, pattern, bounds", () => {
-    expect(validate({ const: "factory.event/v1" }, "factory.event/v1").valid).toBe(true);
+    expect(
+      validate({ const: "factory.event/v1" }, "factory.event/v1").valid,
+    ).toBe(true);
     expect(validate({ enum: ["a", "b"] }, "c").valid).toBe(false);
-    expect(validate({ type: "string", pattern: "^run_" }, "prop_1").valid).toBe(false);
+    expect(validate({ type: "string", pattern: "^run_" }, "prop_1").valid).toBe(
+      false,
+    );
     expect(validate({ type: "array", minItems: 1 }, []).valid).toBe(false);
   });
 
@@ -51,7 +61,19 @@ describe("validate", () => {
   });
 
   test("nested errors carry a path", () => {
-    const schema = { type: "object", properties: { repos: { type: "array", items: { type: "object", required: ["name"], properties: { name: { type: "string" } } } } } };
+    const schema = {
+      type: "object",
+      properties: {
+        repos: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["name"],
+            properties: { name: { type: "string" } },
+          },
+        },
+      },
+    };
     const { errors } = validate(schema, { repos: [{}] });
     expect(errors[0]).toContain("$.repos[0]");
   });
@@ -65,8 +87,12 @@ describe("validate", () => {
       };
       expect(validate(schema, { a: "x", toString: "evil" }).valid).toBe(false);
       expect(validate(schema, { a: "x", valueOf: "evil" }).valid).toBe(false);
-      expect(validate(schema, { a: "x", constructor: "evil" }).valid).toBe(false);
-      expect(validate(schema, { a: "x", isPrototypeOf: "evil" }).valid).toBe(false);
+      expect(validate(schema, { a: "x", constructor: "evil" }).valid).toBe(
+        false,
+      );
+      expect(validate(schema, { a: "x", isPrototypeOf: "evil" }).valid).toBe(
+        false,
+      );
     });
 
     test("validates additionalProperties schema on prototype-named own keys", () => {

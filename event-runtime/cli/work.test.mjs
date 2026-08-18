@@ -201,10 +201,14 @@ describe("work command", () => {
     });
     db.close();
 
-    const child = spawnTracked("bun", [CLI, "work", "--adapter-override", "fake"], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnTracked(
+      "bun",
+      [CLI, "work", "--adapter-override", "fake"],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
 
     let out = "";
     child.stdout.on("data", (b) => {
@@ -241,10 +245,14 @@ describe("work command", () => {
 
   test("work --adapter-override pi is accepted at the work call site (OPS-517)", async () => {
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-work-pi-"));
-    const child = spawnTracked("bun", [CLI, "work", "--adapter-override", "pi"], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnTracked(
+      "bun",
+      [CLI, "work", "--adapter-override", "pi"],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let out = "";
     child.stdout.on("data", (b) => {
       out += b;
@@ -463,10 +471,14 @@ describe("work command", () => {
 
   test("work --adapter-override cursor is accepted at the work call site (WM-440)", async () => {
     const home = mkdtempSync(path.join(os.tmpdir(), "evrt-work-cursor-"));
-    const child = spawnTracked("bun", [CLI, "work", "--adapter-override", "cursor"], {
-      env: { ...process.env, FACTORY_EVENT_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnTracked(
+      "bun",
+      [CLI, "work", "--adapter-override", "cursor"],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let out = "";
     child.stdout.on("data", (b) => {
       out += b;

@@ -13,7 +13,13 @@ import { repoNamesFromInput } from "./api-runs.mjs";
 
 /** The id that names an event's chain: its correlation id, else its own id. */
 export function chainKeyOf(event) {
-  return event?.correlationId ?? event?.correlation_id ?? event?.eventId ?? event?.event_id ?? null;
+  return (
+    event?.correlationId ??
+    event?.correlation_id ??
+    event?.eventId ??
+    event?.event_id ??
+    null
+  );
 }
 
 export function chainView(db, correlationId) {

@@ -21,12 +21,17 @@ export interface TriggerTemplateGroup {
 }
 
 /** Group templates by event-type domain, with deterministic group and item order. */
-export function groupTemplates(templates: TriggerTemplate[]): TriggerTemplateGroup[] {
+export function groupTemplates(
+  templates: TriggerTemplate[],
+): TriggerTemplateGroup[] {
   const groups = new Map<string, TriggerTemplate[]>();
-  const sorted = [...templates].sort((a, b) => a.eventType.localeCompare(b.eventType));
+  const sorted = [...templates].sort((a, b) =>
+    a.eventType.localeCompare(b.eventType),
+  );
   for (const template of sorted) {
     const separator = template.eventType.indexOf(".");
-    const domain = separator > 0 ? template.eventType.slice(0, separator + 1) : "other";
+    const domain =
+      separator > 0 ? template.eventType.slice(0, separator + 1) : "other";
     const group = groups.get(domain) ?? [];
     group.push(template);
     groups.set(domain, group);
@@ -37,9 +42,14 @@ export function groupTemplates(templates: TriggerTemplate[]): TriggerTemplateGro
 }
 
 /** A plausible starting value for one schema property — never a lie, just a seed. */
-function seedFor(name: string, schema: any, nowMs: number = Date.now()): unknown {
+function seedFor(
+  name: string,
+  schema: any,
+  nowMs: number = Date.now(),
+): unknown {
   if (!schema || typeof schema !== "object") return "";
-  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
+  if (Array.isArray(schema.enum) && schema.enum.length > 0)
+    return schema.enum[0];
   if (schema.const !== undefined) return schema.const;
 
   const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
@@ -54,7 +64,9 @@ function seedFor(name: string, schema: any, nowMs: number = Date.now()): unknown
       // required shape is visible. Arrays of strings seed empty even under
       // minItems (WM-76 critique r1): a seeded empty-string chip reads as a
       // rendering glitch, and the minItems validation warning covers the ask.
-      const itemType = Array.isArray(schema.items?.type) ? schema.items.type[0] : schema.items?.type;
+      const itemType = Array.isArray(schema.items?.type)
+        ? schema.items.type[0]
+        : schema.items?.type;
       if ((schema.minItems ?? 0) > 0 && itemType !== "string") {
         return [seedFor(name, schema.items, nowMs)];
       }
@@ -69,7 +81,8 @@ function seedFor(name: string, schema: any, nowMs: number = Date.now()): unknown
       // validation warns, never blocks — and let the form surface the
       // example via placeholderFor() (lib/injectForm.ts).
       if (typeof schema.pattern === "string") {
-        if (schema.pattern.startsWith("^/") || schema.pattern.includes("/")) return "";
+        if (schema.pattern.startsWith("^/") || schema.pattern.includes("/"))
+          return "";
       }
       if (
         schema.format === "date-time" ||
@@ -92,7 +105,10 @@ function seedFor(name: string, schema: any, nowMs: number = Date.now()): unknown
 }
 
 /** Required properties only: the smallest envelope that can pass validation. */
-export function buildSkeleton(schema: any, nowMs: number = Date.now()): Record<string, unknown> {
+export function buildSkeleton(
+  schema: any,
+  nowMs: number = Date.now(),
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const required: string[] = schema?.required ?? [];
   const props = schema?.properties ?? {};
@@ -114,11 +130,17 @@ export function summarize(schema: any): string {
  * function (and tests get stable output).
  */
 export function triggerId(nowMs: number, suffix = ""): string {
-  const stamp = new Date(nowMs).toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
+  const stamp = new Date(nowMs)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\..+/, "");
   return `web-${stamp}${suffix}`;
 }
 
-export function buildTemplates(view: unknown, nowMs: number): TriggerTemplate[] {
+export function buildTemplates(
+  view: unknown,
+  nowMs: number,
+): TriggerTemplate[] {
   if (!view || typeof view !== "object" || Array.isArray(view)) return [];
   const agents = Array.isArray((view as Partial<AgentsView>).agents)
     ? (view as Partial<AgentsView>).agents!
@@ -159,7 +181,10 @@ export function buildTemplates(view: unknown, nowMs: number): TriggerTemplate[] 
  * again", which is deliberately NOT replay: replay reuses the delivery id and
  * dedups to a no-op, this makes a genuinely new admission.
  */
-export function retriggerEnvelope(envelope: Record<string, unknown>, nowMs: number): Record<string, unknown> {
+export function retriggerEnvelope(
+  envelope: Record<string, unknown>,
+  nowMs: number,
+): Record<string, unknown> {
   const id = triggerId(nowMs, "-again");
   return {
     ...envelope,

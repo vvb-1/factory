@@ -43,7 +43,9 @@ async function callControl(method, pathname, body) {
   });
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
-    const err = new Error(payload?.message ?? payload?.error ?? `HTTP ${res.status}`);
+    const err = new Error(
+      payload?.message ?? payload?.error ?? `HTTP ${res.status}`,
+    );
     err.status = res.status;
     throw err;
   }
@@ -82,13 +84,16 @@ function parseDecisionField(field, raw) {
 export async function decideCommand(args) {
   const [itemId, optionId, ...rest] = args;
   if (!itemId || !optionId) {
-    throw new Error("usage: decide <item-id> <option-id> [--field key=value]...");
+    throw new Error(
+      "usage: decide <item-id> <option-id> [--field key=value]...",
+    );
   }
   const detail = await callControl(
     "GET",
     `/inbox/${encodeURIComponent(itemId)}`,
   );
-  if (!detail.item.decision) throw new Error(`inbox item ${itemId} has no decision`);
+  if (!detail.item.decision)
+    throw new Error(`inbox item ${itemId} has no decision`);
   const declared = new Map(
     (detail.item.decision.fields ?? []).map((field) => [field.id, field]),
   );
@@ -99,7 +104,8 @@ export async function decideCommand(args) {
     }
     const assignment = rest[++index];
     const equals = assignment.indexOf("=");
-    if (equals <= 0) throw new Error(`--field expects key=value, got ${assignment}`);
+    if (equals <= 0)
+      throw new Error(`--field expects key=value, got ${assignment}`);
     const key = assignment.slice(0, equals);
     const raw = assignment.slice(equals + 1);
     fields[key] = parseDecisionField(declared.get(key), raw);

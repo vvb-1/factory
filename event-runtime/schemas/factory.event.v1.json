@@ -1,7 +1,14 @@
 {
   "title": "factory.event/v1 — inbound event envelope (docs/event-runtime.md §5.1)",
   "type": "object",
-  "required": ["schemaVersion", "eventId", "type", "source", "occurredAt", "payload"],
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "type",
+    "source",
+    "occurredAt",
+    "payload"
+  ],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "const": "factory.event/v1" },

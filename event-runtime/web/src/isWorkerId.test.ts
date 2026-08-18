@@ -30,7 +30,9 @@ describe("isWorkerId", () => {
   test("short and test worker ids match", () => {
     expect(isWorkerId("worker_1")).toBe(true);
     expect(isWorkerId("worker_test")).toBe(true);
-    expect(isWorkerId("worker_0f3b2a1c-9e8d-4b7a-8c6d-5e4f3a2b1c0d")).toBe(true);
+    expect(isWorkerId("worker_0f3b2a1c-9e8d-4b7a-8c6d-5e4f3a2b1c0d")).toBe(
+      true,
+    );
   });
 });
 
@@ -47,10 +49,14 @@ describe("ActorRef component", () => {
   test.each(["operator", "planner", "reaper", "worker"])(
     "static actor '%s' renders inert text without jump link",
     (actor) => {
-      const { container, queryByRole } = render(createElement(ActorRef, { actor }));
+      const { container, queryByRole } = render(
+        createElement(ActorRef, { actor }),
+      );
       expect(queryByRole("button")).toBeNull();
       expect(container.textContent).toBe(actor);
-      expect(container.querySelector("span")?.getAttribute("title")).toBe(actor);
+      expect(container.querySelector("span")?.getAttribute("title")).toBe(
+        actor,
+      );
     },
   );
 
@@ -70,7 +76,9 @@ describe("ActorRef component", () => {
     (actor) => {
       const title = `${actor} · attempt timed out`;
       const { container } = render(createElement(ActorRef, { actor, title }));
-      expect(container.querySelector("[title]")?.getAttribute("title")).toBe(title);
+      expect(container.querySelector("[title]")?.getAttribute("title")).toBe(
+        title,
+      );
     },
   );
 

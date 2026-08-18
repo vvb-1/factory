@@ -72,7 +72,9 @@ export function loadChainAutoApprovalPolicy({ root = reposRoot() } = {}) {
     }
     const merge = parsed?.merge;
     const escalation = parsed?.escalation;
-    const mergeAllowed = allowed.some((eventType) => MERGE_EVENT_TYPES.has(eventType));
+    const mergeAllowed = allowed.some((eventType) =>
+      MERGE_EVENT_TYPES.has(eventType),
+    );
     const maxFixRounds = merge?.max_fix_rounds ?? 0;
     const autoMergeBase = escalation?.auto_merge_base ?? [];
     const autoMergeOwners = escalation?.auto_merge_owners ?? [];
@@ -297,7 +299,8 @@ function dispatchSafe(envelope, approvalPolicy, dispatchEligibility, dispatch) {
 }
 
 function mergeBarrierReason(db, registry, candidate, now) {
-  const applyAgent = registry.eventTypes["factory.merge-apply.requested"]?.agent;
+  const applyAgent =
+    registry.eventTypes["factory.merge-apply.requested"]?.agent;
   const verifyAgent = registry.eventTypes["factory.merge-landed"]?.agent;
   if (!applyAgent || !verifyAgent) return "merge_barrier_registry_incomplete";
   const inFlight = db
@@ -484,7 +487,9 @@ function chainPredecessorReason(db, registry, candidate, envelope) {
     envelope,
   );
   const predecessorDef = registry.agents.get(spec.agent);
-  const commandEdge = predecessorDef?.chainCommandEdges?.includes(envelope.type);
+  const commandEdge = predecessorDef?.chainCommandEdges?.includes(
+    envelope.type,
+  );
   if (
     declaredEdge?.eventType !== envelope.type &&
     !independentEdge &&
@@ -501,16 +506,16 @@ function chainPredecessorReason(db, registry, candidate, envelope) {
     const sourceRequired = new Set(predecessorDef.inputSchema?.required ?? []);
     const itemsField = predecessorDef.itemsField;
     const item =
-      typeof itemsField === "string"
-        ? source[itemsField]?.[0]
-        : undefined;
+      typeof itemsField === "string" ? source[itemsField]?.[0] : undefined;
     const itemRequired = new Set(
       typeof itemsField === "string"
-        ? predecessorDef.inputSchema?.properties?.[itemsField]?.items?.required ?? []
+        ? (predecessorDef.inputSchema?.properties?.[itemsField]?.items
+            ?.required ?? [])
         : [],
     );
     const targetAgent = registry.eventTypes[envelope.type]?.agent;
-    const required = registry.agents.get(targetAgent)?.inputSchema?.required ?? [];
+    const required =
+      registry.agents.get(targetAgent)?.inputSchema?.required ?? [];
     const payload = envelope.payload ?? {};
     for (const field of required) {
       if (sourceRequired.has(field)) {
@@ -576,7 +581,10 @@ function mergeEligibility(db, registry, candidate, envelope, policy, now) {
   }
   if (envelope.type === "factory.merge-fix.requested") {
     const owner = String(input.github ?? "").split("/")[0];
-    if (!policy.autoMergeOwners?.has(owner) || !policy.autoMergeBase?.has(input.base))
+    if (
+      !policy.autoMergeOwners?.has(owner) ||
+      !policy.autoMergeBase?.has(input.base)
+    )
       return "merge_fix_repo_not_allowed";
     if (input.mechanical !== true || input.withinOwnedPaths !== true)
       return "merge_fix_not_mechanical_or_in_scope";
@@ -673,7 +681,14 @@ function eligible(
   );
   if (predecessorReason) return predecessorReason;
 
-  const mergeReason = mergeEligibility(db, registry, candidate, envelope, policy, now);
+  const mergeReason = mergeEligibility(
+    db,
+    registry,
+    candidate,
+    envelope,
+    policy,
+    now,
+  );
   if (mergeReason) return mergeReason;
 
   const mapping = getEventType(registry, envelope.type);

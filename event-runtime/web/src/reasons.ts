@@ -73,7 +73,8 @@ export const REASONS: Record<string, string> = {
   merge_barrier_uncertain: "Merge barrier uncertain",
   merge_fix_round_not_durable: "Merge-fix round not durable",
   merge_fix_round_exhausted: "Merge-fix rounds exhausted",
-  merge_fix_not_mechanical_or_in_scope: "Merge-fix not mechanical or out of scope",
+  merge_fix_not_mechanical_or_in_scope:
+    "Merge-fix not mechanical or out of scope",
   merge_fix_pr_moved: "PR head moved since the plan",
   merge_fix_pr_not_open: "PR is no longer open",
   merge_fix_pr_not_found: "PR not found",
@@ -169,7 +170,12 @@ function fragmentText(fragment: string): string {
   if (phrase) return phrase;
   // Free text (a Linear title, an error message) and identifiers are kept verbatim.
   if (/\s/.test(fragment) || !/^[a-z0-9_]+$/i.test(fragment)) return fragment;
-  if (RUN_REF.test(fragment) || PROPOSAL_REF.test(fragment) || TICKET_REF.test(fragment)) return fragment;
+  if (
+    RUN_REF.test(fragment) ||
+    PROPOSAL_REF.test(fragment) ||
+    TICKET_REF.test(fragment)
+  )
+    return fragment;
   return fragment.replace(/_/g, " ");
 }
 

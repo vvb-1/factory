@@ -59,7 +59,15 @@
         "additionalProperties": false,
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
-          "kind": { "enum": ["text", "single-choice", "multi-choice", "confirm", "number"] },
+          "kind": {
+            "enum": [
+              "text",
+              "single-choice",
+              "multi-choice",
+              "confirm",
+              "number"
+            ]
+          },
           "label": { "type": "string", "minLength": 1, "maxLength": 60 },
           "required": { "type": "boolean" },
           "whenOption": {
@@ -79,7 +87,10 @@
               "required": ["id", "label"],
               "additionalProperties": false,
               "properties": {
-                "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                },
                 "label": { "type": "string", "minLength": 1, "maxLength": 60 },
                 "description": { "type": "string", "maxLength": 280 }
               }

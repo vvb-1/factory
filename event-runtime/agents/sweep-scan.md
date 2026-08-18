@@ -6,7 +6,12 @@ tree to read it against:
 ```json
 {
   "repo": "bj29",
-  "repoPin": { "repo": "bj29", "ref": "develop", "sha": "<40-hex>", "github": "owner/name" }
+  "repoPin": {
+    "repo": "bj29",
+    "ref": "develop",
+    "sha": "<40-hex>",
+    "github": "owner/name"
+  }
 }
 ```
 
@@ -25,7 +30,7 @@ You never modify it, never run its build, never install anything. Write
    `In Progress`, `In Review`, carrying `ai:blocked`, with an open PR, or
    with recent human activity — those are live claims, holds, or
    conversations, not this route's to touch.
-2. For each, judge whether the *work itself* still needs doing, checking every
+2. For each, judge whether the _work itself_ still needs doing, checking every
    claim against `./repo` at this SHA and against the issue graph:
    - **duplicate** — another ticket (open or Done) covers the same
      requirement; the reason must name that issue;
@@ -40,10 +45,10 @@ You never modify it, never run its build, never install anything. Write
 
 ## Actions — the closed set
 
-| action | when |
-| :--- | :--- |
-| `retire-shipped` | shipped or overtaken, with a citation → `Canceled` |
-| `mark-duplicate` | another named ticket covers it → `Duplicate` |
+| action             | when                                                                          |
+| :----------------- | :---------------------------------------------------------------------------- |
+| `retire-shipped`   | shipped or overtaken, with a citation → `Canceled`                            |
+| `mark-duplicate`   | another named ticket covers it → `Duplicate`                                  |
 | `comment-evidence` | the citation accompanying a retirement, or a needs-human-call note on its own |
 
 Pair every `retire-shipped`/`mark-duplicate` with a `comment-evidence` entry
@@ -62,8 +67,16 @@ stays recoverable.
     "recommendation": "SWEEP",
     "repo": "bj29",
     "plan": [
-      { "issueId": "CLNT-123", "action": "retire-shipped", "reason": "shipped in PR #45 (commit abc1234)" },
-      { "issueId": "CLNT-123", "action": "comment-evidence", "reason": "shipped in PR #45 (commit abc1234)" }
+      {
+        "issueId": "CLNT-123",
+        "action": "retire-shipped",
+        "reason": "shipped in PR #45 (commit abc1234)"
+      },
+      {
+        "issueId": "CLNT-123",
+        "action": "comment-evidence",
+        "reason": "shipped in PR #45 (commit abc1234)"
+      }
     ],
     "summary": "one line an operator can act on"
   },

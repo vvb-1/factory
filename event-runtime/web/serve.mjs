@@ -31,8 +31,12 @@ function fatalProcessError(kind, error) {
   process.exit(1);
 }
 
-process.on("uncaughtException", (error, origin) => fatalProcessError(`uncaughtException (${origin})`, error));
-process.on("unhandledRejection", (reason) => fatalProcessError("unhandledRejection", reason));
+process.on("uncaughtException", (error, origin) =>
+  fatalProcessError(`uncaughtException (${origin})`, error),
+);
+process.on("unhandledRejection", (reason) =>
+  fatalProcessError("unhandledRejection", reason),
+);
 
 Bun.serve({
   hostname: HOST,
@@ -64,21 +68,30 @@ Bun.serve({
         // Backend restarts are expected during deploys and watch-mode reloads.
         // Keep the static server alive and give clients an explicit retryable
         // response instead of allowing Bun's rejected fetch to escape.
-        console.error(`[web] ${req.method} ${url.pathname} upstream unavailable:`, error);
-        return new Response(JSON.stringify({ error: "event runtime temporarily unavailable" }), {
-          status: 503,
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-            "retry-after": "1",
+        console.error(
+          `[web] ${req.method} ${url.pathname} upstream unavailable:`,
+          error,
+        );
+        return new Response(
+          JSON.stringify({ error: "event runtime temporarily unavailable" }),
+          {
+            status: 503,
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+              "retry-after": "1",
+            },
           },
-        });
+        );
       }
     }
 
     // Static, confined to dist/ — reject traversal rather than resolving it.
     const resolved = path.normalize(path.join(DIST, url.pathname));
-    if (!resolved.startsWith(DIST)) return new Response("not found", { status: 404 });
-    const file = Bun.file(resolved === DIST ? path.join(DIST, "index.html") : resolved);
+    if (!resolved.startsWith(DIST))
+      return new Response("not found", { status: 404 });
+    const file = Bun.file(
+      resolved === DIST ? path.join(DIST, "index.html") : resolved,
+    );
     if (await file.exists()) return new Response(file);
     // A stale content-hashed import must fail as a missing module. Returning the
     // SPA document here disguises it as JavaScript and produces a misleading
@@ -90,4 +103,6 @@ Bun.serve({
   },
 });
 
-console.log(`web control plane on http://${HOST}:${WEB_PORT} → API 127.0.0.1:${API_PORT}`);
+console.log(
+  `web control plane on http://${HOST}:${WEB_PORT} → API 127.0.0.1:${API_PORT}`,
+);

@@ -82,11 +82,15 @@ export function createReceipt({
   const defHash = spec?.defHash ?? (def ? computeDefHash(def) : null);
   return {
     ...base,
-    runId: base.runId ?? (spec?.runId ?? runId),
+    runId: base.runId ?? spec?.runId ?? runId,
     runSpecHash: base.runSpecHash ?? (spec ? hashJson(spec) : null),
     ...(defHash ? { defHash } : {}),
-    artifactHash: base.artifactHash !== undefined ? base.artifactHash : artifactHash,
-    evidenceSetHash: base.evidenceSetHash !== undefined ? base.evidenceSetHash : evidenceSetHash,
+    artifactHash:
+      base.artifactHash !== undefined ? base.artifactHash : artifactHash,
+    evidenceSetHash:
+      base.evidenceSetHash !== undefined
+        ? base.evidenceSetHash
+        : evidenceSetHash,
     journalHead: journalHead ?? base.journalHead ?? null,
     verificationStatus: base.verificationStatus ?? verificationStatus,
   };

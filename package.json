@@ -23,8 +23,8 @@
     "sync-floor": "bun build/emit.mjs --sync-floor",
     "economics": "bun orchestrator/economics.mjs",
     "schedule": "bun deploy/gen.mjs",
-    "format:check": "prettier --check 'shared/**/*.md'",
-    "format": "prettier --write 'shared/**/*.md'",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
     "test": "bun test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"

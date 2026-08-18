@@ -961,8 +961,8 @@ lifecycle transitions with the operator as actor:
   for a fixed _event body_; requeue is for a fixed _world_ — after a registry
   or planner fix, the stored event is fine and only the decision was wrong.
 - **decide** — answer an inbox item's hash-bound request through `POST
-  /inbox/:id/decide`; retry a stored response's failed effect through `POST
-  /inbox/:id/decide/retry` without asking for the fields again.
+/inbox/:id/decide`; retry a stored response's failed effect through `POST
+/inbox/:id/decide/retry` without asking for the fields again.
 
 **Dead-lettering.** An event that fails planning repeatedly (default: 3
 attempts) parks as dead-lettered with its last error, visible in status and

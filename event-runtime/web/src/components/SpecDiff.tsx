@@ -10,10 +10,15 @@ export type DiffLine = { type: "same" | "del" | "add"; text: string };
 export function diffLines(a: string[], b: string[]): DiffLine[] {
   const n = a.length;
   const m = b.length;
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  const lcs: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array(m + 1).fill(0),
+  );
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+      lcs[i][j] =
+        a[i] === b[j]
+          ? lcs[i + 1][j + 1] + 1
+          : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
     }
   }
   const out: DiffLine[] = [];
@@ -37,7 +42,10 @@ export function diffLines(a: string[], b: string[]): DiffLine[] {
 
 export function formatDiff(lines: DiffLine[]): string {
   return lines
-    .map((l) => `${l.type === "del" ? "- " : l.type === "add" ? "+ " : "  "}${l.text}`)
+    .map(
+      (l) =>
+        `${l.type === "del" ? "- " : l.type === "add" ? "+ " : "  "}${l.text}`,
+    )
     .join("\n");
 }
 
@@ -52,7 +60,13 @@ function countLinesBelowViewport(scroller: HTMLElement): number {
   return below;
 }
 
-export function SpecDiff({ before, after }: { before: unknown; after: unknown }) {
+export function SpecDiff({
+  before,
+  after,
+}: {
+  before: unknown;
+  after: unknown;
+}) {
   const beforeJson = JSON.stringify(before, null, 2);
   const afterJson = JSON.stringify(after, null, 2);
   const lines = useMemo(
@@ -122,7 +136,10 @@ export function SpecDiff({ before, after }: { before: unknown; after: unknown })
           Copy diff
         </Button>
       </div>
-      <div data-testid="spec-diff-body" className="whitespace-pre-wrap p-3 leading-relaxed">
+      <div
+        data-testid="spec-diff-body"
+        className="whitespace-pre-wrap p-3 leading-relaxed"
+      >
         {lines.map((l, idx) => (
           <div
             key={idx}
@@ -130,9 +147,17 @@ export function SpecDiff({ before, after }: { before: unknown; after: unknown })
             className="whitespace-pre"
             style={
               l.type === "del"
-                ? { color: "var(--hue-err)", background: "color-mix(in oklch, var(--hue-err) 8%, transparent)" }
+                ? {
+                    color: "var(--hue-err)",
+                    background:
+                      "color-mix(in oklch, var(--hue-err) 8%, transparent)",
+                  }
                 : l.type === "add"
-                  ? { color: "var(--hue-ok)", background: "color-mix(in oklch, var(--hue-ok) 8%, transparent)" }
+                  ? {
+                      color: "var(--hue-ok)",
+                      background:
+                        "color-mix(in oklch, var(--hue-ok) 8%, transparent)",
+                    }
                   : undefined
             }
           >

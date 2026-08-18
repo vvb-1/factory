@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { janitorArgv, JANITOR_MAX_BUFFER, JANITOR_TIMEOUT_MS, spawnFactoryJanitor } from "./janitor.mjs";
+import {
+  janitorArgv,
+  JANITOR_MAX_BUFFER,
+  JANITOR_TIMEOUT_MS,
+  spawnFactoryJanitor,
+} from "./janitor.mjs";
 
 describe("janitor", () => {
   test("janitorArgv never includes --force and adds --apply only when asked (OPS-301, OPS-364)", () => {

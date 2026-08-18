@@ -24,7 +24,9 @@ test("factory is a dispatch target, not report_only (OPS-463)", () => {
 test("factory declares its worktree lifecycle and the scripts exist, executable", () => {
   expect(factory.worktreeUp).toBe("bin/worktree-up.sh");
   expect(factory.worktreeDown).toBe("bin/worktree-down.sh");
-  expect(factory.worktreeRoot).toBe(path.join(process.env.HOME ?? "", "Develop/.worktrees/factory"));
+  expect(factory.worktreeRoot).toBe(
+    path.join(process.env.HOME ?? "", "Develop/.worktrees/factory"),
+  );
   for (const script of [factory.worktreeUp, factory.worktreeDown]) {
     // Throws (failing the test) if the declared script is missing or not
     // executable — config must never point dispatch at tooling that isn't there.

@@ -19,9 +19,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "linear:read"
-    ]
+    "services": ["linear:read"]
   },
   "limits": {
     "timeout_seconds": 300,

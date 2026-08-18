@@ -26,8 +26,17 @@ const c = {
 
 function sh(args, cwd = ROOT) {
   try {
-    const result = Bun.spawnSync({ cmd: args, cwd, stdout: "pipe", stderr: "pipe" });
-    return { ok: result.exitCode === 0, out: result.stdout.toString().trim(), err: result.stderr.toString().trim() };
+    const result = Bun.spawnSync({
+      cmd: args,
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return {
+      ok: result.exitCode === 0,
+      out: result.stdout.toString().trim(),
+      err: result.stderr.toString().trim(),
+    };
   } catch (err) {
     return { ok: false, out: "", err: String(err) };
   }
@@ -44,7 +53,9 @@ function hasLinearKey() {
       try {
         const content = readFileSync(envPath, "utf8");
         if (content.includes("LINEAR_API_KEY=")) return true;
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
     }
   }
   return false;
@@ -60,19 +71,41 @@ export async function gatherPulse({
 } = {}) {
   const pulse = {
     timestamp: new Date().toISOString(),
-    stack: { api: { ok: false }, web: { ok: false, port: webPort }, workers: { total: 0, busy: 0, idle: 0, list: [] } },
+    stack: {
+      api: { ok: false },
+      web: { ok: false, port: webPort },
+      workers: { total: 0, busy: 0, idle: 0, list: [] },
+    },
     runs: { active: [], proposed: 0, byState: {} },
-    supply: { repo: repoName, team: "WM", dispatchable: 0, triage: 0, tickets: [] },
+    supply: {
+      repo: repoName,
+      team: "WM",
+      dispatchable: 0,
+      triage: 0,
+      tickets: [],
+    },
     prs: { total: 0, candidates: [] },
-    workspace: { branch: "unknown", head: "unknown", behind: 0, ahead: 0, clean: true },
+    workspace: {
+      branch: "unknown",
+      head: "unknown",
+      behind: 0,
+      ahead: 0,
+      clean: true,
+    },
   };
 
   // 1. API Health & Status
   try {
-    const healthRes = await fetch(`http://${host}:${port}/health`, { signal: AbortSignal.timeout(3000) });
+    const healthRes = await fetch(`http://${host}:${port}/health`, {
+      signal: AbortSignal.timeout(3000),
+    });
     if (healthRes.ok) {
       const healthJson = await healthRes.json();
-      pulse.stack.api = { ok: true, policyVersion: healthJson.policyVersion, env: healthJson.env?.name };
+      pulse.stack.api = {
+        ok: true,
+        policyVersion: healthJson.policyVersion,
+        env: healthJson.env?.name,
+      };
     }
   } catch (err) {
     pulse.stack.api = { ok: false, error: err.message };
@@ -80,11 +113,17 @@ export async function gatherPulse({
 
   // 2. Web UI Health
   try {
-    const webRes = await fetch(`http://${host}:${webPort}/`, { signal: AbortSignal.timeout(2000) });
+    const webRes = await fetch(`http://${host}:${webPort}/`, {
+      signal: AbortSignal.timeout(2000),
+    });
     const ok = webRes.ok || webRes.status === 404; // serving HTTP
     pulse.stack.web = ok
       ? { ok: true, port: webPort }
-      : { ok: false, port: webPort, error: `WEB_DOWN: Web UI returned HTTP ${webRes.status}` };
+      : {
+          ok: false,
+          port: webPort,
+          error: `WEB_DOWN: Web UI returned HTTP ${webRes.status}`,
+        };
   } catch (err) {
     pulse.stack.web = {
       ok: false,
@@ -97,9 +136,15 @@ export async function gatherPulse({
   if (pulse.stack.api.ok) {
     try {
       const [statusRes, workersRes, runsRes] = await Promise.all([
-        fetch(`http://${host}:${port}/status`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json()),
-        fetch(`http://${host}:${port}/workers`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json()),
-        fetch(`http://${host}:${port}/runs?state=RUNNING`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json()),
+        fetch(`http://${host}:${port}/status`, {
+          signal: AbortSignal.timeout(3000),
+        }).then((r) => r.json()),
+        fetch(`http://${host}:${port}/workers`, {
+          signal: AbortSignal.timeout(3000),
+        }).then((r) => r.json()),
+        fetch(`http://${host}:${port}/runs?state=RUNNING`, {
+          signal: AbortSignal.timeout(3000),
+        }).then((r) => r.json()),
       ]);
 
       if (workersRes?.workers) {
@@ -108,7 +153,12 @@ export async function gatherPulse({
           total: workers.length,
           busy: workers.filter((w) => w.state === "busy").length,
           idle: workers.filter((w) => w.state === "idle").length,
-          list: workers.map((w) => ({ id: w.workerId, state: w.state, host: w.host, runId: w.runId })),
+          list: workers.map((w) => ({
+            id: w.workerId,
+            state: w.state,
+            host: w.host,
+            runId: w.runId,
+          })),
         };
       }
 
@@ -141,10 +191,14 @@ export async function gatherPulse({
       // Find repo team from repos.yaml
       let team = "WM";
       try {
-        const reposCfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
+        const reposCfg = Bun.YAML.parse(
+          readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+        );
         const match = (reposCfg.repos ?? []).find((r) => r.name === repoName);
         if (match?.team) team = match.team;
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
       pulse.supply.team = team;
 
       if (!hasLinearKey()) {
@@ -170,7 +224,9 @@ export async function gatherPulse({
 
         pulse.supply.dispatchable = ready.length;
         pulse.supply.triage = triage.length;
-        pulse.supply.tickets = ready.slice(0, 5).map((i) => ({ identifier: i.identifier, title: i.title }));
+        pulse.supply.tickets = ready
+          .slice(0, 5)
+          .map((i) => ({ identifier: i.identifier, title: i.title }));
       }
     } catch (err) {
       pulse.supply.error = err.message;
@@ -180,7 +236,17 @@ export async function gatherPulse({
   // 5. Open GitHub PRs
   if (fetchGitHub) {
     try {
-      const p = sh(["gh", "pr", "list", "--state", "open", "--limit", "15", "--json", "number,title,headRefName,isDraft,statusCheckRollup"]);
+      const p = sh([
+        "gh",
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--limit",
+        "15",
+        "--json",
+        "number,title,headRefName,isDraft,statusCheckRollup",
+      ]);
       if (p.ok && p.out) {
         const prs = JSON.parse(p.out);
         pulse.prs.total = prs.length;
@@ -189,7 +255,9 @@ export async function gatherPulse({
           let ciStatus = "NONE";
           if (checks.length > 0) {
             const hasFailure = checks.some((c) => c.conclusion === "FAILURE");
-            const hasPending = checks.some((c) => c.status === "IN_PROGRESS" || c.status === "QUEUED");
+            const hasPending = checks.some(
+              (c) => c.status === "IN_PROGRESS" || c.status === "QUEUED",
+            );
             const allSuccess = checks.every((c) => c.conclusion === "SUCCESS");
             if (hasFailure) ciStatus = "FAILING";
             else if (hasPending) ciStatus = "PENDING";
@@ -214,7 +282,12 @@ export async function gatherPulse({
     const branchRes = sh(["git", "branch", "--show-current"]);
     const headRes = sh(["git", "rev-parse", "--short", "HEAD"]);
     const statusRes = sh(["git", "status", "--porcelain"]);
-    const behindRes = sh(["git", "rev-list", "--count", "HEAD..origin/develop"]);
+    const behindRes = sh([
+      "git",
+      "rev-list",
+      "--count",
+      "HEAD..origin/develop",
+    ]);
     const aheadRes = sh(["git", "rev-list", "--count", "origin/develop..HEAD"]);
 
     pulse.workspace = {
@@ -224,14 +297,18 @@ export async function gatherPulse({
       ahead: aheadRes.ok ? parseInt(aheadRes.out, 10) || 0 : 0,
       clean: statusRes.ok && statusRes.out.length === 0,
     };
-  } catch { /* intentionally ignored */ }
+  } catch {
+    /* intentionally ignored */
+  }
 
   return pulse;
 }
 
 export function formatPulse(pulse) {
   const lines = [];
-  lines.push(c.bold(`FACTORY PULSE — ${new Date(pulse.timestamp).toUTCString()}`));
+  lines.push(
+    c.bold(`FACTORY PULSE — ${new Date(pulse.timestamp).toUTCString()}`),
+  );
   lines.push("");
 
   // Stack & Workers
@@ -248,22 +325,29 @@ export function formatPulse(pulse) {
   lines.push(`  Web (:${webPort}):     ${webStatus}`);
 
   const workers = pulse.stack.workers;
-  const workerDetail = workers.total > 0
-    ? `${workers.total} registered (${c.green(`${workers.busy} busy`)}, ${workers.idle} idle)`
-    : c.yellow("0 registered");
+  const workerDetail =
+    workers.total > 0
+      ? `${workers.total} registered (${c.green(`${workers.busy} busy`)}, ${workers.idle} idle)`
+      : c.yellow("0 registered");
   lines.push(`  Workers:         ${workerDetail}`);
   lines.push("");
 
   // In-Flight Runs
   const activeRuns = pulse.runs.active;
-  lines.push(c.bold(`IN-FLIGHT RUNS (${activeRuns.length} active, ${pulse.runs.proposed} proposed)`));
+  lines.push(
+    c.bold(
+      `IN-FLIGHT RUNS (${activeRuns.length} active, ${pulse.runs.proposed} proposed)`,
+    ),
+  );
   if (activeRuns.length === 0) {
     lines.push(c.dim("  No runs currently executing"));
   } else {
     for (const r of activeRuns) {
       const ageMs = Date.now() - new Date(r.created_at || Date.now()).getTime();
       const ageMin = Math.round(ageMs / 60000);
-      lines.push(`  ${c.cyan(r.runId.slice(0, 12))} ${c.bold(r.agent)} [${r.state}] (${ageMin}m) ${c.dim(r.eventId || "")}`);
+      lines.push(
+        `  ${c.cyan(r.runId.slice(0, 12))} ${c.bold(r.agent)} [${r.state}] (${ageMin}m) ${c.dim(r.eventId || "")}`,
+      );
     }
   }
   lines.push("");
@@ -273,8 +357,15 @@ export function formatPulse(pulse) {
   if (pulse.supply.error) {
     lines.push(`  ${c.red("Linear read error:")} ${pulse.supply.error}`);
   } else {
-    const supplyColor = pulse.supply.dispatchable >= 5 ? c.green : (pulse.supply.dispatchable > 0 ? c.yellow : c.red);
-    lines.push(`  Dispatchable:    ${supplyColor(`${pulse.supply.dispatchable} tickets`)} in Todo (ai:agent-ready, unassigned)`);
+    const supplyColor =
+      pulse.supply.dispatchable >= 5
+        ? c.green
+        : pulse.supply.dispatchable > 0
+          ? c.yellow
+          : c.red;
+    lines.push(
+      `  Dispatchable:    ${supplyColor(`${pulse.supply.dispatchable} tickets`)} in Todo (ai:agent-ready, unassigned)`,
+    );
     lines.push(`  Triage Backlog:  ${pulse.supply.triage} tickets in Triage`);
     if (pulse.supply.tickets.length > 0) {
       lines.push(c.dim("  Next up:"));
@@ -297,18 +388,27 @@ export function formatPulse(pulse) {
       else if (pr.ciStatus === "PENDING") ciBadge = c.yellow("[CI PENDING]");
 
       const draftBadge = pr.isDraft ? c.dim("(draft) ") : "";
-      lines.push(`  ${c.bold(`#${pr.number}`)} ${ciBadge} ${draftBadge}${pr.title.slice(0, 60)}`);
+      lines.push(
+        `  ${c.bold(`#${pr.number}`)} ${ciBadge} ${draftBadge}${pr.title.slice(0, 60)}`,
+      );
     }
   }
   lines.push("");
 
   // Workspace
   lines.push(c.bold("WORKSPACE"));
-  const cleanStatus = pulse.workspace.clean ? c.green("clean") : c.yellow("dirty (uncommitted changes)");
-  const syncStatus = pulse.workspace.behind > 0
-    ? c.yellow(`behind origin/develop by ${pulse.workspace.behind}`)
-    : (pulse.workspace.ahead > 0 ? c.cyan(`ahead of origin/develop by ${pulse.workspace.ahead}`) : c.green("up to date"));
-  lines.push(`  Branch:          ${c.bold(pulse.workspace.branch)} @ ${pulse.workspace.head} (${syncStatus})`);
+  const cleanStatus = pulse.workspace.clean
+    ? c.green("clean")
+    : c.yellow("dirty (uncommitted changes)");
+  const syncStatus =
+    pulse.workspace.behind > 0
+      ? c.yellow(`behind origin/develop by ${pulse.workspace.behind}`)
+      : pulse.workspace.ahead > 0
+        ? c.cyan(`ahead of origin/develop by ${pulse.workspace.ahead}`)
+        : c.green("up to date");
+  lines.push(
+    `  Branch:          ${c.bold(pulse.workspace.branch)} @ ${pulse.workspace.head} (${syncStatus})`,
+  );
   lines.push(`  Working tree:    ${cleanStatus}`);
 
   return lines.join("\n");

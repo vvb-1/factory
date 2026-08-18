@@ -66,17 +66,26 @@ function seed(
     const parentResult = {
       artifact:
         predecessorArtifact ??
-        (parentRule ? {
-          [parentRule.recommendationField]:
-            predecessorRecommendation ?? predecessor.recommendation,
-        } : {}),
+        (parentRule
+          ? {
+              [parentRule.recommendationField]:
+                predecessorRecommendation ?? predecessor.recommendation,
+            }
+          : {}),
     };
     const at = new Date(now).toISOString();
     db.query(
       `INSERT INTO events
          (source,event_id,type,subject,occurred_at,received_at,correlation_id,envelope_json,payload_hash,status,admitted_at)
        VALUES ('operator',?,'test.parent','test',?,?,?,?,'hash','planned',?)`,
-    ).run(parentEventId, at, at, parentEventId, canonicalJson({ payload: input }), at);
+    ).run(
+      parentEventId,
+      at,
+      at,
+      parentEventId,
+      canonicalJson({ payload: input }),
+      at,
+    );
     db.query(
       `INSERT INTO runs
          (run_id,idempotency_key,spec_json,spec_hash,state,attempts,created_at,updated_at)
@@ -86,7 +95,13 @@ function seed(
       `INSERT INTO proposals
          (id,event_source,event_id,run_id,decision,spec_json,status,created_at,ttl_seconds)
        VALUES (?,'operator',?,?,'run',?,'approved',?,1800)`,
-    ).run(`parent-proposal-${id}`, parentEventId, parentRunId, canonicalJson(parentSpec), at);
+    ).run(
+      `parent-proposal-${id}`,
+      parentEventId,
+      parentRunId,
+      canonicalJson(parentSpec),
+      at,
+    );
     db.query(
       `INSERT INTO results
          (run_id,attempt,result_json,artifact_hash,verification_json,receipt_json,accepted_at)
@@ -193,7 +208,10 @@ const auto = (db, options = {}) => {
   });
 };
 
-const independentMergeRegistry = ({ independent = true, selectors = {} } = {}) => {
+const independentMergeRegistry = ({
+  independent = true,
+  selectors = {},
+} = {}) => {
   const mergeRule = registry.edges["merge-scan@2"];
   return {
     ...registry,
@@ -267,8 +285,13 @@ function seedHistoricalApply(
       summary: "historical merge fixture",
     },
   });
-  db.query(`UPDATE runs SET state = ? WHERE run_id = ?`).run(state, apply.runId);
-  db.query(`UPDATE proposals SET status = 'approved' WHERE id = ?`).run(apply.id);
+  db.query(`UPDATE runs SET state = ? WHERE run_id = ?`).run(
+    state,
+    apply.runId,
+  );
+  db.query(`UPDATE proposals SET status = 'approved' WHERE id = ?`).run(
+    apply.id,
+  );
   return apply;
 }
 
@@ -487,7 +510,9 @@ describe("chain auto approval (WM-357)", () => {
     for (const id of ["env-1", "env-2"]) {
       const failed = seed(circuitDb, { id });
       circuitDb
-        .query(`UPDATE runs SET state = 'FAILED', attempts = 1 WHERE run_id = ?`)
+        .query(
+          `UPDATE runs SET state = 'FAILED', attempts = 1 WHERE run_id = ?`,
+        )
         .run(failed.runId);
       circuitDb
         .query(

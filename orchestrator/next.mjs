@@ -18,8 +18,14 @@ import { appendEvent } from "../lib/factory-state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
-const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
-const only = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
+const val = (f) => {
+  const i = argv.indexOf(f);
+  return i === -1 ? null : argv[i + 1];
+};
+const only = (val("--repo") || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const JSON_OUT = argv.includes("--json");
 const APPLY = argv.includes("--apply");
 const ORCHESTRATED = argv.includes("--orchestrated");
@@ -28,19 +34,32 @@ const HARNESS = val("--harness") || "claude";
 
 const { repos, policy, defaultCap } = loadQueueConfig(only);
 if (!repos.length) {
-  console.error(only.length ? `no repo named "${only.join(",")}" in config/repos.yaml` : "no repos configured");
+  console.error(
+    only.length
+      ? `no repo named "${only.join(",")}" in config/repos.yaml`
+      : "no repos configured",
+  );
   process.exit(2);
 }
 
 const spent = budgetExhausted(policy);
 const summaries = await fetchQueueSummaries(repos, defaultCap);
 const plans = summaries.map((s) => ({
-  ...recommendNext(s, { orchestrated: ORCHESTRATED, includeSweep: INCLUDE_SWEEP }),
+  ...recommendNext(s, {
+    orchestrated: ORCHESTRATED,
+    includeSweep: INCLUDE_SWEEP,
+  }),
   queue: s,
 }));
 
 function slashCommand(plan) {
-  if (!plan.command || plan.command === "tick" || plan.command === "reconcile" || plan.command === "digest") return null;
+  if (
+    !plan.command ||
+    plan.command === "tick" ||
+    plan.command === "reconcile" ||
+    plan.command === "digest"
+  )
+    return null;
   const args = plan.args ? ` ${plan.args}` : "";
   return `/factory-${plan.command.replace(/^factory-/, "")}${args}`;
 }
@@ -85,7 +104,9 @@ for (const plan of output.plans) {
       reason: plan.reason,
       constraint: plan.constraint ?? undefined,
     });
-  } catch { /* journal must not block routing */ }
+  } catch {
+    /* journal must not block routing */
+  }
 }
 
 if (JSON_OUT) {
@@ -109,7 +130,8 @@ for (const plan of output.plans) {
   console.log(c.bold(`\n${plan.repo}`));
   if (plan.constraint) console.log(`  constraint   ${plan.constraint}`);
   if (plan.command) {
-    const label = plan.slash ?? plan.exec ?? `${plan.command} ${plan.args}`.trim();
+    const label =
+      plan.slash ?? plan.exec ?? `${plan.command} ${plan.args}`.trim();
     console.log(`  recommend    ${c.green(label)}`);
     console.log(c.dim(`  because      ${plan.reason}`));
   } else {
@@ -122,7 +144,11 @@ for (const plan of output.plans) {
   }
 }
 
-console.log(c.dim("\nRun one stage: add --apply (interactive: run the slash command; headless: --orchestrated --apply)\n"));
+console.log(
+  c.dim(
+    "\nRun one stage: add --apply (interactive: run the slash command; headless: --orchestrated --apply)\n",
+  ),
+);
 
 if (APPLY) await runApply(output);
 
@@ -147,18 +173,31 @@ async function runApply(out) {
       slash: target.slash ?? undefined,
       runId: process.env.FACTORY_RUN_ID,
     });
-  } catch { /* journal must not block execution */ }
+  } catch {
+    /* journal must not block execution */
+  }
   if (target.exec) {
     console.log(`\n> ${target.exec}\n`);
-    const p = Bun.spawn(["bash", "-lc", target.exec], { cwd: ROOT, stdout: "inherit", stderr: "inherit" });
+    const p = Bun.spawn(["bash", "-lc", target.exec], {
+      cwd: ROOT,
+      stdout: "inherit",
+      stderr: "inherit",
+    });
     process.exit(await p.exited);
   }
-  const readOnly = target.command === "factory-triage" || target.command === "factory-unblock" || target.command === "factory-sweep";
+  const readOnly =
+    target.command === "factory-triage" ||
+    target.command === "factory-unblock" ||
+    target.command === "factory-sweep";
   const cmd = [
-    "bash", path.join(ROOT, "runners/run-agent.sh"),
-    "--repo", target.repo,
-    "--command", target.command,
-    "--harness", HARNESS,
+    "bash",
+    path.join(ROOT, "runners/run-agent.sh"),
+    "--repo",
+    target.repo,
+    "--command",
+    target.command,
+    "--harness",
+    HARNESS,
   ];
   if (readOnly) cmd.push("--read-only");
   if (target.args) cmd.push("--args", target.args);

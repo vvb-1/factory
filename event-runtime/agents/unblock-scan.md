@@ -6,7 +6,12 @@ tree to read it against:
 ```json
 {
   "repo": "bj29",
-  "repoPin": { "repo": "bj29", "ref": "develop", "sha": "<40-hex>", "github": "owner/name" }
+  "repoPin": {
+    "repo": "bj29",
+    "ref": "develop",
+    "sha": "<40-hex>",
+    "github": "owner/name"
+  }
 }
 ```
 
@@ -35,11 +40,11 @@ You never modify it, never run its build, never install anything. Write
 
 ## Actions — the closed set
 
-| action | when |
-| :--- | :--- |
-| `release-hold` | evidence resolves the hold AND the §5 template is solid against this SHA → back to the dispatch queue |
-| `release-to-triage` | evidence resolves the hold but the spec needs work → triage will re-spec it |
-| `comment-evidence` | the one-line citation (ticket/PR/doc) accompanying a release |
+| action              | when                                                                                                  |
+| :------------------ | :---------------------------------------------------------------------------------------------------- |
+| `release-hold`      | evidence resolves the hold AND the §5 template is solid against this SHA → back to the dispatch queue |
+| `release-to-triage` | evidence resolves the hold but the spec needs work → triage will re-spec it                           |
+| `comment-evidence`  | the one-line citation (ticket/PR/doc) accompanying a release                                          |
 
 Never invent an action id. Never release on a guess — a wrongly released hold
 hands an implementation agent a question a human was supposed to answer.
@@ -55,8 +60,16 @@ hands an implementation agent a question a human was supposed to answer.
     "recommendation": "UNBLOCK",
     "repo": "bj29",
     "plan": [
-      { "issueId": "CLNT-123", "action": "release-to-triage", "reason": "dependency CLNT-100 merged in PR #45" },
-      { "issueId": "CLNT-123", "action": "comment-evidence", "reason": "dependency CLNT-100 merged in PR #45" }
+      {
+        "issueId": "CLNT-123",
+        "action": "release-to-triage",
+        "reason": "dependency CLNT-100 merged in PR #45"
+      },
+      {
+        "issueId": "CLNT-123",
+        "action": "comment-evidence",
+        "reason": "dependency CLNT-100 merged in PR #45"
+      }
     ],
     "summary": "one line an operator can act on"
   },

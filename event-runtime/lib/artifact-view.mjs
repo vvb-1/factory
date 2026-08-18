@@ -18,11 +18,33 @@ import { validate } from "./schema.mjs";
 
 export const ARTIFACT_VIEW_SCHEMA_VERSION = "factory.artifact-view/v1";
 export const ARTIFACT_VIEW_SCHEMA = JSON.parse(
-  readFileSync(path.join(RUNTIME_ROOT, "schemas", "factory.artifact-view.v1.json"), "utf8"),
+  readFileSync(
+    path.join(RUNTIME_ROOT, "schemas", "factory.artifact-view.v1.json"),
+    "utf8",
+  ),
 );
 
-export const SECTION_KINDS = ["table", "keyvalue", "list", "badge", "code", "prose"];
-export const FORMATS = ["issue", "pr", "url", "sha", "repo", "run", "duration", "datetime", "state", "bytes", "count"];
+export const SECTION_KINDS = [
+  "table",
+  "keyvalue",
+  "list",
+  "badge",
+  "code",
+  "prose",
+];
+export const FORMATS = [
+  "issue",
+  "pr",
+  "url",
+  "sha",
+  "repo",
+  "run",
+  "duration",
+  "datetime",
+  "state",
+  "bytes",
+  "count",
+];
 export const TONES = ["ok", "warn", "error", "muted", "neutral"];
 
 /** Keys every section may carry, plus the per-`as` keys (design §2.2 `as` row). */
@@ -37,8 +59,10 @@ const KEYS_BY_KIND = {
 };
 const REQUIRED_BY_KIND = { table: ["columns"] };
 
-const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-const hasOwn = (obj, key) => isObject(obj) && Object.prototype.hasOwnProperty.call(obj, key);
+const isObject = (v) =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+const hasOwn = (obj, key) =>
+  isObject(obj) && Object.prototype.hasOwnProperty.call(obj, key);
 
 /** RFC 6901: split a pointer into unescaped reference tokens; null when malformed. */
 export function parsePointer(pointer) {
@@ -93,7 +117,11 @@ function walkSchema(schema, tokens) {
     if (!isObject(node)) return undefined;
     if (isObject(node.properties) && hasOwn(node.properties, token)) {
       node = node.properties[token];
-    } else if (hasOwn(node, "items") && isObject(node.items) && /^(0|[1-9][0-9]*|-)$/.test(token)) {
+    } else if (
+      hasOwn(node, "items") &&
+      isObject(node.items) &&
+      /^(0|[1-9][0-9]*|-)$/.test(token)
+    ) {
       node = node.items;
     } else {
       return undefined;
@@ -104,7 +132,8 @@ function walkSchema(schema, tokens) {
 
 /** The node a section's relative keys are resolved against: an array's `items`, else the node itself. */
 function itemNode(node) {
-  if (isObject(node) && hasOwn(node, "items") && isObject(node.items)) return node.items;
+  if (isObject(node) && hasOwn(node, "items") && isObject(node.items))
+    return node.items;
   return node;
 }
 
@@ -124,15 +153,30 @@ export function validateArtifactView(view, outputSchema) {
   const schemaCheck = validate(ARTIFACT_VIEW_SCHEMA, view, "view");
   if (!schemaCheck.valid) return { valid: false, errors: schemaCheck.errors };
   if (!isObject(outputSchema)) {
-    return { valid: false, errors: ["view: output schema is missing — nothing to resolve pointers against"] };
+    return {
+      valid: false,
+      errors: [
+        "view: output schema is missing — nothing to resolve pointers against",
+      ],
+    };
   }
   const errors = [];
 
-  if (hasOwn(view, "summary") && resolveSchemaPointer(outputSchema, view.summary) === undefined) {
-    errors.push(`view.summary: pointer "${view.summary}" does not resolve in the output schema`);
+  if (
+    hasOwn(view, "summary") &&
+    resolveSchemaPointer(outputSchema, view.summary) === undefined
+  ) {
+    errors.push(
+      `view.summary: pointer "${view.summary}" does not resolve in the output schema`,
+    );
   }
-  if (hasOwn(view, "status") && resolveSchemaPointer(outputSchema, view.status.path) === undefined) {
-    errors.push(`view.status.path: pointer "${view.status.path}" does not resolve in the output schema`);
+  if (
+    hasOwn(view, "status") &&
+    resolveSchemaPointer(outputSchema, view.status.path) === undefined
+  ) {
+    errors.push(
+      `view.status.path: pointer "${view.status.path}" does not resolve in the output schema`,
+    );
   }
 
   view.sections.forEach((section, i) => {
@@ -145,47 +189,67 @@ export function validateArtifactView(view, outputSchema) {
       }
     }
     for (const key of REQUIRED_BY_KIND[kind] ?? []) {
-      if (!hasOwn(section, key)) errors.push(`${at}: as=${kind} requires "${key}"`);
+      if (!hasOwn(section, key))
+        errors.push(`${at}: as=${kind} requires "${key}"`);
     }
 
     const node = resolveSchemaPointer(outputSchema, section.path);
     if (node === undefined) {
-      errors.push(`${at}.path: pointer "${section.path}" does not resolve in the output schema`);
+      errors.push(
+        `${at}.path: pointer "${section.path}" does not resolve in the output schema`,
+      );
       return;
     }
-    if ((kind === "table" || kind === "list") && !(hasOwn(node, "items") && isObject(node.items))) {
-      errors.push(`${at}.path: as=${kind} needs an array schema at "${section.path}"`);
+    if (
+      (kind === "table" || kind === "list") &&
+      !(hasOwn(node, "items") && isObject(node.items))
+    ) {
+      errors.push(
+        `${at}.path: as=${kind} needs an array schema at "${section.path}"`,
+      );
     }
     const base = itemNode(node);
     const checkKey = (field, key) => {
       if (key === "") return;
       if (relativeNode(base, key) === undefined) {
-        errors.push(`${at}.${field}: "${key}" does not resolve under "${section.path}" in the output schema`);
+        errors.push(
+          `${at}.${field}: "${key}" does not resolve under "${section.path}" in the output schema`,
+        );
       }
     };
     for (const field of ["columns", "expand", "keys"]) {
-      if (Array.isArray(section[field])) for (const key of section[field]) checkKey(field, key);
+      if (Array.isArray(section[field]))
+        for (const key of section[field]) checkKey(field, key);
     }
-    if (typeof section.groupBy === "string") checkKey("groupBy", section.groupBy);
-    if (typeof section.itemLabel === "string") checkKey("itemLabel", section.itemLabel);
-    if (isObject(section.formats)) for (const key of Object.keys(section.formats)) checkKey("formats", key);
+    if (typeof section.groupBy === "string")
+      checkKey("groupBy", section.groupBy);
+    if (typeof section.itemLabel === "string")
+      checkKey("itemLabel", section.itemLabel);
+    if (isObject(section.formats))
+      for (const key of Object.keys(section.formats)) checkKey("formats", key);
 
     if (isObject(section.tone)) {
       for (const [key, value] of Object.entries(section.tone)) {
         if (kind === "badge") {
           if (!TONES.includes(value)) {
-            errors.push(`${at}.tone.${key}: badge tone must be one of ${TONES.join("|")}`);
+            errors.push(
+              `${at}.tone.${key}: badge tone must be one of ${TONES.join("|")}`,
+            );
           }
           continue;
         }
         checkKey("tone", key);
         if (!isObject(value)) {
-          errors.push(`${at}.tone.${key}: as=${kind} tone maps a column/key to a (value → tone) object`);
+          errors.push(
+            `${at}.tone.${key}: as=${kind} tone maps a column/key to a (value → tone) object`,
+          );
           continue;
         }
         for (const [v, tone] of Object.entries(value)) {
           if (!TONES.includes(tone)) {
-            errors.push(`${at}.tone.${key}.${v}: tone must be one of ${TONES.join("|")}`);
+            errors.push(
+              `${at}.tone.${key}.${v}: tone must be one of ${TONES.join("|")}`,
+            );
           }
         }
       }
@@ -208,11 +272,12 @@ export function inspectHeader(view, artifact) {
   const lines = [];
   if (typeof view.summary === "string") {
     const summary = resolvePointer(artifact, view.summary);
-    if (typeof summary === "string" && summary.trim()) lines.push(summary.trim());
+    if (typeof summary === "string" && summary.trim())
+      lines.push(summary.trim());
   }
   if (isObject(view.status) && typeof view.status.path === "string") {
     const value = resolvePointer(artifact, view.status.path);
-    if (value !== undefined && value !== null && (typeof value !== "object")) {
+    if (value !== undefined && value !== null && typeof value !== "object") {
       const tokens = parsePointer(view.status.path) ?? [];
       const label = tokens.length ? tokens[tokens.length - 1] : "status";
       lines.push(`${label}: ${String(value)}`);

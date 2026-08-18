@@ -31,7 +31,6 @@ function extensionRefusal(send, status, code, detail = {}) {
   });
 }
 
-
 /** Optional repository names named by a run/event input (OPS-356). */
 export function repoNamesFromInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return [];
@@ -130,7 +129,8 @@ const TICKET_ID = /^[A-Z][A-Z0-9]{1,9}-\d+$/;
 
 function objectNamesTicket(value, ticket) {
   if (!value || typeof value !== "object") return false;
-  if (Array.isArray(value)) return value.some((entry) => objectNamesTicket(entry, ticket));
+  if (Array.isArray(value))
+    return value.some((entry) => objectNamesTicket(entry, ticket));
   for (const [key, entry] of Object.entries(value)) {
     if (
       /^(ticket|ticketId|issue|issueId|linearId)$/i.test(key) &&
@@ -161,7 +161,9 @@ function collectPrRefs(value, refs = { numbers: new Set(), urls: new Set() }) {
   }
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry === "string") {
-      const match = entry.match(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:$|[/?#])/);
+      const match = entry.match(
+        /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:$|[/?#])/,
+      );
       if (match) {
         refs.urls.add(entry);
         refs.numbers.add(Number(match[1]));
@@ -187,7 +189,8 @@ function namedString(values, names) {
   for (const value of values) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     for (const name of names) {
-      if (typeof value[name] === "string" && value[name].trim()) return value[name].trim();
+      if (typeof value[name] === "string" && value[name].trim())
+        return value[name].trim();
     }
   }
   return null;
@@ -201,12 +204,20 @@ function namedString(values, names) {
  * event/proposal/run ids and PR references emitted by dispatch/merge results.
  */
 export function ticketJourneyView(db, rawTicket, options = {}) {
-  const ticket = String(rawTicket ?? "").trim().toUpperCase();
+  const ticket = String(rawTicket ?? "")
+    .trim()
+    .toUpperCase();
   if (!TICKET_ID.test(ticket)) return null;
 
-  const eventRows = db.query(`SELECT * FROM events ORDER BY admitted_at, rowid`).all();
-  const proposalRows = db.query(`SELECT * FROM proposals ORDER BY created_at, rowid`).all();
-  const runRows = db.query(`SELECT * FROM runs ORDER BY created_at, rowid`).all();
+  const eventRows = db
+    .query(`SELECT * FROM events ORDER BY admitted_at, rowid`)
+    .all();
+  const proposalRows = db
+    .query(`SELECT * FROM proposals ORDER BY created_at, rowid`)
+    .all();
+  const runRows = db
+    .query(`SELECT * FROM runs ORDER BY created_at, rowid`)
+    .all();
   const resultRows = db.query(`SELECT * FROM results ORDER BY rowid`).all();
   const resultByRun = new Map();
   for (const row of resultRows) {
@@ -252,22 +263,35 @@ export function ticketJourneyView(db, rawTicket, options = {}) {
         events.has(eventKey) ||
         (row.run_id && runs.has(row.run_id))
       ) {
-        if (!proposals.has(row.id)) { proposals.add(row.id); changed = true; }
-        if (!events.has(eventKey)) { events.add(eventKey); changed = true; }
-        if (row.run_id && !runs.has(row.run_id)) { runs.add(row.run_id); changed = true; }
+        if (!proposals.has(row.id)) {
+          proposals.add(row.id);
+          changed = true;
+        }
+        if (!events.has(eventKey)) {
+          events.add(eventKey);
+          changed = true;
+        }
+        if (row.run_id && !runs.has(row.run_id)) {
+          runs.add(row.run_id);
+          changed = true;
+        }
       }
     }
   }
 
   const prRefs = { numbers: new Set(), urls: new Set() };
   for (const runId of runs) {
-    for (const result of resultByRun.get(runId) ?? []) collectPrRefs(result, prRefs);
+    for (const result of resultByRun.get(runId) ?? [])
+      collectPrRefs(result, prRefs);
   }
   if (prRefs.numbers.size || prRefs.urls.size) {
     for (const row of runRows) {
       const spec = parseObject(row.spec_json);
       const results = resultByRun.get(row.run_id) ?? [];
-      if (hasPrRef(spec.input, prRefs) || results.some((result) => hasPrRef(result, prRefs)))
+      if (
+        hasPrRef(spec.input, prRefs) ||
+        results.some((result) => hasPrRef(result, prRefs))
+      )
         runs.add(row.run_id);
     }
     for (const row of eventRows) {
@@ -279,7 +303,9 @@ export function ticketJourneyView(db, rawTicket, options = {}) {
   const matchedEvents = eventsView(db).filter((event) =>
     events.has(`${event.source}\0${event.eventId}`),
   );
-  const matchedProposals = proposalHistory(db).filter((proposal) => proposals.has(proposal.id));
+  const matchedProposals = proposalHistory(db).filter((proposal) =>
+    proposals.has(proposal.id),
+  );
   const matchedRuns = [...runs]
     .map((runId) => runView(db, runId, options))
     .filter(Boolean)
@@ -291,9 +317,21 @@ export function ticketJourneyView(db, rawTicket, options = {}) {
     ...matchedRuns.map((run) => run.run.spec?.input),
     ...matchedRuns.map((run) => run.result?.artifact),
   ];
-  const title = namedString(metadata, ["ticketTitle", "linearTitle", "issueTitle"]);
-  const recordedState = namedString(metadata, ["ticketState", "linearState", "issueState"]);
-  const createdAt = namedString(metadata, ["ticketCreatedAt", "linearCreatedAt", "issueCreatedAt"]);
+  const title = namedString(metadata, [
+    "ticketTitle",
+    "linearTitle",
+    "issueTitle",
+  ]);
+  const recordedState = namedString(metadata, [
+    "ticketState",
+    "linearState",
+    "issueState",
+  ]);
+  const createdAt = namedString(metadata, [
+    "ticketCreatedAt",
+    "linearCreatedAt",
+    "issueCreatedAt",
+  ]);
   const active = matchedRuns.find((run) =>
     ["QUEUED", "LEASED", "RUNNING", "VERIFYING"].includes(run.run.state),
   );
@@ -318,7 +356,10 @@ export function ticketJourneyView(db, rawTicket, options = {}) {
       createdAt,
       url: `https://linear.app/watt-mind/issue/${encodeURIComponent(ticket)}`,
     },
-    activity: matchedEvents.length > 0 || matchedProposals.length > 0 || matchedRuns.length > 0,
+    activity:
+      matchedEvents.length > 0 ||
+      matchedProposals.length > 0 ||
+      matchedRuns.length > 0,
     events: matchedEvents,
     proposals: matchedProposals,
     runs: matchedRuns,
@@ -361,12 +402,20 @@ function runsView(db, state) {
       leaseExpiresAt: row.lease_expires_at ?? null,
       // Two extra queries per row: only worth it while the deadline can
       // still move (WM-692). Terminal rows on this 2s-polled list get null.
-      deadlineAt: row.attempts > 0 && IN_FLIGHT_STATES.has(row.state)
-        ? (() => {
-            const deadline = attemptDeadline(db, row.run_id, row.attempts, spec);
-            return Number.isFinite(deadline) ? new Date(deadline).toISOString() : null;
-          })()
-        : null,
+      deadlineAt:
+        row.attempts > 0 && IN_FLIGHT_STATES.has(row.state)
+          ? (() => {
+              const deadline = attemptDeadline(
+                db,
+                row.run_id,
+                row.attempts,
+                spec,
+              );
+              return Number.isFinite(deadline)
+                ? new Date(deadline).toISOString()
+                : null;
+            })()
+          : null,
       timeoutSeconds: spec.timeoutSeconds,
       repos: repoNamesFromInput(spec.input),
     };
@@ -483,7 +532,9 @@ function runView(db, runId, { artifactsDir } = {}) {
     result,
     receipt: resultRow ? JSON.parse(resultRow.receipt_json) : null,
     workspace: latest?.workspace_path ?? null,
-    deadlineAt: Number.isFinite(deadline) ? new Date(deadline).toISOString() : null,
+    deadlineAt: Number.isFinite(deadline)
+      ? new Date(deadline).toISOString()
+      : null,
     observedModel:
       artifactsDir && transcript?.sha256
         ? observedModelFromTranscript(
@@ -656,12 +707,14 @@ export async function handleRunApiRoute({
       });
     }
 
-    const row = db.query(
-      `SELECT r.state, r.attempts, a.started_at
+    const row = db
+      .query(
+        `SELECT r.state, r.attempts, a.started_at
          FROM runs r
          LEFT JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
         WHERE r.run_id = ?`,
-    ).get(runId);
+      )
+      .get(runId);
     if (!row) return extensionRefusal(send, 404, "unknown_run", { runId });
 
     const override = body.override === true;
@@ -670,9 +723,10 @@ export async function handleRunApiRoute({
       return extensionRefusal(send, 409, "run_limit_policy_unavailable");
     }
     const startedMs = Date.parse(row.started_at ?? "");
-    const maxDeadlineMs = Number.isFinite(startedMs) && Number.isFinite(maxMinutes)
-      ? startedMs + maxMinutes * 60 * 1000
-      : null;
+    const maxDeadlineMs =
+      Number.isFinite(startedMs) && Number.isFinite(maxMinutes)
+        ? startedMs + maxMinutes * 60 * 1000
+        : null;
     const outcome = extendRunDeadline(db, runId, {
       seconds,
       actor,

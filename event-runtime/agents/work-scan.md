@@ -6,7 +6,12 @@ tree to read it against:
 ```json
 {
   "repo": "bj29",
-  "repoPin": { "repo": "bj29", "ref": "develop", "sha": "<40-hex>", "github": "owner/name" }
+  "repoPin": {
+    "repo": "bj29",
+    "ref": "develop",
+    "sha": "<40-hex>",
+    "github": "owner/name"
+  }
 }
 ```
 
@@ -46,16 +51,17 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
    errors, truncates, or returns
    malformed JSON, refuse with `reasonCode: "needs_human"` rather than inventing
    candidate order.
+
 2. **Order the filtered candidates** with this explicit Linear priority rank,
    then by `createdAt` ascending within the same rank:
 
    | Rank | Linear value | Label used in `reason` |
-   | ---: | ---: | --- |
-   | 1 | 1 | Urgent |
-   | 2 | 2 | High |
-   | 3 | 3 | Medium |
-   | 4 | 4 | Low |
-   | 5 | 0 | No priority |
+   | ---: | -----------: | ---------------------- |
+   |    1 |            1 | Urgent                 |
+   |    2 |            2 | High                   |
+   |    3 |            3 | Medium                 |
+   |    4 |            4 | Low                    |
+   |    5 |            0 | No priority            |
 
    Do **not** sort the raw numeric value ascending: Linear's `0` means no
    priority and belongs last. Every selected item's `reason` must include the
@@ -70,6 +76,7 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
    `[URGENT, NONE]`; `BLOCKED` must be absent. Refuse with
    `reasonCode: "needs_human"` if your candidate construction or ordering does
    not produce that result.
+
 3. **Count the cap**: the repo's `max_in_flight` from
    `$FACTORY_ROOT/config/repos.yaml`, falling back to
    `concurrency.max_in_flight_per_repo` in `config/policy.yaml`, else 3. Record
@@ -107,7 +114,7 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
 
    If this ordered walk yields zero dispatch candidates after a complete read and
    `readyCandidates` is exactly 0, run a complete, independent read of `state:
-   Triage` backlog (again, all pages, fresh command, no sampling). If the Triage
+Triage` backlog (again, all pages, fresh command, no sampling). If the Triage
    read fails or returns any malformed payload, refuse with
    `reasonCode: "needs_human"`.
 
@@ -120,6 +127,7 @@ ticket — dispatching is the chained `factory.dispatch.requested` run's job
    `LOW_SUPPLY` with `readyCandidates` and `triageBacklog` counts in the
    artifact, then stop (no dispatch plan). If there are zero dispatch
    candidates and an empty backlog, emit normal `NOOP queue_empty`.
+
 ## What you cannot see — say so, never pretend
 
 You cannot see the runtime's own ledger: a ticket with an open (not yet
@@ -148,11 +156,13 @@ completion, which re-plans those candidates against a fresh world.
     "repo": "bj29",
     "ticket": "CLNT-123",
     "plan": [
-      { "ticket": "CLNT-123", "ownedPaths": ["src/feature-a/**"], "reason": "priority Urgent, paths disjoint from all in-flight" }
+      {
+        "ticket": "CLNT-123",
+        "ownedPaths": ["src/feature-a/**"],
+        "reason": "priority Urgent, paths disjoint from all in-flight"
+      }
     ],
-    "deferred": [
-      { "ticket": "CLNT-124", "reason": "owned_paths_overlap" }
-    ],
+    "deferred": [{ "ticket": "CLNT-124", "reason": "owned_paths_overlap" }],
     "summary": "one line an operator can act on",
     "readyCandidates": 2,
     "triageBacklog": 0

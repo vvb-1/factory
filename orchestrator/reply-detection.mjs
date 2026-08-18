@@ -54,7 +54,11 @@ export const HELD_QUERY = `
  * comments is NOT answered. Wrongly resurfacing a hold re-derives it every
  * 5 minutes; wrongly leaving one held costs what it costs today.
  */
-export function answeredIdentifiers(heldNodes, labelIds, graceMs = REPLY_GRACE_MS) {
+export function answeredIdentifiers(
+  heldNodes,
+  labelIds,
+  graceMs = REPLY_GRACE_MS,
+) {
   const answered = new Set();
   for (const t of heldNodes ?? []) {
     // Only the two documented hold shapes. An In Progress ticket carrying a
@@ -63,9 +67,12 @@ export function answeredIdentifiers(heldNodes, labelIds, graceMs = REPLY_GRACE_M
     const adds = (t.history?.nodes ?? [])
       .filter((h) => (h.addedLabelIds ?? []).some((id) => labelIds.has(id)))
       .map((h) => Date.parse(h.createdAt));
-    const comments = (t.comments?.nodes ?? []).map((n) => Date.parse(n.createdAt));
+    const comments = (t.comments?.nodes ?? []).map((n) =>
+      Date.parse(n.createdAt),
+    );
     if (!adds.length || !comments.length) continue;
-    if (Math.max(...comments) > Math.max(...adds) + graceMs) answered.add(t.identifier);
+    if (Math.max(...comments) > Math.max(...adds) + graceMs)
+      answered.add(t.identifier);
   }
   return answered;
 }
@@ -124,6 +131,13 @@ export async function blockedLabelIds() {
 export async function answeredHeldTickets(repo) {
   const ids = await blockedLabelIds();
   if (!ids.size) return new Set();
-  const held = (await gql(HELD_QUERY, { team: repo.team, project: repo.project, label: AI_BLOCKED }))?.issues?.nodes ?? [];
+  const held =
+    (
+      await gql(HELD_QUERY, {
+        team: repo.team,
+        project: repo.project,
+        label: AI_BLOCKED,
+      })
+    )?.issues?.nodes ?? [];
   return answeredIdentifiers(held, ids);
 }

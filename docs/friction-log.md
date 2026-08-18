@@ -28,7 +28,7 @@ A fixed sleep is a guess: too long wastes wall clock in a process holding a conc
 
 **Fix:** rule added to `shared/floor.md` (§Waiting). Verified `--watch`, `--fail-fast` and `-i` exist in gh 2.97. factory-ticket.md documents that sleep-polling is blocked by the harness (a blocked tool call kills the run).
 
-**Status:** fixed in the floor + harness block — if sleeps persist in *new* transcripts after Aug 2026, the next step is a `scripts/wait-for-ci.sh` wrapper agents must call.
+**Status:** fixed in the floor + harness block — if sleeps persist in _new_ transcripts after Aug 2026, the next step is a `scripts/wait-for-ci.sh` wrapper agents must call.
 
 ### F-9 · Fixed sleeps waiting for dev servers to boot
 
@@ -44,7 +44,7 @@ Same shape as F-8 but for local processes, and the guess is worse: boot time var
 
 **Seen:** agy triage, `status: ERROR / "timeout waiting for response"` at 231s — its 5-minute print default, 68 tool calls in, cut off mid-summary. Work completed; report lost.
 
-Raising `--print-timeout` alone would trade a short hang for a long one: a wedged run holds its slot for whatever the new timeout is. Two different jobs — the harness timeout should error *cleanly*, the factory timeout should *guarantee the slot frees*.
+Raising `--print-timeout` alone would trade a short hang for a long one: a wedged run holds its slot for whatever the new timeout is. Two different jobs — the harness timeout should error _cleanly_, the factory timeout should _guarantee the slot frees_.
 
 **Fix:** `limits.max_run_minutes` (45) in `policy.yaml`, enforced with `timeout -k 30s` in both `run-agent.sh` and `tick.mjs`; the harness timeout is set two minutes below it so it reports first. **Status: fixed.**
 
@@ -110,7 +110,7 @@ Runs were billed per token instead of drawing on the subscription, and claude.ai
 
 ### F-7 · `Owned Paths` in fenced code blocks parsed as empty — `fixed`
 
-A correctly specced ticket was undispatchable because the parser only read bullet lists. It now accepts bullets, fenced blocks and indented code. This one is worth remembering as a *shape*: a strict parser silently turning good input into no input looks like an upstream failure, not a parser bug.
+A correctly specced ticket was undispatchable because the parser only read bullet lists. It now accepts bullets, fenced blocks and indented code. This one is worth remembering as a _shape_: a strict parser silently turning good input into no input looks like an upstream failure, not a parser bug.
 
 ---
 

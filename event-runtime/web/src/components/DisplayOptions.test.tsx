@@ -1,6 +1,12 @@
 import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  within,
+} from "@testing-library/react";
 import { useState } from "react";
 import { modal } from "../hooks";
 import { goPrefix } from "../goSequence";
@@ -36,7 +42,12 @@ interface Row {
 const CONFIG: DisplayConfig<Row> = {
   view: "panel-test",
   groups: [
-    { key: "state", label: "State", get: (r) => r.state, order: ["RUNNING", "FAILED"] },
+    {
+      key: "state",
+      label: "State",
+      get: (r) => r.state,
+      order: ["RUNNING", "FAILED"],
+    },
     { key: "agent", label: "Agent", get: (r) => r.agent },
   ],
   subGroups: ["agent"],
@@ -62,7 +73,14 @@ function Harness({
       return value;
     });
   };
-  return <DisplayOptions config={CONFIG} state={state} onChange={update} rows={rows} />;
+  return (
+    <DisplayOptions
+      config={CONFIG}
+      state={state}
+      onChange={update}
+      rows={rows}
+    />
+  );
 }
 
 afterEach(() => {
@@ -130,8 +148,12 @@ describe("DisplayOptions panel", () => {
     fireEvent.click(r.getByRole("button", { name: /display/i }));
     chooseOption(r, "Group by", "Agent");
     fireEvent.click(r.getByRole("combobox", { name: "Sub-group by" }));
-    const subOptions = within(r.getByRole("listbox", { name: "Sub-group by options" })).getAllByRole("option");
-    expect(subOptions.map((option) => option.textContent)).not.toContain("Agent");
+    const subOptions = within(
+      r.getByRole("listbox", { name: "Sub-group by options" }),
+    ).getAllByRole("option");
+    expect(subOptions.map((option) => option.textContent)).not.toContain(
+      "Agent",
+    );
   });
 
   test("column pills toggle visibility but always-on columns are not offered", () => {
@@ -168,7 +190,9 @@ describe("DisplayOptions panel", () => {
         id: "r1",
         state: "RUNNING",
         agent: "a",
-        envelope: { payload: { repo: "watt-mind/factory", owner: "watt-mind" } },
+        envelope: {
+          payload: { repo: "watt-mind/factory", owner: "watt-mind" },
+        },
         spec: { input: { model: "claude-sonnet" } },
         labels: { priority: "high" },
       },
@@ -180,21 +204,32 @@ describe("DisplayOptions panel", () => {
     expect(input.getAttribute("placeholder")).toContain("labels.priority");
     fireEvent.focus(input);
 
-    const listbox = r.getByRole("listbox", { name: "Discovered property paths" });
+    const listbox = r.getByRole("listbox", {
+      name: "Discovered property paths",
+    });
     expect(within(listbox).getByText("payload")).toBeTruthy();
     expect(within(listbox).getByText("spec")).toBeTruthy();
     expect(within(listbox).getByText("labels")).toBeTruthy();
     expect(within(listbox).getAllByRole("option")).toHaveLength(4);
-    expect(within(listbox).getByRole("option", { name: /payload\.repo.*watt-mind\/factory.*1 row/i })).toBeTruthy();
+    expect(
+      within(listbox).getByRole("option", {
+        name: /payload\.repo.*watt-mind\/factory.*1 row/i,
+      }),
+    ).toBeTruthy();
 
     fireEvent.keyDown(input, { key: "Escape" });
-    expect(r.queryByRole("listbox", { name: "Discovered property paths" })).toBeNull();
+    expect(
+      r.queryByRole("listbox", { name: "Discovered property paths" }),
+    ).toBeNull();
     expect(r.getByRole("dialog", { name: "Display options" })).toBeTruthy();
   });
 
   test("does not cap the full discovered suggestion list at ten paths", () => {
     const payload = Object.fromEntries(
-      Array.from({ length: 12 }, (_, index) => [`field${index}`, `value${index}`]),
+      Array.from({ length: 12 }, (_, index) => [
+        `field${index}`,
+        `value${index}`,
+      ]),
     );
     const sampleRows: Row[] = [
       { id: "r1", state: "RUNNING", agent: "a", envelope: { payload } },
@@ -204,7 +239,11 @@ describe("DisplayOptions panel", () => {
 
     const input = r.getByRole("combobox", { name: "Add custom property path" });
     fireEvent.focus(input);
-    expect(within(r.getByRole("listbox", { name: "Discovered property paths" })).getAllByRole("option")).toHaveLength(12);
+    expect(
+      within(
+        r.getByRole("listbox", { name: "Discovered property paths" }),
+      ).getAllByRole("option"),
+    ).toHaveLength(12);
   });
 
   test("filters suggestions and adds the keyboard-highlighted path", () => {
@@ -218,14 +257,18 @@ describe("DisplayOptions panel", () => {
         spec: { input: { model: "claude-sonnet" } },
       },
     ];
-    const r = render(<Harness onState={(s) => (latest = s)} rows={sampleRows} />);
+    const r = render(
+      <Harness onState={(s) => (latest = s)} rows={sampleRows} />,
+    );
     fireEvent.click(r.getByRole("button", { name: /display/i }));
 
     const input = r.getByRole("combobox", { name: "Add custom property path" });
     act(() => {
       changeInput(input as HTMLInputElement, "model");
     });
-    const options = within(r.getByRole("listbox", { name: "Discovered property paths" })).getAllByRole("option");
+    const options = within(
+      r.getByRole("listbox", { name: "Discovered property paths" }),
+    ).getAllByRole("option");
     expect(options).toHaveLength(1);
     expect(options[0].textContent).toContain("spec.input.model");
     fireEvent.keyDown(input, { key: "Enter" });
@@ -237,16 +280,27 @@ describe("DisplayOptions panel", () => {
   test("adds an undiscovered free-text path on Enter and explains the empty column", () => {
     let latest: DisplayState | undefined;
     const sampleRows: Row[] = [
-      { id: "r1", state: "RUNNING", agent: "a", envelope: { payload: { repo: "watt-mind/factory" } } },
+      {
+        id: "r1",
+        state: "RUNNING",
+        agent: "a",
+        envelope: { payload: { repo: "watt-mind/factory" } },
+      },
     ];
-    const r = render(<Harness onState={(s) => (latest = s)} rows={sampleRows} />);
+    const r = render(
+      <Harness onState={(s) => (latest = s)} rows={sampleRows} />,
+    );
     fireEvent.click(r.getByRole("button", { name: /display/i }));
 
     const input = r.getByRole("combobox", { name: "Add custom property path" });
     act(() => {
       changeInput(input as HTMLInputElement, "payload.futureField");
     });
-    expect(r.getByText("not seen in loaded items; the column will show — until a row has it")).toBeTruthy();
+    expect(
+      r.getByText(
+        "not seen in loaded items; the column will show — until a row has it",
+      ),
+    ).toBeTruthy();
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(latest?.customColumns).toEqual(["payload.futureField"]);
@@ -290,7 +344,9 @@ describe("DisplayOptions panel", () => {
     const r = render(<Harness />);
     const trigger = r.getByRole("button", { name: /display/i });
     fireEvent.click(trigger);
-    expect(document.activeElement).toBe(r.getByRole("combobox", { name: "Group by" }));
+    expect(document.activeElement).toBe(
+      r.getByRole("combobox", { name: "Group by" }),
+    );
   });
 
   test("outside-click dismiss restores focus to the Display trigger", () => {
@@ -315,7 +371,9 @@ describe("DisplayOptions panel", () => {
     const r = render(<Harness />);
     expect(r.queryByRole("dialog", { name: "Display options" })).toBeNull();
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "v", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "v", bubbles: true }),
+      );
     });
     expect(r.getByRole("dialog", { name: "Display options" })).toBeTruthy();
   });
@@ -337,7 +395,9 @@ describe("DisplayOptions panel", () => {
     const r = render(<Harness />);
     goPrefix.armedAt = Date.now();
     act(() => {
-      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "v", bubbles: true }));
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "v", bubbles: true }),
+      );
     });
     expect(r.queryByRole("dialog", { name: "Display options" })).toBeNull();
   });
@@ -369,7 +429,9 @@ describe("GroupHeaderRow", () => {
                   collapsed={closed}
                   onToggle={() =>
                     setCollapsed((c) =>
-                      c.includes(s.key) ? c.filter((k) => k !== s.key) : [...c, s.key],
+                      c.includes(s.key)
+                        ? c.filter((k) => k !== s.key)
+                        : [...c, s.key],
                     )
                   }
                 />

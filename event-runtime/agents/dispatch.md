@@ -63,9 +63,10 @@ steal a claim, never queue behind the holder.
 
    Resolve in-scope `FIX-FIRST` findings and re-run the critic, for at most two
    review rounds. A startup `BLOCKED - environment mismatch or unresponsive
-   shell` means the spawn prompt was defective: correct its path/launch details
+shell` means the spawn prompt was defective: correct its path/launch details
    and retry once without consuming a review round. If the retry blocks, or the
    app cannot be driven, record that result rather than guessing.
+
 5. **Never `sleep` to wait for anything.** Poll a condition with a real
    command (`gh pr checks <PR> --watch --fail-fast` for CI); a fixed sleep
    wedges the run until the timeout kills it.

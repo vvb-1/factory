@@ -41,10 +41,16 @@ describe("warm cache staleness gate", () => {
   });
 
   test.each([
-    ["non-zero rev-list status", { status: 128, stdout: "", stderr: "fatal: bad revision" }],
+    [
+      "non-zero rev-list status",
+      { status: 128, stdout: "", stderr: "fatal: bad revision" },
+    ],
     ["empty rev-list output", ok("  \n")],
     ["unparseable rev-list output", ok("not-a-number\n")],
-    ["rev-list error output", { status: 0, stdout: "2\n", stderr: "warning: unverified" }],
+    [
+      "rev-list error output",
+      { status: 0, stdout: "2\n", stderr: "warning: unverified" },
+    ],
   ])("%s fails closed and exits 0 under --gate", (_name, revListResult) => {
     const result = evaluate({ revListResult });
     expect(result.behind).toBe(Infinity);
@@ -57,22 +63,32 @@ describe("warm cache staleness gate", () => {
   });
 
   test("an unsafe numeric count fails closed", () => {
-    expect(parseBehindCount(ok(), ok("999999999999999999999\n"))).toBe(Infinity);
+    expect(parseBehindCount(ok(), ok("999999999999999999999\n"))).toBe(
+      Infinity,
+    );
   });
 });
 
 describe("warm CLI behavior", () => {
   const cfg = {
-    repos: [{
-      name: "example",
-      path: "/repo",
-      worktree_root: "/warm-root",
-      base: "develop",
-      worktree_warm: "/warm.sh",
-    }],
+    repos: [
+      {
+        name: "example",
+        path: "/repo",
+        worktree_root: "/warm-root",
+        base: "develop",
+        worktree_warm: "/warm.sh",
+      },
+    ],
   };
 
-  function run({ args = ["--gate"], warmDirExists = true, head = ok(`${HEAD}\n`), fetch = ok(), revList = ok("0\n") } = {}) {
+  function run({
+    args = ["--gate"],
+    warmDirExists = true,
+    head = ok(`${HEAD}\n`),
+    fetch = ok(),
+    revList = ok("0\n"),
+  } = {}) {
     const output = [];
     const shell = (command) => {
       if (command === "git rev-parse HEAD") return head;
@@ -105,13 +121,18 @@ describe("warm CLI behavior", () => {
   });
 
   test("--gate reports stale and unknown when rev-list fails", () => {
-    const result = run({ revList: { status: 128, stdout: "", stderr: "fatal: bad revision" } });
+    const result = run({
+      revList: { status: 128, stdout: "", stderr: "fatal: bad revision" },
+    });
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("stale — behind-count unknown — refresh");
   });
 
   test("non-gate output reports n/a and stale when rev-list fails", () => {
-    const result = run({ args: [], revList: { status: 128, stdout: "", stderr: "fatal" } });
+    const result = run({
+      args: [],
+      revList: { status: 128, stdout: "", stderr: "fatal" },
+    });
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain("behind: n/a commit(s)");
     expect(result.output).toContain("→ stale:");
@@ -120,7 +141,9 @@ describe("warm CLI behavior", () => {
   test("a missing warm directory requests refresh under --gate", () => {
     const result = run({ warmDirExists: false });
     expect(result.exitCode).toBe(0);
-    expect(result.output).toContain("no warm cache at /warm-root/.warm — stale");
+    expect(result.output).toContain(
+      "no warm cache at /warm-root/.warm — stale",
+    );
   });
 
   test("an invalid warm HEAD is stale with an unknown count", () => {
@@ -132,8 +155,17 @@ describe("warm CLI behavior", () => {
 
 describe("warm cache location and HEAD validation", () => {
   test("a missing warm directory is stale", () => {
-    const result = evaluate({ warmDirExists: false, warmHeadResult: null, revListResult: null });
-    expect(result).toMatchObject({ warmHead: null, behind: Infinity, stale: true, gateExitCode: 0 });
+    const result = evaluate({
+      warmDirExists: false,
+      warmHeadResult: null,
+      revListResult: null,
+    });
+    expect(result).toMatchObject({
+      warmHead: null,
+      behind: Infinity,
+      stale: true,
+      gateExitCode: 0,
+    });
   });
 
   test.each([
@@ -142,7 +174,12 @@ describe("warm cache location and HEAD validation", () => {
     ["malformed HEAD", ok("not-an-object-id\n")],
   ])("an invalid warm HEAD (%s) is stale", (_name, warmHeadResult) => {
     const result = evaluate({ warmHeadResult, revListResult: null });
-    expect(result).toMatchObject({ warmHead: null, behind: Infinity, stale: true, gateExitCode: 0 });
+    expect(result).toMatchObject({
+      warmHead: null,
+      behind: Infinity,
+      stale: true,
+      gateExitCode: 0,
+    });
   });
 
   test("SHA-1 and SHA-256 object IDs are accepted", () => {

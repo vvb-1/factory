@@ -70,18 +70,25 @@ export class ContractViolation extends Error {
 }
 
 function normalizeFailureOutput(output) {
-  return String(output ?? "")
-    // eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
-    .replace(/\x1b\[[0-9;]*m/g, "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    // Lifecycle scripts emit recoverable, run-varying diagnostics as warn:.
-    // They are evidence, not part of the underlying failure signature.
-    .filter((line) => !/^warn:\s*/i.test(line))
-    // Runners repeat these for unrelated failures; they are not evidence that
-    // the same underlying check remains red.
-    .filter((line) => !/^(\$ |bun test|error: script |error: ".*" exited|exited with code)/i.test(line));
+  return (
+    String(output ?? "")
+      // eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
+      .replace(/\x1b\[[0-9;]*m/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      // Lifecycle scripts emit recoverable, run-varying diagnostics as warn:.
+      // They are evidence, not part of the underlying failure signature.
+      .filter((line) => !/^warn:\s*/i.test(line))
+      // Runners repeat these for unrelated failures; they are not evidence that
+      // the same underlying check remains red.
+      .filter(
+        (line) =>
+          !/^(\$ |bun test|error: script |error: ".*" exited|exited with code)/i.test(
+            line,
+          ),
+      )
+  );
 }
 
 /**
@@ -143,19 +150,30 @@ function repoVerifyFailureExcerpt(output) {
     .filter((line) => line.trim().length > 0);
   if (lines.length === 0) return "";
 
-  const testFailures = lines.filter((line) => REPO_VERIFY_TEST_FAILURE_LINE.test(line));
+  const testFailures = lines.filter((line) =>
+    REPO_VERIFY_TEST_FAILURE_LINE.test(line),
+  );
   const errors = lines.filter(
-    (line) => !REPO_VERIFY_TEST_FAILURE_LINE.test(line) && REPO_VERIFY_ERROR_LINE.test(line),
+    (line) =>
+      !REPO_VERIFY_TEST_FAILURE_LINE.test(line) &&
+      REPO_VERIFY_ERROR_LINE.test(line),
   );
   if (testFailures.length === 0 && errors.length === 0) {
     return boundedDiagnostic(lines.slice(-REPO_VERIFY_REASON_MAX_LINES));
   }
 
   const excerpt = testFailures.slice(-REPO_VERIFY_REASON_MAX_LINES);
-  const errorCapacity = Math.max(0, REPO_VERIFY_REASON_MAX_LINES - excerpt.length - 1);
+  const errorCapacity = Math.max(
+    0,
+    REPO_VERIFY_REASON_MAX_LINES - excerpt.length - 1,
+  );
   if (errorCapacity > 0) excerpt.push(...errors.slice(-errorCapacity));
   const summary = lines.at(-1);
-  if (excerpt.length < REPO_VERIFY_REASON_MAX_LINES && !excerpt.includes(summary)) excerpt.push(summary);
+  if (
+    excerpt.length < REPO_VERIFY_REASON_MAX_LINES &&
+    !excerpt.includes(summary)
+  )
+    excerpt.push(summary);
   return boundedDiagnostic(excerpt);
 }
 
@@ -196,12 +214,21 @@ export function verifyResult({
   const shape = validate(registry.schemas.agentResult, candidate);
   if (!shape.valid) throw new ContractViolation(shape.errors);
 
-  if (candidate.terminalState === "refused") return verifyRefused({ spec, def, candidate, attempt });
+  if (candidate.terminalState === "refused")
+    return verifyRefused({ spec, def, candidate, attempt });
   if (candidate.decision !== undefined) {
     throw new ContractViolation(["decision_not_allowed_on_completed_result"]);
   }
   return verifyCompleted({
-    spec, def, candidate, workspaceDir, attempt, journalHead, extraArtifacts, worktreeRecord, verifyTimeoutMs,
+    spec,
+    def,
+    candidate,
+    workspaceDir,
+    attempt,
+    journalHead,
+    extraArtifacts,
+    worktreeRecord,
+    verifyTimeoutMs,
   });
 }
 
@@ -239,7 +266,8 @@ function verifyRefused({ spec, def, candidate, attempt }) {
     const semantic = SEMANTIC_CHECKS[spec.outputContract];
     if (semantic) {
       const semanticViolations = semantic(candidate);
-      if (semanticViolations.length > 0) throw new ContractViolation(semanticViolations);
+      if (semanticViolations.length > 0)
+        throw new ContractViolation(semanticViolations);
       checks.push("evidence_recomputed");
     }
 
@@ -270,19 +298,27 @@ function verifyRefused({ spec, def, candidate, attempt }) {
 }
 
 function retainedEvidence(candidate) {
-  if (candidate.evidence === undefined) return { evidence: undefined, evidenceSetHash: null };
+  if (candidate.evidence === undefined)
+    return { evidence: undefined, evidenceSetHash: null };
 
   const canonical = canonicalJson(candidate.evidence);
   const bytes = Buffer.byteLength(canonical, "utf8");
   if (bytes > EVIDENCE_INLINE_LIMIT_BYTES) {
-    throw new ContractViolation([`evidence_too_large: ${bytes} bytes > ${EVIDENCE_INLINE_LIMIT_BYTES}`]);
+    throw new ContractViolation([
+      `evidence_too_large: ${bytes} bytes > ${EVIDENCE_INLINE_LIMIT_BYTES}`,
+    ]);
   }
-  return { evidence: candidate.evidence, evidenceSetHash: hashBytes(canonical) };
+  return {
+    evidence: candidate.evidence,
+    evidenceSetHash: hashBytes(canonical),
+  };
 }
 
 /** Last integer in a raw probe output — `df --output=used -B1` style. */
 function parseProbeBytes(raw) {
-  const match = String(raw ?? "").trim().match(/(\d+)\s*$/);
+  const match = String(raw ?? "")
+    .trim()
+    .match(/(\d+)\s*$/);
   return match ? Number(match[1]) : null;
 }
 
@@ -309,13 +345,14 @@ function checkWorkPlan(candidate) {
   const normalizedCandidates = [];
   if (Array.isArray(candidates)) {
     for (const [index, entry] of candidates.entries()) {
-      const valid = entry !== null
-        && typeof entry === "object"
-        && !Array.isArray(entry)
-        && Object.keys(entry).length === 2
-        && typeof entry.ticket === "string"
-        && /^[A-Z]+-[0-9]+$/.test(entry.ticket)
-        && dispositions.has(entry.disposition);
+      const valid =
+        entry !== null &&
+        typeof entry === "object" &&
+        !Array.isArray(entry) &&
+        Object.keys(entry).length === 2 &&
+        typeof entry.ticket === "string" &&
+        /^[A-Z]+-[0-9]+$/.test(entry.ticket) &&
+        dispositions.has(entry.disposition);
       if (!valid) {
         violations.push(`evidence_candidate_invalid_at_index_${index}`);
       } else {
@@ -326,16 +363,25 @@ function checkWorkPlan(candidate) {
     if (new Set(candidateTickets).size !== candidateTickets.length) {
       violations.push("evidence_candidate_tickets_must_be_unique");
     }
-    if (Number.isInteger(candidatesSeen) && candidatesSeen !== candidates.length) {
+    if (
+      Number.isInteger(candidatesSeen) &&
+      candidatesSeen !== candidates.length
+    ) {
       violations.push(
         `evidence_candidate_count_mismatch: candidatesSeen ${candidatesSeen} != candidates.length ${candidates.length}`,
       );
     }
   }
 
-  if (!Number.isInteger(artifact.readyCandidates) || artifact.readyCandidates < 0) {
+  if (
+    !Number.isInteger(artifact.readyCandidates) ||
+    artifact.readyCandidates < 0
+  ) {
     violations.push("readyCandidates_required_for_work_plan");
-  } else if (Number.isInteger(candidatesSeen) && artifact.readyCandidates !== candidatesSeen) {
+  } else if (
+    Number.isInteger(candidatesSeen) &&
+    artifact.readyCandidates !== candidatesSeen
+  ) {
     violations.push(
       `candidate_count_mismatch: readyCandidates ${artifact.readyCandidates} != evidence.candidatesSeen ${candidatesSeen}`,
     );
@@ -354,12 +400,16 @@ function checkWorkPlan(candidate) {
 
   const expectedTicket = planTickets[0] ?? null;
   if (artifact.ticket !== expectedTicket) {
-    violations.push(`work_plan_ticket_must_equal_first_plan_ticket (expected ${expectedTicket})`);
+    violations.push(
+      `work_plan_ticket_must_equal_first_plan_ticket (expected ${expectedTicket})`,
+    );
   }
 
   if (artifact.recommendation === "DISPATCH") {
-    if (artifact.plan.length === 0) violations.push("dispatch_plan_must_not_be_empty");
-    if (Object.hasOwn(artifact, "noopReason")) violations.push("dispatch_must_not_have_noopReason");
+    if (artifact.plan.length === 0)
+      violations.push("dispatch_plan_must_not_be_empty");
+    if (Object.hasOwn(artifact, "noopReason"))
+      violations.push("dispatch_must_not_have_noopReason");
 
     const evidencePlan = normalizedCandidates
       .filter((entry) => entry.disposition === "selected")
@@ -370,21 +420,32 @@ function checkWorkPlan(candidate) {
     if (JSON.stringify(planTickets) !== JSON.stringify(evidencePlan)) {
       violations.push("dispatch_plan_must_match_candidate_evidence");
     }
-    if (JSON.stringify(artifact.deferred) !== JSON.stringify(evidenceDeferred)) {
+    if (
+      JSON.stringify(artifact.deferred) !== JSON.stringify(evidenceDeferred)
+    ) {
       violations.push("dispatch_deferred_must_match_candidate_evidence");
     }
-    if (Number.isInteger(candidatesSeen) && accountedTickets.length !== candidatesSeen) {
+    if (
+      Number.isInteger(candidatesSeen) &&
+      accountedTickets.length !== candidatesSeen
+    ) {
       violations.push(
         `dispatch_candidate_accounting_mismatch: plan ${artifact.plan.length} + deferred ${artifact.deferred.length} != candidatesSeen ${candidatesSeen}`,
       );
     }
 
-    const hasCapDeferral = normalizedCandidates.some((entry) => entry.disposition === "cap_full");
+    const hasCapDeferral = normalizedCandidates.some(
+      (entry) => entry.disposition === "cap_full",
+    );
     if (hasCapDeferral) {
       const inFlightSeen = evidence?.inFlightSeen;
       const maxInFlight = evidence?.maxInFlight;
-      if (!Number.isInteger(inFlightSeen) || inFlightSeen < 0
-        || !Number.isInteger(maxInFlight) || maxInFlight < 1) {
+      if (
+        !Number.isInteger(inFlightSeen) ||
+        inFlightSeen < 0 ||
+        !Number.isInteger(maxInFlight) ||
+        maxInFlight < 1
+      ) {
         violations.push("capacity_evidence_required_for_cap_full");
       } else if (inFlightSeen + artifact.plan.length < maxInFlight) {
         violations.push(
@@ -393,22 +454,35 @@ function checkWorkPlan(candidate) {
       }
     }
     if (artifact.triageBacklog !== 0) {
-      violations.push(`dispatch_triageBacklog_must_be_0 (got ${artifact.triageBacklog})`);
+      violations.push(
+        `dispatch_triageBacklog_must_be_0 (got ${artifact.triageBacklog})`,
+      );
     }
   } else if (artifact.recommendation === "LOW_SUPPLY") {
     if (artifact.plan.length > 0 || artifact.deferred.length > 0) {
       violations.push("low_supply_plan_and_deferred_must_be_empty");
     }
-    if (Object.hasOwn(artifact, "noopReason")) violations.push("low_supply_must_not_have_noopReason");
+    if (Object.hasOwn(artifact, "noopReason"))
+      violations.push("low_supply_must_not_have_noopReason");
     if (artifact.readyCandidates !== 0) {
-      violations.push(`low_supply_readyCandidates_must_be_0 (got ${artifact.readyCandidates})`);
+      violations.push(
+        `low_supply_readyCandidates_must_be_0 (got ${artifact.readyCandidates})`,
+      );
     }
     if (Number.isInteger(candidatesSeen) && candidatesSeen !== 0) {
-      violations.push(`low_supply_candidatesSeen_must_be_0 (got ${candidatesSeen})`);
+      violations.push(
+        `low_supply_candidatesSeen_must_be_0 (got ${candidatesSeen})`,
+      );
     }
-    if (normalizedCandidates.length !== 0) violations.push("low_supply_candidates_must_be_empty");
-    if (Number.isInteger(artifact.triageBacklog) && artifact.triageBacklog < 1) {
-      violations.push(`low_supply_triage_backlog_must_be_at_least_1 (got ${artifact.triageBacklog})`);
+    if (normalizedCandidates.length !== 0)
+      violations.push("low_supply_candidates_must_be_empty");
+    if (
+      Number.isInteger(artifact.triageBacklog) &&
+      artifact.triageBacklog < 1
+    ) {
+      violations.push(
+        `low_supply_triage_backlog_must_be_at_least_1 (got ${artifact.triageBacklog})`,
+      );
     }
   } else if (artifact.recommendation === "NOOP") {
     if (artifact.plan.length > 0 || artifact.deferred.length > 0) {
@@ -418,33 +492,58 @@ function checkWorkPlan(candidate) {
       violations.push("noopReason_required_for_noop");
     } else if (artifact.noopReason === "queue_empty") {
       if (artifact.readyCandidates !== 0) {
-        violations.push(`queue_empty_readyCandidates_must_be_0 (got ${artifact.readyCandidates})`);
+        violations.push(
+          `queue_empty_readyCandidates_must_be_0 (got ${artifact.readyCandidates})`,
+        );
       }
       if (Number.isInteger(candidatesSeen) && candidatesSeen !== 0) {
-        violations.push(`queue_empty_candidatesSeen_must_be_0 (got ${candidatesSeen})`);
+        violations.push(
+          `queue_empty_candidatesSeen_must_be_0 (got ${candidatesSeen})`,
+        );
       }
-      if (normalizedCandidates.length !== 0) violations.push("queue_empty_candidates_must_be_empty");
+      if (normalizedCandidates.length !== 0)
+        violations.push("queue_empty_candidates_must_be_empty");
     } else if (artifact.noopReason === "cap_full") {
-      if (normalizedCandidates.length === 0) violations.push("cap_full_candidates_must_not_be_empty");
-      if (normalizedCandidates.some((entry) => entry.disposition !== "cap_full")) {
-        violations.push("cap_full_candidates_must_all_have_cap_full_disposition");
+      if (normalizedCandidates.length === 0)
+        violations.push("cap_full_candidates_must_not_be_empty");
+      if (
+        normalizedCandidates.some((entry) => entry.disposition !== "cap_full")
+      ) {
+        violations.push(
+          "cap_full_candidates_must_all_have_cap_full_disposition",
+        );
       }
       const inFlightSeen = evidence?.inFlightSeen;
       const maxInFlight = evidence?.maxInFlight;
-      if (!Number.isInteger(inFlightSeen) || inFlightSeen < 0
-        || !Number.isInteger(maxInFlight) || maxInFlight < 1) {
+      if (
+        !Number.isInteger(inFlightSeen) ||
+        inFlightSeen < 0 ||
+        !Number.isInteger(maxInFlight) ||
+        maxInFlight < 1
+      ) {
         violations.push("capacity_evidence_required_for_cap_full");
       } else if (inFlightSeen < maxInFlight) {
-        violations.push(`cap_full_contradicts_capacity: inFlightSeen ${inFlightSeen} < maxInFlight ${maxInFlight}`);
+        violations.push(
+          `cap_full_contradicts_capacity: inFlightSeen ${inFlightSeen} < maxInFlight ${maxInFlight}`,
+        );
       }
     } else if (artifact.noopReason === "all_overlapping") {
-      if (normalizedCandidates.length === 0) violations.push("all_overlapping_candidates_must_not_be_empty");
-      if (normalizedCandidates.some((entry) => entry.disposition !== "owned_paths_overlap")) {
-        violations.push("all_overlapping_candidates_must_all_have_overlap_disposition");
+      if (normalizedCandidates.length === 0)
+        violations.push("all_overlapping_candidates_must_not_be_empty");
+      if (
+        normalizedCandidates.some(
+          (entry) => entry.disposition !== "owned_paths_overlap",
+        )
+      ) {
+        violations.push(
+          "all_overlapping_candidates_must_all_have_overlap_disposition",
+        );
       }
     }
     if (artifact.triageBacklog !== 0) {
-      violations.push(`noop_triageBacklog_must_be_0 (got ${artifact.triageBacklog})`);
+      violations.push(
+        `noop_triageBacklog_must_be_0 (got ${artifact.triageBacklog})`,
+      );
     }
   }
 
@@ -461,20 +560,31 @@ const SEMANTIC_CHECKS = {
   "factory.disk-remediation/v1": (candidate) => {
     const violations = [];
     const { artifact, evidence } = candidate;
-    if (evidence === undefined) return ["evidence_required: factory.disk-remediation/v1 claims are recomputed from probes"];
+    if (evidence === undefined)
+      return [
+        "evidence_required: factory.disk-remediation/v1 claims are recomputed from probes",
+      ];
     const before = parseProbeBytes(evidence.probeBefore);
     const after = parseProbeBytes(evidence.probeAfter);
-    if (before === null) violations.push("evidence_unparseable: probeBefore has no byte count");
-    if (after === null) violations.push("evidence_unparseable: probeAfter has no byte count");
+    if (before === null)
+      violations.push("evidence_unparseable: probeBefore has no byte count");
+    if (after === null)
+      violations.push("evidence_unparseable: probeAfter has no byte count");
     if (violations.length > 0) return violations;
     if (artifact.beforeUsedBytes !== before) {
-      violations.push(`evidence_mismatch: beforeUsedBytes ${artifact.beforeUsedBytes} != probed ${before}`);
+      violations.push(
+        `evidence_mismatch: beforeUsedBytes ${artifact.beforeUsedBytes} != probed ${before}`,
+      );
     }
     if (artifact.afterUsedBytes !== after) {
-      violations.push(`evidence_mismatch: afterUsedBytes ${artifact.afterUsedBytes} != probed ${after}`);
+      violations.push(
+        `evidence_mismatch: afterUsedBytes ${artifact.afterUsedBytes} != probed ${after}`,
+      );
     }
     if (artifact.reclaimedBytes !== before - after) {
-      violations.push(`evidence_mismatch: reclaimedBytes ${artifact.reclaimedBytes} != recomputed ${before - after}`);
+      violations.push(
+        `evidence_mismatch: reclaimedBytes ${artifact.reclaimedBytes} != recomputed ${before - after}`,
+      );
     }
     return violations;
   },
@@ -483,7 +593,8 @@ const SEMANTIC_CHECKS = {
     const { artifact } = candidate;
     if (artifact.outcome === "PR_OPEN") {
       if (!artifact.prUrl) violations.push("pr_url_required_for_pr_open");
-      if (artifact.verification?.passed !== true) violations.push("verification_must_pass_for_pr_open");
+      if (artifact.verification?.passed !== true)
+        violations.push("verification_must_pass_for_pr_open");
     }
     return violations;
   },
@@ -501,7 +612,8 @@ function verifyCompleted({
   worktreeRecord = null,
   verifyTimeoutMs,
 }) {
-  if (candidate.artifact === undefined) throw new ContractViolation(["missing_artifact"]);
+  if (candidate.artifact === undefined)
+    throw new ContractViolation(["missing_artifact"]);
 
   const artifactCheck = validate(def.outputSchema, candidate.artifact);
   if (!artifactCheck.valid) throw new ContractViolation(artifactCheck.errors);
@@ -509,7 +621,8 @@ function verifyCompleted({
   const semantic = SEMANTIC_CHECKS[spec.outputContract];
   if (semantic) {
     const semanticViolations = semantic(candidate);
-    if (semanticViolations.length > 0) throw new ContractViolation(semanticViolations);
+    if (semanticViolations.length > 0)
+      throw new ContractViolation(semanticViolations);
   }
 
   // Execute repo's declared verify command for tier-2 mutating runs (docs/event-runtime-dispatch.md §5, §9, WM-115)
@@ -517,14 +630,17 @@ function verifyCompleted({
   if (!worktreeRecord && existsSync(markerPath)) {
     try {
       worktreeRecord = JSON.parse(readFileSync(markerPath, "utf8"));
-    } catch { /* intentionally ignored */ }
+    } catch {
+      /* intentionally ignored */
+    }
   }
 
   let repoVerifyPassed = false;
   if (worktreeRecord?.verify && candidate.artifact?.outcome === "PR_OPEN") {
-    const worktreePath = worktreeRecord.path && existsSync(worktreeRecord.path)
-      ? worktreeRecord.path
-      : path.join(workspaceDir, "repo");
+    const worktreePath =
+      worktreeRecord.path && existsSync(worktreeRecord.path)
+        ? worktreeRecord.path
+        : path.join(workspaceDir, "repo");
     const verifyLogPath = path.join(workspaceDir, ".verify.log");
     const verifyLogFd = openSync(verifyLogPath, "w");
     let vres;
@@ -543,11 +659,11 @@ function verifyCompleted({
       const why = timedOut
         ? `timed out after ${verifyTimeoutMs}ms`
         : repoVerifyFailureExcerpt(output) || `exit ${vres.status}`;
-      const baselineStillRed = !timedOut && matchesRedBaseline(worktreeRecord.baseline, output);
-      throw new ContractViolation(
-        [`repo_verify_failed: ${why}`],
-        { reasonCode: baselineStillRed ? "baseline_red" : "contract_violation" },
-      );
+      const baselineStillRed =
+        !timedOut && matchesRedBaseline(worktreeRecord.baseline, output);
+      throw new ContractViolation([`repo_verify_failed: ${why}`], {
+        reasonCode: baselineStillRed ? "baseline_red" : "contract_violation",
+      });
     }
     repoVerifyPassed = true;
   }
@@ -558,7 +674,9 @@ function verifyCompleted({
   const declared = candidate.artifacts ?? [];
   const declaredPaths = new Set(declared.map((entry) => entry.path));
   const injected = extraArtifacts.filter(
-    (entry) => !declaredPaths.has(entry.path) && existsSync(path.join(workspaceDir, entry.path)),
+    (entry) =>
+      !declaredPaths.has(entry.path) &&
+      existsSync(path.join(workspaceDir, entry.path)),
   );
 
   const violations = [];
@@ -576,7 +694,11 @@ function verifyCompleted({
       violations.push(`artifact_missing: ${entry.path}`);
       continue;
     }
-    collected.push({ kind: entry.kind, uri: `file://${abs}`, sha256: sha256Hex(readFileSync(abs)) });
+    collected.push({
+      kind: entry.kind,
+      uri: `file://${abs}`,
+      sha256: sha256Hex(readFileSync(abs)),
+    });
   }
   if (violations.length > 0) throw new ContractViolation(violations);
 
@@ -598,9 +720,14 @@ function verifyCompleted({
     verification: {
       status: "passed",
       checks: [
-        "schema_valid", "hash_recomputed", "paths_confined", "artifacts_exist",
+        "schema_valid",
+        "hash_recomputed",
+        "paths_confined",
+        "artifacts_exist",
         ...(evidence !== undefined ? ["evidence_retained"] : []),
-        ...(SEMANTIC_CHECKS[spec.outputContract] ? ["evidence_recomputed"] : []),
+        ...(SEMANTIC_CHECKS[spec.outputContract]
+          ? ["evidence_recomputed"]
+          : []),
         ...(repoVerifyPassed ? ["repo_verify_passed"] : []),
       ],
     },

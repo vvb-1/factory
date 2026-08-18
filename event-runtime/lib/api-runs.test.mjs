@@ -53,7 +53,11 @@ describe("run deadline extension (WM-566)", () => {
   }
   const policyRoot = policyRootWith(MAX_RUN_MINUTES);
 
-  function insertAttempt(db, runId, { state = "RUNNING", timeoutSeconds = 60, adapter = "fake" } = {}) {
+  function insertAttempt(
+    db,
+    runId,
+    { state = "RUNNING", timeoutSeconds = 60, adapter = "fake" } = {},
+  ) {
     const spec = {
       schemaVersion: "factory.run-spec/v1",
       runId,
@@ -69,7 +73,14 @@ describe("run deadline extension (WM-566)", () => {
     db.query(
       `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
        VALUES (?, ?, ?, 'sha256:test', ?, 1, ?, ?)`,
-    ).run(runId, spec.idempotencyKey, JSON.stringify(spec), state, new Date(start).toISOString(), new Date(start).toISOString());
+    ).run(
+      runId,
+      spec.idempotencyKey,
+      JSON.stringify(spec),
+      state,
+      new Date(start).toISOString(),
+      new Date(start).toISOString(),
+    );
     db.query(
       `INSERT INTO attempts (run_id, attempt, fencing_token, lease_owner, started_at, lease_expires_at)
        VALUES (?, 1, 1, 'worker-test', ?, ?)`,
@@ -93,9 +104,11 @@ describe("run deadline extension (WM-566)", () => {
         leaseExpiresAt: new Date(start + 1_080_000).toISOString(),
         override: false,
       });
-      const lifecycle = s.db.query(
-        `SELECT from_state, to_state, actor, reason FROM lifecycle_events WHERE run_id = ?`,
-      ).get("run-extend-happy");
+      const lifecycle = s.db
+        .query(
+          `SELECT from_state, to_state, actor, reason FROM lifecycle_events WHERE run_id = ?`,
+        )
+        .get("run-extend-happy");
       expect(lifecycle.from_state).toBe("RUNNING");
       expect(lifecycle.to_state).toBe("RUNNING");
       expect(lifecycle.actor).toBe("operator");
@@ -105,7 +118,9 @@ describe("run deadline extension (WM-566)", () => {
         seconds: 900,
         type: "deadline_extended",
       });
-      expect((await s.client.run("run-extend-happy")).deadlineAt).toBe(outcome.deadlineAt);
+      expect((await s.client.run("run-extend-happy")).deadlineAt).toBe(
+        outcome.deadlineAt,
+      );
     } finally {
       s.close();
     }
@@ -115,12 +130,19 @@ describe("run deadline extension (WM-566)", () => {
     const s = await makeServer({ now: () => start, policyRoot });
     try {
       insertAttempt(s.db, "run-extend-queued", { state: "QUEUED" });
-      const wrongState = await rejection(s.client.extend("run-extend-queued", 60));
+      const wrongState = await rejection(
+        s.client.extend("run-extend-queued", 60),
+      );
       expect(wrongState.status).toBe(409);
-      expect(wrongState.body.refusal).toMatchObject({ code: "run_not_extendable", retryable: false });
+      expect(wrongState.body.refusal).toMatchObject({
+        code: "run_not_extendable",
+        retryable: false,
+      });
 
       // Ten seconds short of the cap: a 20s extension crosses started_at + max_run_minutes.
-      insertAttempt(s.db, "run-extend-cap", { timeoutSeconds: MAX_RUN_MINUTES * 60 - 10 });
+      insertAttempt(s.db, "run-extend-cap", {
+        timeoutSeconds: MAX_RUN_MINUTES * 60 - 10,
+      });
       const capped = await rejection(s.client.extend("run-extend-cap", 20));
       expect(capped.status).toBe(409);
       expect(capped.body.refusal).toMatchObject({
@@ -128,10 +150,15 @@ describe("run deadline extension (WM-566)", () => {
         retryable: false,
         maxDeadlineAt: new Date(start + MAX_RUN_MINUTES * 60_000).toISOString(),
       });
-      expect((await s.client.extend("run-extend-cap", 20, { override: true })).override).toBe(true);
+      expect(
+        (await s.client.extend("run-extend-cap", 20, { override: true }))
+          .override,
+      ).toBe(true);
 
       insertAttempt(s.db, "run-extend-actions", { adapter: "actions" });
-      const actions = await rejection(s.client.extend("run-extend-actions", 60));
+      const actions = await rejection(
+        s.client.extend("run-extend-actions", 60),
+      );
       expect(actions.status).toBe(409);
       expect(actions.body.refusal).toMatchObject({
         code: "adapter_deadline_not_extendable",
@@ -141,24 +168,37 @@ describe("run deadline extension (WM-566)", () => {
 
       const bounded = await rejection(s.client.extend("run-extend-cap", 3_601));
       expect(bounded.status).toBe(422);
-      expect(bounded.body.refusal).toEqual(expect.objectContaining({
-        code: "extension_too_large",
-        retryable: false,
-        maxSeconds: 3_600,
-      }));
+      expect(bounded.body.refusal).toEqual(
+        expect.objectContaining({
+          code: "extension_too_large",
+          retryable: false,
+          maxSeconds: 3_600,
+        }),
+      );
     } finally {
       s.close();
     }
   });
 
   test("without a readable max_run_minutes only override may extend", async () => {
-    const s = await makeServer({ now: () => start, policyRoot: policyRootWith(null) });
+    const s = await makeServer({
+      now: () => start,
+      policyRoot: policyRootWith(null),
+    });
     try {
       insertAttempt(s.db, "run-extend-nopolicy");
-      const refused = await rejection(s.client.extend("run-extend-nopolicy", 60));
+      const refused = await rejection(
+        s.client.extend("run-extend-nopolicy", 60),
+      );
       expect(refused.status).toBe(409);
-      expect(refused.body.refusal).toMatchObject({ code: "run_limit_policy_unavailable", retryable: false });
-      expect((await s.client.extend("run-extend-nopolicy", 60, { override: true })).extended).toBe(true);
+      expect(refused.body.refusal).toMatchObject({
+        code: "run_limit_policy_unavailable",
+        retryable: false,
+      });
+      expect(
+        (await s.client.extend("run-extend-nopolicy", 60, { override: true }))
+          .extended,
+      ).toBe(true);
     } finally {
       s.close();
     }
@@ -194,7 +234,15 @@ describe("run list deadlines (WM-692)", () => {
   test("GET /runs computes deadlineAt only for in-flight rows", async () => {
     const s = await makeServer({ now: () => start });
     try {
-      for (const state of ["LEASED", "RUNNING", "VERIFYING", "COMPLETED", "FAILED", "TIMED_OUT", "CANCELLED"]) {
+      for (const state of [
+        "LEASED",
+        "RUNNING",
+        "VERIFYING",
+        "COMPLETED",
+        "FAILED",
+        "TIMED_OUT",
+        "CANCELLED",
+      ]) {
         insertRun(s.db, `run-list-${state}`, state);
       }
       const { runs } = await s.client.runs();
@@ -297,57 +345,68 @@ describe("ticket journey join (WM-595)", () => {
           maxAttempts: 1,
           idempotencyKey: "ignored",
         });
-      s.db.query(
-        `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+      s.db
+        .query(
+          `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-      ).run(
-        "run_ticket",
-        "ticket-key",
-        spec({ repo: "factory", ticket: "WM-595" }),
-        "sha256:ticket",
-        "COMPLETED",
-        "2026-01-01T10:00:00.000Z",
-        "2026-01-01T10:10:00.000Z",
-      );
-      s.db.query(
-        `INSERT INTO results
+        )
+        .run(
+          "run_ticket",
+          "ticket-key",
+          spec({ repo: "factory", ticket: "WM-595" }),
+          "sha256:ticket",
+          "COMPLETED",
+          "2026-01-01T10:00:00.000Z",
+          "2026-01-01T10:10:00.000Z",
+        );
+      s.db
+        .query(
+          `INSERT INTO results
            (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
          VALUES (?, 1, ?, ?, '{}', '{}', ?)`,
-      ).run(
-        "run_ticket",
-        JSON.stringify({
-          terminalState: "completed",
-          artifact: {
-            outcome: "PR_OPEN",
-            ticket: "WM-595",
-            prUrl: "https://github.com/watt-mind/factory/pull/595",
-          },
-        }),
-        "sha256:result-ticket",
-        "2026-01-01T10:10:00.000Z",
-      );
-      s.db.query(
-        `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+        )
+        .run(
+          "run_ticket",
+          JSON.stringify({
+            terminalState: "completed",
+            artifact: {
+              outcome: "PR_OPEN",
+              ticket: "WM-595",
+              prUrl: "https://github.com/watt-mind/factory/pull/595",
+            },
+          }),
+          "sha256:result-ticket",
+          "2026-01-01T10:10:00.000Z",
+        );
+      s.db
+        .query(
+          `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-      ).run(
-        "run_merge",
-        "merge-key",
-        spec({ repo: "factory", pr: 595 }, "merge-apply@1"),
-        "sha256:merge",
-        "COMPLETED",
-        "2026-01-01T11:00:00.000Z",
-        "2026-01-01T11:01:00.000Z",
-      );
-      s.db.query(
-        `INSERT INTO results
+        )
+        .run(
+          "run_merge",
+          "merge-key",
+          spec({ repo: "factory", pr: 595 }, "merge-apply@1"),
+          "sha256:merge",
+          "COMPLETED",
+          "2026-01-01T11:00:00.000Z",
+          "2026-01-01T11:01:00.000Z",
+        );
+      s.db
+        .query(
+          `INSERT INTO results
            (run_id, attempt, result_json, artifact_hash, verification_json, receipt_json, accepted_at)
          VALUES (?, 1, ?, ?, '{}', '{}', ?)`,
-      ).run(
-        "run_merge",
-        JSON.stringify({ terminalState: "completed", artifact: { pr: 595, outcome: "MERGED" } }),
-        "sha256:result-merge",
-        "2026-01-01T11:01:00.000Z",
-      );
+        )
+        .run(
+          "run_merge",
+          JSON.stringify({
+            terminalState: "completed",
+            artifact: { pr: 595, outcome: "MERGED" },
+          }),
+          "sha256:result-merge",
+          "2026-01-01T11:01:00.000Z",
+        );
 
       const response = await fetch(s.url("/runs?ticket=WM-595"));
       expect(response.status).toBe(200);
@@ -359,8 +418,13 @@ describe("ticket journey join (WM-595)", () => {
         createdAt: "2026-01-01T09:00:00.000Z",
         url: "https://linear.app/watt-mind/issue/WM-595",
       });
-      expect(journey.events.map((event) => event.eventId)).toContain("ticket-dispatch");
-      expect(journey.runs.map((run) => run.run.runId)).toEqual(["run_ticket", "run_merge"]);
+      expect(journey.events.map((event) => event.eventId)).toContain(
+        "ticket-dispatch",
+      );
+      expect(journey.runs.map((run) => run.run.runId)).toEqual([
+        "run_ticket",
+        "run_merge",
+      ]);
       expect(journey.activity).toBe(true);
 
       const unknown = await fetch(s.url("/runs?ticket=WM-999"));
@@ -918,5 +982,4 @@ describe("run trace surfacing (OPS-295)", () => {
       server.close();
     }
   });
-
 });

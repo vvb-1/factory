@@ -24,7 +24,12 @@
  * the pi path did not have to solve.
  */
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { FACTORY_ROOT } from "../config.mjs";
@@ -61,7 +66,11 @@ export const SANDBOX_SUPPORT = "unsupported";
 export const KILL_GRACE_MS = 30_000;
 
 /** Terminate a detached CLI and every subprocess it started (WM-263). */
-export function killProcessGroup(child, signal = "SIGTERM", kill = process.kill) {
+export function killProcessGroup(
+  child,
+  signal = "SIGTERM",
+  kill = process.kill,
+) {
   const pid = child?.pid;
   if (!pid) return;
   try {
@@ -84,7 +93,14 @@ export const PROMPT_SUFFIX =
 // `mutating: false` means no durable mutation beyond the run's declared
 // workspace output; it does not mean a model cannot use the shell to inspect
 // that workspace. The per-run Claude policy below enforces the boundary.
-export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "Bash", "Write", "Edit"];
+export const READ_ONLY_TOOLS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "Bash",
+  "Write",
+  "Edit",
+];
 export const WRITE_TOOLS = new Set([
   "Write",
   "Edit",
@@ -106,22 +122,26 @@ export const WRITE_TOOLS = new Set([
  */
 export function deriveAllowedTools(def) {
   if (def?.mutating === false) return [...READ_ONLY_TOOLS];
-  if (Array.isArray(def?.capabilities?.tools)) return [...def.capabilities.tools];
+  if (Array.isArray(def?.capabilities?.tools))
+    return [...def.capabilities.tools];
   return [...READ_ONLY_TOOLS];
 }
 
 /** Generate a per-run settings file; absolute paths cannot drift with cwd. */
 export function buildClaudeSettings({ spec, def, workspaceDir }) {
   if (def?.mutating !== false) return null;
-  const checkoutDir = spec?.workspace?.type === "repository"
-    ? path.resolve(workspaceDir, spec.workspace.checkoutDir ?? "repo")
-    : null;
+  const checkoutDir =
+    spec?.workspace?.type === "repository"
+      ? path.resolve(workspaceDir, spec.workspace.checkoutDir ?? "repo")
+      : null;
   return {
     permissions: {
       allow: [...READ_ONLY_TOOLS],
       // Claude's file permission matcher uses `//` for filesystem-absolute
       // paths. `Edit` covers both the Edit and Write tools.
-      deny: checkoutDir ? [`Edit(//${checkoutDir.replace(/^\/+/, "")}/**)`] : [],
+      deny: checkoutDir
+        ? [`Edit(//${checkoutDir.replace(/^\/+/, "")}/**)`]
+        : [],
     },
     sandbox: {
       enabled: true,
@@ -162,16 +182,20 @@ export const PUSH_CREDENTIAL_ENV = [
  * (`mutating: false` or default) have push credentials and secret keys stripped.
  */
 export function safeChildEnvironment(env = {}, defOrOpts = {}) {
-  const isMutating = typeof defOrOpts === "boolean"
-    ? defOrOpts
-    : defOrOpts?.mutating === true || (defOrOpts?.mutating !== false && defOrOpts?.mutating !== undefined);
+  const isMutating =
+    typeof defOrOpts === "boolean"
+      ? defOrOpts
+      : defOrOpts?.mutating === true ||
+        (defOrOpts?.mutating !== false && defOrOpts?.mutating !== undefined);
 
   const inherited = isMutating
     ? [...BASE_INHERITED_ENV, ...PUSH_CREDENTIAL_ENV]
     : BASE_INHERITED_ENV;
 
   const childEnv = Object.fromEntries(
-    inherited.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]]))
+    inherited.flatMap((key) =>
+      process.env[key] === undefined ? [] : [[key, process.env[key]]],
+    ),
   );
   Object.assign(childEnv, env);
   delete childEnv.ANTHROPIC_API_KEY;
@@ -201,7 +225,13 @@ export function safeChildEnvironment(env = {}, defOrOpts = {}) {
  * both of which mean "ride the CLI's own default" — today's behavior.
  */
 export function buildClaudeArgv({
-  prompt, def, allowedTools = deriveAllowedTools(def), mcpConfig, settingsPath, model, resumeSessionId,
+  prompt,
+  def,
+  allowedTools = deriveAllowedTools(def),
+  mcpConfig,
+  settingsPath,
+  model,
+  resumeSessionId,
 }) {
   const args = ["-p", prompt];
   if (typeof resumeSessionId === "string" && resumeSessionId) {
@@ -233,7 +263,9 @@ export function buildClaudeArgv({
 
 function clip(text) {
   const s = String(text ?? "");
-  return s.length > TEXT_PREVIEW_CHARS ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]` : s;
+  return s.length > TEXT_PREVIEW_CHARS
+    ? `${s.slice(0, TEXT_PREVIEW_CHARS)}…[truncated]`
+    : s;
 }
 
 /**
@@ -257,7 +289,10 @@ export const HARNESS_DENIAL_PATTERNS = [
 ];
 
 export function isHarnessDenial(content) {
-  return typeof content === "string" && HARNESS_DENIAL_PATTERNS.some((re) => re.test(content));
+  return (
+    typeof content === "string" &&
+    HARNESS_DENIAL_PATTERNS.some((re) => re.test(content))
+  );
 }
 
 /** Flatten a tool_result content value (string or content-block array) to text. */
@@ -289,9 +324,19 @@ export function mapStreamEvent(msg) {
     const events = [];
     for (const block of blocks) {
       if (block?.type === "text" && block.text) {
-        events.push({ kind: "assistant_text", payload: { text: clip(block.text) } });
+        events.push({
+          kind: "assistant_text",
+          payload: { text: clip(block.text) },
+        });
       } else if (block?.type === "tool_use") {
-        events.push({ kind: "tool_use", payload: { id: block.id ?? null, name: block.name, input: block.input } });
+        events.push({
+          kind: "tool_use",
+          payload: {
+            id: block.id ?? null,
+            name: block.name,
+            input: block.input,
+          },
+        });
       }
     }
     return events;
@@ -303,7 +348,10 @@ export function mapStreamEvent(msg) {
     const events = [];
     for (const block of blocks) {
       if (block?.type !== "tool_result") continue;
-      const payload = { content: clip(contentText(block.content)), toolUseId: block.tool_use_id ?? null };
+      const payload = {
+        content: clip(contentText(block.content)),
+        toolUseId: block.tool_use_id ?? null,
+      };
       if (block.is_error === true) payload.isError = true;
       events.push({ kind: "tool_result", payload });
     }
@@ -312,7 +360,12 @@ export function mapStreamEvent(msg) {
 
   if (msg.type === "result") {
     const usage = {};
-    for (const key of ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]) {
+    for (const key of [
+      "input_tokens",
+      "output_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    ]) {
       if (typeof msg.usage?.[key] === "number") usage[key] = msg.usage[key];
     }
     return [
@@ -356,10 +409,18 @@ export async function execute({
 
   const mcpConfig = path.join(FACTORY_ROOT, "config", "mcp", "claude.json");
   const settings = buildClaudeSettings({ spec, def, workspaceDir });
-  const settingsPath = settings ? path.join(workspaceDir, ".claude-policy.json") : null;
-  if (settingsPath) writeFileSync(settingsPath, `${JSON.stringify(settings)}\n`, "utf8");
+  const settingsPath = settings
+    ? path.join(workspaceDir, ".claude-policy.json")
+    : null;
+  if (settingsPath)
+    writeFileSync(settingsPath, `${JSON.stringify(settings)}\n`, "utf8");
   const argv = buildClaudeArgv({
-    prompt, def, mcpConfig, settingsPath, model: spec?.model, resumeSessionId: resume?.sessionId,
+    prompt,
+    def,
+    mcpConfig,
+    settingsPath,
+    model: spec?.model,
+    resumeSessionId: resume?.sessionId,
   });
 
   return new Promise((resolve, reject) => {
@@ -375,7 +436,9 @@ export async function execute({
     // what the agent reported long after the workspace is gone. With
     // stream-json the artifact is NDJSON, one message per line — consumers
     // stream bytes, none parses it as a single JSON document.
-    const transcript = createWriteStream(path.join(workspaceDir, ".transcript.json"));
+    const transcript = createWriteStream(
+      path.join(workspaceDir, ".transcript.json"),
+    );
     transcript.on("error", () => {});
     if (child.stdout) {
       child.stdout.pipe(transcript);
@@ -386,7 +449,12 @@ export async function execute({
     const policyDenials = [];
     let lastTool = null;
     const toolNames = new Map();
-    const tokenKeys = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"];
+    const tokenKeys = [
+      "input_tokens",
+      "output_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    ];
     const assistantUsage = Object.fromEntries(tokenKeys.map((key) => [key, 0]));
     let finalUsage = null;
     let observedModel = null;
@@ -395,13 +463,23 @@ export async function execute({
       lines.on("line", (line) => {
         try {
           const parsed = JSON.parse(line);
-          if (parsed?.type === "system" && parsed?.subtype === "init" && typeof parsed.model === "string") {
+          if (
+            parsed?.type === "system" &&
+            parsed?.subtype === "init" &&
+            typeof parsed.model === "string"
+          ) {
             observedModel = parsed.model;
           } else if (parsed?.type === "assistant") {
-            if (!observedModel && typeof parsed.message?.model === "string") observedModel = parsed.message.model;
+            if (!observedModel && typeof parsed.message?.model === "string")
+              observedModel = parsed.message.model;
             for (const key of tokenKeys) {
               const value = parsed.message?.usage?.[key];
-              if (typeof value === "number" && Number.isFinite(value) && value >= 0) assistantUsage[key] += value;
+              if (
+                typeof value === "number" &&
+                Number.isFinite(value) &&
+                value >= 0
+              )
+                assistantUsage[key] += value;
             }
           } else if (parsed?.type === "result") {
             finalUsage = parsed;
@@ -412,9 +490,22 @@ export async function execute({
               if (event.payload?.id) toolNames.set(event.payload.id, lastTool);
             }
             onTrace?.(event.kind, event.payload);
-            const content = typeof event.payload?.content === "string" ? event.payload.content : "";
-            if (event.kind === "tool_result" && event.payload?.isError && isHarnessDenial(content)) {
-              const denial = { tool: toolNames.get(event.payload?.toolUseId) ?? lastTool ?? "unknown", rule: clip(content) };
+            const content =
+              typeof event.payload?.content === "string"
+                ? event.payload.content
+                : "";
+            if (
+              event.kind === "tool_result" &&
+              event.payload?.isError &&
+              isHarnessDenial(content)
+            ) {
+              const denial = {
+                tool:
+                  toolNames.get(event.payload?.toolUseId) ??
+                  lastTool ??
+                  "unknown",
+                rule: clip(content),
+              };
               policyDenials.push(denial);
               // Keep the registry's closed trace-kind set. The payload turns
               // this existing lifecycle event into an operator-visible denial.
@@ -432,14 +523,20 @@ export async function execute({
     const termTimer = setTimeout(() => {
       timedOut = true;
       killProcessGroup(child, "SIGTERM");
-      killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+      killTimer = setTimeout(
+        () => killProcessGroup(child, "SIGKILL"),
+        killGraceMs,
+      );
       killTimer.unref?.();
     }, timeoutMs);
 
     const onAbort = () => {
       killProcessGroup(child, "SIGTERM");
       if (!killTimer) {
-        killTimer = setTimeout(() => killProcessGroup(child, "SIGKILL"), killGraceMs);
+        killTimer = setTimeout(
+          () => killProcessGroup(child, "SIGKILL"),
+          killGraceMs,
+        );
         killTimer.unref?.();
       }
     };
@@ -482,12 +579,19 @@ export async function execute({
           outputTokens: tokenValue("output_tokens"),
           cacheCreationInputTokens: tokenValue("cache_creation_input_tokens"),
           cacheReadInputTokens: tokenValue("cache_read_input_tokens"),
-          costUSD: typeof finalUsage?.total_cost_usd === "number" ? finalUsage.total_cost_usd : 0,
+          costUSD:
+            typeof finalUsage?.total_cost_usd === "number"
+              ? finalUsage.total_cost_usd
+              : 0,
         });
       } catch {
         // Usage is observability: a consumer failure must not change execution.
       }
-      resolve({ exitCode, timedOut, policyDenials: exitCode === 0 ? [] : policyDenials });
+      resolve({
+        exitCode,
+        timedOut,
+        policyDenials: exitCode === 0 ? [] : policyDenials,
+      });
     });
   });
 }

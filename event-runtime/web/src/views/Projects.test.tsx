@@ -2,11 +2,7 @@ import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { Projects } from "./Projects";
-import {
-  renderWithClient,
-  restoreApi,
-  withApi,
-} from "../test-render";
+import { renderWithClient, restoreApi, withApi } from "../test-render";
 import type { JanitorResult, RepoItem } from "../types";
 import { CONTEXT_STORAGE_KEY } from "../context";
 import { goPrefix } from "../goSequence";
@@ -59,7 +55,11 @@ function janitor(overrides: Partial<JanitorResult> = {}): JanitorResult {
 
 function renderProjects(focusRepoName: string | null = null) {
   return renderWithClient(
-    <Projects connected={true} focusRepoName={focusRepoName} onSelectRepo={noop} />,
+    <Projects
+      connected={true}
+      focusRepoName={focusRepoName}
+      onSelectRepo={noop}
+    />,
   );
 }
 
@@ -75,7 +75,10 @@ describe("Projects unscoped caption (WM-157)", () => {
   test("All context shows no factory-wide caption", async () => {
     window.location.hash = "#/projects";
     // Stale sessionStorage must not invent a caption — hash is the live source (same as App).
-    sessionStorage.setItem(CONTEXT_STORAGE_KEY, JSON.stringify({ openRepos: ["factory"], active: "factory" }));
+    sessionStorage.setItem(
+      CONTEXT_STORAGE_KEY,
+      JSON.stringify({ openRepos: ["factory"], active: "factory" }),
+    );
     await withApi({ repos: async () => ({ repos: [repo()] }) }, async () => {
       const r = renderProjects();
       await waitFor(() => {
@@ -123,7 +126,13 @@ describe("Projects unscoped caption (WM-157)", () => {
       window.addEventListener("hashchange", swallow, true);
       try {
         window.location.hash = "#/projects?project=factory";
-        r.rerender(<Projects connected={true} focusRepoName={null} onSelectRepo={noop} />);
+        r.rerender(
+          <Projects
+            connected={true}
+            focusRepoName={null}
+            onSelectRepo={noop}
+          />,
+        );
       } finally {
         window.removeEventListener("hashchange", swallow, true);
       }
@@ -138,7 +147,8 @@ describe("Projects Clean Reclaimable Apply (WM-157)", () => {
     await withApi(
       {
         repos: async () => ({ repos: [repo()] }),
-        janitor: async (name: string) => janitor({ repo: name, reclaimable: [] }),
+        janitor: async (name: string) =>
+          janitor({ repo: name, reclaimable: [] }),
       },
       async () => {
         const r = await openJanitor();
@@ -146,7 +156,9 @@ describe("Projects Clean Reclaimable Apply (WM-157)", () => {
         await waitFor(() => {
           expect(r.getByText("0 reclaimable")).toBeTruthy();
         });
-        const apply = r.getByRole("button", { name: "Clean Reclaimable Worktrees…" });
+        const apply = r.getByRole("button", {
+          name: "Clean Reclaimable Worktrees…",
+        });
         expect((apply as HTMLButtonElement).disabled).toBe(true);
         expect(r.getByText("Nothing to reclaim")).toBeTruthy();
         fireEvent.click(apply);
@@ -172,7 +184,9 @@ describe("Projects Clean Reclaimable Apply (WM-157)", () => {
         await waitFor(() => {
           expect(r.getByText("1 reclaimable")).toBeTruthy();
         });
-        const apply = r.getByRole("button", { name: "Clean Reclaimable Worktrees…" });
+        const apply = r.getByRole("button", {
+          name: "Clean Reclaimable Worktrees…",
+        });
         expect((apply as HTMLButtonElement).disabled).toBe(false);
         expect(r.queryByText("Nothing to reclaim")).toBeNull();
         fireEvent.click(apply);
@@ -200,7 +214,9 @@ describe("Projects Clean Reclaimable Apply (WM-157)", () => {
         await waitFor(() => {
           expect(r.getByText("1 reclaimable")).toBeTruthy();
         });
-        const apply = r.getByRole("button", { name: "Clean Reclaimable Worktrees…" });
+        const apply = r.getByRole("button", {
+          name: "Clean Reclaimable Worktrees…",
+        });
         expect((apply as HTMLButtonElement).disabled).toBe(true);
         expect(r.getByText(/Apply is disabled: report-only repo/)).toBeTruthy();
         fireEvent.click(apply);
@@ -236,7 +252,9 @@ describe("Projects copy chords and hints (WM-233)", () => {
       },
       async () => {
         const r = renderProjects("factory");
-        const pathBtn = await r.findByRole("button", { name: "Copy repo path (c p)" });
+        const pathBtn = await r.findByRole("button", {
+          name: "Copy repo path (c p)",
+        });
 
         // Verify icon-action tooltips preserve shortcut discoverability.
         expect(pathBtn.getAttribute("title")).toBe("Copy repo path · c p");
@@ -315,14 +333,24 @@ describe("Projects quick dispatch and GitHub chords (WM-294)", () => {
         const r = renderProjects("factory");
         await r.findByText("Quick Dispatch (Agent Tasks)");
 
-        expect(r.getByRole("button", { name: "Triage Scan" }).textContent).toContain("d t");
-        expect(r.getByRole("button", { name: "Status Report" }).textContent).toContain("d s");
-        expect(r.getByRole("button", { name: "Janitor Scan" }).textContent).toContain("d j");
-        expect(r.getByRole("link", { name: "GitHub" }).textContent).toContain("g h");
+        expect(
+          r.getByRole("button", { name: "Triage Scan" }).textContent,
+        ).toContain("d t");
+        expect(
+          r.getByRole("button", { name: "Status Report" }).textContent,
+        ).toContain("d s");
+        expect(
+          r.getByRole("button", { name: "Janitor Scan" }).textContent,
+        ).toContain("d j");
+        expect(r.getByRole("link", { name: "GitHub" }).textContent).toContain(
+          "g h",
+        );
 
         fireEvent.keyDown(document.body, { key: "g" });
         fireEvent.keyDown(document.body, { key: "h" });
-        expect(opened).toEqual([["https://github.com/watt-mind/factory", "_blank"]]);
+        expect(opened).toEqual([
+          ["https://github.com/watt-mind/factory", "_blank"],
+        ]);
       });
     } finally {
       window.open = originalOpen;
@@ -337,14 +365,17 @@ describe("Projects quick dispatch and GitHub chords (WM-294)", () => {
       return null;
     }) as typeof window.open;
     try {
-      await withApi({ repos: async () => ({ repos: [repo({ github: null })] }) }, async () => {
-        const r = renderProjects("factory");
-        await r.findByText("Quick Dispatch (Agent Tasks)");
-        fireEvent.keyDown(document.body, { key: "g" });
-        fireEvent.keyDown(document.body, { key: "h" });
-        expect(opens).toBe(0);
-        expect(r.queryByRole("link", { name: "GitHub" })).toBeNull();
-      });
+      await withApi(
+        { repos: async () => ({ repos: [repo({ github: null })] }) },
+        async () => {
+          const r = renderProjects("factory");
+          await r.findByText("Quick Dispatch (Agent Tasks)");
+          fireEvent.keyDown(document.body, { key: "g" });
+          fireEvent.keyDown(document.body, { key: "h" });
+          expect(opens).toBe(0);
+          expect(r.queryByRole("link", { name: "GitHub" })).toBeNull();
+        },
+      );
     } finally {
       window.open = originalOpen;
     }
@@ -369,20 +400,44 @@ describe("Projects toolbar counts and ordering (WM-560)", () => {
         await r.findByText("a-dispatch");
 
         const tabs = r.getAllByRole("tab");
-        const counts = tabs.map((tab) => Number(tab.querySelector(".tabular-nums")?.textContent));
+        const counts = tabs.map((tab) =>
+          Number(tab.querySelector(".tabular-nums")?.textContent),
+        );
         expect(counts).toEqual([4, 2, 2]);
         expect(counts[1] + counts[2]).toBe(counts[0]);
 
         const rowNames = () =>
-          Array.from(r.container.querySelectorAll("tbody tr td:first-child")).map((cell) => cell.textContent);
-        expect(rowNames()).toEqual(["a-dispatch", "z-dispatch", "a-report", "z-report"]);
+          Array.from(
+            r.container.querySelectorAll("tbody tr td:first-child"),
+          ).map((cell) => cell.textContent);
+        expect(rowNames()).toEqual([
+          "a-dispatch",
+          "z-dispatch",
+          "a-report",
+          "z-report",
+        ]);
 
         fireEvent.click(r.getByRole("button", { name: "Name" }));
-        expect(rowNames()).toEqual(["a-dispatch", "a-report", "z-dispatch", "z-report"]);
+        expect(rowNames()).toEqual([
+          "a-dispatch",
+          "a-report",
+          "z-dispatch",
+          "z-report",
+        ]);
         fireEvent.click(r.getByRole("button", { name: "Name" }));
-        expect(rowNames()).toEqual(["z-report", "z-dispatch", "a-report", "a-dispatch"]);
+        expect(rowNames()).toEqual([
+          "z-report",
+          "z-dispatch",
+          "a-report",
+          "a-dispatch",
+        ]);
         fireEvent.click(r.getByRole("button", { name: "Name" }));
-        expect(rowNames()).toEqual(["a-dispatch", "z-dispatch", "a-report", "z-report"]);
+        expect(rowNames()).toEqual([
+          "a-dispatch",
+          "z-dispatch",
+          "a-report",
+          "z-report",
+        ]);
       },
     );
   });
@@ -404,7 +459,9 @@ describe("Projects toolbar counts and ordering (WM-560)", () => {
         const r = renderProjects();
         await r.findByText("factory");
         const scriptsCell = r.container.querySelector("tbody tr td:last-child");
-        const placeholder = scriptsCell?.querySelector("span.text-\\(--text-faint\\)");
+        const placeholder = scriptsCell?.querySelector(
+          "span.text-\\(--text-faint\\)",
+        );
         expect(placeholder?.textContent).toBe("—");
       },
     );
@@ -449,17 +506,23 @@ describe("Projects mode tabs and hotkeys (WM-234)", () => {
       expect(tabs[0].getAttribute("aria-selected")).toBe("true");
 
       act(() => {
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "]", bubbles: true }));
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "]", bubbles: true }),
+        );
       });
       expect(tabs[1].getAttribute("aria-selected")).toBe("true");
 
       act(() => {
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "]", bubbles: true }));
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "]", bubbles: true }),
+        );
       });
       expect(tabs[2].getAttribute("aria-selected")).toBe("true");
 
       act(() => {
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "[", bubbles: true }));
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "[", bubbles: true }),
+        );
       });
       expect(tabs[1].getAttribute("aria-selected")).toBe("true");
     });
@@ -486,7 +549,9 @@ describe("Projects mode tabs and hotkeys (WM-234)", () => {
 
         // Key 2 -> Dispatchable
         act(() => {
-          document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "2", bubbles: true }));
+          document.body.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "2", bubbles: true }),
+          );
         });
         expect(tabs[1].getAttribute("aria-selected")).toBe("true");
         expect(r.getByText("r-dispatch")).toBeTruthy();
@@ -494,7 +559,9 @@ describe("Projects mode tabs and hotkeys (WM-234)", () => {
 
         // Key 3 -> Report-Only
         act(() => {
-          document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "3", bubbles: true }));
+          document.body.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "3", bubbles: true }),
+          );
         });
         expect(tabs[2].getAttribute("aria-selected")).toBe("true");
         expect(r.queryByText("r-dispatch")).toBeNull();
@@ -502,7 +569,9 @@ describe("Projects mode tabs and hotkeys (WM-234)", () => {
 
         // Key 1 -> All
         act(() => {
-          document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true }));
+          document.body.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "1", bubbles: true }),
+          );
         });
         expect(tabs[0].getAttribute("aria-selected")).toBe("true");
         expect(r.getByText("r-dispatch")).toBeTruthy();
@@ -541,11 +610,12 @@ describe("Projects mode tabs and hotkeys (WM-234)", () => {
       goPrefix.armedAt = Date.now();
 
       act(() => {
-        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "2", bubbles: true }));
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "2", bubbles: true }),
+        );
       });
       expect(tabs[0].getAttribute("aria-selected")).toBe("true");
       expect(tabs[1].getAttribute("aria-selected")).toBe("false");
     });
   });
 });
-

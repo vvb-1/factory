@@ -41,7 +41,7 @@ The smallest real step, and a prerequisite for everything after:
   already supports multiple processes on one machine — what it needed was
   `BEGIN IMMEDIATE` on the claim (the default deferred transaction lets two
   workers read the same QUEUED row before either writes) and `busy_timeout`
-  set *before* `journal_mode`, or a second process opening the database
+  set _before_ `journal_mode`, or a second process opening the database
   fails with `SQLITE_BUSY_RECOVERY`. The old plan made Postgres with
   `FOR UPDATE SKIP LOCKED` the remote-node requirement. WM-308 supersedes it:
   SQLite remains private to the control plane, and remote claims cross the
@@ -50,7 +50,7 @@ The smallest real step, and a prerequisite for everything after:
   already contains: claim → workspace → adapter → verify → fenced publish.
   `serve` keeps API, planner, approval, outbox, and the reaper, and no longer
   executes (`--with-worker` restores the all-in-one for a quick demo).
-- **Worker registry and heartbeats.** Leases prove an *attempt* is held; the
+- **Worker registry and heartbeats.** Leases prove an _attempt_ is held; the
   registry answers which processes are alive, where, and with what labels —
   the difference between "busy on a long run" and "died holding a lease".
   The heartbeat runs on its own timer, never inside the claim loop, because
@@ -76,7 +76,7 @@ processes and remembered to stop them. `cli.mjs supervise` makes it a
 deterministic function of observed queue depth.
 
 The insight that shapes the whole design: **idle workers are nearly free.**
-An idle worker costs a poll every 500ms and a heartbeat every 15s. A *busy*
+An idle worker costs a poll every 500ms and a heartbeat every 15s. A _busy_
 one costs a worktree and an LLM subprocess, and draws on a shared
 subscription usage window nothing here can observe (§3, and event-runtime.md
 §3's open problem). So the supervisor spends the cheap resource — process
@@ -86,7 +86,7 @@ real ceiling on concurrent agent runs on that machine.
 - **Its own process, not part of `serve`.** Decisions and execution stay
   separated; restarting the control plane must not kill capacity. Because
   workers are spawned detached with their own pidfiles, a supervisor that
-  restarts *adopts* the running pool rather than replacing it. launchd
+  restarts _adopts_ the running pool rather than replacing it. launchd
   (WM-139) supervises `serve` and the supervisor; the supervisor supervises
   workers.
 - **Deterministic, from config, never model-driven.** The rule is a pure
@@ -101,7 +101,7 @@ real ceiling on concurrent agent runs on that machine.
 - **Scale-down is a request, never a signal.** The supervisor writes
   `worker-N.drain` in the run dir; `work --drain-file` reads it at its **idle
   poll boundary only** — the same place WM-213's code-stamp check lives, and
-  for the same reason. A worker holding a lease finishes its run and *then*
+  for the same reason. A worker holding a lease finishes its run and _then_
   exits 0. The supervisor never sends a signal to a worker it is merely
   shrinking, so "no leased worker is ever killed" is a structural property,
   not a race it usually wins.
@@ -118,7 +118,7 @@ real ceiling on concurrent agent runs on that machine.
   Holds are logged only when the reason changes.
 - **Visible in status/doctor.** `status` grows a `pool` line (supervisor
   liveness, pool size, how many are draining), and a queue with waiting runs
-  behind a *dead* supervisor is an anomaly — nothing is left that can grow
+  behind a _dead_ supervisor is an anomaly — nothing is left that can grow
   the pool. Read from the run dir rather than the control API, because
   pidfile liveness is node-local state the API cannot see.
 
@@ -263,7 +263,7 @@ the whole mechanism:
   process, bin-packing layer, or second coordinator.
 
 Slice 2 is the motivating case: `keephq.disk-alert.raised` remediation must
-execute *on the affected host*. Labels also encode the quota split cleanly:
+execute _on the affected host_. Labels also encode the quota split cleanly:
 `adapter=claude` workers are capped hard; `can=infra-exec` deterministic
 executors (closed action registry, no model) can scale per node with zero
 usage-window risk.
@@ -287,7 +287,7 @@ that answer "can agent A trigger agent B":
   upstream unlocks downstreams. Slice 2's diagnose → remediate pair is the
   first two-node chain.
 - **"Agent A identifies that agent B should work"** — the discovered chain —
-  is a *typed recommendation in A's output contract*, not an action A takes:
+  is a _typed recommendation in A's output contract_, not an action A takes:
   A's artifact carries e.g. `recommendedFollowUp: { type: "...", input: … }`
   drawn from a closed set its schema allows. The result event re-enters the
   planner; the planner (registered mapping, never the model) turns it into a
@@ -312,7 +312,7 @@ First use case: **shipped (OPS-223)** — the CI failure doctor: `github.workflo
 
 ## 5a. Repository access: tier 1 shipped, tier 2 held (OPS-228/OPS-229)
 
-Agents that need a repo split cleanly by whether they *read* code or *build*
+Agents that need a repo split cleanly by whether they _read_ code or _build_
 it, and only the second half is expensive.
 
 **Tier 1 — read-only pinned checkout (shipped).** A bare mirror per repo under
@@ -389,7 +389,7 @@ stand as the rules that design satisfies:
    (`config/policy.yaml`) on observed queue depth; `poolDecision` /
    `poolCounts` / `loadWorkerPolicy` in `lib/workers.mjs`, drain-file
    scale-down honoured at the worker's idle poll boundary (`work
-   --drain-file`), `factory up --workers min:max`, pool liveness in
+--drain-file`), `factory up --workers min:max`, pool liveness in
    status/doctor. Weight-class caps (`heavy`/`light`, item 4's machinery) and
    the budget-aware ceiling (blocked on WM-66) are the explicit follow-ups.
 

@@ -17,8 +17,16 @@ describe("groupDiscoveredFields", () => {
       field("labels.priority"),
     ]);
 
-    expect(groups.map((group) => group.root)).toEqual(["payload", "spec", "top-level", "labels"]);
-    expect(groups[0].fields.map((item) => item.path)).toEqual(["payload.repo", "payload.owner"]);
+    expect(groups.map((group) => group.root)).toEqual([
+      "payload",
+      "spec",
+      "top-level",
+      "labels",
+    ]);
+    expect(groups[0].fields.map((item) => item.path)).toEqual([
+      "payload.repo",
+      "payload.owner",
+    ]);
     expect(groups[2].fields.map((item) => item.path)).toEqual(["id"]);
   });
 });

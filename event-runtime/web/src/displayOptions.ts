@@ -82,7 +82,9 @@ export function defaultDisplayState<T>(config: DisplayConfig<T>): DisplayState {
     sortBy: DEFAULT_ORDER,
     sortDir: "asc",
     showEmpty: false,
-    hiddenColumns: config.columns.filter((c) => c.defaultHidden).map((c) => c.key),
+    hiddenColumns: config.columns
+      .filter((c) => c.defaultHidden)
+      .map((c) => c.key),
     collapsed: [],
     customColumns: [],
     ...config.defaults,
@@ -115,10 +117,14 @@ export function loadDisplayState<T>(config: DisplayConfig<T>): DisplayState {
   const p = parsed as Record<string, unknown>;
 
   const customColumns: string[] = Array.isArray(p.customColumns)
-    ? p.customColumns.filter((k): k is string => typeof k === "string" && k.trim().length > 0)
+    ? p.customColumns.filter(
+        (k): k is string => typeof k === "string" && k.trim().length > 0,
+      )
     : fallback.customColumns;
 
-  const customColKeys = new Set(customColumns.map((c) => (c.startsWith("custom:") ? c : `custom:${c}`)));
+  const customColKeys = new Set(
+    customColumns.map((c) => (c.startsWith("custom:") ? c : `custom:${c}`)),
+  );
   const groupKeys = new Set([NONE, ...config.groups.map((g) => g.key)]);
   const sortKeys = new Set([
     DEFAULT_ORDER,
@@ -140,10 +146,18 @@ export function loadDisplayState<T>(config: DisplayConfig<T>): DisplayState {
     // be two; normalize it away at the edge so nothing downstream checks.
     subGroupBy: subGroupBy === groupBy ? NONE : subGroupBy,
     sortBy: str(p.sortBy, sortKeys, fallback.sortBy),
-    sortDir: p.sortDir === "desc" ? "desc" : p.sortDir === "asc" ? "asc" : fallback.sortDir,
-    showEmpty: typeof p.showEmpty === "boolean" ? p.showEmpty : fallback.showEmpty,
+    sortDir:
+      p.sortDir === "desc"
+        ? "desc"
+        : p.sortDir === "asc"
+          ? "asc"
+          : fallback.sortDir,
+    showEmpty:
+      typeof p.showEmpty === "boolean" ? p.showEmpty : fallback.showEmpty,
     hiddenColumns: Array.isArray(p.hiddenColumns)
-      ? p.hiddenColumns.filter((k): k is string => typeof k === "string" && columnKeys.has(k))
+      ? p.hiddenColumns.filter(
+          (k): k is string => typeof k === "string" && columnKeys.has(k),
+        )
       : fallback.hiddenColumns,
     collapsed: Array.isArray(p.collapsed)
       ? p.collapsed.filter((k): k is string => typeof k === "string")
@@ -152,7 +166,10 @@ export function loadDisplayState<T>(config: DisplayConfig<T>): DisplayState {
   };
 }
 
-export function saveDisplayState<T>(config: DisplayConfig<T>, state: DisplayState): void {
+export function saveDisplayState<T>(
+  config: DisplayConfig<T>,
+  state: DisplayState,
+): void {
   try {
     localStorage.setItem(storageKey(config.view), JSON.stringify(state));
   } catch {
@@ -160,7 +177,10 @@ export function saveDisplayState<T>(config: DisplayConfig<T>, state: DisplayStat
   }
 }
 
-export function isDefaultDisplayState<T>(config: DisplayConfig<T>, state: DisplayState): boolean {
+export function isDefaultDisplayState<T>(
+  config: DisplayConfig<T>,
+  state: DisplayState,
+): boolean {
   const d = defaultDisplayState(config);
   return (
     state.groupBy === d.groupBy &&
@@ -187,7 +207,11 @@ export interface Section<T> {
 }
 
 function parseDateString(s: string): number | null {
-  if (/^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(s.trim())) {
+  if (
+    /^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(
+      s.trim(),
+    )
+  ) {
     const t = Date.parse(s.trim());
     if (!Number.isNaN(t)) return t;
   }
@@ -205,13 +229,22 @@ function parseDurationString(s: string): number | null {
         parseInt(colonMatch[3], 10) * 1000
       );
     }
-    return parseInt(colonMatch[1], 10) * 60000 + parseInt(colonMatch[2], 10) * 1000;
+    return (
+      parseInt(colonMatch[1], 10) * 60000 + parseInt(colonMatch[2], 10) * 1000
+    );
   }
 
   if (/[0-9]+(?:\.[0-9]+)?\s*(?:d|h|m|s)/i.test(str)) {
-    const durRegex = /(?:(\d+(?:\.\d+)?)\s*d(?:ays?)?)?\s*(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+(?:\.\d+)?)\s*m(?:in(?:ute)?s?)?)?\s*(?:(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?)?(?:\s*ago)?$/;
+    const durRegex =
+      /(?:(\d+(?:\.\d+)?)\s*d(?:ays?)?)?\s*(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+(?:\.\d+)?)\s*m(?:in(?:ute)?s?)?)?\s*(?:(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?)?(?:\s*ago)?$/;
     const m = str.match(durRegex);
-    if (m && (m[1] !== undefined || m[2] !== undefined || m[3] !== undefined || m[4] !== undefined)) {
+    if (
+      m &&
+      (m[1] !== undefined ||
+        m[2] !== undefined ||
+        m[3] !== undefined ||
+        m[4] !== undefined)
+    ) {
       const days = parseFloat(m[1] || "0") * 86400000;
       const hours = parseFloat(m[2] || "0") * 3600000;
       const mins = parseFloat(m[3] || "0") * 60000;
@@ -238,13 +271,23 @@ export const cmp = (a: unknown, b: unknown): number => {
     const durB = parseDurationString(b);
     if (durA !== null && durB !== null) return durA - durB;
 
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    return a.localeCompare(b, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
   }
-  return String(a ?? "").localeCompare(String(b ?? ""), undefined, { numeric: true, sensitivity: "base" });
+  return String(a ?? "").localeCompare(String(b ?? ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
 };
 
 /** Stable sort by the configured field; DEFAULT_ORDER keeps (or reverses) API order. */
-export function sortRows<T>(rows: T[], config: DisplayConfig<T>, state: DisplayState): T[] {
+export function sortRows<T>(
+  rows: T[],
+  config: DisplayConfig<T>,
+  state: DisplayState,
+): T[] {
   const dirSign = state.sortDir === "desc" ? -1 : 1;
   if (state.sortBy === DEFAULT_ORDER) {
     return dirSign === 1 ? rows.slice() : rows.slice().reverse();
@@ -269,7 +312,11 @@ export function sortRows<T>(rows: T[], config: DisplayConfig<T>, state: DisplayS
     .map((e) => e.row);
 }
 
-function buckets<T>(rows: T[], field: GroupField<T>, showEmpty: boolean): Map<string, T[]> {
+function buckets<T>(
+  rows: T[],
+  field: GroupField<T>,
+  showEmpty: boolean,
+): Map<string, T[]> {
   const byValue = new Map<string, T[]>();
   if (showEmpty && field.order) for (const v of field.order) byValue.set(v, []);
   for (const row of rows) {
@@ -281,18 +328,27 @@ function buckets<T>(rows: T[], field: GroupField<T>, showEmpty: boolean): Map<st
   if (!field.order) {
     // Open-ended fields: busiest bucket first, name breaking ties.
     return new Map(
-      [...byValue.entries()].sort((a, b) => b[1].length - a[1].length || cmp(a[0], b[0])),
+      [...byValue.entries()].sort(
+        (a, b) => b[1].length - a[1].length || cmp(a[0], b[0]),
+      ),
     );
   }
   const rank = new Map(field.order.map((v, i) => [v, i]));
   return new Map(
     [...byValue.entries()].sort(
-      (a, b) => (rank.get(a[0]) ?? field.order!.length) - (rank.get(b[0]) ?? field.order!.length) || cmp(a[0], b[0]),
+      (a, b) =>
+        (rank.get(a[0]) ?? field.order!.length) -
+          (rank.get(b[0]) ?? field.order!.length) || cmp(a[0], b[0]),
     ),
   );
 }
 
-const section = <T,>(key: string, value: string, field: GroupField<T>, rows: T[]): Section<T> => ({
+const section = <T>(
+  key: string,
+  value: string,
+  field: GroupField<T>,
+  rows: T[],
+): Section<T> => ({
   key,
   value,
   label: value,
@@ -314,7 +370,15 @@ export function buildSections<T>(
   const sorted = sortRows(rows, config, state);
   const group = config.groups.find((g) => g.key === state.groupBy);
   if (!group) {
-    return [{ key: NONE, value: NONE, label: "All", count: sorted.length, rows: sorted }];
+    return [
+      {
+        key: NONE,
+        value: NONE,
+        label: "All",
+        count: sorted.length,
+        rows: sorted,
+      },
+    ];
   }
   const sub =
     state.subGroupBy !== state.groupBy
@@ -340,7 +404,10 @@ export const grouped = (state: DisplayState): boolean => state.groupBy !== NONE;
  * renders them: open sections contribute their rows (through open
  * sub-sections), collapsed ones contribute nothing.
  */
-export function flattenSections<T>(sections: Section<T>[], collapsed: readonly string[]): T[] {
+export function flattenSections<T>(
+  sections: Section<T>[],
+  collapsed: readonly string[],
+): T[] {
   const closed = new Set(collapsed);
   const out: T[] = [];
   for (const s of sections) {
@@ -356,7 +423,10 @@ export function flattenSections<T>(sections: Section<T>[], collapsed: readonly s
   return out;
 }
 
-export function toggleCollapsed(state: DisplayState, key: string): DisplayState {
+export function toggleCollapsed(
+  state: DisplayState,
+  key: string,
+): DisplayState {
   const collapsed = state.collapsed.includes(key)
     ? state.collapsed.filter((k) => k !== key)
     : [...state.collapsed, key];
@@ -364,14 +434,19 @@ export function toggleCollapsed(state: DisplayState, key: string): DisplayState 
 }
 
 /** Columns the table actually renders, in declared order followed by custom columns. */
-export function visibleColumns<T>(config: DisplayConfig<T>, state: DisplayState): ColumnDef[] {
+export function visibleColumns<T>(
+  config: DisplayConfig<T>,
+  state: DisplayState,
+): ColumnDef[] {
   const dynamicCols: ColumnDef[] = (state.customColumns ?? []).map((path) => ({
     key: path.startsWith("custom:") ? path : `custom:${path}`,
     label: path.startsWith("custom:") ? path.slice(7) : path,
     isCustom: true,
   }));
   const allCols = [...config.columns, ...dynamicCols];
-  return allCols.filter((c) => c.always || !state.hiddenColumns.includes(c.key));
+  return allCols.filter(
+    (c) => c.always || !state.hiddenColumns.includes(c.key),
+  );
 }
 
 export function toggleColumn(state: DisplayState, key: string): DisplayState {
@@ -381,25 +456,38 @@ export function toggleColumn(state: DisplayState, key: string): DisplayState {
   return { ...state, hiddenColumns };
 }
 
-export function addCustomColumn(state: DisplayState, path: string): DisplayState {
+export function addCustomColumn(
+  state: DisplayState,
+  path: string,
+): DisplayState {
   const clean = path.trim().replace(/^custom:/, "");
   if (!clean || state.customColumns.includes(clean)) return state;
   const colKey = `custom:${clean}`;
   return {
     ...state,
     customColumns: [...state.customColumns, clean],
-    hiddenColumns: state.hiddenColumns.filter((k) => k !== colKey && k !== clean),
+    hiddenColumns: state.hiddenColumns.filter(
+      (k) => k !== colKey && k !== clean,
+    ),
   };
 }
 
-export function removeCustomColumn(state: DisplayState, path: string): DisplayState {
+export function removeCustomColumn(
+  state: DisplayState,
+  path: string,
+): DisplayState {
   const clean = path.trim().replace(/^custom:/, "");
   const colKey = `custom:${clean}`;
   return {
     ...state,
     customColumns: state.customColumns.filter((c) => c !== clean),
-    hiddenColumns: state.hiddenColumns.filter((k) => k !== colKey && k !== clean),
-    sortBy: state.sortBy === colKey || state.sortBy === clean ? DEFAULT_ORDER : state.sortBy,
+    hiddenColumns: state.hiddenColumns.filter(
+      (k) => k !== colKey && k !== clean,
+    ),
+    sortBy:
+      state.sortBy === colKey || state.sortBy === clean
+        ? DEFAULT_ORDER
+        : state.sortBy,
   };
 }
 

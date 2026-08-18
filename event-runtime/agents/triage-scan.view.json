@@ -24,7 +24,12 @@
           "needs-human": "warn"
         }
       },
-      "expand": ["detail", "ownedPaths", "verificationCommand", "acceptanceCriteria"]
+      "expand": [
+        "detail",
+        "ownedPaths",
+        "verificationCommand",
+        "acceptanceCriteria"
+      ]
     },
     {
       "path": "/repo",

@@ -42,13 +42,22 @@ describe("tokenizeJson", () => {
   });
 
   it("classifies primitive types correctly", () => {
-    const input = '{\n  "n": 100,\n  "b": true,\n  "f": false,\n  "nil": null\n}';
+    const input =
+      '{\n  "n": 100,\n  "b": true,\n  "f": false,\n  "nil": null\n}';
     const tokens = tokenizeJson(input);
 
-    expect(tokens.some((t) => t.kind === "number" && t.text === "100")).toBeTrue();
-    expect(tokens.some((t) => t.kind === "boolean" && t.text === "true")).toBeTrue();
-    expect(tokens.some((t) => t.kind === "boolean" && t.text === "false")).toBeTrue();
-    expect(tokens.some((t) => t.kind === "null" && t.text === "null")).toBeTrue();
+    expect(
+      tokens.some((t) => t.kind === "number" && t.text === "100"),
+    ).toBeTrue();
+    expect(
+      tokens.some((t) => t.kind === "boolean" && t.text === "true"),
+    ).toBeTrue();
+    expect(
+      tokens.some((t) => t.kind === "boolean" && t.text === "false"),
+    ).toBeTrue();
+    expect(
+      tokens.some((t) => t.kind === "null" && t.text === "null"),
+    ).toBeTrue();
   });
 
   it("handles empty arrays and objects", () => {
@@ -56,16 +65,8 @@ describe("tokenizeJson", () => {
     const tokens = tokenizeJson(input);
 
     expect(tokens.map((t) => t.text).join("")).toBe(input);
-    expect(tokens.filter((t) => t.kind === "punct").map((t) => t.text)).toEqual([
-      "{",
-      ":",
-      "[",
-      "]",
-      ",",
-      ":",
-      "{",
-      "}",
-      "}",
-    ]);
+    expect(tokens.filter((t) => t.kind === "punct").map((t) => t.text)).toEqual(
+      ["{", ":", "[", "]", ",", ":", "{", "}", "}"],
+    );
   });
 });

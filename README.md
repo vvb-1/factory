@@ -38,14 +38,14 @@ evals/                            prompt regression cases (no runner yet — see
 
 The **content** is portable; only the **packaging** isn't. `SKILL.md` is a shared workflow format, command bodies are Markdown, and each harness gets its native custom-agent manifest.
 
-| Harness | Context | Skills | Commands | Agents |
-| :--- | :--- | :--- | :--- | :--- |
-| Claude Code | `CLAUDE.md` → `AGENTS.md` | plugin `skills/` | plugin `commands/` | plugin `agents/` |
-| Codex | `AGENTS.md` (native) | `~/.agents/skills/` | — (use `@factory-*` skills) | `~/.codex/agents/` |
-| Pi | `AGENTS.md` (native) | `dist/pi/skills/` | `dist/pi/prompts/` | `~/.pi/agent/agents/` |
-| Gemini CLI | `GEMINI.md` → `AGENTS.md` | `~/.gemini/skills/` | — | `~/.gemini/agents/` |
-| Antigravity | shares `~/.gemini/` | via Gemini | — | via Gemini |
-| Cursor | `.cursor/rules/` | — | `~/.cursor/commands/` | `~/.cursor/agents/` |
+| Harness     | Context                   | Skills              | Commands                    | Agents                |
+| :---------- | :------------------------ | :------------------ | :-------------------------- | :-------------------- |
+| Claude Code | `CLAUDE.md` → `AGENTS.md` | plugin `skills/`    | plugin `commands/`          | plugin `agents/`      |
+| Codex       | `AGENTS.md` (native)      | `~/.agents/skills/` | — (use `@factory-*` skills) | `~/.codex/agents/`    |
+| Pi          | `AGENTS.md` (native)      | `dist/pi/skills/`   | `dist/pi/prompts/`          | `~/.pi/agent/agents/` |
+| Gemini CLI  | `GEMINI.md` → `AGENTS.md` | `~/.gemini/skills/` | —                           | `~/.gemini/agents/`   |
+| Antigravity | shares `~/.gemini/`       | via Gemini          | —                           | via Gemini            |
+| Cursor      | `.cursor/rules/`          | —                   | `~/.cursor/commands/`       | `~/.cursor/agents/`   |
 
 ```bash
 bun build/emit.mjs           # regenerate everything
@@ -79,21 +79,21 @@ bun run link-repos           # symlink plugins/core/commands/ into every repo in
 
 Prefixed `factory-` so they're identifiable as ours and never collide with a repo-local or built-in command of the same name.
 
-| Command | Does |
-| :--- | :--- |
-| `/factory-work` | Claims agent-ready tickets, dispatches them rolling (not batched), lands the PRs |
-| `/factory-ticket` | Implements exactly one already-claimed ticket in the current worktree — what `tick.mjs` spawns |
-| `/factory-merge` | Reviews open PRs, fixes what's mechanical, merges what qualifies |
-| `/factory-ship` | Opens the `develop` → deploy-branch PR, waits for CI, merges, verifies the deploy |
-| `/factory-triage` | Turns `Triage` tickets into `ai:agent-ready` ones |
-| `/factory-unblock` | Re-examines `ai:blocked` holds and releases the ones new evidence resolved |
-| `/factory-sweep` | Retires tickets overtaken by events — `Canceled`/`Duplicate` with evidence, never a delete |
-| `/factory-audit` | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps |
-| `/factory-capture` | Files a Linear issue from the conversation — capture only, never implement |
-| `/factory-friction` | Files harness friction seen in an interactive session, where no transcript exists |
-| `/factory-retro` | Turns measured friction into harness changes |
-| `/factory-report` | Read-only pipeline snapshot across the configured repos |
-| `/factory-next` | Picks the one next stage for this repo, and runs it only when asked |
+| Command             | Does                                                                                           |
+| :------------------ | :--------------------------------------------------------------------------------------------- |
+| `/factory-work`     | Claims agent-ready tickets, dispatches them rolling (not batched), lands the PRs               |
+| `/factory-ticket`   | Implements exactly one already-claimed ticket in the current worktree — what `tick.mjs` spawns |
+| `/factory-merge`    | Reviews open PRs, fixes what's mechanical, merges what qualifies                               |
+| `/factory-ship`     | Opens the `develop` → deploy-branch PR, waits for CI, merges, verifies the deploy              |
+| `/factory-triage`   | Turns `Triage` tickets into `ai:agent-ready` ones                                              |
+| `/factory-unblock`  | Re-examines `ai:blocked` holds and releases the ones new evidence resolved                     |
+| `/factory-sweep`    | Retires tickets overtaken by events — `Canceled`/`Duplicate` with evidence, never a delete     |
+| `/factory-audit`    | Grades a repo against project-conventions `PC-01`..`PC-20`, files the gaps                     |
+| `/factory-capture`  | Files a Linear issue from the conversation — capture only, never implement                     |
+| `/factory-friction` | Files harness friction seen in an interactive session, where no transcript exists              |
+| `/factory-retro`    | Turns measured friction into harness changes                                                   |
+| `/factory-report`   | Read-only pipeline snapshot across the configured repos                                        |
+| `/factory-next`     | Picks the one next stage for this repo, and runs it only when asked                            |
 
 ### `factory status` — the everyday hub
 
@@ -116,8 +116,8 @@ A repo may opt into deployment revision comparison in `config/repos.yaml`:
 ```yaml
 deployment:
   url: https://app.example.com/healthz # exact endpoint, or origin -> /version.json
-  branch: develop                      # branch represented by this environment
-  revision_field: revision              # optional; commit/git_sha/sha are automatic
+  branch: develop # branch represented by this environment
+  revision_field: revision # optional; commit/git_sha/sha are automatic
 ```
 
 The endpoint must return JSON containing a revision field, such as
@@ -153,12 +153,12 @@ It delegates to `~/Develop/hdkiller/scripts/notify.py` and preserves its exit st
 
 Agents are isolated specialist contexts, not workflow entry points. Their names use `factory-<role>` so ownership is visible without repeating the resource type in every identifier.
 
-| Agent | Does |
-| :--- | :--- |
-| `factory-ux-critic` | Exercises a materially changed user journey and returns a read-only `SHIP` / `FIX-FIRST` critique |
+| Agent                    | Does                                                                                                               |
+| :----------------------- | :----------------------------------------------------------------------------------------------------------------- |
+| `factory-ux-critic`      | Exercises a materially changed user journey and returns a read-only `SHIP` / `FIX-FIRST` critique                  |
 | `factory-merge-reviewer` | Reviews one PR cold and returns `MERGE` / `FIX` / `ESCALATE`, so the diff never enters the merge session's context |
-| `factory-ci-doctor` | Diagnoses one red Actions run and classifies it `TICKET` / `ENV` / `FLAKE`, keeping the job logs out of the caller |
-| `factory-infra-scout` | Answers questions that need SSH or container output, returning a verdict rather than the dumps |
+| `factory-ci-doctor`      | Diagnoses one red Actions run and classifies it `TICKET` / `ENV` / `FLAKE`, keeping the job logs out of the caller |
+| `factory-infra-scout`    | Answers questions that need SSH or container output, returning a verdict rather than the dumps                     |
 
 ## Scheduling — nothing is scheduled
 
@@ -186,11 +186,11 @@ That's what makes it continuous rather than batch — **follow-up work filed dur
 
 Each gate encodes what "work exists" means for that stage:
 
-| Stage | Runs when |
-| :--- | :--- |
-| `triage` | anything is in `Triage`, or `Todo` without `ai:agent-ready` |
+| Stage      | Runs when                                                        |
+| :--------- | :--------------------------------------------------------------- |
+| `triage`   | anything is in `Triage`, or `Todo` without `ai:agent-ready`      |
 | `dispatch` | a slot is free **and** a ticket is startable (Owned Paths clear) |
-| `merge` | a PR is actually in review |
+| `merge`    | a PR is actually in review                                       |
 
 The dispatch gate matters most: an agent that wakes to find the cap full has burned a run to learn nothing.
 
@@ -198,13 +198,13 @@ The dispatch gate matters most: an agent that wakes to find the cap full has bur
 
 On a subscription the scarce resource is the **usage window**, and Opus consumes it several times faster than Sonnet. So Opus is spent only where it changes the outcome:
 
-| Stage | Model | Why |
-| :--- | :--- | :--- |
-| `factory-triage` | sonnet | Structured extraction guided by a detailed skill — find the files, write tight globs, write a command that runs |
-| `factory-work` | sonnet **orchestrating opus subagents** | Coordination is cheap; the code is the product |
-| `factory-merge` | **opus** | Review catches what tests don't, and it is the last gate before `develop` auto-deploys |
-| `factory-audit` | sonnet | A mechanical checklist against `PC-01`..`PC-20` |
-| `factory-ux-critic` | sonnet on Claude; parent model elsewhere | Exercises the running app and reports |
+| Stage               | Model                                    | Why                                                                                                             |
+| :------------------ | :--------------------------------------- | :-------------------------------------------------------------------------------------------------------------- |
+| `factory-triage`    | sonnet                                   | Structured extraction guided by a detailed skill — find the files, write tight globs, write a command that runs |
+| `factory-work`      | sonnet **orchestrating opus subagents**  | Coordination is cheap; the code is the product                                                                  |
+| `factory-merge`     | **opus**                                 | Review catches what tests don't, and it is the last gate before `develop` auto-deploys                          |
+| `factory-audit`     | sonnet                                   | A mechanical checklist against `PC-01`..`PC-20`                                                                 |
+| `factory-ux-critic` | sonnet on Claude; parent model elsewhere | Exercises the running app and reports                                                                           |
 
 Claude reads the per-command frontmatter. `agy` is deliberately pinned to `gemini-3.6-flash-medium` in both Factory launch paths because it receives only the command body; `run-agent.sh --model X` overrides that for a one-off session.
 
@@ -229,7 +229,7 @@ There is also a standalone `warm` stage (every 2h, same staleness gate) so a lon
 
 Three levels, each with a different job:
 
-1. **Across repos — sequential.** `--repo a,b` runs repos one after another. Parallelism belongs *inside* a repo; N concurrent sessions across repos contend for the same machine, the same Linear rate budget, and the same daily spend cap.
+1. **Across repos — sequential.** `--repo a,b` runs repos one after another. Parallelism belongs _inside_ a repo; N concurrent sessions across repos contend for the same machine, the same Linear rate budget, and the same daily spend cap.
 2. **Within a repo — `max_in_flight` slots** (20 for bj29, in `config/repos.yaml`; 3 is the fallback in `config/policy.yaml` for a repo that names no number of its own). One ticket = one worktree = one agent. The gate reports `slotsFree` and refuses to dispatch at zero.
 3. **Between tickets — `Owned Paths`.** Two tickets run together only if their glob sets are disjoint. This is the real safety property; slots just cap resource use.
 
@@ -239,22 +239,22 @@ Three levels, each with a different job:
 
 Not in the command. The layering:
 
-| Knowledge | Lives in |
-| :--- | :--- |
-| How to triage / dispatch / merge — universal | `shared/commands/factory-*.md` |
-| Routing facts: team, base branch, worktree script, verify command, escalation paths | `config/repos.yaml` |
-| Stack rules, product decisions, gotchas | the repo's own `AGENTS.md`, `docs/product-decisions.md` |
+| Knowledge                                                                           | Lives in                                                |
+| :---------------------------------------------------------------------------------- | :------------------------------------------------------ |
+| How to triage / dispatch / merge — universal                                        | `shared/commands/factory-*.md`                          |
+| Routing facts: team, base branch, worktree script, verify command, escalation paths | `config/repos.yaml`                                     |
+| Stack rules, product decisions, gotchas                                             | the repo's own `AGENTS.md`, `docs/product-decisions.md` |
 
-The agent runs with `cwd` set to the repo, so it reads that repo's `AGENTS.md` naturally — repo specifics arrive as *context*, not as forked commands. For genuinely stage-specific repo guidance, `run-agent.sh --args` appends to the prompt. Resist adding config surface before a real case demands it.
+The agent runs with `cwd` set to the repo, so it reads that repo's `AGENTS.md` naturally — repo specifics arrive as _context_, not as forked commands. For genuinely stage-specific repo guidance, `run-agent.sh --args` appends to the prompt. Resist adding config surface before a real case demands it.
 
 ### Where the work happens
 
-| What | Where | Why |
-| :--- | :--- | :--- |
-| The repo itself | `~/Develop/pets/bj29` (`repos.yaml: path`) | Triage reads it; worktrees are created *from* it |
-| Per-ticket worktrees | `~/Develop/.worktrees/<repo>/<TICKET>` (`repos.yaml: worktree_root`) | One ticket, one checkout, own branch/ports/database |
-| Factory runtime state | `~/.factory/` | Session ids, budget ledger, logs, stage journal — never in git |
-| This repo | `~/Develop/factory` | Control plane only. **No work happens here.** |
+| What                  | Where                                                                | Why                                                            |
+| :-------------------- | :------------------------------------------------------------------- | :------------------------------------------------------------- |
+| The repo itself       | `~/Develop/pets/bj29` (`repos.yaml: path`)                           | Triage reads it; worktrees are created _from_ it               |
+| Per-ticket worktrees  | `~/Develop/.worktrees/<repo>/<TICKET>` (`repos.yaml: worktree_root`) | One ticket, one checkout, own branch/ports/database            |
+| Factory runtime state | `~/.factory/`                                                        | Session ids, budget ledger, logs, stage journal — never in git |
+| This repo             | `~/Develop/factory`                                                  | Control plane only. **No work happens here.**                  |
 
 **Worktrees must not live inside `~/Develop/factory/`.** It's a git repo, so nesting checkouts under it means `git status` noise, a real chance of `git add -A` sweeping an entire worktree into a commit, and the drift check walking trees it has no business in. A control plane that can accidentally commit its own workload is a bad control plane.
 
@@ -262,7 +262,7 @@ A sibling like `~/Develop/factory-workspace/` would work, but it buys nothing an
 
 The existing convention already has the properties you'd want: outside any repo, namespaced per repo, dot-prefixed so it stays out of `~/Develop` listings, and pointed at by `worktree_root` in `config/repos.yaml` — so it's a config change, not a code change, if it ever needs to move.
 
-**The one good reason to move it: disk.** This machine is at 96%, and worktrees are the bulk of it. If you relocate them to another volume, change `worktree_root` here *and* the corresponding path in the repo's `worktree-up.sh` — those two must agree, or the janitor cleans a directory the scripts aren't using.
+**The one good reason to move it: disk.** This machine is at 96%, and worktrees are the bulk of it. If you relocate them to another volume, change `worktree_root` here _and_ the corresponding path in the repo's `worktree-up.sh` — those two must agree, or the janitor cleans a directory the scripts aren't using.
 
 ### Lifecycle
 
@@ -277,7 +277,7 @@ The janitor exists because that third step is the one that gets skipped — a cr
 
 ### Checkout freshness
 
-Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **always fetches, and fast-forwards only when the tree is clean** — `--ff-only` cannot create a merge commit or lose work, so it is safe unattended. When the tree is dirty it pulls nothing and says so, in the log *and* in the prompt: the main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. A checkout that is behind, ahead, or dirty is announced to the agent as unreliable evidence, with instructions to take code from `origin/<base>` instead. Triage is read-only and needs no worktree; only dispatch creates them.
+Stages read the repo to write file pointers and verification commands, so `run-agent.sh` **always fetches, and fast-forwards only when the tree is clean** — `--ff-only` cannot create a merge commit or lose work, so it is safe unattended. When the tree is dirty it pulls nothing and says so, in the log _and_ in the prompt: the main checkout routinely holds someone's uncommitted work, and silently rebasing under them is a worse failure than a slightly stale spec. A checkout that is behind, ahead, or dirty is announced to the agent as unreliable evidence, with instructions to take code from `origin/<base>` instead. Triage is read-only and needs no worktree; only dispatch creates them.
 
 ## Testing the loop
 
@@ -323,17 +323,17 @@ Only then start the supervisor on a cadence.
 
 ### Limits
 
-| Limit | Where | Default |
-| :--- | :--- | :--- |
-| Tickets per tick | `--args` in `config/schedule.yaml` | triage 5, unblock 10 |
-| Concurrent tickets | `max_in_flight` in `config/repos.yaml` | 20 for bj29, legalease and cashsaas; 3 where a repo names nothing |
-| Spend per run | `--budget`, else `budget.per_ticket_usd` in `config/policy.yaml` | $15 (`merge_usd`: $40 — a merge pass reviews a backlog, not one diff) |
-| Daily spend | `budget.per_day_usd` | $2000 |
-| Which repos | `--repo` on each job, else `defaults.repo` | `bj29` |
+| Limit              | Where                                                            | Default                                                               |
+| :----------------- | :--------------------------------------------------------------- | :-------------------------------------------------------------------- |
+| Tickets per tick   | `--args` in `config/schedule.yaml`                               | triage 5, unblock 10                                                  |
+| Concurrent tickets | `max_in_flight` in `config/repos.yaml`                           | 20 for bj29, legalease and cashsaas; 3 where a repo names nothing     |
+| Spend per run      | `--budget`, else `budget.per_ticket_usd` in `config/policy.yaml` | $15 (`merge_usd`: $40 — a merge pass reviews a backlog, not one diff) |
+| Daily spend        | `budget.per_day_usd`                                             | $2000                                                                 |
+| Which repos        | `--repo` on each job, else `defaults.repo`                       | `bj29`                                                                |
 
 ### Auth and "budget" on a subscription
 
-Runs use the **claude.ai subscription**, not the API. `run-agent.sh` unsets `ANTHROPIC_API_KEY` for the child unless you pass `--use-api` — with it set, every run bills per token *and* claude.ai connectors (including the Linear MCP) are disabled.
+Runs use the **claude.ai subscription**, not the API. `run-agent.sh` unsets `ANTHROPIC_API_KEY` for the child unless you pass `--use-api` — with it set, every run bills per token _and_ claude.ai connectors (including the Linear MCP) are disabled.
 
 So `--max-budget-usd` is **not money**. Claude still reports `costUSD` per model — a trivial one-turn run shows ~$0.14 notional, mostly cache creation — and the flag caps against that figure. Treat it as a **runaway guard in notional API-equivalent units**: it stops a session going in circles; it does not protect a wallet. `$2` is too tight for a triage run that has to explore a codebase.
 
@@ -356,8 +356,8 @@ bun orchestrator/run.mjs --all --apply
 
 Three properties, in order of how much they matter:
 
-1. **Dry by default.** A job declares `dry_command` next to `command`; without `--apply` you get the dry one. The reaper's first real run would have unassigned 31 tickets, so *what would this do* is the default question.
-2. **Explicit selection.** Always `--only` or `--all`. There is no "run whatever is enabled" mode — `enabled:` means *may be installed as an unattended timer*, which is a different decision from *run it now*.
+1. **Dry by default.** A job declares `dry_command` next to `command`; without `--apply` you get the dry one. The reaper's first real run would have unassigned 31 tickets, so _what would this do_ is the default question.
+2. **Explicit selection.** Always `--only` or `--all`. There is no "run whatever is enabled" mode — `enabled:` means _may be installed as an unattended timer_, which is a different decision from _run it now_.
 3. **No overlap.** A job still running when its next tick arrives is skipped, not stacked. Two reapers racing is precisely the failure the reaper exists to clean up.
 
 `config/schedule.yaml` stays the single source of truth for cadences — the supervisor and the launchd generator read it through the same `lib/schedule.mjs`, so the watched and unattended modes can't disagree about what the jobs are. When a loop does earn promotion it's one flag and a regeneration, not a plist someone writes by hand at 1am.
@@ -382,7 +382,7 @@ Never hand-edit a generated plist — the next regeneration silently reverts it.
 
 ### Measuring the runs — friction and economics
 
-The transcripts under `~/.factory/logs/*.jsonl` are the record of what agents *actually did*, which is why both of these measure rather than ask. An agent that fought a broken tool for ten minutes will not reliably write that down; its transcript shows the same failing call three runs running.
+The transcripts under `~/.factory/logs/*.jsonl` are the record of what agents _actually did_, which is why both of these measure rather than ask. An agent that fought a broken tool for ten minutes will not reliably write that down; its transcript shows the same failing call three runs running.
 
 ```bash
 bun orchestrator/friction.mjs                # what wasted the agents' TIME
@@ -410,7 +410,7 @@ bun orchestrator/economics.mjs --roll        # append to the permanent rollup
 Concurrent Claude agents used to share one chrome-devtools-mcp profile: ten tickets dispatched in the same second all raced for one `SingletonLock`, first Chrome won, and everyone else burned turns on `browser is already running` — 95 errors across 26 runs. The fix is structural, not prompt-level, and it lives in this repo:
 
 - **`config/mcp/claude.json`** defines the browser server the factory passes to every Claude spawn via `--mcp-config`: `--isolated` (temp profile per session, auto-cleaned — collisions become impossible), `--headless`, and webp screenshot caps (`--screenshotFormat=webp --screenshotQuality=70 --screenshotMaxWidth=1280`) that shrink the factory's single biggest context cost 4–6x at the source, while an agent that truly needs a pixel-perfect PNG can still request one per-call.
-- **Deliberately NOT `--strict-mcp-config`.** Strict mode also drops the claude.ai connectors, and losing the Linear MCP severs the control plane — verified empirically on 2026-08-04: 0 Linear tools under strict, 52 without it. The global chrome-devtools *plugin* is disabled in `~/.claude/settings.json` instead, so exactly one browser server loads.
+- **Deliberately NOT `--strict-mcp-config`.** Strict mode also drops the claude.ai connectors, and losing the Linear MCP severs the control plane — verified empirically on 2026-08-04: 0 Linear tools under strict, 52 without it. The global chrome-devtools _plugin_ is disabled in `~/.claude/settings.json` instead, so exactly one browser server loads.
 - **`orchestrator/chrome-sweep.mjs`** cleans up what the wall-clock cap leaves behind: a killed run's MCP server dies without closing its Chrome, which reparents to launchd and keeps running. The sweep kills only processes that pass three fences (agent profile dir in the command line, browser main process, reparented to PID 1 — a live agent's Chrome still has its MCP server as parent) and clears stale `Singleton*` locks nobody holds. Dry-run by default; `--apply` to act. The one unforgivable failure — killing the human's actual Chrome — has a test per fence.
 
 Verified end to end: two parallel headless sessions each launched their own Chrome and navigated with zero contention. After the next batch, `bun run economics -- --since 1d` should show browser-collision errors at zero and `take_screenshot` payloads down ~4–6x.
@@ -419,7 +419,7 @@ Verified end to end: two parallel headless sessions each launched their own Chro
 
 `orchestrator/owned-paths.mjs` decides whether two tickets can run at once by intersecting their `Owned Paths` globs. Every `ai:agent-ready` ticket already carries that section, so the machine-readable answer exists — guessing from title keywords both over-fires ("Fix login button copy" vs "Rewrite auth middleware" share vocabulary but no files) and under-fires ("Onboarding wizard polish" vs "Profile page spacing" share files but no words).
 
-Where the glob algebra is ambiguous it errs toward *collision*: a false positive serializes two tickets, a false negative puts two agents in one file. Tests: `bun test`.
+Where the glob algebra is ambiguous it errs toward _collision_: a false positive serializes two tickets, a false negative puts two agents in one file. Tests: `bun test`.
 
 ## What stays out of git
 
@@ -429,12 +429,12 @@ Secrets (injected via launchd env or `op run`), worktrees, agent session logs, a
 
 **Automated dispatch is authorized for the four repos in `config/repos.yaml` that ship the worktree lifecycle:** `bj29`, `legalease`, `cashsaas` and `wm-home`. coach-wattz's teardown script landed in [CW-363](https://linear.app/watt-mind/issue/CW-363), so the janitor can safely reclaim its finished worktrees through that repo-owned script, but it stays `report_only` for dispatch — as do watts-mobile, proxies, hdkiller, eslint-config and this repo.
 
-| Stage | State |
-| :--- | :--- |
-| `triage` | works on Claude **and** agy; claims tickets so they show in Agents In Flight |
-| `dispatch` | `tick.mjs` — one process per ticket, rolling refill, auto-warm |
-| `merge` | exercised end to end across bj29, legalease and cashsaas; still the one stage that is never parallel |
-| `janitor`, `warm`, `reaper` | work; reaper cleaned 50 stale markers |
+| Stage                       | State                                                                                                |
+| :-------------------------- | :--------------------------------------------------------------------------------------------------- |
+| `triage`                    | works on Claude **and** agy; claims tickets so they show in Agents In Flight                         |
+| `dispatch`                  | `tick.mjs` — one process per ticket, rolling refill, auto-warm                                       |
+| `merge`                     | exercised end to end across bj29, legalease and cashsaas; still the one stage that is never parallel |
+| `janitor`, `warm`, `reaper` | work; reaper cleaned 50 stale markers                                                                |
 
 **Nothing is scheduled.** All jobs are `enabled: false`; run through `orchestrator/run.mjs`.
 

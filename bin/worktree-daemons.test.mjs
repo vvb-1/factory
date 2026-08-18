@@ -1,4 +1,11 @@
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "bun:test";
@@ -84,7 +91,9 @@ test("spawn_daemon creates detached process that survives subshell exit", () => 
       try {
         const pid = readFileSync(pidfile, "utf8").trim();
         process.kill(Number(pid), "SIGKILL");
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
     }
     rmSync(testDir, { recursive: true, force: true });
   }
@@ -119,7 +128,9 @@ test("pid_alive returns true for running process and false for dead process", ()
 });
 
 test("await_daemon falls back to SIGKILL when process ignores SIGTERM", () => {
-  const testDir = mkdtempSync(path.join(tmpdir(), "await-daemon-sigkill-test-"));
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "await-daemon-sigkill-test-"),
+  );
   const pidfile = path.join(testDir, "stubborn.pid");
   const logfile = path.join(testDir, "stubborn.log");
 
@@ -158,7 +169,9 @@ test("await_daemon falls back to SIGKILL when process ignores SIGTERM", () => {
     if (pid) {
       try {
         process.kill(Number(pid), "SIGKILL");
-      } catch { /* intentionally ignored */ }
+      } catch {
+        /* intentionally ignored */
+      }
     }
     rmSync(testDir, { recursive: true, force: true });
   }
@@ -248,14 +261,20 @@ test("supervise_tick restarts dead daemon and logs restart line", () => {
     expect(logContent).toContain("[supervisor] restarting dead worker");
 
     // Clean up spawned worker
-    try { process.kill(Number(newPid), "SIGKILL"); } catch { /* intentionally ignored */ }
+    try {
+      process.kill(Number(newPid), "SIGKILL");
+    } catch {
+      /* intentionally ignored */
+    }
   } finally {
     rmSync(testDir, { recursive: true, force: true });
   }
 });
 
 test("supervise_tick enforces circuit breaker when max restarts exceeded", () => {
-  const testDir = mkdtempSync(path.join(tmpdir(), "supervise-circuit-breaker-test-"));
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "supervise-circuit-breaker-test-"),
+  );
   const runDir = path.join(testDir, ".factory", "run");
   mkdirSync(runDir, { recursive: true });
 
@@ -265,9 +284,12 @@ test("supervise_tick enforces circuit breaker when max restarts exceeded", () =>
     const now = Math.floor(Date.now() / 1000);
 
     // Pre-populate state with 3 recent restarts
-    writeFileSync(stateFile, JSON.stringify({
-      worker: [now - 10, now - 5, now - 1],
-    }));
+    writeFileSync(
+      stateFile,
+      JSON.stringify({
+        worker: [now - 10, now - 5, now - 1],
+      }),
+    );
     writeFileSync(workerPid, "999999");
 
     // max_restarts = 3 -> should hit circuit breaker

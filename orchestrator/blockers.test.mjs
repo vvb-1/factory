@@ -5,22 +5,42 @@ const issueWith = (nodes) => ({ inverseRelations: { nodes } });
 
 describe("openBlockers", () => {
   test("open blocker holds the ticket", () => {
-    const i = issueWith([{ type: "blocks", issue: { identifier: "OPS-1", state: { type: "started" } } }]);
+    const i = issueWith([
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-1", state: { type: "started" } },
+      },
+    ]);
     expect(openBlockers(i)).toEqual(["OPS-1"]);
   });
 
   test("unstarted blocker holds too — Todo is not Done", () => {
-    const i = issueWith([{ type: "blocks", issue: { identifier: "OPS-2", state: { type: "unstarted" } } }]);
+    const i = issueWith([
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-2", state: { type: "unstarted" } },
+      },
+    ]);
     expect(openBlockers(i)).toEqual(["OPS-2"]);
   });
 
   test("completed blocker releases", () => {
-    const i = issueWith([{ type: "blocks", issue: { identifier: "OPS-3", state: { type: "completed" } } }]);
+    const i = issueWith([
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-3", state: { type: "completed" } },
+      },
+    ]);
     expect(openBlockers(i)).toEqual([]);
   });
 
   test("canceled blocker releases — dead work must not gate live work", () => {
-    const i = issueWith([{ type: "blocks", issue: { identifier: "OPS-4", state: { type: "canceled" } } }]);
+    const i = issueWith([
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-4", state: { type: "canceled" } },
+      },
+    ]);
     expect(openBlockers(i)).toEqual([]);
   });
 
@@ -35,18 +55,36 @@ describe("openBlockers", () => {
 
   test("duplicate/related relation types do not gate", () => {
     const i = issueWith([
-      { type: "duplicate", issue: { identifier: "OPS-5", state: { type: "started" } } },
-      { type: "related", issue: { identifier: "OPS-6", state: { type: "unstarted" } } },
+      {
+        type: "duplicate",
+        issue: { identifier: "OPS-5", state: { type: "started" } },
+      },
+      {
+        type: "related",
+        issue: { identifier: "OPS-6", state: { type: "unstarted" } },
+      },
     ]);
     expect(openBlockers(i)).toEqual([]);
   });
 
   test("mixed relations report only the open blockers", () => {
     const i = issueWith([
-      { type: "blocks", issue: { identifier: "OPS-7", state: { type: "completed" } } },
-      { type: "blocks", issue: { identifier: "OPS-8", state: { type: "started" } } },
-      { type: "related", issue: { identifier: "OPS-9", state: { type: "started" } } },
-      { type: "blocks", issue: { identifier: "OPS-10", state: { type: "backlog" } } },
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-7", state: { type: "completed" } },
+      },
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-8", state: { type: "started" } },
+      },
+      {
+        type: "related",
+        issue: { identifier: "OPS-9", state: { type: "started" } },
+      },
+      {
+        type: "blocks",
+        issue: { identifier: "OPS-10", state: { type: "backlog" } },
+      },
     ]);
     expect(openBlockers(i)).toEqual(["OPS-8", "OPS-10"]);
   });

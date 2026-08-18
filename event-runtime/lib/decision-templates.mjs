@@ -7,7 +7,12 @@ const dismiss = () => ({
   tone: "neutral",
 });
 
-const textField = ({ id = "answer", label, required = false, whenOption } = {}) => ({
+const textField = ({
+  id = "answer",
+  label,
+  required = false,
+  whenOption,
+} = {}) => ({
   id,
   kind: "text",
   label: label ?? "Anything the runtime should know",
@@ -169,7 +174,8 @@ const BUILDERS = {
 export function templateFor(kind, { producer, refs = {} } = {}) {
   const selected = producer ?? String(kind ?? "").toLowerCase();
   const builder = BUILDERS[selected];
-  if (!builder) throw new Error(`unknown decision template producer: ${selected}`);
+  if (!builder)
+    throw new Error(`unknown decision template producer: ${selected}`);
   return builder(refs);
 }
 

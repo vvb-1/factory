@@ -36,7 +36,9 @@ async function waitForFile(file, timeoutMs = 5_000) {
   while (Date.now() < deadline) {
     try {
       return readFileSync(file, "utf8").trim();
-    } catch { /* intentionally ignored */ }
+    } catch {
+      /* intentionally ignored */
+    }
     await Bun.sleep(10);
   }
   throw new Error(`timed out waiting for ${file}`);
@@ -96,7 +98,10 @@ describe("tracked test processes (WM-654)", () => {
     const pidFile = path.join(dir, "grandchild.pid");
     const child = spawnTracked(
       "bash",
-      ["-c", `sleep 60 & printf '%s\\n' "$!" > ${JSON.stringify(pidFile)}; wait`],
+      [
+        "-c",
+        `sleep 60 & printf '%s\\n' "$!" > ${JSON.stringify(pidFile)}; wait`,
+      ],
       { stdio: "ignore" },
     );
     const grandchildPid = Number(await waitForFile(pidFile));
@@ -148,7 +153,9 @@ describe("tracked test processes (WM-654)", () => {
       detached: process.platform !== "win32",
       stdio: "ignore",
       env: Object.fromEntries(
-        Object.entries(process.env).filter(([key]) => key !== "FACTORY_TEST_TRACKED_PROCESS"),
+        Object.entries(process.env).filter(
+          ([key]) => key !== "FACTORY_TEST_TRACKED_PROCESS",
+        ),
       ),
     });
     try {

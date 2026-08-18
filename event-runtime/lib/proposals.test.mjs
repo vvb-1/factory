@@ -3,7 +3,14 @@ import { openDb } from "./db.mjs";
 import { admitEvent } from "./intake.mjs";
 import { lifecycleOf, runState } from "./lifecycle.mjs";
 import { planEvent } from "./planner.mjs";
-import { ambiguousOpenProposalRuns, approveProposal, closeOpenProposalForRun, getProposal, openProposals, rejectProposal } from "./proposals.mjs";
+import {
+  ambiguousOpenProposalRuns,
+  approveProposal,
+  closeOpenProposalForRun,
+  getProposal,
+  openProposals,
+  rejectProposal,
+} from "./proposals.mjs";
 import { loadRegistry } from "./registry.mjs";
 
 const registry = loadRegistry();
@@ -26,12 +33,16 @@ function envelope(overrides = {}) {
 }
 
 /** Admit and plan one event; returns { db, proposal, runId }. */
-function planned(overrides = {}, { now = NOW, policyVersion = "git:test" } = {}) {
+function planned(
+  overrides = {},
+  { now = NOW, policyVersion = "git:test" } = {},
+) {
   const db = openDb(":memory:");
   const admitted = admitEvent(db, registry, envelope(overrides), { now });
   expect(admitted.admitted).toBe(true);
   const outcome = planEvent(
-    db, registry,
+    db,
+    registry,
     { source: admitted.event.source, eventId: admitted.event.event_id },
     { now, policyVersion },
   );
@@ -60,7 +71,10 @@ describe("openProposals / getProposal", () => {
 describe("approveProposal within TTL", () => {
   test("transitions the run PROPOSED → APPROVED → QUEUED and marks the proposal approved", () => {
     const { db, proposal, runId } = planned();
-    const result = approveProposal(db, registry, proposal.id, { actor: "operator", now: NOW + 60_000 });
+    const result = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      now: NOW + 60_000,
+    });
     expect(result).toEqual({ approved: true, runId });
     expect(runState(db, runId)).toBe("QUEUED");
 
@@ -70,7 +84,11 @@ describe("approveProposal within TTL", () => {
     expect(row.decided_at).toBe(new Date(NOW + 60_000).toISOString());
 
     const journal = lifecycleOf(db, runId);
-    expect(journal.map((e) => e.to_state)).toEqual(["PROPOSED", "APPROVED", "QUEUED"]);
+    expect(journal.map((e) => e.to_state)).toEqual([
+      "PROPOSED",
+      "APPROVED",
+      "QUEUED",
+    ]);
     expect(journal[1].actor).toBe("operator");
     expect(journal[1].correlation_id).toBe("workflow-01");
   });
@@ -78,15 +96,29 @@ describe("approveProposal within TTL", () => {
   test("only open 'run' proposals are approvable", () => {
     const { db, proposal } = planned();
     approveProposal(db, registry, proposal.id, { actor: "operator", now: NOW });
-    expect(() => approveProposal(db, registry, proposal.id, { actor: "operator", now: NOW })).toThrow(/not open/);
-    expect(() => approveProposal(db, registry, "prop_nope", { actor: "operator", now: NOW })).toThrow(/unknown proposal/);
+    expect(() =>
+      approveProposal(db, registry, proposal.id, {
+        actor: "operator",
+        now: NOW,
+      }),
+    ).toThrow(/not open/);
+    expect(() =>
+      approveProposal(db, registry, "prop_nope", {
+        actor: "operator",
+        now: NOW,
+      }),
+    ).toThrow(/unknown proposal/);
   });
 });
 
 describe("rejectProposal", () => {
   test("marks the proposal rejected and cancels the PROPOSED run", () => {
     const { db, proposal, runId } = planned();
-    const result = rejectProposal(db, proposal.id, { actor: "operator", reason: "not today", now: NOW + 1000 });
+    const result = rejectProposal(db, proposal.id, {
+      actor: "operator",
+      reason: "not today",
+      now: NOW + 1000,
+    });
     expect(result).toEqual({ rejected: true, runId });
     expect(runState(db, runId)).toBe("CANCELLED");
 
@@ -106,8 +138,9 @@ describe("closeOpenProposalForRun", () => {
   test("closes the unique open proposal with reason run_cancelled", () => {
     const { db, proposal, runId } = planned();
     const later = NOW + 1000;
-    expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: later }))
-      .toEqual({ closed: true, id: proposal.id });
+    expect(
+      closeOpenProposalForRun(db, runId, { actor: "operator", now: later }),
+    ).toEqual({ closed: true, id: proposal.id });
     const row = getProposal(db, proposal.id);
     expect(row.status).toBe("rejected");
     expect(row.reason).toBe("run_cancelled");
@@ -119,11 +152,16 @@ describe("closeOpenProposalForRun", () => {
   test("no-op when the run has no open proposal", () => {
     const { db, proposal, runId } = planned();
     approveProposal(db, registry, proposal.id, { actor: "operator", now: NOW });
-    expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }))
-      .toEqual({ closed: false });
+    expect(
+      closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }),
+    ).toEqual({ closed: false });
     expect(getProposal(db, proposal.id).status).toBe("approved");
-    expect(closeOpenProposalForRun(db, "run_missing", { actor: "operator", now: NOW }))
-      .toEqual({ closed: false });
+    expect(
+      closeOpenProposalForRun(db, "run_missing", {
+        actor: "operator",
+        now: NOW,
+      }),
+    ).toEqual({ closed: false });
   });
 
   test("leaves every proposal untouched when more than one is open for the run", () => {
@@ -134,8 +172,9 @@ describe("closeOpenProposalForRun", () => {
       `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
        VALUES (?, ?, ?, ?, 'run', ?, 1800)`,
     ).run("prop_extra", proposal.event_source, proposal.event_id, runId, at);
-    expect(closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }))
-      .toEqual({ closed: false, ambiguous: true, count: 2 });
+    expect(
+      closeOpenProposalForRun(db, runId, { actor: "operator", now: NOW }),
+    ).toEqual({ closed: false, ambiguous: true, count: 2 });
     expect(getProposal(db, proposal.id).status).toBe("open");
     expect(getProposal(db, "prop_extra").status).toBe("open");
     expect(ambiguousOpenProposalRuns(db)).toEqual([{ runId, count: 2 }]);
@@ -146,10 +185,16 @@ describe("ambiguousOpenProposalRuns", () => {
   test("two open human_needed proposals with NULL run_id are not reported as ambiguous", () => {
     const db = openDb(":memory:");
     for (const eventId of ["hn-null-1", "hn-null-2"]) {
-      const admitted = admitEvent(db, registry, envelope({ eventId, type: "totally.unknown.type" }), { now: NOW });
+      const admitted = admitEvent(
+        db,
+        registry,
+        envelope({ eventId, type: "totally.unknown.type" }),
+        { now: NOW },
+      );
       expect(admitted.admitted).toBe(true);
       const outcome = planEvent(
-        db, registry,
+        db,
+        registry,
         { source: admitted.event.source, eventId: admitted.event.event_id },
         { now: NOW },
       );
@@ -166,7 +211,9 @@ describe("approveProposal after TTL expiry (§12)", () => {
     const { db, proposal, runId } = planned();
     const later = NOW + TTL_MS + 1;
     const result = approveProposal(db, registry, proposal.id, {
-      actor: "operator", now: later, policyVersion: "git:test",
+      actor: "operator",
+      now: later,
+      policyVersion: "git:test",
     });
     expect(result).toEqual({ approved: true, runId });
     expect(runState(db, runId)).toBe("QUEUED");
@@ -182,7 +229,10 @@ describe("approveProposal after TTL expiry (§12)", () => {
     // adapterOverride forces the re-planned spec to differ from the stale one
     // (the registered route is pi since WM-215, so claude is the off-route value).
     const result = approveProposal(db, registry, proposal.id, {
-      actor: "operator", now: later, policyVersion: "git:test", adapterOverride: "claude",
+      actor: "operator",
+      now: later,
+      policyVersion: "git:test",
+      adapterOverride: "claude",
     });
 
     expect(result.approved).toBe(false);
@@ -211,7 +261,10 @@ describe("approveProposal after TTL expiry (§12)", () => {
 
     // Approving the fresh proposal (same override, so specs match) queues the run.
     const approved = approveProposal(db, registry, result.proposal.id, {
-      actor: "operator", now: later + 1000, policyVersion: "git:test", adapterOverride: "claude",
+      actor: "operator",
+      now: later + 1000,
+      policyVersion: "git:test",
+      adapterOverride: "claude",
     });
     expect(approved).toEqual({ approved: true, runId });
     expect(runState(db, runId)).toBe("QUEUED");

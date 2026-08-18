@@ -33,7 +33,9 @@ export const DEFAULT_NOTIFY_CMD = `python3 ${path.join(homedir(), "Develop", "hd
 export const NOTIFY_TIMEOUT_MS = 30_000;
 
 export function notifyEnabled(env = process.env) {
-  return env.FACTORY_EVENT_NOTIFY === "1" || env.FACTORY_EVENT_NOTIFY === "true";
+  return (
+    env.FACTORY_EVENT_NOTIFY === "1" || env.FACTORY_EVENT_NOTIFY === "true"
+  );
 }
 
 /**
@@ -60,8 +62,14 @@ export function ensureNotifyLog(db) {
     inbox_item_id TEXT,
     PRIMARY KEY (kind, target)
   );`);
-  const columns = new Set(db.query("PRAGMA table_info(notify_log)").all().map((row) => row.name));
-  if (!columns.has("inbox_item_id")) db.exec("ALTER TABLE notify_log ADD COLUMN inbox_item_id TEXT;");
+  const columns = new Set(
+    db
+      .query("PRAGMA table_info(notify_log)")
+      .all()
+      .map((row) => row.name),
+  );
+  if (!columns.has("inbox_item_id"))
+    db.exec("ALTER TABLE notify_log ADD COLUMN inbox_item_id TEXT;");
 }
 
 const KIND_HUMAN_NEEDED = "human_needed";
@@ -72,7 +80,9 @@ const KIND_DECISION_NEEDED = "decision_needed";
 const KIND_PROPOSAL_EXPIRED = "proposal_expired";
 
 function alreadyNotified(db, kind, target) {
-  return !!db.query(`SELECT 1 FROM notify_log WHERE kind = ? AND target = ?`).get(kind, target);
+  return !!db
+    .query(`SELECT 1 FROM notify_log WHERE kind = ? AND target = ?`)
+    .get(kind, target);
 }
 
 /**
@@ -126,7 +136,9 @@ export function pendingNotifications(db, { now = Date.now() } = {}) {
   }
 
   const open = db
-    .query(`SELECT * FROM proposals WHERE status = 'open' AND decision = 'run' ORDER BY created_at, rowid`)
+    .query(
+      `SELECT * FROM proposals WHERE status = 'open' AND decision = 'run' ORDER BY created_at, rowid`,
+    )
     .all();
   for (const p of open) {
     const ageMs = now - Date.parse(p.created_at);
@@ -140,11 +152,19 @@ export function pendingNotifications(db, { now = Date.now() } = {}) {
           kind: KIND_PROPOSAL_EXPIRED,
           target: p.id,
           title: `DECISION NEEDED proposal ${p.id} (${agent}): expired undecided`,
-          refs: { proposalId: p.id, eventSource: p.event_source, eventId: p.event_id },
+          refs: {
+            proposalId: p.id,
+            eventSource: p.event_source,
+            eventId: p.event_id,
+          },
           source: "serve:notify",
           decision: templateFor(KIND_PROPOSAL_EXPIRED, {
             producer: "proposal",
-            refs: { proposalId: p.id, eventSource: p.event_source, eventId: p.event_id },
+            refs: {
+              proposalId: p.id,
+              eventSource: p.event_source,
+              eventId: p.event_id,
+            },
           }),
           dedupeKey: `${KIND_PROPOSAL_EXPIRED}:${p.id}`,
         });
@@ -156,11 +176,19 @@ export function pendingNotifications(db, { now = Date.now() } = {}) {
         dedupKind: DEDUP_PROPOSAL_TTL,
         target: p.id,
         title: `DECISION NEEDED proposal ${p.id} (${agent}): expires in ${minutesLeft}m`,
-        refs: { proposalId: p.id, eventSource: p.event_source, eventId: p.event_id },
+        refs: {
+          proposalId: p.id,
+          eventSource: p.event_source,
+          eventId: p.event_id,
+        },
         source: "serve:notify",
         decision: templateFor(KIND_DECISION_NEEDED, {
           producer: "proposal",
-          refs: { proposalId: p.id, eventSource: p.event_source, eventId: p.event_id },
+          refs: {
+            proposalId: p.id,
+            eventSource: p.event_source,
+            eventId: p.event_id,
+          },
         }),
         dedupeKey: `${KIND_DECISION_NEEDED}:${p.id}`,
       });
@@ -177,12 +205,18 @@ export function pendingNotifications(db, { now = Date.now() } = {}) {
  *
  * @returns {Promise<{ ok: boolean, exitCode: number|null, error: string|null }>}
  */
-export function sendNotification(command, message, { timeoutMs = NOTIFY_TIMEOUT_MS } = {}) {
+export function sendNotification(
+  command,
+  message,
+  { timeoutMs = NOTIFY_TIMEOUT_MS } = {},
+) {
   return new Promise((resolve) => {
     const argv = String(command).trim().split(/\s+/).filter(Boolean);
     let child;
     try {
-      child = spawn(argv[0], [...argv.slice(1), message], { stdio: ["ignore", "ignore", "ignore"] });
+      child = spawn(argv[0], [...argv.slice(1), message], {
+        stdio: ["ignore", "ignore", "ignore"],
+      });
     } catch (err) {
       resolve({ ok: false, exitCode: null, error: err.message });
       return;
@@ -200,15 +234,24 @@ export function sendNotification(command, message, { timeoutMs = NOTIFY_TIMEOUT_
       } catch {
         // already gone
       }
-      settle({ ok: false, exitCode: null, error: `notifier timed out after ${timeoutMs}ms` });
+      settle({
+        ok: false,
+        exitCode: null,
+        error: `notifier timed out after ${timeoutMs}ms`,
+      });
     }, timeoutMs);
     timer.unref?.();
-    child.on("error", (err) => settle({ ok: false, exitCode: null, error: err.message }));
+    child.on("error", (err) =>
+      settle({ ok: false, exitCode: null, error: err.message }),
+    );
     child.on("exit", (code, signal) => {
       settle({
         ok: code === 0,
         exitCode: code,
-        error: code === 0 ? null : `notifier exited ${code ?? `on signal ${signal}`}`,
+        error:
+          code === 0
+            ? null
+            : `notifier exited ${code ?? `on signal ${signal}`}`,
       });
     });
   });
@@ -225,14 +268,17 @@ export function sendNotification(command, message, { timeoutMs = NOTIFY_TIMEOUT_
  *
  * @returns {{ sent: Array<{kind, target, message}>, deliveries: Promise<Array> }}
  */
-export function notifyPending(db, {
-  now = Date.now(),
-  enabled = notifyEnabled(),
-  command = notifyCommand(),
-  log = () => {},
-  send = sendNotification,
-  webUrl = process.env.FACTORY_WEB_URL,
-} = {}) {
+export function notifyPending(
+  db,
+  {
+    now = Date.now(),
+    enabled = notifyEnabled(),
+    command = notifyCommand(),
+    log = () => {},
+    send = sendNotification,
+    webUrl = process.env.FACTORY_WEB_URL,
+  } = {},
+) {
   const pending = pendingNotifications(db, { now });
   const at = new Date(now).toISOString();
   const deliveries = [];
@@ -257,16 +303,20 @@ export function notifyPending(db, {
     sent.push(notification);
     log(`notify ${n.kind} ${n.target}: ${n.title}`);
     deliveries.push(
-      deliverInboxItem(db, created.id, { command, send, webUrl, now }).then((outcome) => {
-        try {
-          db.query(`UPDATE notify_log SET exit_code = ?, error = ? WHERE kind = ? AND target = ?`)
-            .run(outcome.exitCode, outcome.error, dedupKind, n.target);
-        } catch {
-          // db already closed (shutdown mid-delivery) — the log line below is the record
-        }
-        if (!outcome.ok) log(`notify ${n.kind} ${n.target} failed: ${outcome.error}`);
-        return { ...notification, ...outcome };
-      }),
+      deliverInboxItem(db, created.id, { command, send, webUrl, now }).then(
+        (outcome) => {
+          try {
+            db.query(
+              `UPDATE notify_log SET exit_code = ?, error = ? WHERE kind = ? AND target = ?`,
+            ).run(outcome.exitCode, outcome.error, dedupKind, n.target);
+          } catch {
+            // db already closed (shutdown mid-delivery) — the log line below is the record
+          }
+          if (!outcome.ok)
+            log(`notify ${n.kind} ${n.target} failed: ${outcome.error}`);
+          return { ...notification, ...outcome };
+        },
+      ),
     );
   }
   return { sent, deliveries: Promise.all(deliveries) };

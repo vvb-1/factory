@@ -2,7 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { retriggerEnvelope } from "../templates";
-import { keyGuard, refetchIntervals, tableTokens, useDisplayOptions, useListKeys, useNow, useRequeuePoll, useTabKeys, useTableWindow } from "../hooks";
+import {
+  keyGuard,
+  refetchIntervals,
+  tableTokens,
+  useDisplayOptions,
+  useListKeys,
+  useNow,
+  useRequeuePoll,
+  useTabKeys,
+  useTableWindow,
+} from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   buildSections,
@@ -19,7 +29,12 @@ import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { CustomCell } from "../components/CustomCell";
 import { setContextActions } from "../palette";
 import { ScopeCaption } from "../components/ContextTabs";
-import type { AdmittedEvent, EventFocus, Proposal, RunListItem } from "../types";
+import type {
+  AdmittedEvent,
+  EventFocus,
+  Proposal,
+  RunListItem,
+} from "../types";
 import type { OperatorContext } from "../context";
 import { matchesRepo } from "../context";
 import {
@@ -30,7 +45,11 @@ import {
   type FilterToken,
 } from "../filterQuery";
 import { humanizeReason } from "../reasons";
-import { ReasonText, TicketDecisionsPanel, eventTicket } from "../components/RunDetailBlocks";
+import {
+  ReasonText,
+  TicketDecisionsPanel,
+  eventTicket,
+} from "../components/RunDetailBlocks";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import {
   Ago,
@@ -58,7 +77,10 @@ import {
   shortId,
 } from "../components/ui";
 
-function removeTokensFromQuery(filter: string, tokens: readonly FilterToken[]): string {
+function removeTokensFromQuery(
+  filter: string,
+  tokens: readonly FilterToken[],
+): string {
   const ordered = [...tokens].sort((a, b) => a.start - b.start);
   let cursor = 0;
   let next = "";
@@ -103,7 +125,9 @@ function FacetChoice({
     >
       <span className="min-w-0 truncate">{value}</span>
       {count > 0 && (
-        <span className={`${mono ? "font-sans" : ""} ml-1.5 shrink-0 tabular-nums text-(--text-faint)`}>
+        <span
+          className={`${mono ? "font-sans" : ""} ml-1.5 shrink-0 tabular-nums text-(--text-faint)`}
+        >
           {count}
         </span>
       )}
@@ -111,7 +135,15 @@ function FacetChoice({
   );
 }
 
-function FacetOverflow({ children, count, label }: { children: React.ReactNode; count: number; label: string }) {
+function FacetOverflow({
+  children,
+  count,
+  label,
+}: {
+  children: React.ReactNode;
+  count: number;
+  label: string;
+}) {
   if (count === 0) return null;
   return (
     <details className="relative shrink-0">
@@ -128,7 +160,11 @@ function FacetOverflow({ children, count, label }: { children: React.ReactNode; 
   );
 }
 
-function toggleFacetInQuery(filter: string, key: "type" | "source", value: string): string {
+function toggleFacetInQuery(
+  filter: string,
+  key: "type" | "source",
+  value: string,
+): string {
   const parsed = parseFilterQuery(filter, EVENT_FACETS);
   const existingTokens = parsed.tokens.filter(
     (t): t is Extract<FilterToken, { kind: "field" }> =>
@@ -150,7 +186,11 @@ function toggleFacetInQuery(filter: string, key: "type" | "source", value: strin
   return next ? `${next} ${addition}` : addition;
 }
 
-function setFacetInQuery(filter: string, key: "type" | "source", value: string): string {
+function setFacetInQuery(
+  filter: string,
+  key: "type" | "source",
+  value: string,
+): string {
   const parsed = parseFilterQuery(filter, EVENT_FACETS);
   const existingTokens = parsed.tokens.filter(
     (t): t is Extract<FilterToken, { kind: "field" }> =>
@@ -161,11 +201,21 @@ function setFacetInQuery(filter: string, key: "type" | "source", value: string):
   return next ? `${next} ${addition}` : addition;
 }
 
-const STATUS_TABS = ["all", "admitted", "planned", "noop", "human_needed", "dead_lettered"] as const;
+const STATUS_TABS = [
+  "all",
+  "admitted",
+  "planned",
+  "noop",
+  "human_needed",
+  "dead_lettered",
+] as const;
 type StatusTab = (typeof STATUS_TABS)[number];
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable=true]"));
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable=true]"))
+  );
 }
 
 /** Only these two statuses may be requeued (planner.mjs requeueEvent). */
@@ -204,9 +254,15 @@ export function decisionOf(
   // `ticket_dispatch_already_live`); only a run planned from this very event
   // makes the event's decision `refused`.
   const run = e.runId ? runsById.get(e.runId) : undefined;
-  if (run?.state === "REFUSED" && run.eventSource === e.source && run.eventId === e.eventId)
+  if (
+    run?.state === "REFUSED" &&
+    run.eventSource === e.source &&
+    run.eventId === e.eventId
+  )
     return { outcome: "refused", status: null, reason: run.reasonCode };
-  const proposal = (e.proposalId ? proposalsById.get(e.proposalId) : undefined) ?? proposalsByEvent.get(keyOf(e));
+  const proposal =
+    (e.proposalId ? proposalsById.get(e.proposalId) : undefined) ??
+    proposalsByEvent.get(keyOf(e));
   if (proposal) {
     return {
       outcome: proposal.decision === "run" ? "planned" : proposal.decision,
@@ -214,7 +270,8 @@ export function decisionOf(
       reason: proposal.reason,
     };
   }
-  if (e.lastPlanError) return { outcome: e.status, status: null, reason: e.lastPlanError };
+  if (e.lastPlanError)
+    return { outcome: e.status, status: null, reason: e.lastPlanError };
   return null;
 }
 
@@ -222,7 +279,10 @@ export function decisionOf(
 export function decisionText(d: EventDecision | null): string {
   if (!d) return "";
   const reason = humanizeReason(d.reason).text;
-  const status = d.outcome === "planned" && d.status && d.status !== "approved" ? ` (${d.status})` : "";
+  const status =
+    d.outcome === "planned" && d.status && d.status !== "approved"
+      ? ` (${d.status})`
+      : "";
   return `${d.outcome}${status}${reason ? ` · ${reason}` : ""}`;
 }
 
@@ -231,10 +291,17 @@ function isStatusTab(value: string | undefined): value is StatusTab {
 }
 
 /** The list badge can also read `refused` — an event whose planned run the gate turned away. */
-const LIST_STATUS_HUES: Record<string, string> = { ...EVENT_STATUS_HUES, refused: "var(--hue-warn)" };
+const LIST_STATUS_HUES: Record<string, string> = {
+  ...EVENT_STATUS_HUES,
+  refused: "var(--hue-warn)",
+};
 
 const rowWash = (s: string) =>
-  s === "dead_lettered" ? "row-wash-err" : s === "human_needed" ? "row-wash-warn" : "";
+  s === "dead_lettered"
+    ? "row-wash-err"
+    : s === "human_needed"
+      ? "row-wash-warn"
+      : "";
 
 /**
  * Grouping/ordering/columns (OPS-493) — one config across every status tab:
@@ -260,11 +327,32 @@ const EVENTS_DISPLAY: DisplayConfig<AdmittedEvent> = {
     { key: "event", label: "Event", get: (e) => e.eventId, column: "event" },
     { key: "source", label: "Source", get: (e) => e.source, column: "source" },
     { key: "type", label: "Type", get: (e) => e.type, column: "type" },
-    { key: "subject", label: "Subject", get: (e) => e.subject ?? "", column: "subject" },
+    {
+      key: "subject",
+      label: "Subject",
+      get: (e) => e.subject ?? "",
+      column: "subject",
+    },
     { key: "status", label: "Status", get: (e) => e.status, column: "status" },
-    { key: "admitted", label: "Admitted", get: (e) => e.admittedAt, defaultDir: "desc", column: "admitted" },
-    { key: "occurred", label: "Occurred", get: (e) => e.occurredAt, defaultDir: "desc" },
-    { key: "received", label: "Received", get: (e) => e.receivedAt, defaultDir: "desc" },
+    {
+      key: "admitted",
+      label: "Admitted",
+      get: (e) => e.admittedAt,
+      defaultDir: "desc",
+      column: "admitted",
+    },
+    {
+      key: "occurred",
+      label: "Occurred",
+      get: (e) => e.occurredAt,
+      defaultDir: "desc",
+    },
+    {
+      key: "received",
+      label: "Received",
+      get: (e) => e.receivedAt,
+      defaultDir: "desc",
+    },
   ],
   columns: [
     { key: "event", label: "Event", always: true },
@@ -313,8 +401,12 @@ export function Events({
   const now = useNow();
   const queryClient = useQueryClient();
   const pollRequeue = useRequeuePoll(onJumpProposal);
-  const [tab, setTab] = useState<StatusTab>(isStatusTab(focusEvent?.status) ? focusEvent.status : "all");
-  const [filter, setFilter] = useState(focusEvent?.type ? `type:${focusEvent.type}` : "");
+  const [tab, setTab] = useState<StatusTab>(
+    isStatusTab(focusEvent?.status) ? focusEvent.status : "all",
+  );
+  const [filter, setFilter] = useState(
+    focusEvent?.type ? `type:${focusEvent.type}` : "",
+  );
   const [confirmReplay, setConfirmReplay] = useState(false);
 
   const fetchAll = context.kind === "repo";
@@ -323,7 +415,11 @@ export function Events({
     queryFn: () => api.events(fetchAll || tab === "all" ? undefined : tab),
     ...refetchIntervals.primary,
   });
-  const statusQ = useQuery({ queryKey: ["status"], queryFn: api.status, ...refetchIntervals.fast });
+  const statusQ = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    ...refetchIntervals.fast,
+  });
   // The reason behind a noop / refused row lives on the proposal and the run,
   // not the event (WM-594); both lists are already cached by other views.
   const proposalsQ = useQuery({
@@ -331,7 +427,11 @@ export function Events({
     queryFn: () => api.proposalHistory("all"),
     ...refetchIntervals.secondary,
   });
-  const runsQ = useQuery({ queryKey: ["runs", "ALL"], queryFn: () => api.runs(), ...refetchIntervals.secondary });
+  const runsQ = useQuery({
+    queryKey: ["runs", "ALL"],
+    queryFn: () => api.runs(),
+    ...refetchIntervals.secondary,
+  });
   const decisions = useMemo(() => {
     const byId = new Map<string, Proposal>();
     const byEvent = new Map<string, Proposal>();
@@ -345,19 +445,29 @@ export function Events({
     for (const r of runsQ.data?.runs ?? []) runsById.set(r.runId, r);
     return { byId, byEvent, runsById };
   }, [proposalsQ.data, runsQ.data]);
-  const decisionFor = (e: AdmittedEvent) => decisionOf(e, decisions.byId, decisions.byEvent, decisions.runsById);
+  const decisionFor = (e: AdmittedEvent) =>
+    decisionOf(e, decisions.byId, decisions.byEvent, decisions.runsById);
   const rows: EventFilterRow[] = useMemo(
     () =>
       (list.data?.events ?? []).map((e) => {
-        const d = decisionOf(e, decisions.byId, decisions.byEvent, decisions.runsById);
+        const d = decisionOf(
+          e,
+          decisions.byId,
+          decisions.byEvent,
+          decisions.runsById,
+        );
         return d?.reason ? { ...e, decisionReason: d.reason } : e;
       }),
     [list.data, decisions],
   );
   const scoped = useMemo(() => {
     const focusKey =
-      focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
-    return rows.filter((e) => keyOf(e) === focusKey || matchesRepo(e.repos, context));
+      focusEvent?.source && focusEvent?.eventId
+        ? `${focusEvent.source}:${focusEvent.eventId}`
+        : null;
+    return rows.filter(
+      (e) => keyOf(e) === focusKey || matchesRepo(e.repos, context),
+    );
   }, [rows, context, focusEvent?.source, focusEvent?.eventId]);
 
   const tabScoped = useMemo(() => {
@@ -386,19 +496,24 @@ export function Events({
   const types = useMemo(
     () =>
       Object.keys(typeCounts).sort(
-        (a, b) => (typeCounts[b] ?? 0) - (typeCounts[a] ?? 0) || a.localeCompare(b),
+        (a, b) =>
+          (typeCounts[b] ?? 0) - (typeCounts[a] ?? 0) || a.localeCompare(b),
       ),
     [typeCounts],
   );
   const sources = useMemo(
     () =>
       Object.keys(sourceCounts).sort(
-        (a, b) => (sourceCounts[b] ?? 0) - (sourceCounts[a] ?? 0) || a.localeCompare(b),
+        (a, b) =>
+          (sourceCounts[b] ?? 0) - (sourceCounts[a] ?? 0) || a.localeCompare(b),
       ),
     [sourceCounts],
   );
 
-  const parsed = useMemo(() => parseFilterQuery(filter, EVENT_FACETS), [filter]);
+  const parsed = useMemo(
+    () => parseFilterQuery(filter, EVENT_FACETS),
+    [filter],
+  );
 
   // `reason:` value suggestions come from the reasons actually in the loaded
   // set (head code only, most frequent first) — the vocabulary is the planner's.
@@ -414,13 +529,19 @@ export function Events({
     const reasons = [...counts.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([r]) => r);
-    return { ...EVENT_FACETS, values: { ...EVENT_FACETS.values, reason: reasons } };
+    return {
+      ...EVENT_FACETS,
+      values: { ...EVENT_FACETS.values, reason: reasons },
+    };
   }, [tabScoped]);
 
   const activeTypes = useMemo(() => {
     return new Set(
       parsed.tokens
-        .filter((t): t is Extract<FilterToken, { kind: "field" }> => t.kind === "field" && t.key === "type")
+        .filter(
+          (t): t is Extract<FilterToken, { kind: "field" }> =>
+            t.kind === "field" && t.key === "type",
+        )
         .map((t) => t.value.toLowerCase()),
     );
   }, [parsed.tokens]);
@@ -428,7 +549,10 @@ export function Events({
   const activeSources = useMemo(() => {
     return new Set(
       parsed.tokens
-        .filter((t): t is Extract<FilterToken, { kind: "field" }> => t.kind === "field" && t.key === "source")
+        .filter(
+          (t): t is Extract<FilterToken, { kind: "field" }> =>
+            t.kind === "field" && t.key === "source",
+        )
         .map((t) => t.value.toLowerCase()),
     );
   }, [parsed.tokens]);
@@ -450,7 +574,9 @@ export function Events({
         ? EVENTS_DISPLAY
         : {
             ...EVENTS_DISPLAY,
-            groups: EVENTS_DISPLAY.groups.map((g) => (g.key === "status" ? { ...g, order: [tab] } : g)),
+            groups: EVENTS_DISPLAY.groups.map((g) =>
+              g.key === "status" ? { ...g, order: [tab] } : g,
+            ),
           },
     [tab],
   );
@@ -466,7 +592,9 @@ export function Events({
   const cols = visibleColumns(displayConfig, display);
 
   const selectedKey =
-    focusEvent?.source && focusEvent?.eventId ? `${focusEvent.source}:${focusEvent.eventId}` : null;
+    focusEvent?.source && focusEvent?.eventId
+      ? `${focusEvent.source}:${focusEvent.eventId}`
+      : null;
   // Keyboard index walks the open sections; the detail pane keys off the row
   // itself so collapsing the group under a selection never closes the pane.
   const selectedIndex = useMemo(
@@ -481,26 +609,34 @@ export function Events({
     JSON.stringify([tab, filter, context, display]),
   );
   const sel = useMemo(
-    () => (selectedKey ? (visible.find((e) => keyOf(e) === selectedKey) ?? null) : null),
+    () =>
+      selectedKey
+        ? (visible.find((e) => keyOf(e) === selectedKey) ?? null)
+        : null,
     [visible, selectedKey],
   );
   // The detail pane leaves a compact triage list. Keep the columns needed to
   // identify and compare events; the complete row remains in Display when the
   // pane closes, and every field remains available in the pane itself.
   const listCols = sel
-    ? cols.filter((c) => ["event", "type", "subject", "status", "admitted"].includes(c.key))
+    ? cols.filter((c) =>
+        ["event", "type", "subject", "status", "admitted"].includes(c.key),
+      )
     : cols;
   const show = useMemo(() => new Set(listCols.map((c) => c.key)), [listCols]);
 
   useEffect(() => {
-    document.querySelector("tr.row-selected")?.scrollIntoView({ block: "nearest" });
+    document
+      .querySelector("tr.row-selected")
+      ?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex, windowStart]);
 
   // Ephemeral Overview/Graph jumps: apply tab/type then drop them so the hash
   // (if any) is the only remaining selection source.
   useEffect(() => {
     if (!focusEvent) return;
-    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status) setTab(focusEvent.status);
+    if (isStatusTab(focusEvent.status) && tab !== focusEvent.status)
+      setTab(focusEvent.status);
     if (focusEvent.type) {
       setFilter((cur) => setFacetInQuery(cur, "type", focusEvent.type!));
     }
@@ -544,7 +680,12 @@ export function Events({
     const emptyFilters = {
       filter: "",
     };
-    const decision = decideRevealFilters(latch.snapshot, currentFilters, emptyFilters, isVisible);
+    const decision = decideRevealFilters(
+      latch.snapshot,
+      currentFilters,
+      emptyFilters,
+      isVisible,
+    );
     if (decision.cleared) {
       if (decision.clearedFields.includes("filter")) {
         setFilter(decision.next.filter);
@@ -600,7 +741,16 @@ export function Events({
       setTab("all");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusEvent?.source, focusEvent?.eventId, focusEvent?.status, rows, tab, fetchAll, list.isPending, list.data]);
+  }, [
+    focusEvent?.source,
+    focusEvent?.eventId,
+    focusEvent?.status,
+    rows,
+    tab,
+    fetchAll,
+    list.isPending,
+    list.data,
+  ]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["events"] });
@@ -623,7 +773,12 @@ export function Events({
     onSuccess: (data) => {
       queryClient.invalidateQueries();
       setConfirmReplay(false);
-      notify(data.duplicate ? `Duplicate event ${data.eventId}` : `Replayed event ${data.eventId}`, "info");
+      notify(
+        data.duplicate
+          ? `Duplicate event ${data.eventId}`
+          : `Replayed event ${data.eventId}`,
+        "info",
+      );
     },
   });
 
@@ -677,7 +832,11 @@ export function Events({
         pendingC.current = Date.now();
       },
       l: () => {
-        if (sel && pendingC.current > 0 && Date.now() - pendingC.current < 800) {
+        if (
+          sel &&
+          pendingC.current > 0 &&
+          Date.now() - pendingC.current < 800
+        ) {
           copyLink();
           pendingC.current = 0;
         }
@@ -692,14 +851,28 @@ export function Events({
     } else {
       setContextActions([
         ...(canRequeue
-          ? [{ label: `Requeue ${sel.eventId} (re-plan admitted event)`, hint: "q", run: () => requeue.mutate(sel) }]
+          ? [
+              {
+                label: `Requeue ${sel.eventId} (re-plan admitted event)`,
+                hint: "q",
+                run: () => requeue.mutate(sel),
+              },
+            ]
           : []),
-        { label: `Replay ${sel.eventId} through intake…`, run: () => setConfirmReplay(true) },
+        {
+          label: `Replay ${sel.eventId} through intake…`,
+          run: () => setConfirmReplay(true),
+        },
         {
           label: `Trigger ${sel.type} again (new event id)…`,
-          run: () => onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now())),
+          run: () =>
+            onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now())),
         },
-        { label: `Copy ${sel.eventId}`, hint: "c", run: () => copyText(sel.eventId, "event id") },
+        {
+          label: `Copy ${sel.eventId}`,
+          hint: "c",
+          run: () => copyText(sel.eventId, "event id"),
+        },
         { label: "Copy link to this event", hint: "c l", run: copyLink },
       ]);
     }
@@ -722,7 +895,10 @@ export function Events({
     const sorted = sortRows(visible, displayConfig, display);
     const dateStr = new Date().toISOString().slice(0, 10);
     exportJson(`events-export-${dateStr}.json`, sorted);
-    notify(`Exported ${sorted.length} event${sorted.length === 1 ? "" : "s"} to JSON`, "info");
+    notify(
+      `Exported ${sorted.length} event${sorted.length === 1 ? "" : "s"} to JSON`,
+      "info",
+    );
   };
 
   return (
@@ -730,150 +906,211 @@ export function Events({
       <ListPane
         chrome={
           <>
-        <h1 className="display mb-4 text-lg font-semibold">Events</h1>
-        {context.kind === "inflight" && <ScopeCaption context={context} surface="fleet" />}
-        {context.kind === "repo" && (
-          <p className="mb-3 text-[11px] text-(--text-faint)">
-            Scoped to <span className="mono">{context.name}</span> — only rows naming this repo.
-          </p>
-        )}
+            <h1 className="display mb-4 text-lg font-semibold">Events</h1>
+            {context.kind === "inflight" && (
+              <ScopeCaption context={context} surface="fleet" />
+            )}
+            {context.kind === "repo" && (
+              <p className="mb-3 text-[11px] text-(--text-faint)">
+                Scoped to <span className="mono">{context.name}</span> — only
+                rows naming this repo.
+              </p>
+            )}
 
-        <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Event status">
-          {STATUS_TABS.map((t, idx) => {
-            const count = tabCount(t);
-            return (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => selectTab(t)}
-                title={t}
-                className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                  tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"
-                }`}
-              >
-                {TAB_LABEL[t]}
-                {count > 0 && <span className="ml-1.5 tabular-nums text-(--text-faint)">{count}</span>}
-                <span aria-hidden="true" className="mono ml-1 text-(--text-faint) text-[10px] opacity-70">
-                  {idx + 1}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+            <div
+              className="mb-3 flex flex-wrap gap-1"
+              role="tablist"
+              aria-label="Event status"
+            >
+              {STATUS_TABS.map((t, idx) => {
+                const count = tabCount(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t}
+                    onClick={() => selectTab(t)}
+                    title={t}
+                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                      tab === t
+                        ? "bg-(--surface-3) text-(--text)"
+                        : "text-(--text-faint) hover:bg-(--surface-1)"
+                    }`}
+                  >
+                    {TAB_LABEL[t]}
+                    {count > 0 && (
+                      <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                        {count}
+                      </span>
+                    )}
+                    <span
+                      aria-hidden="true"
+                      className="mono ml-1 text-(--text-faint) text-[10px] opacity-70"
+                    >
+                      {idx + 1}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-        {(types.length > 1 || sources.length > 1) && (
-          <div className="mb-2 flex min-w-0 items-center gap-x-4 whitespace-nowrap text-[11px]">
-            {types.length > 1 && (
-              <div className="flex min-w-0 flex-1 items-center gap-1.5" role="group" aria-label="Event types">
-                <span className="shrink-0 text-[11px] font-medium text-(--text-dim)">Type:</span>
-                {types.slice(0, FACET_PREVIEW_LIMIT).map((t) => {
-                  const isPressed = activeTypes.has(t.toLowerCase());
-                  return (
-                    <FacetChoice
-                      key={t}
-                      value={t}
-                      count={typeCounts[t] ?? 0}
-                      active={isPressed}
-                      onClick={() => {
-                        setFilter((cur) => toggleFacetInQuery(cur, "type", t));
-                        onSelectType(isPressed ? null : t);
-                      }}
-                    />
-                  );
-                })}
-                <FacetOverflow count={Math.max(0, types.length - FACET_PREVIEW_LIMIT)} label="event types">
-                  {types.slice(FACET_PREVIEW_LIMIT).map((t) => {
-                    const isPressed = activeTypes.has(t.toLowerCase());
-                    return (
+            {(types.length > 1 || sources.length > 1) && (
+              <div className="mb-2 flex min-w-0 items-center gap-x-4 whitespace-nowrap text-[11px]">
+                {types.length > 1 && (
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-1.5"
+                    role="group"
+                    aria-label="Event types"
+                  >
+                    <span className="shrink-0 text-[11px] font-medium text-(--text-dim)">
+                      Type:
+                    </span>
+                    {types.slice(0, FACET_PREVIEW_LIMIT).map((t) => {
+                      const isPressed = activeTypes.has(t.toLowerCase());
+                      return (
+                        <FacetChoice
+                          key={t}
+                          value={t}
+                          count={typeCounts[t] ?? 0}
+                          active={isPressed}
+                          onClick={() => {
+                            setFilter((cur) =>
+                              toggleFacetInQuery(cur, "type", t),
+                            );
+                            onSelectType(isPressed ? null : t);
+                          }}
+                        />
+                      );
+                    })}
+                    <FacetOverflow
+                      count={Math.max(0, types.length - FACET_PREVIEW_LIMIT)}
+                      label="event types"
+                    >
+                      {types.slice(FACET_PREVIEW_LIMIT).map((t) => {
+                        const isPressed = activeTypes.has(t.toLowerCase());
+                        return (
+                          <FacetChoice
+                            key={t}
+                            value={t}
+                            count={typeCounts[t] ?? 0}
+                            active={isPressed}
+                            onClick={() => {
+                              setFilter((cur) =>
+                                toggleFacetInQuery(cur, "type", t),
+                              );
+                              onSelectType(isPressed ? null : t);
+                            }}
+                          />
+                        );
+                      })}
+                    </FacetOverflow>
+                  </div>
+                )}
+                {sources.length > 1 && (
+                  <div
+                    className="flex min-w-0 flex-1 items-center gap-1.5"
+                    role="group"
+                    aria-label="Event sources"
+                  >
+                    <span className="shrink-0 text-[11px] font-medium text-(--text-dim)">
+                      Source:
+                    </span>
+                    {sources.slice(0, FACET_PREVIEW_LIMIT).map((s) => (
                       <FacetChoice
-                        key={t}
-                        value={t}
-                        count={typeCounts[t] ?? 0}
-                        active={isPressed}
-                        onClick={() => {
-                          setFilter((cur) => toggleFacetInQuery(cur, "type", t));
-                          onSelectType(isPressed ? null : t);
-                        }}
+                        key={s}
+                        value={s}
+                        count={sourceCounts[s] ?? 0}
+                        active={activeSources.has(s.toLowerCase())}
+                        mono
+                        onClick={() =>
+                          setFilter((cur) =>
+                            toggleFacetInQuery(cur, "source", s),
+                          )
+                        }
                       />
-                    );
-                  })}
-                </FacetOverflow>
+                    ))}
+                    <FacetOverflow
+                      count={Math.max(0, sources.length - FACET_PREVIEW_LIMIT)}
+                      label="event sources"
+                    >
+                      {sources.slice(FACET_PREVIEW_LIMIT).map((s) => (
+                        <FacetChoice
+                          key={s}
+                          value={s}
+                          count={sourceCounts[s] ?? 0}
+                          active={activeSources.has(s.toLowerCase())}
+                          mono
+                          onClick={() =>
+                            setFilter((cur) =>
+                              toggleFacetInQuery(cur, "source", s),
+                            )
+                          }
+                        />
+                      ))}
+                    </FacetOverflow>
+                  </div>
+                )}
               </div>
             )}
-            {sources.length > 1 && (
-              <div className="flex min-w-0 flex-1 items-center gap-1.5" role="group" aria-label="Event sources">
-                <span className="shrink-0 text-[11px] font-medium text-(--text-dim)">Source:</span>
-                {sources.slice(0, FACET_PREVIEW_LIMIT).map((s) => (
-                  <FacetChoice
-                    key={s}
-                    value={s}
-                    count={sourceCounts[s] ?? 0}
-                    active={activeSources.has(s.toLowerCase())}
-                    mono
-                    onClick={() => setFilter((cur) => toggleFacetInQuery(cur, "source", s))}
-                  />
-                ))}
-                <FacetOverflow count={Math.max(0, sources.length - FACET_PREVIEW_LIMIT)} label="event sources">
-                  {sources.slice(FACET_PREVIEW_LIMIT).map((s) => (
-                    <FacetChoice
-                      key={s}
-                      value={s}
-                      count={sourceCounts[s] ?? 0}
-                      active={activeSources.has(s.toLowerCase())}
-                      mono
-                      onClick={() => setFilter((cur) => toggleFacetInQuery(cur, "source", s))}
-                    />
-                  ))}
-                </FacetOverflow>
-              </div>
-            )}
-          </div>
-        )}
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="ml-auto">
-            <DisplayOptions
-              config={displayConfig}
-              state={display}
-              onChange={setDisplay}
-              onExport={visible.length > 0 ? handleExport : undefined}
-              rows={scoped}
-            />
-          </span>
-          {/* Last in the row: the token chips are a full-width item, so anything
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="ml-auto">
+                <DisplayOptions
+                  config={displayConfig}
+                  state={display}
+                  onChange={setDisplay}
+                  onExport={visible.length > 0 ? handleExport : undefined}
+                  rows={scoped}
+                />
+              </span>
+              {/* Last in the row: the token chips are a full-width item, so anything
               after the filter box would be pushed onto a third line the moment
               a chip appeared. */}
-          <FilterInput
-            value={filter}
-            onChange={setFilter}
-            placeholder="source:… type:… reason:… is:stale"
-            label="Filter events"
-            query={parsed}
-            facets={facets}
-          />
-        </div>
+              <FilterInput
+                value={filter}
+                onChange={setFilter}
+                placeholder="source:… type:… reason:… is:stale"
+                label="Filter events"
+                query={parsed}
+                facets={facets}
+              />
+            </div>
           </>
         }
       >
-
         <table className="w-full table-fixed border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-[11px] text-(--text-faint)">
               {listCols.map((c) => {
-                const sort = displayConfig.sorts.find((s) => s.column === c.key);
+                const sort = displayConfig.sorts.find(
+                  (s) => s.column === c.key,
+                );
                 const isCustom = c.isCustom || c.key.startsWith("custom:");
                 const customPath = c.key.replace(/^custom:/, "");
-                const isCurrentSort = isCustom ? display.sortBy === c.key : (sort && display.sortBy === sort.key);
+                const isCurrentSort = isCustom
+                  ? display.sortBy === c.key
+                  : sort && display.sortBy === sort.key;
                 return (
                   <Th
                     key={c.key}
                     label={c.label}
                     dir={isCurrentSort ? display.sortDir : null}
                     naturalDir={sort?.defaultDir ?? "asc"}
-                    onSort={sort || isCustom ? () => setDisplay((s) => cycleColumnSort(displayConfig, s, c.key)) : undefined}
-                    onRemove={isCustom ? () => setDisplay((s) => removeCustomColumn(s, customPath)) : undefined}
+                    onSort={
+                      sort || isCustom
+                        ? () =>
+                            setDisplay((s) =>
+                              cycleColumnSort(displayConfig, s, c.key),
+                            )
+                        : undefined
+                    }
+                    onRemove={
+                      isCustom
+                        ? () =>
+                            setDisplay((s) => removeCustomColumn(s, customPath))
+                        : undefined
+                    }
                   />
                 );
               })}
@@ -892,21 +1129,33 @@ export function Events({
                     aria-selected={isSelected}
                     className={`cursor-pointer hover:bg-(--surface-1) ${rowWash(e.status)} ${isSelected ? "row-selected" : ""}`}
                   >
-                    <td className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap" title={e.eventId}>
+                    <td
+                      className="mono max-w-28 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap"
+                      title={e.eventId}
+                    >
                       {shortId(e.eventId)}
                     </td>
                     {show.has("source") && (
-                      <td className="mono max-w-24 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)" title={e.source}>
+                      <td
+                        className="mono max-w-24 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
+                        title={e.source}
+                      >
                         {e.source}
                       </td>
                     )}
                     {show.has("type") && (
-                      <td className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)" title={e.type}>
+                      <td
+                        className="max-w-44 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)"
+                        title={e.type}
+                      >
                         {e.type}
                       </td>
                     )}
                     {show.has("subject") && (
-                      <td className="max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)" title={e.subject ?? undefined}>
+                      <td
+                        className="max-w-36 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-faint)"
+                        title={e.subject ?? undefined}
+                      >
                         {e.subject ?? "-"}
                       </td>
                     )}
@@ -922,23 +1171,32 @@ export function Events({
                             className="flex shrink-0 items-center"
                             title={
                               decisionTitle
-                                ? decision?.reason && decision.reason !== decisionTitle
+                                ? decision?.reason &&
+                                  decision.reason !== decisionTitle
                                   ? `${decisionTitle}\n${decision.reason}`
                                   : decisionTitle
                                 : undefined
                             }
                             data-decision={decision?.outcome ?? undefined}
                           >
-                            <StateBadge state={e.status} hues={EVENT_STATUS_HUES} />
+                            <StateBadge
+                              state={e.status}
+                              hues={EVENT_STATUS_HUES}
+                            />
                             {decision?.outcome === "refused" && (
                               <span className="ml-1.5">
-                                <StateBadge state="refused" hues={LIST_STATUS_HUES} dot={false} />
+                                <StateBadge
+                                  state="refused"
+                                  hues={LIST_STATUS_HUES}
+                                  dot={false}
+                                />
                               </span>
                             )}
                           </span>
                           {e.planFailures > 0 && (
                             <span className="shrink-0 text-[11px] text-(--hue-err)">
-                              {e.planFailures} failure{e.planFailures === 1 ? "" : "s"}
+                              {e.planFailures} failure
+                              {e.planFailures === 1 ? "" : "s"}
                             </span>
                           )}
                           {e.lastPlanError && (
@@ -954,9 +1212,15 @@ export function Events({
                         <Ago iso={e.admittedAt} now={now} />
                       </td>
                     )}
-                    {listCols.filter((c) => c.isCustom || c.key.startsWith("custom:")).map((c) => (
-                      <CustomCell key={c.key} row={e} path={c.key.replace(/^custom:/, "")} />
-                    ))}
+                    {listCols
+                      .filter((c) => c.isCustom || c.key.startsWith("custom:"))
+                      .map((c) => (
+                        <CustomCell
+                          key={c.key}
+                          row={e}
+                          path={c.key.replace(/^custom:/, "")}
+                        />
+                      ))}
                   </tr>
                 );
               };
@@ -969,7 +1233,9 @@ export function Events({
                     colSpan={listCols.length}
                     section={s}
                     collapsed={display.collapsed.includes(s.key)}
-                    onToggle={() => setDisplay((st) => toggleCollapsed(st, s.key))}
+                    onToggle={() =>
+                      setDisplay((st) => toggleCollapsed(st, s.key))
+                    }
                     sub={sub}
                   />
                 );
@@ -998,8 +1264,8 @@ export function Events({
                   context.kind === "repo"
                     ? `No events for ${context.name}.`
                     : tab === "all"
-                    ? "No events."
-                    : `No ${TAB_LABEL[tab].toLowerCase()} events.`
+                      ? "No events."
+                      : `No ${TAB_LABEL[tab].toLowerCase()} events.`
                 }
                 escHint={Boolean(filter.trim())}
                 action={
@@ -1017,7 +1283,10 @@ export function Events({
         <DetailPane
           widthClass="w-[440px]"
           title={
-            <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal">
+            <nav
+              aria-label="Breadcrumb"
+              className="flex min-w-0 items-center gap-1.5 text-[13px] font-normal"
+            >
               <button
                 type="button"
                 onClick={() => onSelectEvent(null)}
@@ -1029,7 +1298,10 @@ export function Events({
               <span className="text-(--text-faint)" aria-hidden="true">
                 /
               </span>
-              <span className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)" aria-current="page">
+              <span
+                className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)"
+                aria-current="page"
+              >
                 <StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />
                 <span className="truncate mono" title={sel.eventId}>
                   {shortId(sel.eventId)}
@@ -1045,23 +1317,39 @@ export function Events({
                   disabled={!connected || requeue.isPending}
                   onClick={() => requeue.mutate(sel)}
                 >
-                  Requeue <span className="mono ml-1 text-(--text-faint)" aria-hidden="true">q</span>
+                  Requeue{" "}
+                  <span
+                    className="mono ml-1 text-(--text-faint)"
+                    aria-hidden="true"
+                  >
+                    q
+                  </span>
                 </Button>
               )}
               <div className="flex items-center gap-1.5">
                 {onJumpChain && (
                   <Button
-                    onClick={() => onJumpChain(sel.correlationId ?? sel.eventId, `event:${sel.source}:${sel.eventId}`)}
+                    onClick={() =>
+                      onJumpChain(
+                        sel.correlationId ?? sel.eventId,
+                        `event:${sel.source}:${sel.eventId}`,
+                      )
+                    }
                   >
                     View chain
                   </Button>
                 )}
-                <Button disabled={!connected || replay.isPending} onClick={() => setConfirmReplay(true)}>
+                <Button
+                  disabled={!connected || replay.isPending}
+                  onClick={() => setConfirmReplay(true)}
+                >
                   Replay…
                 </Button>
                 <Button
                   disabled={!connected}
-                  onClick={() => onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now()))}
+                  onClick={() =>
+                    onTriggerAgain(retriggerEnvelope(sel.envelope, Date.now()))
+                  }
                 >
                   Trigger again…
                 </Button>
@@ -1071,12 +1359,14 @@ export function Events({
           utility={<CopyActions id={sel.eventId} idLabel="event id" />}
           close={<Button onClick={() => onSelectEvent(null)}>Close</Button>}
         >
-
           <Section title="Event" icons>
             <KV k="source" v={sel.source} />
             <KV k="type" v={sel.type} />
             <KV k="subject" v={sel.subject} />
-            <KV k="status" v={<StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />} />
+            <KV
+              k="status"
+              v={<StateBadge state={sel.status} hues={EVENT_STATUS_HUES} />}
+            />
             {(() => {
               // Why the planner did what it did (WM-594): directly under status,
               // humanized, raw code in the tooltip, references as jump links.
@@ -1086,14 +1376,31 @@ export function Events({
                 <KV
                   k="decision"
                   v={
-                    <span className="flex min-w-0 flex-wrap items-baseline gap-1.5 whitespace-normal" data-testid="event-decision" title={d.reason ?? undefined}>
-                      <StateBadge state={d.outcome} hues={LIST_STATUS_HUES} dot={false} />
-                      {d.outcome === "planned" && d.status && d.status !== "approved" && (
-                        <span className="text-(--text-faint)">({d.status})</span>
-                      )}
+                    <span
+                      className="flex min-w-0 flex-wrap items-baseline gap-1.5 whitespace-normal"
+                      data-testid="event-decision"
+                      title={d.reason ?? undefined}
+                    >
+                      <StateBadge
+                        state={d.outcome}
+                        hues={LIST_STATUS_HUES}
+                        dot={false}
+                      />
+                      {d.outcome === "planned" &&
+                        d.status &&
+                        d.status !== "approved" && (
+                          <span className="text-(--text-faint)">
+                            ({d.status})
+                          </span>
+                        )}
                       {d.reason && (
                         <>
-                          <span className="text-(--text-faint)" aria-hidden="true">·</span>
+                          <span
+                            className="text-(--text-faint)"
+                            aria-hidden="true"
+                          >
+                            ·
+                          </span>
                           <ReasonText
                             code={d.reason}
                             onJumpRun={onJumpRun}
@@ -1111,7 +1418,10 @@ export function Events({
               k="correlationId"
               v={
                 sel.correlationId && onJumpChain ? (
-                  <JumpLink onClick={() => onJumpChain(sel.correlationId!)} title="Open chain trace">
+                  <JumpLink
+                    onClick={() => onJumpChain(sel.correlationId!)}
+                    title="Open chain trace"
+                  >
                     {sel.correlationId}
                   </JumpLink>
                 ) : (
@@ -1123,7 +1433,10 @@ export function Events({
               k="causationId"
               v={
                 sel.causationId ? (
-                  <JumpLink onClick={() => onJumpRun(sel.causationId!)} title="The run that emitted this event">
+                  <JumpLink
+                    onClick={() => onJumpRun(sel.causationId!)}
+                    title="The run that emitted this event"
+                  >
                     {shortId(sel.causationId)}
                   </JumpLink>
                 ) : null
@@ -1136,7 +1449,10 @@ export function Events({
               k="proposal"
               v={
                 sel.proposalId ? (
-                  <JumpLink onClick={() => onJumpProposal(sel.proposalId!)} title={sel.proposalId}>
+                  <JumpLink
+                    onClick={() => onJumpProposal(sel.proposalId!)}
+                    title={sel.proposalId}
+                  >
                     {shortId(sel.proposalId)}
                   </JumpLink>
                 ) : null
@@ -1146,7 +1462,10 @@ export function Events({
               k="run"
               v={
                 sel.runId ? (
-                  <JumpLink onClick={() => onJumpRun(sel.runId!)} title={sel.runId}>
+                  <JumpLink
+                    onClick={() => onJumpRun(sel.runId!)}
+                    title={sel.runId}
+                  >
                     {shortId(sel.runId)}
                   </JumpLink>
                 ) : null
@@ -1173,7 +1492,9 @@ export function Events({
             const hue = "var(--hue-err)";
             return (
               <Section title="Planning" icons>
-                {sel.planFailures > 0 && <KV k="planFailures" v={String(sel.planFailures)} />}
+                {sel.planFailures > 0 && (
+                  <KV k="planFailures" v={String(sel.planFailures)} />
+                )}
                 {err && (
                   <div
                     className="mt-1.5 rounded-md px-2.5 py-1.5 text-[12px]"
@@ -1200,7 +1521,10 @@ export function Events({
       )}
 
       {confirmReplay && sel && (
-        <Dialog title={`Replay ${sel.eventId} through intake?`} onClose={() => setConfirmReplay(false)}>
+        <Dialog
+          title={`Replay ${sel.eventId} through intake?`}
+          onClose={() => setConfirmReplay(false)}
+        >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             Replay re-injects this envelope through intake.
           </div>

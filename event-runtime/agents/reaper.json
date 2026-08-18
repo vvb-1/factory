@@ -5,11 +5,7 @@
   "input_schema": "schemas/reaper.input.json",
   "output_schema": "schemas/command-result.output.json",
   "output_contract": "factory.command-result/v1",
-  "command": [
-    "bun",
-    "{factoryRoot}/orchestrator/reaper.mjs",
-    "--apply"
-  ],
+  "command": ["bun", "{factoryRoot}/orchestrator/reaper.mjs", "--apply"],
   "captureStdout": "reaper.log",
   "captureKind": "log",
   "workspace": {
@@ -18,9 +14,7 @@
   },
   "capabilities": {
     "filesystem": "workspace-only",
-    "services": [
-      "linear:write"
-    ]
+    "services": ["linear:write"]
   },
   "limits": {
     "timeout_seconds": 600,

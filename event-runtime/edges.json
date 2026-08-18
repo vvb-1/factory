@@ -120,9 +120,7 @@
     "edges": {
       "PR_OPEN": {
         "eventType": "factory.work.requested",
-        "also": [
-          "PR_OPEN_MERGE"
-        ],
+        "also": ["PR_OPEN_MERGE"],
         "input": {
           "repo": "$.input.repo"
         }
@@ -133,9 +131,7 @@
         "whenPath": "$.artifact.prNumber",
         "input": {
           "repo": "$.artifact.repo",
-          "prNumbers": [
-            "$.artifact.prNumber"
-          ]
+          "prNumbers": ["$.artifact.prNumber"]
         }
       },
       "NOT_CLAIMED": {

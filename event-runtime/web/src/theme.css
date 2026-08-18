@@ -86,7 +86,10 @@ body {
 
   /* Table banding is intentionally a semantic surface rather than a separate
      colour, so row text keeps the same contrast contract in every theme. */
-  tbody > tr:nth-child(even):not(.row-selected):not(.row-wash-err):not(.row-wash-warn) {
+  tbody
+    > tr:nth-child(even):not(.row-selected):not(.row-wash-err):not(
+      .row-wash-warn
+    ) {
     background: color-mix(in oklch, var(--surface-2) 70%, var(--surface-1));
   }
 
@@ -147,9 +150,16 @@ main[tabindex="-1"]:focus-visible {
 
 /* React Flow minimap: SVG fills cannot use var()/color-mix, so the node
    colors live here as classes (Graph view, OPS-224). */
-.react-flow__minimap-node.minimap-node { fill: var(--hue-info); stroke: none; }
-.react-flow__minimap-node.minimap-agent { fill: var(--hue-ok); }
-.react-flow__minimap-node.minimap-terminal { fill: var(--text-faint); }
+.react-flow__minimap-node.minimap-node {
+  fill: var(--hue-info);
+  stroke: none;
+}
+.react-flow__minimap-node.minimap-agent {
+  fill: var(--hue-ok);
+}
+.react-flow__minimap-node.minimap-terminal {
+  fill: var(--text-faint);
+}
 
 /* Canvas controls inherit the app's surfaces rather than React Flow's default white. */
 .react-flow__controls-button {
@@ -158,5 +168,9 @@ main[tabindex="-1"]:focus-visible {
   color: var(--text-dim);
   fill: var(--text-dim);
 }
-.react-flow__controls-button:hover { background: var(--surface-3); }
-.react-flow__edge-text { fill: var(--text-faint); }
+.react-flow__controls-button:hover {
+  background: var(--surface-3);
+}
+.react-flow__edge-text {
+  fill: var(--text-faint);
+}

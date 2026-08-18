@@ -78,7 +78,11 @@ if (process.env.FAKE_WORKER_MODE === "wait-term") {
 }
 `;
 
-function makeFixture({ withWebDeps = true, policy = null, bundle = "fresh" } = {}) {
+function makeFixture({
+  withWebDeps = true,
+  policy = null,
+  bundle = "fresh",
+} = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "live-stack-"));
   const webDir = path.join(root, "event-runtime", "web");
   mkdirSync(path.join(root, "bin"), { recursive: true });
@@ -89,10 +93,19 @@ function makeFixture({ withWebDeps = true, policy = null, bundle = "fresh" } = {
     writeFileSync(path.join(root, "config", "policy.yaml"), policy, "utf8");
   }
   copyFileSync(LIVE_STACK, path.join(root, "bin", "live-stack.sh"));
-  writeFileSync(path.join(root, "bin", "worktree-common.sh"), COMMON_STUB, "utf8");
+  writeFileSync(
+    path.join(root, "bin", "worktree-common.sh"),
+    COMMON_STUB,
+    "utf8",
+  );
   writeFileSync(path.join(root, "event-runtime", "cli.mjs"), FAKE_CLI, "utf8");
   writeFileSync(path.join(webDir, "serve.mjs"), "", "utf8");
-  for (const relative of ["src/App.tsx", "index.html", "vite.config.ts", "package.json"]) {
+  for (const relative of [
+    "src/App.tsx",
+    "index.html",
+    "vite.config.ts",
+    "package.json",
+  ]) {
     writeFileSync(path.join(webDir, relative), `${relative}\n`, "utf8");
   }
   if (bundle !== "missing") {
@@ -100,7 +113,12 @@ function makeFixture({ withWebDeps = true, policy = null, bundle = "fresh" } = {
     writeFileSync(path.join(webDir, "dist", "index.html"), "built\n", "utf8");
     const sourceTime = new Date("2026-01-01T00:00:00Z");
     const distTime = new Date("2027-01-01T00:00:00Z");
-    for (const relative of ["src/App.tsx", "index.html", "vite.config.ts", "package.json"]) {
+    for (const relative of [
+      "src/App.tsx",
+      "index.html",
+      "vite.config.ts",
+      "package.json",
+    ]) {
       utimesSync(path.join(webDir, relative), sourceTime, sourceTime);
     }
     utimesSync(path.join(webDir, "dist", "index.html"), distTime, distTime);
@@ -109,7 +127,8 @@ function makeFixture({ withWebDeps = true, policy = null, bundle = "fresh" } = {
       utimesSync(path.join(webDir, "src", "App.tsx"), staleTime, staleTime);
     }
   }
-  if (withWebDeps) mkdirSync(path.join(webDir, "node_modules"), { recursive: true });
+  if (withWebDeps)
+    mkdirSync(path.join(webDir, "node_modules"), { recursive: true });
 
   // The health polls must not gate a test on a server nobody started.
   const curl = path.join(root, "stubs", "curl");
@@ -119,7 +138,9 @@ function makeFixture({ withWebDeps = true, policy = null, bundle = "fresh" } = {
   // Non-dev web builds are recorded and materialize the one artifact the
   // script checks. Other bun commands are only arguments to spawn_daemon.
   const bun = path.join(root, "stubs", "bun");
-  writeFileSync(bun, `#!/bin/sh
+  writeFileSync(
+    bun,
+    `#!/bin/sh
 if [ "$1 $2" = "run build" ]; then
   printf 'BUILD cwd=%s cmd=%s\\n' "$PWD" "$*" >>"$BUILD_LOG"
   mkdir -p "$FAKE_REPO/event-runtime/web/dist"
@@ -128,7 +149,9 @@ if [ "$1 $2" = "run build" ]; then
 fi
 printf 'unexpected bun invocation: %s\\n' "$*" >&2
 exit 99
-`, "utf8");
+`,
+    "utf8",
+  );
   chmodSync(bun, 0o755);
 
   return {
@@ -160,12 +183,17 @@ function runStack(fixture, args, extraEnv = {}) {
     status: result.exitCode,
     stdout: result.stdout.toString(),
     stderr: result.stderr.toString(),
-    spawns: existsSync(fixture.spawnLog) ? readFileSync(fixture.spawnLog, "utf8").trim().split("\n") : [],
-    builds: existsSync(fixture.buildLog) ? readFileSync(fixture.buildLog, "utf8").trim().split("\n") : [],
+    spawns: existsSync(fixture.spawnLog)
+      ? readFileSync(fixture.spawnLog, "utf8").trim().split("\n")
+      : [],
+    builds: existsSync(fixture.buildLog)
+      ? readFileSync(fixture.buildLog, "utf8").trim().split("\n")
+      : [],
   };
 }
 
-const spawnFor = (spawns, pidfile) => spawns.find((line) => line.includes(`pid=${pidfile}`)) ?? "";
+const spawnFor = (spawns, pidfile) =>
+  spawns.find((line) => line.includes(`pid=${pidfile}`)) ?? "";
 
 test("plain `up` spawns serve, worker, and the static web server — unchanged by --dev existing", () => {
   const f = makeFixture();
@@ -178,7 +206,9 @@ test("plain `up` spawns serve, worker, and the static web server — unchanged b
     expect(serve).not.toContain("--watch");
 
     expect(spawnFor(r.spawns, "worker.pid")).toContain("cli.mjs work");
-    expect(spawnFor(r.spawns, "worker.pid")).not.toContain("__supervise-worker");
+    expect(spawnFor(r.spawns, "worker.pid")).not.toContain(
+      "__supervise-worker",
+    );
 
     const web = spawnFor(r.spawns, "web.pid");
     expect(web).toContain("web/serve.mjs");
@@ -198,7 +228,9 @@ test("plain `up` rebuilds a stale web bundle and reports the elapsed time", () =
     expect(r.status).toBe(0);
     expect(r.builds).toHaveLength(1);
     expect(r.builds[0]).toContain("cmd=run build");
-    expect(r.builds[0]).toContain(`cwd=${path.join(f.root, "event-runtime", "web")}`);
+    expect(r.builds[0]).toContain(
+      `cwd=${path.join(f.root, "event-runtime", "web")}`,
+    );
     expect(r.stdout).toMatch(/web bundle stale — rebuilt in \d+s/);
   } finally {
     f.cleanup();
@@ -222,7 +254,11 @@ test("each top-level web build input participates in the stale check", () => {
     const f = makeFixture({ bundle: "fresh" });
     try {
       const staleTime = new Date("2028-01-01T00:00:00Z");
-      utimesSync(path.join(f.root, "event-runtime", "web", relative), staleTime, staleTime);
+      utimesSync(
+        path.join(f.root, "event-runtime", "web", relative),
+        staleTime,
+        staleTime,
+      );
       const r = runStack(f, ["up"]);
       expect(r.status).toBe(0);
       expect(r.builds).toHaveLength(1);
@@ -238,7 +274,11 @@ test("plain `up` builds when the web bundle is missing", () => {
     const r = runStack(f, ["up"]);
     expect(r.status).toBe(0);
     expect(r.builds).toHaveLength(1);
-    expect(existsSync(path.join(f.root, "event-runtime", "web", "dist", "index.html"))).toBe(true);
+    expect(
+      existsSync(
+        path.join(f.root, "event-runtime", "web", "dist", "index.html"),
+      ),
+    ).toBe(true);
     expect(r.stdout).toMatch(/web bundle missing — rebuilt in \d+s/);
   } finally {
     f.cleanup();
@@ -262,7 +302,9 @@ test("`up --fake` still passes the adapter override through", () => {
   try {
     const r = runStack(f, ["up", "--fake"]);
     expect(r.status).toBe(0);
-    expect(spawnFor(r.spawns, "serve.pid")).toContain("--adapter-override fake");
+    expect(spawnFor(r.spawns, "serve.pid")).toContain(
+      "--adapter-override fake",
+    );
   } finally {
     f.cleanup();
   }
@@ -274,14 +316,22 @@ test("`up --dev` wires all three without checking or building a stale dist", () 
     const r = runStack(f, ["up", "--dev"]);
     expect(r.status).toBe(0);
 
-    expect(spawnFor(r.spawns, "serve.pid")).toContain("cli.mjs serve --port 7381 --watch");
+    expect(spawnFor(r.spawns, "serve.pid")).toContain(
+      "cli.mjs serve --port 7381 --watch",
+    );
 
     const worker = spawnFor(r.spawns, "worker.pid");
-    expect(worker).toContain("bin/live-stack.sh __supervise-worker --reload-on-change");
+    expect(worker).toContain(
+      "bin/live-stack.sh __supervise-worker --reload-on-change",
+    );
 
     const web = spawnFor(r.spawns, "web.pid");
-    expect(web).toContain("bunx vite --host 127.0.0.1 --port 7382 --strictPort");
-    expect(web).toContain(`workdir=${path.join(f.root, "event-runtime", "web")}`);
+    expect(web).toContain(
+      "bunx vite --host 127.0.0.1 --port 7382 --strictPort",
+    );
+    expect(web).toContain(
+      `workdir=${path.join(f.root, "event-runtime", "web")}`,
+    );
 
     expect(r.stdout).toContain("ready — live factory stack (dev, live reload)");
     expect(r.stdout).toContain("worker: on exit 75 when idle");
@@ -295,7 +345,15 @@ test("`up --dev` wires all three without checking or building a stale dist", () 
 test("`up --dev --fake` keeps both the adapter override and the watch flag", () => {
   const f = makeFixture();
   try {
-    const r = runStack(f, ["up", "--dev", "--fake", "--port", "7391", "--web-port", "7392"]);
+    const r = runStack(f, [
+      "up",
+      "--dev",
+      "--fake",
+      "--port",
+      "7391",
+      "--web-port",
+      "7392",
+    ]);
     expect(r.status).toBe(0);
     const serve = spawnFor(r.spawns, "serve.pid");
     expect(serve).toContain("--port 7391");
@@ -337,7 +395,9 @@ test("`down` stops all three daemons in either mode", () => {
 // --- worker pool (WM-226) ----------------------------------------------------
 
 test("a config with no workers: block keeps the plain single worker (regression)", () => {
-  const f = makeFixture({ policy: "concurrency:\n  max_in_flight_per_repo: 3\n" });
+  const f = makeFixture({
+    policy: "concurrency:\n  max_in_flight_per_repo: 3\n",
+  });
   try {
     const r = runStack(f, ["up"]);
     expect(r.status).toBe(0);
@@ -372,7 +432,9 @@ test("`up --workers 2:4` selects the pool even with no policy file, and passes t
   try {
     const r = runStack(f, ["up", "--workers", "2:4"]);
     expect(r.status).toBe(0);
-    expect(spawnFor(r.spawns, "worker.pid")).toContain("cli.mjs supervise --workers 2:4");
+    expect(spawnFor(r.spawns, "worker.pid")).toContain(
+      "cli.mjs supervise --workers 2:4",
+    );
     expect(r.stdout).toContain("starting worker pool supervisor (workers 2:4)");
     expect(r.stdout).toContain("supervised pool (2:4)");
   } finally {
@@ -385,7 +447,9 @@ test("`--workers` and `--dev` both claim the worker slot — the conflict is nam
   try {
     const r = runStack(f, ["up", "--dev", "--workers", "1:3"]);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("--workers and --dev both replace the worker daemon");
+    expect(r.stderr).toContain(
+      "--workers and --dev both replace the worker daemon",
+    );
     expect(r.spawns).toEqual([]);
   } finally {
     f.cleanup();
@@ -398,7 +462,9 @@ test("`up --dev` ignores a workers: block and keeps WM-213's reload supervisor",
     const r = runStack(f, ["up", "--dev"]);
     expect(r.status).toBe(0);
     const worker = spawnFor(r.spawns, "worker.pid");
-    expect(worker).toContain("bin/live-stack.sh __supervise-worker --reload-on-change");
+    expect(worker).toContain(
+      "bin/live-stack.sh __supervise-worker --reload-on-change",
+    );
     expect(worker).not.toContain("cli.mjs supervise");
   } finally {
     f.cleanup();
@@ -410,18 +476,32 @@ test("`down` drains the pool before the ordinary teardown, and clears the slot f
   try {
     mkdirSync(f.runDir, { recursive: true });
     for (const [name, body] of [
-      ["supervisor.pid", "4242\n"], ["worker.pid", "4242\n"],
-      ["worker-1.pid", "4243\n"], ["worker-1.drain", "scale-down\n"], ["worker-1.id", "worker_x\n"],
-    ]) writeFileSync(path.join(f.runDir, name), body, "utf8");
+      ["supervisor.pid", "4242\n"],
+      ["worker.pid", "4242\n"],
+      ["worker-1.pid", "4243\n"],
+      ["worker-1.drain", "scale-down\n"],
+      ["worker-1.id", "worker_x\n"],
+    ])
+      writeFileSync(path.join(f.runDir, name), body, "utf8");
 
-    const r = runStack(f, ["down"], { FAKE_ALIVE: "1", FACTORY_POOL_DRAIN_TIMEOUT: "5" });
+    const r = runStack(f, ["down"], {
+      FAKE_ALIVE: "1",
+      FACTORY_POOL_DRAIN_TIMEOUT: "5",
+    });
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("draining worker pool (up to 5s — runs in flight finish first)");
+    expect(r.stdout).toContain(
+      "draining worker pool (up to 5s — runs in flight finish first)",
+    );
     // The supervisor is stopped FIRST and waited for, not lumped into the
     // three-second await that is right for a web server and wrong here.
     expect(r.spawns[0]).toBe("TERM worker pool supervisor");
     expect(r.stderr).not.toContain("still draining");
-    for (const name of ["worker-1.pid", "worker-1.drain", "worker-1.id", "supervisor.pid"]) {
+    for (const name of [
+      "worker-1.pid",
+      "worker-1.drain",
+      "worker-1.id",
+      "supervisor.pid",
+    ]) {
       expect(existsSync(path.join(f.runDir, name))).toBe(false);
     }
   } finally {
@@ -437,7 +517,9 @@ test("`down` gives the pool a bounded wait, then says so instead of hanging", ()
     writeFileSync(path.join(f.runDir, "worker.pid"), "4242\n", "utf8");
 
     const r = runStack(f, ["down"], {
-      FAKE_ALIVE: "1", FAKE_IGNORES_TERM: "1", FACTORY_POOL_DRAIN_TIMEOUT: "1",
+      FAKE_ALIVE: "1",
+      FAKE_IGNORES_TERM: "1",
+      FACTORY_POOL_DRAIN_TIMEOUT: "1",
     });
     expect(r.status).toBe(0);
     expect(r.stderr).toContain("worker pool still draining after 1s");
@@ -476,7 +558,12 @@ function runSupervisor(f, { reloads = 0, final = 0, mode = "" } = {}) {
   const counter = path.join(f.root, "counter");
   writeFileSync(counter, "0", "utf8");
   const proc = Bun.spawnSync({
-    cmd: ["bash", path.join(f.root, "bin", "live-stack.sh"), "__supervise-worker", "--reload-on-change"],
+    cmd: [
+      "bash",
+      path.join(f.root, "bin", "live-stack.sh"),
+      "__supervise-worker",
+      "--reload-on-change",
+    ],
     stdout: "pipe",
     stderr: "pipe",
     env: {
@@ -542,7 +629,12 @@ test("SIGTERM to the supervisor drains the worker and stops — even if it exits
   const counter = path.join(f.root, "counter");
   writeFileSync(counter, "0", "utf8");
   const proc = Bun.spawn({
-    cmd: ["bash", path.join(f.root, "bin", "live-stack.sh"), "__supervise-worker", "--reload-on-change"],
+    cmd: [
+      "bash",
+      path.join(f.root, "bin", "live-stack.sh"),
+      "__supervise-worker",
+      "--reload-on-change",
+    ],
     stdout: "pipe",
     stderr: "pipe",
     env: {
@@ -557,10 +649,12 @@ test("SIGTERM to the supervisor drains the worker and stops — even if it exits
   try {
     let out = "";
     const reader = (async () => {
-      for await (const chunk of proc.stdout) out += new TextDecoder().decode(chunk);
+      for await (const chunk of proc.stdout)
+        out += new TextDecoder().decode(chunk);
     })();
     const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline && !out.includes("fake worker start #1")) await Bun.sleep(50);
+    while (Date.now() < deadline && !out.includes("fake worker start #1"))
+      await Bun.sleep(50);
     expect(out).toContain("fake worker start #1");
 
     proc.kill("SIGTERM");

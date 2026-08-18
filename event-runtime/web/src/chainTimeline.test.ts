@@ -13,7 +13,13 @@ import {
   specInputRefs,
   CHAIN_VIEW_STORAGE_KEY,
 } from "./chainTimeline";
-import type { ChainView, InboxItem, LifecycleEvent, Proposal, RunDetail } from "./types";
+import type {
+  ChainView,
+  InboxItem,
+  LifecycleEvent,
+  Proposal,
+  RunDetail,
+} from "./types";
 
 // Fixture: the real 2026-08-17 19:06 case from the ticket — a merge sweep
 // (origin clock tick → merge-scan run) that emitted a merge-fix request for
@@ -100,8 +106,25 @@ function chain(overrides?: Partial<ChainView>): ChainView {
   };
 }
 
-function lc(seq: number, from: string | null, to: string, actor: string, reason: string | null, at: string, attempt: number | null = null): LifecycleEvent {
-  return { seq, run_id: FIX_RUN, from_state: from, to_state: to, actor, reason, attempt, at };
+function lc(
+  seq: number,
+  from: string | null,
+  to: string,
+  actor: string,
+  reason: string | null,
+  at: string,
+  attempt: number | null = null,
+): LifecycleEvent {
+  return {
+    seq,
+    run_id: FIX_RUN,
+    from_state: from,
+    to_state: to,
+    actor,
+    reason,
+    attempt,
+    at,
+  };
 }
 
 function fixRunDetail(): RunDetail {
@@ -118,7 +141,13 @@ function fixRunDetail(): RunDetail {
         schemaVersion: "factory.run/v1",
         runId: FIX_RUN,
         agent: "merge-fix@1",
-        input: { github: "watt-mind/factory", pr: 541, ticket: "WM-627", headSha: "6dbaab46a7f362ea66f907b630e57849e2631915", repo: "factory" },
+        input: {
+          github: "watt-mind/factory",
+          pr: 541,
+          ticket: "WM-627",
+          headSha: "6dbaab46a7f362ea66f907b630e57849e2631915",
+          repo: "factory",
+        },
         inputHash: "sha256:in",
         workspace: { type: "worktree" },
         adapter: "pi",
@@ -132,13 +161,66 @@ function fixRunDetail(): RunDetail {
       },
     },
     lifecycle: [
-      lc(4749, null, "PROPOSED", "planner", "planned", "2026-08-17T19:06:04.284Z"),
-      lc(4755, "PROPOSED", "APPROVED", "chain-auto-approval", "auto_approved:chain-policy@1", "2026-08-17T19:06:04.284Z"),
-      lc(4756, "APPROVED", "QUEUED", "chain-auto-approval", "auto_approved:chain-policy@1", "2026-08-17T19:06:04.284Z"),
-      lc(4765, "QUEUED", "LEASED", "worker_30596_69", "claimed", "2026-08-17T19:06:05.102Z", 1),
-      lc(4766, "LEASED", "RUNNING", "worker_30596_69", "started", "2026-08-17T19:06:05.105Z", 1),
-      lc(4772, "RUNNING", "VERIFYING", "worker_30596_69", "merge_fix_pr_moved", "2026-08-17T19:06:07.657Z", 1),
-      lc(4773, "VERIFYING", "REFUSED", "worker_30596_69", "merge_fix_pr_moved", "2026-08-17T19:06:07.657Z", 1),
+      lc(
+        4749,
+        null,
+        "PROPOSED",
+        "planner",
+        "planned",
+        "2026-08-17T19:06:04.284Z",
+      ),
+      lc(
+        4755,
+        "PROPOSED",
+        "APPROVED",
+        "chain-auto-approval",
+        "auto_approved:chain-policy@1",
+        "2026-08-17T19:06:04.284Z",
+      ),
+      lc(
+        4756,
+        "APPROVED",
+        "QUEUED",
+        "chain-auto-approval",
+        "auto_approved:chain-policy@1",
+        "2026-08-17T19:06:04.284Z",
+      ),
+      lc(
+        4765,
+        "QUEUED",
+        "LEASED",
+        "worker_30596_69",
+        "claimed",
+        "2026-08-17T19:06:05.102Z",
+        1,
+      ),
+      lc(
+        4766,
+        "LEASED",
+        "RUNNING",
+        "worker_30596_69",
+        "started",
+        "2026-08-17T19:06:05.105Z",
+        1,
+      ),
+      lc(
+        4772,
+        "RUNNING",
+        "VERIFYING",
+        "worker_30596_69",
+        "merge_fix_pr_moved",
+        "2026-08-17T19:06:07.657Z",
+        1,
+      ),
+      lc(
+        4773,
+        "VERIFYING",
+        "REFUSED",
+        "worker_30596_69",
+        "merge_fix_pr_moved",
+        "2026-08-17T19:06:07.657Z",
+        1,
+      ),
     ],
     attempts: [],
     result: { terminalState: "refused", reasonCode: "merge_fix_pr_moved" },
@@ -212,21 +294,41 @@ describe("buildChainTimeline", () => {
     // origin admitted → planned scan → scan LEASED (fallback rows: no detail
     // loaded for the scan run) → scan COMPLETED → fix admitted → fix planned
     // → fix LEASED → fix REFUSED → next
-    expect(badges).toEqual(["admitted", "planned", "RUNNING", "COMPLETED", "admitted", "planned", "LEASED", "REFUSED", "next"]);
-    const ats = rows.filter((r) => r.kind !== "next").map((r) => Date.parse(r.at!));
+    expect(badges).toEqual([
+      "admitted",
+      "planned",
+      "RUNNING",
+      "COMPLETED",
+      "admitted",
+      "planned",
+      "LEASED",
+      "REFUSED",
+      "next",
+    ]);
+    const ats = rows
+      .filter((r) => r.kind !== "next")
+      .map((r) => Date.parse(r.at!));
     expect([...ats].sort((a, b) => a - b)).toEqual(ats);
 
     const admitted = rows[4];
     expect(admitted.actor).toBe("chain");
     expect(admitted.what).toBe("factory.merge-fix.requested (PR #541, WM-627)");
     expect(admitted.refs.map((r) => r.kind)).toEqual(["event", "pr", "ticket"]);
-    expect(admitted.refs.find((r) => r.kind === "pr")?.href).toBe("https://github.com/watt-mind/factory/pull/541");
+    expect(admitted.refs.find((r) => r.kind === "pr")?.href).toBe(
+      "https://github.com/watt-mind/factory/pull/541",
+    );
 
     const planned = rows[5];
     expect(planned.actor).toBe("planner");
-    expect(planned.what).toBe("merge-fix@1 → run_643c2c35 (auto-approved: chain-policy@1)");
+    expect(planned.what).toBe(
+      "merge-fix@1 → run_643c2c35 (auto-approved: chain-policy@1)",
+    );
     expect(planned.nodeId).toBe(`run:${FIX_RUN}`);
-    expect(planned.refs.map((r) => r.kind)).toEqual(["proposal", "run", "agent"]);
+    expect(planned.refs.map((r) => r.kind)).toEqual([
+      "proposal",
+      "run",
+      "agent",
+    ]);
     expect(rows[6].refs.map((r) => r.kind)).toEqual(["run"]);
     expect(rows[7].refs.map((r) => r.kind)).toEqual(["run", "pr", "ticket"]);
     expect(formatDelta(planned.deltaMs)).toBe("+6s");
@@ -238,10 +340,19 @@ describe("buildChainTimeline", () => {
     const refused = rows[7];
     expect(refused.badge).toBe("REFUSED");
     expect(refused.actor).toBe("merge-fix@1");
-    expect(refused.reason).toEqual({ text: "PR head moved after the plan (planned at 6dbaab4)", raw: "merge_fix_pr_moved" });
+    expect(refused.reason).toEqual({
+      text: "PR head moved after the plan (planned at 6dbaab4)",
+      raw: "merge_fix_pr_moved",
+    });
     expect(formatDelta(refused.deltaMs)).toBe("+3s");
     // APPROVED / QUEUED / RUNNING(+3ms) / VERIFYING(same instant as REFUSED) are folded.
-    expect(rows.filter((r) => ["APPROVED", "QUEUED", "RUNNING", "VERIFYING"].includes(r.badge) && r.nodeId === `run:${FIX_RUN}`)).toEqual([]);
+    expect(
+      rows.filter(
+        (r) =>
+          ["APPROVED", "QUEUED", "RUNNING", "VERIFYING"].includes(r.badge) &&
+          r.nodeId === `run:${FIX_RUN}`,
+      ),
+    ).toEqual([]);
   });
 
   test("first row has no Δ; the next-step row carries none", () => {
@@ -256,8 +367,12 @@ describe("buildChainTimeline", () => {
     const next = rows.at(-1)!;
     expect(next.kind).toBe("next");
     expect(next.actor).toBeNull();
-    expect(next.what).toMatch(/^next: merge-factory · re-examines at \d{2}:\d{2} \(in 8m 30s\)$/);
-    expect(next.refs).toEqual([{ kind: "schedule", label: "merge-factory", id: "merge-factory" }]);
+    expect(next.what).toMatch(
+      /^next: merge-factory · re-examines at \d{2}:\d{2} \(in 8m 30s\)$/,
+    );
+    expect(next.refs).toEqual([
+      { kind: "schedule", label: "merge-factory", id: "merge-factory" },
+    ]);
     expect(next.muted).toBe(true);
   });
 
@@ -276,42 +391,83 @@ describe("buildChainTimeline", () => {
       resolvedBy: null,
       delivery: {},
     };
-    const disabled = build({ schedules: [schedule({ enabled: false })], inbox: [item] });
+    const disabled = build({
+      schedules: [schedule({ enabled: false })],
+      inbox: [item],
+    });
     const next = disabled.rows.at(-1)!;
     expect(next.kind).toBe("next");
     expect(next.what).toBe("no automatic retry — needs a decision");
-    expect(next.refs).toEqual([{ kind: "inbox", label: item.title, id: "inbox_1" }]);
+    expect(next.refs).toEqual([
+      { kind: "inbox", label: item.title, id: "inbox_1" },
+    ]);
 
     const otherRepo = build({ schedules: [schedule({ repo: "cashsaas" })] });
-    expect(otherRepo.rows.at(-1)!.what).toBe("no automatic retry — needs a decision");
+    expect(otherRepo.rows.at(-1)!.what).toBe(
+      "no automatic retry — needs a decision",
+    );
     expect(otherRepo.rows.at(-1)!.refs).toEqual([]);
   });
 
   test("no next-step row when the chain completed or is still running", () => {
     const completed = chain();
-    completed.runs[1] = { ...completed.runs[1], state: "COMPLETED", reasonCode: "ok" };
+    completed.runs[1] = {
+      ...completed.runs[1],
+      state: "COMPLETED",
+      reasonCode: "ok",
+    };
     expect(chainNeedsRevisit(completed)).toBe(false);
-    expect(build({ chain: completed, runDetails: {} }).rows.some((r) => r.kind === "next")).toBe(false);
+    expect(
+      build({ chain: completed, runDetails: {} }).rows.some(
+        (r) => r.kind === "next",
+      ),
+    ).toBe(false);
 
     const running = chain();
-    running.runs[1] = { ...running.runs[1], state: "RUNNING", finishedAt: null, reasonCode: null };
+    running.runs[1] = {
+      ...running.runs[1],
+      state: "RUNNING",
+      finishedAt: null,
+      reasonCode: null,
+    };
     expect(chainNeedsRevisit(running)).toBe(false);
-    expect(build({ chain: running, runDetails: {} }).rows.some((r) => r.kind === "next")).toBe(false);
+    expect(
+      build({ chain: running, runDetails: {} }).rows.some(
+        (r) => r.kind === "next",
+      ),
+    ).toBe(false);
   });
 
   test("noop decisions render the planner's reason humanized with the raw code in title", () => {
     const view = chain();
-    view.events[1] = { ...view.events[1], status: "noop", proposalDecision: "noop", proposalStatus: "resolved", runId: null };
+    view.events[1] = {
+      ...view.events[1],
+      status: "noop",
+      proposalDecision: "noop",
+      proposalStatus: "resolved",
+      runId: null,
+    };
     view.runs = [view.runs[0]];
     const { rows } = build({
       chain: view,
       runDetails: {},
-      proposals: [proposal({ decision: "noop", status: "resolved", reason: "ticket_assigned", runId: null, decided_at: null })],
+      proposals: [
+        proposal({
+          decision: "noop",
+          status: "resolved",
+          reason: "ticket_assigned",
+          runId: null,
+          decided_at: null,
+        }),
+      ],
     });
     const noop = rows.find((r) => r.badge === "noop")!;
     expect(noop.actor).toBe("planner");
     expect(noop.what).toBe("Ticket is already assigned");
-    expect(noop.reason).toEqual({ text: "Ticket is already assigned", raw: "ticket_assigned" });
+    expect(noop.reason).toEqual({
+      text: "Ticket is already assigned",
+      raw: "ticket_assigned",
+    });
     expect(noop.nodeId).toBe(`event:chain:${FIX_EVENT}`);
     expect(rows.at(-1)!.kind).toBe("next");
   });
@@ -327,14 +483,25 @@ describe("buildChainTimeline", () => {
 
   test("nodeOrder lists distinct nodes in narrative order for j/k", () => {
     const { nodeOrder } = build();
-    expect(nodeOrder).toEqual([`event:clock:${CORR}`, `run:${SCAN_RUN}`, `event:chain:${FIX_EVENT}`, `run:${FIX_RUN}`]);
+    expect(nodeOrder).toEqual([
+      `event:clock:${CORR}`,
+      `run:${SCAN_RUN}`,
+      `event:chain:${FIX_EVENT}`,
+      `run:${FIX_RUN}`,
+    ]);
   });
 });
 
 describe("helpers", () => {
   test("humanizeRunReason keeps the suffix and de-snakes unknown codes", () => {
-    expect(humanizeRunReason("auto_approved:chain-policy@1")).toEqual({ text: "Auto-approved — chain-policy@1", raw: "auto_approved:chain-policy@1" });
-    expect(humanizeRunReason("some_new_code")).toEqual({ text: "some new code", raw: "some_new_code" });
+    expect(humanizeRunReason("auto_approved:chain-policy@1")).toEqual({
+      text: "Auto-approved — chain-policy@1",
+      raw: "auto_approved:chain-policy@1",
+    });
+    expect(humanizeRunReason("some_new_code")).toEqual({
+      text: "some new code",
+      raw: "some_new_code",
+    });
     expect(humanizeRunReason(null)).toBeNull();
   });
 
@@ -350,8 +517,15 @@ describe("helpers", () => {
   });
 
   test("specInputRefs picks PR + ticket out of a merge-fix input", () => {
-    expect(specInputRefs({ github: "watt-mind/factory", pr: 541, ticket: "WM-627" })).toEqual([
-      { kind: "pr", label: "PR #541", id: "https://github.com/watt-mind/factory/pull/541", href: "https://github.com/watt-mind/factory/pull/541" },
+    expect(
+      specInputRefs({ github: "watt-mind/factory", pr: 541, ticket: "WM-627" }),
+    ).toEqual([
+      {
+        kind: "pr",
+        label: "PR #541",
+        id: "https://github.com/watt-mind/factory/pull/541",
+        href: "https://github.com/watt-mind/factory/pull/541",
+      },
       { kind: "ticket", label: "WM-627", id: "WM-627" },
     ]);
     expect(specInputRefs(null)).toEqual([]);
@@ -359,21 +533,34 @@ describe("helpers", () => {
 
   test("nextScheduledRetry ignores disabled/stopped loops and matches repo", () => {
     const origin = chain().events[0];
-    expect(nextScheduledRetry(origin, [schedule({ stopped: true })])).toBeNull();
-    expect(nextScheduledRetry(origin, [schedule({ repo: null })])?.loop).toBe("merge-factory");
-    expect(nextScheduledRetry(origin, [schedule({ eventType: "factory.work.requested" })])).toBeNull();
+    expect(
+      nextScheduledRetry(origin, [schedule({ stopped: true })]),
+    ).toBeNull();
+    expect(nextScheduledRetry(origin, [schedule({ repo: null })])?.loop).toBe(
+      "merge-factory",
+    );
+    expect(
+      nextScheduledRetry(origin, [
+        schedule({ eventType: "factory.work.requested" }),
+      ]),
+    ).toBeNull();
   });
 
   test("view mode persists and ?view= parses", () => {
     const store = new Map<string, string>();
-    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    const storage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    };
     expect(loadChainViewMode(storage)).toBe("graph");
     saveChainViewMode("timeline", storage);
     expect(store.get(CHAIN_VIEW_STORAGE_KEY)).toBe("timeline");
     expect(loadChainViewMode(storage)).toBe("timeline");
     store.set(CHAIN_VIEW_STORAGE_KEY, "bogus");
     expect(loadChainViewMode(storage)).toBe("graph");
-    expect(chainViewModeFromQuery(new URLSearchParams("view=timeline&node=x"))).toBe("timeline");
+    expect(
+      chainViewModeFromQuery(new URLSearchParams("view=timeline&node=x")),
+    ).toBe("timeline");
     expect(chainViewModeFromQuery(new URLSearchParams("view=nope"))).toBeNull();
     expect(chainViewModeFromQuery(new URLSearchParams(""))).toBeNull();
   });

@@ -52,11 +52,11 @@ Cloning after a run is claimed is the wrong fallback:
 
 The control plane therefore separates three states:
 
-| State | Meaning | Tier-2 claim eligible? |
-| :--- | :--- | :--- |
-| absent | no checkout at the node-resolved path | no |
-| present | a full checkout exists, but readiness is unknown or stale | no |
-| ready | path, identity, auth, lifecycle scripts, toolchain, and repo check have a current attestation | yes |
+| State   | Meaning                                                                                       | Tier-2 claim eligible? |
+| :------ | :-------------------------------------------------------------------------------------------- | :--------------------- |
+| absent  | no checkout at the node-resolved path                                                         | no                     |
+| present | a full checkout exists, but readiness is unknown or stale                                     | no                     |
+| ready   | path, identity, auth, lifecycle scripts, toolchain, and repo check have a current attestation | yes                    |
 
 A node can move from absent to ready without any event run or Linear ticket.
 
@@ -73,7 +73,7 @@ single-node commands and interactive operator checkout:
 ```yaml
 repos:
   - name: factory
-    path: ~/Develop/factory       # local default, not a fleet-wide path
+    path: ~/Develop/factory # local default, not a fleet-wide path
     github: watt-mind/factory
     base: develop
     # worktree_up/down/root, verify, toolchain, etc.
@@ -98,7 +98,7 @@ nodes:
     repos_root: ~/.factory/repos
     repos:
       factory:
-        path: ~/Develop/factory   # use the operator-owned checkout here
+        path: ~/Develop/factory # use the operator-owned checkout here
         managed: false
 ```
 
@@ -483,7 +483,7 @@ Devcontainers were considered and rejected for this design:
 
 - The security boundary is already the Gondolin microVM (WM-185), with
   default-deny egress and secret placeholder substitution. A devcontainer is
-a weaker boundary. Putting both on the hot path creates two isolation models,
+  a weaker boundary. Putting both on the hot path creates two isolation models,
   with the weaker one handling execution.
 - The extra isolation a container offers here is filesystem/branch separation.
   Repo-owned worktree scripts already provide that **plus** the parts Git and

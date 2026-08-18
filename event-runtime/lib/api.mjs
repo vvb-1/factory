@@ -41,11 +41,7 @@ import {
   webhookSecret,
 } from "./config.mjs";
 import { githubWebhookSecret } from "./intake.mjs";
-import {
-  decideInboxItem,
-  getInboxItem,
-  retryInboxDecision,
-} from "./inbox.mjs";
+import { decideInboxItem, getInboxItem, retryInboxDecision } from "./inbox.mjs";
 import { applyDecisionEffect } from "./decision-effects.mjs";
 import { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 import { notifyCommand, sendNotification } from "./notify.mjs";
@@ -156,9 +152,7 @@ export function createApi({
         const detailMatch = url.pathname.match(/^\/inbox\/([^/]+)$/);
         if (req.method === "GET" && detailMatch) {
           const item = getInboxItem(db, decodeURIComponent(detailMatch[1]));
-          return item
-            ? send(200, { item })
-            : send(404, { error: "not_found" });
+          return item ? send(200, { item }) : send(404, { error: "not_found" });
         }
 
         const decisionMatch = url.pathname.match(
@@ -172,7 +166,11 @@ export function createApi({
               const raw = await readBody(req);
               if (raw.length > 0) {
                 const parsed = parseJson(raw);
-                if (parsed.error) return send(400, { error: "invalid_json", message: parsed.error });
+                if (parsed.error)
+                  return send(400, {
+                    error: "invalid_json",
+                    message: parsed.error,
+                  });
               }
               result = retryInboxDecision(db, id, {
                 now: nowMs,
@@ -180,7 +178,11 @@ export function createApi({
               });
             } else {
               const parsed = parseJson(await readBody(req));
-              if (parsed.error) return send(400, { error: "invalid_json", message: parsed.error });
+              if (parsed.error)
+                return send(400, {
+                  error: "invalid_json",
+                  message: parsed.error,
+                });
               result = decideInboxItem(db, id, parsed.value, {
                 now: nowMs,
                 decidedBy: actor,

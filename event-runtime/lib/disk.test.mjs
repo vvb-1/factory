@@ -52,7 +52,14 @@ describe("getDiskSpace", () => {
 
   test("handles non-existent paths by checking closest existing ancestor", () => {
     const dir = tmp("disk-test-");
-    const nonExistentSub = path.join(dir, "nested", "path", "does", "not", "exist");
+    const nonExistentSub = path.join(
+      dir,
+      "nested",
+      "path",
+      "does",
+      "not",
+      "exist",
+    );
     try {
       const stats = getDiskSpace(nonExistentSub);
       expect(stats.totalBytes).toBeGreaterThan(0);
@@ -143,7 +150,9 @@ describe("helpers", () => {
       bfree: 600,
       bavail: 600, // 600 MB
     });
-    const res = assertDiskSpaceForWorkspace("/tmp/ws", { statfsFn: mockStatfs });
+    const res = assertDiskSpaceForWorkspace("/tmp/ws", {
+      statfsFn: mockStatfs,
+    });
     expect(res.ok).toBe(true);
   });
 
@@ -154,7 +163,9 @@ describe("helpers", () => {
       bfree: 450,
       bavail: 450, // 450 MB < 500 MB
     });
-    expect(() => assertDiskSpaceForWorkspace("/tmp/ws", { statfsFn: mockStatfs })).toThrow(DiskSpaceError);
+    expect(() =>
+      assertDiskSpaceForWorkspace("/tmp/ws", { statfsFn: mockStatfs }),
+    ).toThrow(DiskSpaceError);
   });
 
   test("assertDiskSpaceForArtifacts uses default 500MB min free bytes", () => {
@@ -164,7 +175,9 @@ describe("helpers", () => {
       bfree: 600,
       bavail: 600,
     });
-    const res = assertDiskSpaceForArtifacts("/tmp/artifacts", { statfsFn: mockStatfs });
+    const res = assertDiskSpaceForArtifacts("/tmp/artifacts", {
+      statfsFn: mockStatfs,
+    });
     expect(res.ok).toBe(true);
   });
 
@@ -175,7 +188,9 @@ describe("helpers", () => {
       bfree: 300,
       bavail: 300, // 300 MB < 500 MB
     });
-    expect(() => assertDiskSpaceForArtifacts("/tmp/artifacts", { statfsFn: mockStatfs })).toThrow(DiskSpaceError);
+    expect(() =>
+      assertDiskSpaceForArtifacts("/tmp/artifacts", { statfsFn: mockStatfs }),
+    ).toThrow(DiskSpaceError);
   });
 
   test("defaults verify constants", () => {

@@ -4,7 +4,12 @@
   "summary": "/summary",
   "status": {
     "path": "/recommendation",
-    "tone": { "MERGE": "ok", "FIX": "warn", "ESCALATE": "error", "NOOP": "neutral" }
+    "tone": {
+      "MERGE": "ok",
+      "FIX": "warn",
+      "ESCALATE": "error",
+      "NOOP": "neutral"
+    }
   },
   "sections": [
     {
@@ -12,7 +17,12 @@
       "as": "table",
       "label": "Merge",
       "columns": ["pr", "ticket", "headRef", "reason"],
-      "formats": { "pr": "pr", "ticket": "issue", "headSha": "sha", "baseSha": "sha" },
+      "formats": {
+        "pr": "pr",
+        "ticket": "issue",
+        "headSha": "sha",
+        "baseSha": "sha"
+      },
       "expand": ["headSha", "baseSha", "sensitive", "ambiguous"]
     },
     {
@@ -20,12 +30,25 @@
       "as": "table",
       "label": "Fix",
       "columns": ["pr", "ticket", "round", "mechanical", "finding"],
-      "formats": { "pr": "pr", "ticket": "issue", "round": "count", "headSha": "sha", "baseSha": "sha" },
+      "formats": {
+        "pr": "pr",
+        "ticket": "issue",
+        "round": "count",
+        "headSha": "sha",
+        "baseSha": "sha"
+      },
       "tone": {
         "mechanical": { "true": "ok", "false": "warn" },
         "withinOwnedPaths": { "true": "ok", "false": "error" }
       },
-      "expand": ["headRef", "headSha", "baseSha", "withinOwnedPaths", "ownedPaths", "findingHash"]
+      "expand": [
+        "headRef",
+        "headSha",
+        "baseSha",
+        "withinOwnedPaths",
+        "ownedPaths",
+        "findingHash"
+      ]
     },
     {
       "path": "/escalate",
@@ -41,7 +64,9 @@
       "label": "Repo",
       "keys": ["repo", "github", "base", "deployBranch", "noopReason"],
       "formats": { "repo": "repo" },
-      "tone": { "noopReason": { "no_open_prs": "muted", "all_prs_held": "warn" } }
+      "tone": {
+        "noopReason": { "no_open_prs": "muted", "all_prs_held": "warn" }
+      }
     }
   ]
 }

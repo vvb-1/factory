@@ -11,13 +11,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Absolute path of the event-runtime/ directory inside the factory repo. */
-export const RUNTIME_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+export const RUNTIME_ROOT = path.dirname(
+  path.dirname(fileURLToPath(import.meta.url)),
+);
 
 /** The factory checkout itself — where config/repos.yaml lives (OPS-228). */
 export const FACTORY_ROOT = path.dirname(RUNTIME_ROOT);
 
 export function runtimeHome() {
-  return process.env.FACTORY_EVENT_HOME || path.join(homedir(), ".factory", "event-runtime");
+  return (
+    process.env.FACTORY_EVENT_HOME ||
+    path.join(homedir(), ".factory", "event-runtime")
+  );
 }
 
 export function dbPath(home = runtimeHome()) {

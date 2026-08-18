@@ -52,7 +52,9 @@ describe("idempotencyKeyFor", () => {
     const a = idempotencyKeyFor(mapping, def, envelope(), inputHash);
     const b = idempotencyKeyFor(mapping, def, envelope(), inputHash);
     expect(a).toBe(b);
-    expect(a).toBe(`factory-status-report@1:factory.status-report/v1:workflow-01:${inputHash}`);
+    expect(a).toBe(
+      `factory-status-report@1:factory.status-report/v1:workflow-01:${inputHash}`,
+    );
   });
 
   test("correlationId scope falls back to eventId; subject scope to empty string", () => {
@@ -62,15 +64,25 @@ describe("idempotencyKeyFor", () => {
       `factory-status-report@1:factory.status-report/v1:delivery-1:${inputHash}`,
     );
     const subjectScope = { idempotencyScope: ["subject"] };
-    expect(idempotencyKeyFor(subjectScope, def, envelope({ subject: null }), inputHash)).toBe(
-      "factory-status-report@1:factory.status-report/v1:",
-    );
+    expect(
+      idempotencyKeyFor(
+        subjectScope,
+        def,
+        envelope({ subject: null }),
+        inputHash,
+      ),
+    ).toBe("factory-status-report@1:factory.status-report/v1:");
   });
 
   test("unknown scope field throws (fail closed)", () => {
-    expect(() => idempotencyKeyFor({ idempotencyScope: ["deliveryColor"] }, def, envelope(), "sha256:x")).toThrow(
-      /unknown idempotency scope/,
-    );
+    expect(() =>
+      idempotencyKeyFor(
+        { idempotencyScope: ["deliveryColor"] },
+        def,
+        envelope(),
+        "sha256:x",
+      ),
+    ).toThrow(/unknown idempotency scope/);
   });
 });
 
@@ -84,7 +96,10 @@ describe("merge concurrency policy", () => {
     expect(policyMaxConcurrentMerges(root)).toBe(2);
 
     for (const invalid of ["0", "1.5", "many"]) {
-      writeFileSync(policy, `concurrency:\n  max_concurrent_merges: ${invalid}\n`);
+      writeFileSync(
+        policy,
+        `concurrency:\n  max_concurrent_merges: ${invalid}\n`,
+      );
       expect(policyMaxConcurrentMerges(root)).toBe(1);
     }
   });
@@ -94,7 +109,10 @@ describe("planEvent", () => {
   test("run decision: PROPOSED run + open proposal with the §5.2 spec", () => {
     const db = openDb(":memory:");
     const ref = admit(db);
-    const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test" });
+    const outcome = planEvent(db, registry, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
 
     expect(outcome.decision).toBe("run");
     expect(runState(db, outcome.runId)).toBe("PROPOSED");
@@ -126,17 +144,27 @@ describe("planEvent", () => {
       idempotencyKey: `factory-status-report@1:factory.status-report/v1:workflow-01:${hashJson(payload)}`,
     });
 
-    const event = db.query(`SELECT status FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+    const event = db
+      .query(`SELECT status FROM events WHERE source = ? AND event_id = ?`)
+      .get(ref.source, ref.eventId);
     expect(event.status).toBe("planned");
-    expect(lifecycleOf(db, outcome.runId).map((e) => e.to_state)).toEqual(["PROPOSED"]);
+    expect(lifecycleOf(db, outcome.runId).map((e) => e.to_state)).toEqual([
+      "PROPOSED",
+    ]);
     expect(lifecycleOf(db, outcome.runId)[0].actor).toBe("planner");
   });
 
   test("planning the same event twice is idempotent: one run, one proposal", () => {
     const db = openDb(":memory:");
     const ref = admit(db);
-    const first = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test" });
-    const second = planEvent(db, registry, ref, { now: NOW + 60_000, policyVersion: "git:test" });
+    const first = planEvent(db, registry, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
+    const second = planEvent(db, registry, ref, {
+      now: NOW + 60_000,
+      policyVersion: "git:test",
+    });
     expect(second.decision).toBe("run");
     expect(second.runId).toBe(first.runId);
     expect(second.proposal.id).toBe(first.proposal.id);
@@ -148,8 +176,14 @@ describe("planEvent", () => {
     const db = openDb(":memory:");
     const ref1 = admit(db, { eventId: "delivery-1" });
     const ref2 = admit(db, { eventId: "delivery-2" });
-    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
-    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+    const first = planEvent(db, registry, ref1, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
+    const second = planEvent(db, registry, ref2, {
+      now: NOW + 1000,
+      policyVersion: "git:test",
+    });
 
     expect(first.decision).toBe("run");
     expect(second.decision).toBe("noop");
@@ -158,8 +192,14 @@ describe("planEvent", () => {
     expect(second.proposal.run_id).toBe(first.runId);
     expect(second.proposal.status).toBe("resolved");
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
-    expect(db.query(`SELECT COUNT(*) AS n FROM proposals WHERE status = 'open'`).get().n).toBe(1);
-    const event = db.query(`SELECT status FROM events WHERE event_id = 'delivery-2'`).get();
+    expect(
+      db
+        .query(`SELECT COUNT(*) AS n FROM proposals WHERE status = 'open'`)
+        .get().n,
+    ).toBe(1);
+    const event = db
+      .query(`SELECT status FROM events WHERE event_id = 'delivery-2'`)
+      .get();
     expect(event.status).toBe("noop");
   });
 
@@ -169,17 +209,31 @@ describe("planEvent", () => {
       eventId: "keep-1",
       correlationId: "alert-1",
       type: "keephq.disk-remediate.requested",
-      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+      payload: {
+        host: "lab",
+        mount: "/",
+        actions: [{ action: "docker-builder-prune" }],
+      },
     });
     const ref2 = admit(db, {
       eventId: "keep-2",
       correlationId: "alert-2",
       type: "keephq.disk-remediate.requested",
-      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+      payload: {
+        host: "lab",
+        mount: "/",
+        actions: [{ action: "docker-builder-prune" }],
+      },
     });
 
-    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
-    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+    const first = planEvent(db, registry, ref1, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
+    const second = planEvent(db, registry, ref2, {
+      now: NOW + 1000,
+      policyVersion: "git:test",
+    });
 
     expect(first.decision).toBe("run");
     expect(second.decision).toBe("run");
@@ -193,17 +247,31 @@ describe("planEvent", () => {
       eventId: "keep-1",
       correlationId: "alert-1",
       type: "keephq.disk-remediate.requested",
-      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+      payload: {
+        host: "lab",
+        mount: "/",
+        actions: [{ action: "docker-builder-prune" }],
+      },
     });
     const ref2 = admit(db, {
       eventId: "keep-dup",
       correlationId: "alert-1",
       type: "keephq.disk-remediate.requested",
-      payload: { host: "lab", mount: "/", actions: [{ action: "docker-builder-prune" }] },
+      payload: {
+        host: "lab",
+        mount: "/",
+        actions: [{ action: "docker-builder-prune" }],
+      },
     });
 
-    const first = planEvent(db, registry, ref1, { now: NOW, policyVersion: "git:test" });
-    const second = planEvent(db, registry, ref2, { now: NOW + 1000, policyVersion: "git:test" });
+    const first = planEvent(db, registry, ref1, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
+    const second = planEvent(db, registry, ref2, {
+      now: NOW + 1000,
+      policyVersion: "git:test",
+    });
 
     expect(first.decision).toBe("run");
     expect(second.decision).toBe("noop");
@@ -213,7 +281,11 @@ describe("planEvent", () => {
   });
 
   test("chain repeat triggers coalesce while active and self-feed again after terminal completion (WM-319)", () => {
-    const synthetic = { ...registry, agents: new Map(registry.agents), eventTypes: { ...registry.eventTypes } };
+    const synthetic = {
+      ...registry,
+      agents: new Map(registry.agents),
+      eventTypes: { ...registry.eventTypes },
+    };
     synthetic.eventTypes["test.chain.requested"] = {
       agent: "test-chain@1",
       adapter: "fake",
@@ -242,31 +314,77 @@ describe("planEvent", () => {
     });
     const db = openDb(":memory:");
 
-    const firstRef = admit(db, chainEvent("chain-dispatch-1", "run_dispatch_1"));
-    const first = planEvent(db, synthetic, firstRef, { now: NOW, policyVersion: "git:test" });
+    const firstRef = admit(
+      db,
+      chainEvent("chain-dispatch-1", "run_dispatch_1"),
+    );
+    const first = planEvent(db, synthetic, firstRef, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     expect(first.decision).toBe("run");
 
-    const concurrentRef = admit(db, chainEvent("chain-dispatch-2", "run_dispatch_2"));
-    const concurrent = planEvent(db, synthetic, concurrentRef, { now: NOW + 1000, policyVersion: "git:test" });
-    expect(concurrent).toMatchObject({ decision: "noop", reason: "duplicate_run", runId: first.runId });
+    const concurrentRef = admit(
+      db,
+      chainEvent("chain-dispatch-2", "run_dispatch_2"),
+    );
+    const concurrent = planEvent(db, synthetic, concurrentRef, {
+      now: NOW + 1000,
+      policyVersion: "git:test",
+    });
+    expect(concurrent).toMatchObject({
+      decision: "noop",
+      reason: "duplicate_run",
+      runId: first.runId,
+    });
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(1);
 
-    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+    for (const to of [
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+    ]) {
       transition(db, { runId: first.runId, to, actor: "test" });
     }
 
-    const nextCycleRef = admit(db, chainEvent("chain-dispatch-3", "run_dispatch_3"));
-    const nextCycle = planEvent(db, synthetic, nextCycleRef, { now: NOW + 2000, policyVersion: "git:test" });
+    const nextCycleRef = admit(
+      db,
+      chainEvent("chain-dispatch-3", "run_dispatch_3"),
+    );
+    const nextCycle = planEvent(db, synthetic, nextCycleRef, {
+      now: NOW + 2000,
+      policyVersion: "git:test",
+    });
     expect(nextCycle.decision).toBe("run");
     expect(nextCycle.runId).not.toBe(first.runId);
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
 
-    const coalescedAgainRef = admit(db, chainEvent("chain-dispatch-4", "run_dispatch_4"));
-    const coalescedAgain = planEvent(db, synthetic, coalescedAgainRef, { now: NOW + 3000, policyVersion: "git:test" });
-    expect(coalescedAgain).toMatchObject({ decision: "noop", reason: "duplicate_run", runId: nextCycle.runId });
+    const coalescedAgainRef = admit(
+      db,
+      chainEvent("chain-dispatch-4", "run_dispatch_4"),
+    );
+    const coalescedAgain = planEvent(db, synthetic, coalescedAgainRef, {
+      now: NOW + 3000,
+      policyVersion: "git:test",
+    });
+    expect(coalescedAgain).toMatchObject({
+      decision: "noop",
+      reason: "duplicate_run",
+      runId: nextCycle.runId,
+    });
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
 
-    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+    for (const to of [
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+    ]) {
       transition(db, { runId: nextCycle.runId, to, actor: "test" });
     }
 
@@ -287,16 +405,31 @@ describe("planEvent", () => {
       policyVersion: "git:test",
       now: NOW + 4000,
     });
-    transition(db, { runId: "run_collision_winner", to: "CANCELLED", actor: "test", now: NOW + 4000 });
+    transition(db, {
+      runId: "run_collision_winner",
+      to: "CANCELLED",
+      actor: "test",
+      now: NOW + 4000,
+    });
 
-    const collisionRef = admit(db, chainEvent(collisionEventId, "run_dispatch_5"));
-    const collision = planEvent(db, synthetic, collisionRef, { now: NOW + 5000, policyVersion: "git:test" });
+    const collisionRef = admit(
+      db,
+      chainEvent(collisionEventId, "run_dispatch_5"),
+    );
+    const collision = planEvent(db, synthetic, collisionRef, {
+      now: NOW + 5000,
+      policyVersion: "git:test",
+    });
     expect(collision).toMatchObject({
       decision: "noop",
       reason: "idempotency_collision:run_collision_winner",
       runId: "run_collision_winner",
     });
-    expect(db.query(`SELECT status FROM events WHERE event_id = ?`).get(collisionEventId).status).toBe("noop");
+    expect(
+      db
+        .query(`SELECT status FROM events WHERE event_id = ?`)
+        .get(collisionEventId).status,
+    ).toBe("noop");
   });
 
   test("concurrent work scans for one repo reserve selection before either can duplicate it (WM-491)", () => {
@@ -323,8 +456,14 @@ describe("planEvent", () => {
       payload: { repo: "factory" },
     });
 
-    const first = planEvent(db, synthetic, firstRef, { now: NOW, policyVersion: "git:test" });
-    const second = planEvent(db, synthetic, secondRef, { now: NOW + 1000, policyVersion: "git:test" });
+    const first = planEvent(db, synthetic, firstRef, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
+    const second = planEvent(db, synthetic, secondRef, {
+      now: NOW + 1000,
+      policyVersion: "git:test",
+    });
 
     expect(first.decision).toBe("run");
     expect(runState(db, first.runId)).toBe("PROPOSED");
@@ -345,7 +484,12 @@ describe("planEvent", () => {
       correlationId: "work-other-repo",
       payload: { repo: "bj29", loop: "work-bj29" },
     });
-    expect(planEvent(db, synthetic, otherRepoRef, { now: NOW + 2000, policyVersion: "git:test" }).decision).toBe("run");
+    expect(
+      planEvent(db, synthetic, otherRepoRef, {
+        now: NOW + 2000,
+        policyVersion: "git:test",
+      }).decision,
+    ).toBe("run");
 
     // A failed read emitted no dispatch chain and must release the queue; unlike
     // a failed dispatch, a failed scan owns no retained worktree to protect.
@@ -359,10 +503,20 @@ describe("planEvent", () => {
       correlationId: "work-after-failure",
       payload: { repo: "factory" },
     });
-    const afterFailure = planEvent(db, synthetic, afterFailureRef, { now: NOW + 3000, policyVersion: "git:test" });
+    const afterFailure = planEvent(db, synthetic, afterFailureRef, {
+      now: NOW + 3000,
+      policyVersion: "git:test",
+    });
     expect(afterFailure.decision).toBe("run");
 
-    for (const to of ["APPROVED", "QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+    for (const to of [
+      "APPROVED",
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+    ]) {
       transition(db, { runId: afterFailure.runId, to, actor: "test" });
     }
     const nextCycleRef = admit(db, {
@@ -372,11 +526,20 @@ describe("planEvent", () => {
       correlationId: "work-hot-next",
       payload: { repo: "factory" },
     });
-    expect(planEvent(db, synthetic, nextCycleRef, { now: NOW + 4000, policyVersion: "git:test" }).decision).toBe("run");
+    expect(
+      planEvent(db, synthetic, nextCycleRef, {
+        now: NOW + 4000,
+        policyVersion: "git:test",
+      }).decision,
+    ).toBe("run");
   });
 
   test("live reservations survive an agent version upgrade (WM-491)", () => {
-    const synthetic = { ...registry, agents: new Map(registry.agents), eventTypes: { ...registry.eventTypes } };
+    const synthetic = {
+      ...registry,
+      agents: new Map(registry.agents),
+      eventTypes: { ...registry.eventTypes },
+    };
     synthetic.agents.set("work-scan@1", {
       ...registry.agents.get("work-scan@1"),
       workspace: { type: "ephemeral" },
@@ -389,7 +552,10 @@ describe("planEvent", () => {
       correlationId: "work-v1",
       payload: { repo: "factory" },
     });
-    const first = planEvent(db, synthetic, firstRef, { now: NOW, policyVersion: "git:test" });
+    const first = planEvent(db, synthetic, firstRef, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
 
     synthetic.eventTypes["factory.work.requested"] = {
       ...synthetic.eventTypes["factory.work.requested"],
@@ -407,7 +573,12 @@ describe("planEvent", () => {
       correlationId: "work-v2",
       payload: { repo: "factory" },
     });
-    expect(planEvent(db, synthetic, nextRef, { now: NOW + 1000, policyVersion: "git:test" })).toMatchObject({
+    expect(
+      planEvent(db, synthetic, nextRef, {
+        now: NOW + 1000,
+        policyVersion: "git:test",
+      }),
+    ).toMatchObject({
       decision: "noop",
       reason: "work_scan_already_in_flight",
       runId: first.runId,
@@ -434,8 +605,14 @@ describe("planEvent", () => {
     const firstRef = admit(db, dispatch("dispatch-hot-1"));
     const secondRef = admit(db, dispatch("dispatch-hot-2"));
 
-    const first = planEvent(db, synthetic, firstRef, { now: NOW, policyVersion: "git:test" });
-    const second = planEvent(db, synthetic, secondRef, { now: NOW + 1000, policyVersion: "git:test" });
+    const first = planEvent(db, synthetic, firstRef, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
+    const second = planEvent(db, synthetic, secondRef, {
+      now: NOW + 1000,
+      policyVersion: "git:test",
+    });
 
     expect(first.decision).toBe("run");
     expect(second).toMatchObject({
@@ -450,7 +627,10 @@ describe("planEvent", () => {
     const malformedEnvelope = dispatch("dispatch-malformed");
     delete malformedEnvelope.payload.ticket;
     const malformedRef = admit(db, malformedEnvelope);
-    const malformed = planEvent(db, synthetic, malformedRef, { now: NOW + 2000, policyVersion: "git:test" });
+    const malformed = planEvent(db, synthetic, malformedRef, {
+      now: NOW + 2000,
+      policyVersion: "git:test",
+    });
     expect(malformed.decision).toBe("human_needed");
     expect(malformed.reason).toMatch(/^invalid_input: /);
 
@@ -458,16 +638,32 @@ describe("planEvent", () => {
       transition(db, { runId: first.runId, to, actor: "test" });
     }
     const failedRetryRef = admit(db, dispatch("dispatch-while-retryable"));
-    expect(planEvent(db, synthetic, failedRetryRef, { now: NOW + 3000, policyVersion: "git:test" })).toMatchObject({
+    expect(
+      planEvent(db, synthetic, failedRetryRef, {
+        now: NOW + 3000,
+        policyVersion: "git:test",
+      }),
+    ).toMatchObject({
       decision: "noop",
       reason: `ticket_dispatch_already_live:${first.runId}:same_ticket_worktree_held`,
     });
 
-    for (const to of ["QUEUED", "LEASED", "RUNNING", "VERIFYING", "COMPLETED"]) {
+    for (const to of [
+      "QUEUED",
+      "LEASED",
+      "RUNNING",
+      "VERIFYING",
+      "COMPLETED",
+    ]) {
       transition(db, { runId: first.runId, to, actor: "test" });
     }
     const nextRef = admit(db, dispatch("dispatch-next-cycle"));
-    expect(planEvent(db, synthetic, nextRef, { now: NOW + 4000, policyVersion: "git:test" }).decision).toBe("run");
+    expect(
+      planEvent(db, synthetic, nextRef, {
+        now: NOW + 4000,
+        policyVersion: "git:test",
+      }).decision,
+    ).toBe("run");
   });
 
   test("unregistered event type → human_needed", () => {
@@ -478,7 +674,9 @@ describe("planEvent", () => {
     expect(outcome.reason).toBe("unregistered_event_type");
     expect(outcome.proposal.decision).toBe("human_needed");
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
-    const event = db.query(`SELECT status FROM events WHERE event_id = ?`).get(ref.eventId);
+    const event = db
+      .query(`SELECT status FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("human_needed");
   });
 
@@ -493,7 +691,9 @@ describe("planEvent", () => {
     expect(outcome.reason).toBe("observed");
     expect(outcome.proposal.status).toBe("resolved");
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
-    const event = db.query(`SELECT status FROM events WHERE event_id = ?`).get(ref.eventId);
+    const event = db
+      .query(`SELECT status FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("noop");
   });
 
@@ -504,7 +704,9 @@ describe("planEvent", () => {
     expect(outcome.decision).toBe("human_needed");
     expect(outcome.reason.startsWith("invalid_input: ")).toBe(true);
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
-    const event = db.query(`SELECT status FROM events WHERE event_id = ?`).get(ref.eventId);
+    const event = db
+      .query(`SELECT status FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("human_needed");
   });
 });
@@ -513,7 +715,11 @@ describe("planEvent worktree gate (WM-108)", () => {
   // A synthetic worktree-workspace agent: the real dispatch@1 lands with its
   // own tests; this proves the gate itself, independent of any one agent.
   function syntheticRegistry() {
-    const synthetic = { ...registry, agents: new Map(registry.agents), eventTypes: { ...registry.eventTypes } };
+    const synthetic = {
+      ...registry,
+      agents: new Map(registry.agents),
+      eventTypes: { ...registry.eventTypes },
+    };
     synthetic.eventTypes["test.worktree.requested"] = {
       agent: "test-worktree@1",
       adapter: "claude",
@@ -528,7 +734,11 @@ describe("planEvent worktree gate (WM-108)", () => {
       capabilities: { services: [] },
       limits: { timeout_seconds: 60, attempts: 1 },
       mutating: true,
-      inputSchema: { type: "object", required: ["repo", "ticket"], properties: { repo: { type: "string" }, ticket: { type: "string" } } },
+      inputSchema: {
+        type: "object",
+        required: ["repo", "ticket"],
+        properties: { repo: { type: "string" }, ticket: { type: "string" } },
+      },
     });
     return synthetic;
   }
@@ -555,20 +765,30 @@ describe("planEvent worktree gate (WM-108)", () => {
   });
 
   test("a dispatch-exempt worktree agent bypasses dispatch-only planning checks", () => {
-    withReposRoot(`repos:\n  - name: repairable\n    path: /tmp/nowhere\n    base: develop\n`, () => {
-      const synthetic = syntheticRegistry();
-      synthetic.agents.set("test-worktree@1", {
-        ...synthetic.agents.get("test-worktree@1"),
-        dispatchGateExempt: true,
-      });
-      const db = openDb(":memory:");
-      const ref = admit(db, dispatchEnvelope({ repo: "repairable", ticket: "WM-500" }));
-      const outcome = planEvent(db, synthetic, ref, {
-        now: NOW,
-        dispatch: { fetchTicket: () => { throw new Error("dispatch gate must not run"); } },
-      });
-      expect(outcome.decision).toBe("run");
-    });
+    withReposRoot(
+      `repos:\n  - name: repairable\n    path: /tmp/nowhere\n    base: develop\n`,
+      () => {
+        const synthetic = syntheticRegistry();
+        synthetic.agents.set("test-worktree@1", {
+          ...synthetic.agents.get("test-worktree@1"),
+          dispatchGateExempt: true,
+        });
+        const db = openDb(":memory:");
+        const ref = admit(
+          db,
+          dispatchEnvelope({ repo: "repairable", ticket: "WM-500" }),
+        );
+        const outcome = planEvent(db, synthetic, ref, {
+          now: NOW,
+          dispatch: {
+            fetchTicket: () => {
+              throw new Error("dispatch gate must not run");
+            },
+          },
+        });
+        expect(outcome.decision).toBe("run");
+      },
+    );
   });
 
   test("merge-fix@1 bypasses the tier-2 dispatch gate while dispatch@1 does not", () => {
@@ -642,58 +862,93 @@ describe("planEvent worktree gate (WM-108)", () => {
     });
     expect(eligible.ok).toBe(true);
 
-    expect(worktreeMergeFixEligibility(payload, {
-      fetchTicket: () => ({ ...ticket, labels: { nodes: [{ name: "ai:escalated" }] } }),
-      fetchPullRequest: () => ({ state: "OPEN", headRefOid: payload.headSha }),
-      now: NOW,
-    }).refusal.reason).toBe("merge_fix_ticket_escalated");
-    expect(worktreeMergeFixEligibility(payload, {
-      fetchTicket: () => ticket,
-      fetchPullRequest: () => ({ state: "OPEN", headRefOid: "b".repeat(40) }),
-      now: NOW,
-    }).refusal.reason).toBe("merge_fix_pr_moved");
-    expect(worktreeMergeFixEligibility(payload, {
-      fetchTicket: () => ticket,
-      fetchPullRequest: () => ({ state: "OPEN", headRefOid: payload.headSha }),
-      fetchNonTerminalRuns: () => [{ runId: "run_other", state: "RUNNING" }],
-      now: NOW,
-    }).refusal.reason).toBe("merge_fix_run_active");
-    expect(worktreeMergeFixEligibility({ ...payload, ownedPaths: ["outside/scope.mjs"] }, {
-      fetchTicket: () => ticket,
-      fetchPullRequest: () => ({ state: "OPEN", headRefOid: payload.headSha }),
-      now: NOW,
-    }).refusal.reason).toBe("merge_fix_owned_paths_moved");
+    expect(
+      worktreeMergeFixEligibility(payload, {
+        fetchTicket: () => ({
+          ...ticket,
+          labels: { nodes: [{ name: "ai:escalated" }] },
+        }),
+        fetchPullRequest: () => ({
+          state: "OPEN",
+          headRefOid: payload.headSha,
+        }),
+        now: NOW,
+      }).refusal.reason,
+    ).toBe("merge_fix_ticket_escalated");
+    expect(
+      worktreeMergeFixEligibility(payload, {
+        fetchTicket: () => ticket,
+        fetchPullRequest: () => ({ state: "OPEN", headRefOid: "b".repeat(40) }),
+        now: NOW,
+      }).refusal.reason,
+    ).toBe("merge_fix_pr_moved");
+    expect(
+      worktreeMergeFixEligibility(payload, {
+        fetchTicket: () => ticket,
+        fetchPullRequest: () => ({
+          state: "OPEN",
+          headRefOid: payload.headSha,
+        }),
+        fetchNonTerminalRuns: () => [{ runId: "run_other", state: "RUNNING" }],
+        now: NOW,
+      }).refusal.reason,
+    ).toBe("merge_fix_run_active");
+    expect(
+      worktreeMergeFixEligibility(
+        { ...payload, ownedPaths: ["outside/scope.mjs"] },
+        {
+          fetchTicket: () => ticket,
+          fetchPullRequest: () => ({
+            state: "OPEN",
+            headRefOid: payload.headSha,
+          }),
+          now: NOW,
+        },
+      ).refusal.reason,
+    ).toBe("merge_fix_owned_paths_moved");
   });
 
   test("a repo with no worktree scripts declared → typed human_needed at plan time, no run", () => {
-    withReposRoot(`repos:\n  - name: noscripts\n    path: /tmp/nowhere\n    base: develop\n`, () => {
-      const synthetic = syntheticRegistry();
-      const db = openDb(":memory:");
-      const ref = admit(db, dispatchEnvelope({ repo: "noscripts", ticket: "WM-1" }));
-      const outcome = planEvent(db, synthetic, ref, { now: NOW });
-      expect(outcome.decision).toBe("human_needed");
-      expect(outcome.reason).toBe("no_worktree_scripts");
-      expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
-    });
+    withReposRoot(
+      `repos:\n  - name: noscripts\n    path: /tmp/nowhere\n    base: develop\n`,
+      () => {
+        const synthetic = syntheticRegistry();
+        const db = openDb(":memory:");
+        const ref = admit(
+          db,
+          dispatchEnvelope({ repo: "noscripts", ticket: "WM-1" }),
+        );
+        const outcome = planEvent(db, synthetic, ref, { now: NOW });
+        expect(outcome.decision).toBe("human_needed");
+        expect(outcome.reason).toBe("no_worktree_scripts");
+        expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
+      },
+    );
   });
 
   test("a repo missing from config/repos.yaml → human_needed repo_unknown", () => {
-    withReposRoot(`repos:\n  - name: real\n    path: /tmp/nowhere\n    base: develop\n`, () => {
-      const synthetic = syntheticRegistry();
-      const db = openDb(":memory:");
-      const ref = admit(db, dispatchEnvelope({ repo: "ghost", ticket: "WM-1" }));
-      const outcome = planEvent(db, synthetic, ref, { now: NOW });
-      expect(outcome.decision).toBe("human_needed");
-      expect(outcome.reason).toMatch(/^repo_unknown: /);
-      expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
-    });
+    withReposRoot(
+      `repos:\n  - name: real\n    path: /tmp/nowhere\n    base: develop\n`,
+      () => {
+        const synthetic = syntheticRegistry();
+        const db = openDb(":memory:");
+        const ref = admit(
+          db,
+          dispatchEnvelope({ repo: "ghost", ticket: "WM-1" }),
+        );
+        const outcome = planEvent(db, synthetic, ref, { now: NOW });
+        expect(outcome.decision).toBe("human_needed");
+        expect(outcome.reason).toMatch(/^repo_unknown: /);
+        expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
+      },
+    );
   });
 
   test("unknown Owned Paths refuses distinctly before wildcard escalation", () => {
     withReposRoot(
       `repos:\n  - name: gated\n    path: /tmp/nowhere\n    base: develop\n` +
-      `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
-      `    worktree_root: /tmp/worktrees\n    escalate_paths:\n      - '**'\n`,
+        `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
+        `    worktree_root: /tmp/worktrees\n    escalate_paths:\n      - '**'\n`,
       () => {
         let fetchedInFlight = false;
         const result = worktreeDispatchAutoEligibility(
@@ -708,11 +963,20 @@ describe("planEvent worktree gate (WM-108)", () => {
               labels: { nodes: [{ name: "ai:agent-ready" }] },
               description: "",
             }),
-            fetchInFlight: () => { fetchedInFlight = true; return []; },
+            fetchInFlight: () => {
+              fetchedInFlight = true;
+              return [];
+            },
           },
         );
-        expect(result.refusal).toMatchObject({ decision: "noop", reason: "owned_paths_unknown" });
-        expect(result.evidence.ticket).toMatchObject({ ownedPaths: ["**"], ownedPathsParsed: false });
+        expect(result.refusal).toMatchObject({
+          decision: "noop",
+          reason: "owned_paths_unknown",
+        });
+        expect(result.evidence.ticket).toMatchObject({
+          ownedPaths: ["**"],
+          ownedPathsParsed: false,
+        });
         expect(result.evidence.escalatePathIntersections).toEqual([]);
         expect(fetchedInFlight).toBe(false);
       },
@@ -722,14 +986,16 @@ describe("planEvent worktree gate (WM-108)", () => {
   test("lease-loss retry accepts only the factory viewer's surviving In Progress claim (WM-621)", () => {
     withReposRoot(
       `repos:\n  - name: gated\n    path: /tmp/nowhere\n    base: develop\n` +
-      `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
-      `    worktree_root: /tmp/worktrees\n    escalate_paths: []\n`,
+        `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
+        `    worktree_root: /tmp/worktrees\n    escalate_paths: []\n`,
       () => {
         const claimedTicket = (assignee) => ({
           identifier: "WM-621",
           state: { name: "In Progress" },
           assignee,
-          labels: { nodes: [{ name: "ai:in-progress" }, { name: "agent:claude-code" }] },
+          labels: {
+            nodes: [{ name: "ai:in-progress" }, { name: "agent:claude-code" }],
+          },
           description: "## Owned Paths\n- event-runtime/lib/worker.mjs\n",
         });
         const baseDispatch = {
@@ -737,12 +1003,19 @@ describe("planEvent worktree gate (WM-108)", () => {
           budgetRefusal: () => null,
           fetchViewer: () => ({ id: "factory-user", name: "Factory" }),
           fetchInFlight: () => [],
-          claimedRetry: { runId: "run_same", priorAttempt: 1, reasonCode: "lease_expired" },
+          claimedRetry: {
+            runId: "run_same",
+            priorAttempt: 1,
+            reasonCode: "lease_expired",
+          },
         };
 
         const resumed = worktreeDispatchAutoEligibility(
           { repo: "gated", ticket: "WM-621" },
-          { ...baseDispatch, fetchTicket: () => claimedTicket({ id: "factory-user" }) },
+          {
+            ...baseDispatch,
+            fetchTicket: () => claimedTicket({ id: "factory-user" }),
+          },
         );
         expect(resumed.ok).toBe(true);
         expect(resumed.evidence.checks).toMatchObject({
@@ -753,9 +1026,15 @@ describe("planEvent worktree gate (WM-108)", () => {
 
         const foreign = worktreeDispatchAutoEligibility(
           { repo: "gated", ticket: "WM-621" },
-          { ...baseDispatch, fetchTicket: () => claimedTicket({ id: "someone-else" }) },
+          {
+            ...baseDispatch,
+            fetchTicket: () => claimedTicket({ id: "someone-else" }),
+          },
         );
-        expect(foreign.refusal).toMatchObject({ decision: "noop", reason: "ticket_assigned" });
+        expect(foreign.refusal).toMatchObject({
+          decision: "noop",
+          reason: "ticket_assigned",
+        });
 
         const ownAssignedTodo = worktreeDispatchAutoEligibility(
           { repo: "gated", ticket: "WM-621" },
@@ -768,7 +1047,10 @@ describe("planEvent worktree gate (WM-108)", () => {
             }),
           },
         );
-        expect(ownAssignedTodo.refusal).toMatchObject({ decision: "noop", reason: "ticket_assigned" });
+        expect(ownAssignedTodo.refusal).toMatchObject({
+          decision: "noop",
+          reason: "ticket_assigned",
+        });
       },
     );
   });
@@ -776,8 +1058,8 @@ describe("planEvent worktree gate (WM-108)", () => {
   test("a genuine sensitive-path refusal names the intersecting configured globs", () => {
     withReposRoot(
       `repos:\n  - name: gated\n    path: /tmp/nowhere\n    base: develop\n` +
-      `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
-      `    worktree_root: /tmp/worktrees\n    escalate_paths:\n      - src/auth/**\n      - infra/**\n`,
+        `    team: WM\n    project: Factory\n    worktree_up: bin/up\n    worktree_down: bin/down\n` +
+        `    worktree_root: /tmp/worktrees\n    escalate_paths:\n      - src/auth/**\n      - infra/**\n`,
       () => {
         const dispatch = {
           countLeases: () => 0,
@@ -800,13 +1082,26 @@ describe("planEvent worktree gate (WM-108)", () => {
           reason: "escalate_paths_intersect",
           detail: "intersecting escalate_paths globs: src/auth/**",
         });
-        expect(result.evidence.escalatePathIntersections).toEqual(["src/auth/**"]);
+        expect(result.evidence.escalatePathIntersections).toEqual([
+          "src/auth/**",
+        ]);
 
         const db = openDb(":memory:");
-        const ref = admit(db, dispatchEnvelope({ repo: "gated", ticket: "WM-3" }));
-        const outcome = planEvent(db, syntheticRegistry(), ref, { now: NOW, dispatch });
-        expect(outcome).toMatchObject({ decision: "noop", reason: "escalate_paths_intersect" });
-        expect(outcome.proposal.reason).toBe("intersecting escalate_paths globs: src/auth/**");
+        const ref = admit(
+          db,
+          dispatchEnvelope({ repo: "gated", ticket: "WM-3" }),
+        );
+        const outcome = planEvent(db, syntheticRegistry(), ref, {
+          now: NOW,
+          dispatch,
+        });
+        expect(outcome).toMatchObject({
+          decision: "noop",
+          reason: "escalate_paths_intersect",
+        });
+        expect(outcome.proposal.reason).toBe(
+          "intersecting escalate_paths globs: src/auth/**",
+        );
       },
     );
   });
@@ -816,7 +1111,11 @@ describe("planEvent repo scoping (WM-64)", () => {
   // A synthetic agent per test keeps the check independent of any one real
   // definition (same approach as the worktree gate tests above).
   function scopedRegistry({ repos, workspace = { type: "ephemeral" } } = {}) {
-    const synthetic = { ...registry, agents: new Map(registry.agents), eventTypes: { ...registry.eventTypes } };
+    const synthetic = {
+      ...registry,
+      agents: new Map(registry.agents),
+      eventTypes: { ...registry.eventTypes },
+    };
     synthetic.eventTypes["test.scoped.requested"] = {
       agent: "test-scoped@1",
       adapter: "claude",
@@ -851,29 +1150,51 @@ describe("planEvent repo scoping (WM-64)", () => {
     const synthetic = scopedRegistry({ repos: ["bj29", "cw-app"] });
     const db = openDb(":memory:");
     const ref = admit(db, scopedEnvelope({ repo: "bj29", ticket: "WM-1" }));
-    const outcome = planEvent(db, synthetic, ref, { now: NOW, policyVersion: "git:test" });
+    const outcome = planEvent(db, synthetic, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     expect(outcome.decision).toBe("run");
     // The proposal the operator approves names the scope (WM-64).
-    expect(JSON.parse(outcome.proposal.spec_json).repos).toEqual(["bj29", "cw-app"]);
+    expect(JSON.parse(outcome.proposal.spec_json).repos).toEqual([
+      "bj29",
+      "cw-app",
+    ]);
   });
 
   test("payload.repo outside the declared set parks human_needed with the named reason, no run", () => {
     const synthetic = scopedRegistry({ repos: ["bj29", "cw-app"] });
     const db = openDb(":memory:");
-    const ref = admit(db, scopedEnvelope({ repo: "coach-wattz", ticket: "WM-1" }));
-    const outcome = planEvent(db, synthetic, ref, { now: NOW, policyVersion: "git:test" });
+    const ref = admit(
+      db,
+      scopedEnvelope({ repo: "coach-wattz", ticket: "WM-1" }),
+    );
+    const outcome = planEvent(db, synthetic, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     expect(outcome.decision).toBe("human_needed");
-    expect(outcome.reason).toBe("repo_not_allowed: test-scoped@1 may not run over coach-wattz (allowed: bj29, cw-app)");
+    expect(outcome.reason).toBe(
+      "repo_not_allowed: test-scoped@1 may not run over coach-wattz (allowed: bj29, cw-app)",
+    );
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
-    const event = db.query(`SELECT status FROM events WHERE event_id = ?`).get(ref.eventId);
+    const event = db
+      .query(`SELECT status FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("human_needed");
   });
 
   test("a definition without repos is unrestricted — behaves exactly as today (regression)", () => {
     const synthetic = scopedRegistry();
     const db = openDb(":memory:");
-    const ref = admit(db, scopedEnvelope({ repo: "anything-at-all", ticket: "WM-1" }));
-    const outcome = planEvent(db, synthetic, ref, { now: NOW, policyVersion: "git:test" });
+    const ref = admit(
+      db,
+      scopedEnvelope({ repo: "anything-at-all", ticket: "WM-1" }),
+    );
+    const outcome = planEvent(db, synthetic, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     expect(outcome.decision).toBe("run");
     expect(JSON.parse(outcome.proposal.spec_json).repos).toBeUndefined();
   });
@@ -882,20 +1203,37 @@ describe("planEvent repo scoping (WM-64)", () => {
     // No FACTORY_REPOS_ROOT setup at all — if the planner reached pinRepo it
     // would fail as repo_pin_failed; the scope check must win first, so no
     // mirror fetch happens for a refused run.
-    const synthetic = scopedRegistry({ repos: ["bj29"], workspace: { type: "repository" } });
+    const synthetic = scopedRegistry({
+      repos: ["bj29"],
+      workspace: { type: "repository" },
+    });
     const db = openDb(":memory:");
-    const ref = admit(db, scopedEnvelope({ repo: "coach-wattz", ticket: "WM-1" }));
-    const outcome = planEvent(db, synthetic, ref, { now: NOW, policyVersion: "git:test" });
+    const ref = admit(
+      db,
+      scopedEnvelope({ repo: "coach-wattz", ticket: "WM-1" }),
+    );
+    const outcome = planEvent(db, synthetic, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     expect(outcome.decision).toBe("human_needed");
     expect(outcome.reason).toMatch(/^repo_not_allowed: /);
-    const stored = db.query(`SELECT envelope_json FROM events WHERE event_id = ?`).get(ref.eventId);
+    const stored = db
+      .query(`SELECT envelope_json FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(JSON.parse(stored.envelope_json).payload.repoPin).toBeUndefined();
   });
 
   test("scope refusal precedes the worktree dispatch gate: no Linear or lease reads for an out-of-scope repo", () => {
-    const synthetic = scopedRegistry({ repos: ["bj29"], workspace: { type: "worktree" } });
+    const synthetic = scopedRegistry({
+      repos: ["bj29"],
+      workspace: { type: "worktree" },
+    });
     const db = openDb(":memory:");
-    const ref = admit(db, scopedEnvelope({ repo: "coach-wattz", ticket: "WM-1" }));
+    const ref = admit(
+      db,
+      scopedEnvelope({ repo: "coach-wattz", ticket: "WM-1" }),
+    );
     const dispatch = {
       fetchTicket: () => {
         throw new Error("gate consulted Linear for an out-of-scope repo");
@@ -904,7 +1242,11 @@ describe("planEvent repo scoping (WM-64)", () => {
         throw new Error("gate consulted Linear for an out-of-scope repo");
       },
     };
-    const outcome = planEvent(db, synthetic, ref, { now: NOW, policyVersion: "git:test", dispatch });
+    const outcome = planEvent(db, synthetic, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+      dispatch,
+    });
     expect(outcome.decision).toBe("human_needed");
     expect(outcome.reason).toMatch(/^repo_not_allowed: /);
   });
@@ -913,12 +1255,19 @@ describe("planEvent repo scoping (WM-64)", () => {
 describe("planEvent model pinning (WM-135)", () => {
   // Synthetic agents again: the resolution semantics belong to the planner,
   // not to any one shipped definition.
-  function tieredRegistry({ modelTier, model, adapter = "claude", modelTiers } = {}) {
+  function tieredRegistry({
+    modelTier,
+    model,
+    adapter = "claude",
+    modelTiers,
+  } = {}) {
     const synthetic = {
       ...registry,
       agents: new Map(registry.agents),
       eventTypes: { ...registry.eventTypes },
-      modelTiers: modelTiers ?? { claude: { strong: "default", standard: "sonnet", light: "haiku" } },
+      modelTiers: modelTiers ?? {
+        claude: { strong: "default", standard: "sonnet", light: "haiku" },
+      },
     };
     synthetic.eventTypes["test.tiered.requested"] = {
       agent: "test-tiered@1",
@@ -951,17 +1300,27 @@ describe("planEvent model pinning (WM-135)", () => {
   test("declared tier resolves through the policy map and is pinned into the spec the operator approves", () => {
     const db = openDb(":memory:");
     const ref = admit(db, tieredEnvelope());
-    const outcome = planEvent(db, tieredRegistry({ modelTier: "standard" }), ref, { now: NOW, policyVersion: "git:test" });
+    const outcome = planEvent(
+      db,
+      tieredRegistry({ modelTier: "standard" }),
+      ref,
+      { now: NOW, policyVersion: "git:test" },
+    );
     expect(outcome.decision).toBe("run");
     const spec = JSON.parse(outcome.proposal.spec_json);
     expect(spec.model).toBe("sonnet");
     expect(spec.modelTier).toBe("standard");
   });
 
-  test("tier resolving to the default sentinel pins \"default\" explicitly — visible, not implicit", () => {
+  test('tier resolving to the default sentinel pins "default" explicitly — visible, not implicit', () => {
     const db = openDb(":memory:");
     const ref = admit(db, tieredEnvelope());
-    const outcome = planEvent(db, tieredRegistry({ modelTier: "strong" }), ref, { now: NOW, policyVersion: "git:test" });
+    const outcome = planEvent(
+      db,
+      tieredRegistry({ modelTier: "strong" }),
+      ref,
+      { now: NOW, policyVersion: "git:test" },
+    );
     const spec = JSON.parse(outcome.proposal.spec_json);
     expect(spec.model).toBe("default");
     expect(spec.modelTier).toBe("strong");
@@ -984,7 +1343,10 @@ describe("planEvent model pinning (WM-135)", () => {
   test("a definition declaring nothing produces a spec without model fields — today's behavior (regression)", () => {
     const db = openDb(":memory:");
     const ref = admit(db, tieredEnvelope());
-    const outcome = planEvent(db, tieredRegistry(), ref, { now: NOW, policyVersion: "git:test" });
+    const outcome = planEvent(db, tieredRegistry(), ref, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     const spec = JSON.parse(outcome.proposal.spec_json);
     expect("model" in spec).toBe(false);
     expect("modelTier" in spec).toBe(false);
@@ -1024,7 +1386,12 @@ describe("planEvent model pinning (WM-135)", () => {
     // Bypassing loadRegistry's own load-time check (synthetic registry): the
     // planner is the second line of the same fail-closed rule.
     expect(() =>
-      planEvent(db, tieredRegistry({ modelTier: "light", modelTiers: {} }), ref, { now: NOW, policyVersion: "git:test" }),
+      planEvent(
+        db,
+        tieredRegistry({ modelTier: "light", modelTiers: {} }),
+        ref,
+        { now: NOW, policyVersion: "git:test" },
+      ),
     ).toThrow(/no mapping for adapter "claude"/);
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(0);
   });
@@ -1037,7 +1404,10 @@ describe("buildRunSpec", () => {
     const a = buildRunSpec(registry, envelope(), mapping, opts);
     const b = buildRunSpec(registry, envelope(), mapping, opts);
     expect(hashJson(a)).toBe(hashJson(b));
-    const overridden = buildRunSpec(registry, envelope(), mapping, { ...opts, adapterOverride: "pi" });
+    const overridden = buildRunSpec(registry, envelope(), mapping, {
+      ...opts,
+      adapterOverride: "pi",
+    });
     expect(overridden.adapter).toBe("pi");
     expect(overridden.idempotencyKey).toBe(a.idempotencyKey);
   });
@@ -1050,27 +1420,46 @@ describe("planAdmittedEvents", () => {
     const broken = {}; // getEventType throws on this — a poison planning input
 
     for (let i = 1; i < DEAD_LETTER_AFTER; i++) {
-      expect(planAdmittedEvents(db, broken)).toEqual({ planned: 0, failed: 1, deadLettered: 0 });
-      const event = db.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+      expect(planAdmittedEvents(db, broken)).toEqual({
+        planned: 0,
+        failed: 1,
+        deadLettered: 0,
+      });
+      const event = db
+        .query(`SELECT * FROM events WHERE event_id = ?`)
+        .get(ref.eventId);
       expect(event.status).toBe("admitted");
       expect(event.plan_failures).toBe(i);
     }
 
-    expect(planAdmittedEvents(db, broken)).toEqual({ planned: 0, failed: 1, deadLettered: 1 });
-    const event = db.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    expect(planAdmittedEvents(db, broken)).toEqual({
+      planned: 0,
+      failed: 1,
+      deadLettered: 1,
+    });
+    const event = db
+      .query(`SELECT * FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("dead_lettered");
     expect(event.plan_failures).toBe(DEAD_LETTER_AFTER);
     expect(event.last_plan_error).toBeTruthy();
 
     // Dead-lettered events leave the sweep; nothing is wedged.
-    expect(planAdmittedEvents(db, broken)).toEqual({ planned: 0, failed: 0, deadLettered: 0 });
+    expect(planAdmittedEvents(db, broken)).toEqual({
+      planned: 0,
+      failed: 0,
+      deadLettered: 0,
+    });
   });
 
   test("plans every admitted event and reports counts", () => {
     const db = openDb(":memory:");
     admit(db, { eventId: "delivery-1" });
     admit(db, { eventId: "delivery-2", correlationId: "workflow-02" });
-    const counts = planAdmittedEvents(db, registry, { now: NOW, policyVersion: "git:test" });
+    const counts = planAdmittedEvents(db, registry, {
+      now: NOW,
+      policyVersion: "git:test",
+    });
     expect(counts).toEqual({ planned: 2, failed: 0, deadLettered: 0 });
     expect(db.query(`SELECT COUNT(*) AS n FROM runs`).get().n).toBe(2);
   });
@@ -1096,7 +1485,9 @@ describe("planAdmittedEvents", () => {
       db1.exec("ROLLBACK;");
     }
 
-    const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    const event = db1
+      .query(`SELECT * FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("admitted");
     expect(event.plan_failures).toBe(0);
   });
@@ -1120,7 +1511,9 @@ describe("planAdmittedEvents", () => {
       db1.exec("ROLLBACK;");
     }
 
-    const event = db1.query(`SELECT * FROM events WHERE event_id = ?`).get(ref.eventId);
+    const event = db1
+      .query(`SELECT * FROM events WHERE event_id = ?`)
+      .get(ref.eventId);
     expect(event.status).toBe("admitted");
     expect(event.plan_failures).toBe(0);
   });
@@ -1129,8 +1522,12 @@ describe("planAdmittedEvents", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "evrt-plan-factory-"));
     mkdirSync(path.join(root, "config"), { recursive: true });
     const repoDir = mkdtempSync(path.join(os.tmpdir(), "evrt-repo-"));
-    execFileSync("git", ["init", "--quiet", "--initial-branch=develop"], { cwd: repoDir });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir });
+    execFileSync("git", ["init", "--quiet", "--initial-branch=develop"], {
+      cwd: repoDir,
+    });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: repoDir,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
     writeFileSync(path.join(repoDir, "README.md"), "bj29\n");
     execFileSync("git", ["add", "."], { cwd: repoDir });
@@ -1143,7 +1540,9 @@ describe("planAdmittedEvents", () => {
     const oldReposRoot = process.env.FACTORY_REPOS_ROOT;
     const oldHome = process.env.FACTORY_EVENT_HOME;
     process.env.FACTORY_REPOS_ROOT = root;
-    process.env.FACTORY_EVENT_HOME = mkdtempSync(path.join(os.tmpdir(), "evrt-plan-home-"));
+    process.env.FACTORY_EVENT_HOME = mkdtempSync(
+      path.join(os.tmpdir(), "evrt-plan-home-"),
+    );
 
     try {
       const db = openDb(":memory:");
@@ -1152,14 +1551,21 @@ describe("planAdmittedEvents", () => {
         type: "factory.triage.requested",
         payload: { repo: "bj29", ref: "develop" },
       });
-      const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test" });
+      const outcome = planEvent(db, registry, ref, {
+        now: NOW,
+        policyVersion: "git:test",
+      });
       expect(outcome.decision).toBe("run");
       const originalSpec = JSON.parse(outcome.proposal.spec_json);
       expect(originalSpec.input.repoPin).toBeTruthy();
       expect(originalSpec.input.repoPin.sha).toMatch(/^[0-9a-f]{40}$/);
 
       // Stored event envelope now carries repoPin
-      const storedEvent = db.query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+      const storedEvent = db
+        .query(
+          `SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`,
+        )
+        .get(ref.source, ref.eventId);
       const storedEnvelope = JSON.parse(storedEvent.envelope_json);
       expect(storedEnvelope.payload.repoPin).toBeTruthy();
 
@@ -1196,13 +1602,21 @@ describe("planAdmittedEvents", () => {
     ).run(
       priorRunId,
       JSON.stringify({
-        artifacts: [{ kind: "transcript", uri: "file:///tmp/t.json", sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }],
+        artifacts: [
+          {
+            kind: "transcript",
+            uri: "file:///tmp/t.json",
+            sha256:
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          },
+        ],
       }),
       new Date(NOW).toISOString(),
     );
 
     const artifactStore = mkdtempSync(path.join(os.tmpdir(), "evrt-pm-store-"));
-    const transcriptSha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const transcriptSha =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     writeFileSync(path.join(artifactStore, transcriptSha), "{}");
 
     const ref = admit(db, {
@@ -1210,13 +1624,23 @@ describe("planAdmittedEvents", () => {
       type: "factory.run-postmortem.requested",
       payload: { runId: priorRunId },
     });
-    const outcome = planEvent(db, registry, ref, { now: NOW, policyVersion: "git:test", artifactStore });
+    const outcome = planEvent(db, registry, ref, {
+      now: NOW,
+      policyVersion: "git:test",
+      artifactStore,
+    });
     expect(outcome.decision).toBe("run");
     const originalSpec = JSON.parse(outcome.proposal.spec_json);
     expect(originalSpec.input.runPin).toBeTruthy();
-    expect(originalSpec.input.runPin.transcript).toBe("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    expect(originalSpec.input.runPin.transcript).toBe(
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
 
-    const storedEvent = db.query(`SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`).get(ref.source, ref.eventId);
+    const storedEvent = db
+      .query(
+        `SELECT envelope_json FROM events WHERE source = ? AND event_id = ?`,
+      )
+      .get(ref.source, ref.eventId);
     const storedEnvelope = JSON.parse(storedEvent.envelope_json);
     expect(storedEnvelope.payload.runPin).toBeTruthy();
 

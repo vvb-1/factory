@@ -61,26 +61,38 @@ async function api(path, options = {}) {
       json = null;
     }
     if (!res.ok) {
-      const err = json?.error || (Array.isArray(json?.errors) ? json.errors.join("; ") : `HTTP ${res.status}`);
+      const err =
+        json?.error ||
+        (Array.isArray(json?.errors)
+          ? json.errors.join("; ")
+          : `HTTP ${res.status}`);
       die(`control API error on ${path}: ${err}`);
     }
     return json;
   } catch (e) {
-    die(`failed to reach event runtime on port ${port} — is 'factory serve' running? (${e.message})`);
+    die(
+      `failed to reach event runtime on port ${port} — is 'factory serve' running? (${e.message})`,
+    );
   }
 }
 
 async function streamTrace(runId) {
-  console.log(`\n==> Streaming live trace for run ${runId} (Ctrl+C to detach)...\n`);
+  console.log(
+    `\n==> Streaming live trace for run ${runId} (Ctrl+C to detach)...\n`,
+  );
   let since = 0;
   let finished = false;
 
   while (!finished) {
-    const trace = await api(`/runs/${encodeURIComponent(runId)}/trace?since=${since}&limit=100`);
+    const trace = await api(
+      `/runs/${encodeURIComponent(runId)}/trace?since=${since}&limit=100`,
+    );
     if (trace?.entries) {
       for (const entry of trace.entries) {
         since = Math.max(since, entry.seq);
-        const time = entry.occurred_at ? new Date(entry.occurred_at).toLocaleTimeString() : "";
+        const time = entry.occurred_at
+          ? new Date(entry.occurred_at).toLocaleTimeString()
+          : "";
         const type = entry.type || "trace";
         let detail;
         if (entry.data?.text) detail = entry.data.text;
@@ -97,7 +109,9 @@ async function streamTrace(runId) {
     if (run && ["COMPLETED", "FAILED", "CANCELLED"].includes(run.state)) {
       // Not `finished = true`: the `break` below exits the loop directly, so
       // the while(!finished) condition is never re-evaluated after this branch.
-      console.log(`\n==> Run ${runId} settled: ${run.state} (${run.reasonCode || "ok"})`);
+      console.log(
+        `\n==> Run ${runId} settled: ${run.state} (${run.reasonCode || "ok"})`,
+      );
       if (run.state !== "COMPLETED") {
         process.exit(1);
       }
@@ -112,7 +126,9 @@ async function findRunForEvent(source, eventId, maxWaitMs = 10000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     const res = await api(`/proposals`);
-    const proposal = (res.proposals || []).find((p) => p.eventSource === source && p.eventId === eventId);
+    const proposal = (res.proposals || []).find(
+      (p) => p.eventSource === source && p.eventId === eventId,
+    );
     if (proposal?.runId) {
       return proposal.runId;
     }
@@ -155,12 +171,17 @@ async function main() {
       payload = { repos: [repo] };
       break;
     case "janitor":
-      eventType = values.apply ? "factory.janitor-apply.requested" : "factory.janitor-scan.requested";
+      eventType = values.apply
+        ? "factory.janitor-apply.requested"
+        : "factory.janitor-scan.requested";
       payload = { repo };
       break;
     case "event": {
       eventType = positionals[1];
-      if (!eventType) die("missing event type for 'event' action. Usage: factory dispatch event <type>");
+      if (!eventType)
+        die(
+          "missing event type for 'event' action. Usage: factory dispatch event <type>",
+        );
       if (values.payload) {
         try {
           payload = JSON.parse(values.payload);
@@ -207,7 +228,9 @@ async function main() {
     if (runId) {
       await streamTrace(runId);
     } else {
-      console.log(`Event admitted. Check status via: factory events ps or web UI http://127.0.0.1:${port}`);
+      console.log(
+        `Event admitted. Check status via: factory events ps or web UI http://127.0.0.1:${port}`,
+      );
     }
   } else {
     console.log(`\nView live status: http://127.0.0.1:${port}/#/events`);

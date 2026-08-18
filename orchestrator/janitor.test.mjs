@@ -15,7 +15,14 @@
  * misses: they release themselves as soon as the holding PR closes.
  */
 import { test, expect, describe } from "bun:test";
-import { parseWorktreeBranches, openPrHold, listOpenPrs, ticketBranches, reclaim, survey } from "./janitor.mjs";
+import {
+  parseWorktreeBranches,
+  openPrHold,
+  listOpenPrs,
+  ticketBranches,
+  reclaim,
+  survey,
+} from "./janitor.mjs";
 
 /** A spawnSync stand-in that records every call and never touches the disk. */
 function recorder(handler = () => ({ status: 0, stdout: "", stderr: "" })) {
@@ -47,7 +54,12 @@ describe("parseWorktreeBranches", () => {
   });
 
   test("a detached worktree has no branch and simply does not appear", () => {
-    const porcelain = ["worktree /Users/x/wt/CLNT-1", "HEAD cccc", "detached", ""].join("\n");
+    const porcelain = [
+      "worktree /Users/x/wt/CLNT-1",
+      "HEAD cccc",
+      "detached",
+      "",
+    ].join("\n");
     expect(parseWorktreeBranches(porcelain)).toEqual({});
   });
 
@@ -80,7 +92,10 @@ describe("openPrHold", () => {
   });
 
   test("several open PRs on one branch are all named", () => {
-    const hold = openPrHold("feat/CLNT-520", [...openPrs, { number: 264, headRefName: "feat/CLNT-520" }]);
+    const hold = openPrHold("feat/CLNT-520", [
+      ...openPrs,
+      { number: 264, headRefName: "feat/CLNT-520" },
+    ]);
     expect(hold).toContain("#261");
     expect(hold).toContain("#264");
   });
@@ -92,8 +107,13 @@ describe("openPrHold", () => {
 
 describe("listOpenPrs", () => {
   test("returns the parsed PR list", () => {
-    const run = recorder(() => ({ status: 0, stdout: JSON.stringify([{ number: 261, headRefName: "feat/CLNT-520" }]) }));
-    expect(listOpenPrs("/repo", run)).toEqual([{ number: 261, headRefName: "feat/CLNT-520" }]);
+    const run = recorder(() => ({
+      status: 0,
+      stdout: JSON.stringify([{ number: 261, headRefName: "feat/CLNT-520" }]),
+    }));
+    expect(listOpenPrs("/repo", run)).toEqual([
+      { number: 261, headRefName: "feat/CLNT-520" },
+    ]);
     expect(run.calls[0].args).toContain("--state");
     expect(run.calls[0].args).toContain("open");
   });
@@ -101,19 +121,41 @@ describe("listOpenPrs", () => {
   test("a failed or unparseable `gh` is null, not an empty list", () => {
     // The distinction is the whole point: empty means "no open PR", null means
     // "could not tell", and only the first one licenses a teardown.
-    expect(listOpenPrs("/repo", recorder(() => ({ status: 1, stderr: "gh: not authenticated" })))).toBeNull();
-    expect(listOpenPrs("/repo", recorder(() => ({ status: 0, stdout: "not json" })))).toBeNull();
+    expect(
+      listOpenPrs(
+        "/repo",
+        recorder(() => ({ status: 1, stderr: "gh: not authenticated" })),
+      ),
+    ).toBeNull();
+    expect(
+      listOpenPrs(
+        "/repo",
+        recorder(() => ({ status: 0, stdout: "not json" })),
+      ),
+    ).toBeNull();
   });
 
   test("fails closed (returns null) when hitting the fetch limit (WM-56)", () => {
-    const atLimit = Array.from({ length: 200 }, (_, i) => ({ number: i + 1, headRefName: `branch-${i + 1}` }));
-    const run = recorder(() => ({ status: 0, stdout: JSON.stringify(atLimit) }));
+    const atLimit = Array.from({ length: 200 }, (_, i) => ({
+      number: i + 1,
+      headRefName: `branch-${i + 1}`,
+    }));
+    const run = recorder(() => ({
+      status: 0,
+      stdout: JSON.stringify(atLimit),
+    }));
     expect(listOpenPrs("/repo", run, 200)).toBeNull();
   });
 
   test("returns PRs when below the fetch limit (WM-56)", () => {
-    const belowLimit = Array.from({ length: 199 }, (_, i) => ({ number: i + 1, headRefName: `branch-${i + 1}` }));
-    const run = recorder(() => ({ status: 0, stdout: JSON.stringify(belowLimit) }));
+    const belowLimit = Array.from({ length: 199 }, (_, i) => ({
+      number: i + 1,
+      headRefName: `branch-${i + 1}`,
+    }));
+    const run = recorder(() => ({
+      status: 0,
+      stdout: JSON.stringify(belowLimit),
+    }));
     expect(listOpenPrs("/repo", run, 200)).toHaveLength(199);
   });
 });
@@ -129,15 +171,28 @@ describe("ticketBranches", () => {
       "",
     ].join("\n");
     const run = recorder(() => ({ status: 0, stdout: porcelain }));
-    expect(ticketBranches("/repo", "/wt/legalease", ["CLNT-520", "CLNT-600", "CLNT-700"], run)).toEqual({
+    expect(
+      ticketBranches(
+        "/repo",
+        "/wt/legalease",
+        ["CLNT-520", "CLNT-600", "CLNT-700"],
+        run,
+      ),
+    ).toEqual({
       "CLNT-520": "feat/CLNT-520",
       "CLNT-600": "fix/CLNT-600-thing",
     });
   });
 
   test("a failed git worktree list is cannot-tell, not an empty map", () => {
-    const run = recorder(() => ({ status: 128, stdout: "", stderr: "fatal: not a git repository\n" }));
-    expect(ticketBranches("/repo", "/wt/legalease", ["CLNT-520"], run)).toBeNull();
+    const run = recorder(() => ({
+      status: 128,
+      stdout: "",
+      stderr: "fatal: not a git repository\n",
+    }));
+    expect(
+      ticketBranches("/repo", "/wt/legalease", ["CLNT-520"], run),
+    ).toBeNull();
   });
 });
 
@@ -176,10 +231,18 @@ describe("reclaim (WM-17 regression: branch A merged while a second PR still hea
   });
 
   test("worktree-down.sh's own refusal (unpushed work) is still reported, not overridden", () => {
-    const run = recorder(() => ({ status: 1, stderr: "CLNT-600 has uncommitted changes — commit/stash them\n" }));
+    const run = recorder(() => ({
+      status: 1,
+      stderr: "CLNT-600 has uncommitted changes — commit/stash them\n",
+    }));
     const out = reclaim(["CLNT-600"], { ...scenario, run });
     expect(out.removed).toEqual([]);
-    expect(out.refused).toEqual([{ id: "CLNT-600", reason: "CLNT-600 has uncommitted changes — commit/stash them" }]);
+    expect(out.refused).toEqual([
+      {
+        id: "CLNT-600",
+        reason: "CLNT-600 has uncommitted changes — commit/stash them",
+      },
+    ]);
   });
 
   test("teardown is never invoked with --force", () => {
@@ -190,10 +253,18 @@ describe("reclaim (WM-17 regression: branch A merged while a second PR still hea
 
   test("reclaim throws if openPrs is missing, null, or not an array (WM-56)", () => {
     const run = recorder();
-    expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: undefined, run })).toThrow("reclaim requires openPrs array");
-    expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: null, run })).toThrow("reclaim requires openPrs array");
-    expect(() => reclaim(["CLNT-520"], { ...scenario, openPrs: "invalid", run })).toThrow("reclaim requires openPrs array");
-    expect(() => reclaim(["CLNT-520"], { repoPath: "/repo", down: "down.sh" })).toThrow("reclaim requires openPrs array");
+    expect(() =>
+      reclaim(["CLNT-520"], { ...scenario, openPrs: undefined, run }),
+    ).toThrow("reclaim requires openPrs array");
+    expect(() =>
+      reclaim(["CLNT-520"], { ...scenario, openPrs: null, run }),
+    ).toThrow("reclaim requires openPrs array");
+    expect(() =>
+      reclaim(["CLNT-520"], { ...scenario, openPrs: "invalid", run }),
+    ).toThrow("reclaim requires openPrs array");
+    expect(() =>
+      reclaim(["CLNT-520"], { repoPath: "/repo", down: "down.sh" }),
+    ).toThrow("reclaim requires openPrs array");
   });
 });
 
@@ -213,7 +284,10 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
       { identifier: "CLNT-520", state: { name: "Done", type: "completed" } },
       { identifier: "CLNT-600", state: { name: "Done", type: "completed" } },
     ],
-    getBranches: () => ({ "CLNT-520": "feat/CLNT-520", "CLNT-600": "fix/CLNT-600" }),
+    getBranches: () => ({
+      "CLNT-520": "feat/CLNT-520",
+      "CLNT-600": "fix/CLNT-600",
+    }),
     getOpenPrs: () => [{ number: 261, headRefName: "feat/CLNT-520" }],
   };
 
@@ -232,19 +306,24 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
       // in one request silently omits every worktree after the first 250.
       return nums.slice(0, 250).map((number) => ({
         identifier: `CLNT-${number}`,
-        state: number % 2 === 0
-          ? { name: "Done", type: "completed" }
-          : { name: "In Progress", type: "started" },
+        state:
+          number % 2 === 0
+            ? { name: "Done", type: "completed" }
+            : { name: "In Progress", type: "started" },
       }));
     };
 
-    const res = await survey(repo, { apply: false }, {
-      readdir: () => worktrees,
-      exists: () => true,
-      queryIssues,
-      getBranches: () => ({}),
-      getOpenPrs: () => [],
-    });
+    const res = await survey(
+      repo,
+      { apply: false },
+      {
+        readdir: () => worktrees,
+        exists: () => true,
+        queryIssues,
+        getBranches: () => ({}),
+        getOpenPrs: () => [],
+      },
+    );
 
     expect(calls.map((nums) => nums.length)).toEqual([250, 250, 1]);
     expect(maxActive).toBe(3);
@@ -260,20 +339,26 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
       expect(surveyRes.held).toHaveLength(1);
       expect(surveyRes.held[0].id).toBe("CLNT-520");
       expect(surveyRes.held[0].reason).toContain("#261");
-      expect(surveyRes.reclaimable).toEqual([{ id: "CLNT-600", state: "Done" }]);
+      expect(surveyRes.reclaimable).toEqual([
+        { id: "CLNT-600", state: "Done" },
+      ]);
       expect(surveyRes.skippedApplyReason).toBeNull();
     });
   });
 
   test("an open-PR hold populates the held array and is excluded from reclaimable (apply run)", async () => {
     let reclaimed = null;
-    const res = await survey(repo, { apply: true }, {
-      ...defaultDeps,
-      doReclaim: (finished, opts) => {
-        reclaimed = finished;
-        return { removed: finished, refused: [], held: [] };
+    const res = await survey(
+      repo,
+      { apply: true },
+      {
+        ...defaultDeps,
+        doReclaim: (finished, opts) => {
+          reclaimed = finished;
+          return { removed: finished, refused: [], held: [] };
+        },
       },
-    });
+    );
     expect(res.held).toHaveLength(1);
     expect(res.held[0].id).toBe("CLNT-520");
     expect(res.reclaimable).toEqual([{ id: "CLNT-600", state: "Done" }]);
@@ -282,40 +367,60 @@ describe("survey (WM-55: hold wiring and cannot-tell exclusion)", () => {
   });
 
   test("cannot-tell from gh (getOpenPrs returns null) yields empty reclaimable and populates skippedApplyReason (dry and apply)", async () => {
-    const dry = await survey(repo, { apply: false }, {
-      ...defaultDeps,
-      getOpenPrs: () => null,
-    });
+    const dry = await survey(
+      repo,
+      { apply: false },
+      {
+        ...defaultDeps,
+        getOpenPrs: () => null,
+      },
+    );
     expect(dry.reclaimable).toEqual([]);
     expect(dry.held).toEqual([]);
     expect(dry.skippedApplyReason).toContain("could not list open PRs");
 
-    const apply = await survey(repo, { apply: true }, {
-      ...defaultDeps,
-      getOpenPrs: () => null,
-    });
+    const apply = await survey(
+      repo,
+      { apply: true },
+      {
+        ...defaultDeps,
+        getOpenPrs: () => null,
+      },
+    );
     expect(apply.reclaimable).toEqual([]);
     expect(apply.held).toEqual([]);
     expect(apply.skippedApplyReason).toContain("could not list open PRs");
   });
 
   test("cannot-tell from git worktree list (getBranches returns null) yields empty reclaimable and populates skippedApplyReason (dry and apply)", async () => {
-    const dry = await survey(repo, { apply: false }, {
-      ...defaultDeps,
-      getBranches: () => null,
-      getOpenPrs: () => [],
-    });
+    const dry = await survey(
+      repo,
+      { apply: false },
+      {
+        ...defaultDeps,
+        getBranches: () => null,
+        getOpenPrs: () => [],
+      },
+    );
     expect(dry.reclaimable).toEqual([]);
     expect(dry.held).toEqual([]);
-    expect(dry.skippedApplyReason).toContain("could not list worktree branches");
+    expect(dry.skippedApplyReason).toContain(
+      "could not list worktree branches",
+    );
 
-    const apply = await survey(repo, { apply: true }, {
-      ...defaultDeps,
-      getBranches: () => null,
-      getOpenPrs: () => [],
-    });
+    const apply = await survey(
+      repo,
+      { apply: true },
+      {
+        ...defaultDeps,
+        getBranches: () => null,
+        getOpenPrs: () => [],
+      },
+    );
     expect(apply.reclaimable).toEqual([]);
     expect(apply.held).toEqual([]);
-    expect(apply.skippedApplyReason).toContain("could not list worktree branches");
+    expect(apply.skippedApplyReason).toContain(
+      "could not list worktree branches",
+    );
   });
 });

@@ -91,7 +91,8 @@ export function RunFull({
   const followUpEvents = useMemo(() => {
     const events = eventsQ.data?.events ?? [];
     return events.filter(
-      (e) => e.causationId === runId || (e.envelope as any)?.causationId === runId,
+      (e) =>
+        e.causationId === runId || (e.envelope as any)?.causationId === runId,
     );
   }, [eventsQ.data, runId]);
   // The chain this run belongs to: its origin event's correlation id (falling
@@ -100,7 +101,10 @@ export function RunFull({
   const chainKey = useMemo(() => {
     const events = eventsQ.data?.events ?? [];
     const origin = listRow
-      ? events.find((e) => e.source === listRow.eventSource && e.eventId === listRow.eventId)
+      ? events.find(
+          (e) =>
+            e.source === listRow.eventSource && e.eventId === listRow.eventId,
+        )
       : null;
     if (origin) return origin.correlationId ?? origin.eventId;
     const emitted = events.find((e) => e.causationId === runId);
@@ -201,9 +205,9 @@ export function RunFull({
 
   const canApprove = Boolean(
     selProposal &&
-      selProposal.status === "open" &&
-      selProposal.decision === "run" &&
-      d?.run.state === "PROPOSED",
+    selProposal.status === "open" &&
+    selProposal.decision === "run" &&
+    d?.run.state === "PROPOSED",
   );
 
   // Verbs: Esc back to list, x cancel, c copy id, c i / c c copy CLI inspect command, c l copy link.
@@ -329,7 +333,14 @@ export function RunFull({
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d?.run.runId, d?.run.state, attemptsExhausted, connected, canApprove, selProposal]);
+  }, [
+    d?.run.runId,
+    d?.run.state,
+    attemptsExhausted,
+    connected,
+    canApprove,
+    selProposal,
+  ]);
 
   return (
     <div className="fixed inset-0 z-20 flex h-full min-w-0 flex-col overflow-hidden bg-(--surface-0) sm:static sm:z-auto">
@@ -411,7 +422,10 @@ export function RunFull({
                   Remaining{" "}
                   {d.deadlineAt
                     ? (() => {
-                        const left = Math.max(0, Date.parse(d.deadlineAt) - now);
+                        const left = Math.max(
+                          0,
+                          Date.parse(d.deadlineAt) - now,
+                        );
                         const minutes = Math.ceil(left / 60_000);
                         return minutes >= 60
                           ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
@@ -421,13 +435,17 @@ export function RunFull({
                 </span>
                 <Button
                   disabled={!connected || extend.isPending}
-                  onClick={() => extend.mutate({ id: d.run.runId, seconds: 15 * 60 })}
+                  onClick={() =>
+                    extend.mutate({ id: d.run.runId, seconds: 15 * 60 })
+                  }
                 >
                   +15m
                 </Button>
                 <Button
                   disabled={!connected || extend.isPending}
-                  onClick={() => extend.mutate({ id: d.run.runId, seconds: 30 * 60 })}
+                  onClick={() =>
+                    extend.mutate({ id: d.run.runId, seconds: 30 * 60 })
+                  }
                 >
                   +30m
                 </Button>
@@ -439,7 +457,8 @@ export function RunFull({
                 </Button>
               </div>
             )}
-            {d && d.run.state === "FAILED" &&
+            {d &&
+              d.run.state === "FAILED" &&
               (attemptsExhausted ? (
                 <Button
                   disabled={!connected}
@@ -465,9 +484,7 @@ export function RunFull({
               </Button>
             )}
             {onJumpChain && chainKey && (
-              <Button
-                onClick={() => onJumpChain(chainKey, `run:${runId}`)}
-              >
+              <Button onClick={() => onJumpChain(chainKey, `run:${runId}`)}>
                 View chain
               </Button>
             )}
@@ -485,7 +502,9 @@ export function RunFull({
         {extend.error && !customExtend && <VerbError error={extend.error} />}
         {extendNotice && (
           <div className="mt-1 text-[12px] text-(--hue-ok)" role="status">
-            {extendNotice}. The Remaining clock is the current execution deadline; the sidebar budget preserves the original approved RunSpec.
+            {extendNotice}. The Remaining clock is the current execution
+            deadline; the sidebar budget preserves the original approved
+            RunSpec.
           </div>
         )}
         <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-(--text-faint)">
@@ -524,7 +543,9 @@ export function RunFull({
                 <div className="mb-6 rounded-md border border-(--border) bg-(--surface-1) p-4 text-[13px]">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="font-semibold text-(--text)">Awaiting Proposal Approval</div>
+                      <div className="font-semibold text-(--text)">
+                        Awaiting Proposal Approval
+                      </div>
                       <div className="text-[12px] text-(--text-dim) mt-0.5">
                         {selProposal
                           ? `Proposal ${shortId(selProposal.id)} is open and ready to approve.`
@@ -578,7 +599,11 @@ export function RunFull({
                 onForceRetry={() => setConfirm("force-retry")}
                 retryPending={retry.isPending}
                 afterLifecycle={
-                  <Section title="Follow-up Events" id="run-follow-up-events" card={followUpEvents.length === 0}>
+                  <Section
+                    title="Follow-up Events"
+                    id="run-follow-up-events"
+                    card={followUpEvents.length === 0}
+                  >
                     {followUpEvents.length === 0 ? (
                       <div className="text-[12px] text-(--text-faint)">
                         No follow-up event was emitted.
@@ -586,21 +611,33 @@ export function RunFull({
                     ) : (
                       <div className="space-y-2">
                         {followUpEvents.map((e) => {
-                          const linkedRun = e.runId ? runsById.get(e.runId) : null;
+                          const linkedRun = e.runId
+                            ? runsById.get(e.runId)
+                            : null;
                           return (
                             <div
                               key={`${e.source}:${e.eventId}`}
                               className="rounded-md border border-(--border) bg-(--surface-0) p-3 text-[12px]"
                             >
                               <div className="flex items-baseline justify-between gap-2">
-                                <span className="mono font-medium text-(--text) truncate" title={e.type}>
+                                <span
+                                  className="mono font-medium text-(--text) truncate"
+                                  title={e.type}
+                                >
                                   {e.type}
                                 </span>
                                 <span
                                   className="mono shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
                                   style={{
-                                    background: e.status === "planned" || e.status === "admitted" ? "var(--surface-2)" : "var(--surface-1)",
-                                    color: e.status === "dead_lettered" ? "var(--hue-err)" : "var(--text-dim)",
+                                    background:
+                                      e.status === "planned" ||
+                                      e.status === "admitted"
+                                        ? "var(--surface-2)"
+                                        : "var(--surface-1)",
+                                    color:
+                                      e.status === "dead_lettered"
+                                        ? "var(--hue-err)"
+                                        : "var(--text-dim)",
                                   }}
                                 >
                                   {e.status}
@@ -610,7 +647,9 @@ export function RunFull({
                               <div className="mt-1.5 flex items-baseline justify-between gap-2 text-[11px] text-(--text-faint)">
                                 <span className="shrink-0">event</span>
                                 <JumpLink
-                                  onClick={() => onJumpEvent(e.source, e.eventId)}
+                                  onClick={() =>
+                                    onJumpEvent(e.source, e.eventId)
+                                  }
                                   title={e.eventId}
                                   className="truncate"
                                 >
@@ -642,7 +681,9 @@ export function RunFull({
                                     )}
                                   </div>
                                   <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
-                                    <span className="text-(--text-faint)">agent</span>
+                                    <span className="text-(--text-faint)">
+                                      agent
+                                    </span>
                                     <span className="text-(--text-dim) truncate">
                                       {linkedRun?.agent ? (
                                         <AgentHoverCard
@@ -655,7 +696,9 @@ export function RunFull({
                                     </span>
                                   </div>
                                   <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
-                                    <span className="text-(--text-faint)">run</span>
+                                    <span className="text-(--text-faint)">
+                                      run
+                                    </span>
                                     <JumpLink
                                       href={`#/${withProject(hashPath("run", e.runId), hashProject(window.location.hash))}`}
                                       title={`Open run ${e.runId}`}
@@ -690,7 +733,9 @@ export function RunFull({
           wide
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
-            Approving proposal <span className="mono font-semibold">{selProposal.id}</span> queues this run for execution.
+            Approving proposal{" "}
+            <span className="mono font-semibold">{selProposal.id}</span> queues
+            this run for execution.
           </div>
           <VerbError error={approve.error} />
           <div className="flex justify-end gap-2">
@@ -701,16 +746,23 @@ export function RunFull({
                 approve.mutate(selProposal.id);
               }}
             >
-              Approve and queue <span className="mono ml-1 opacity-80" aria-hidden="true">↵</span>
+              Approve and queue{" "}
+              <span className="mono ml-1 opacity-80" aria-hidden="true">
+                ↵
+              </span>
             </Button>
           </div>
         </Dialog>
       )}
 
       {customExtend && d && (
-        <Dialog title={`Extend ${d.run.runId}`} onClose={() => setCustomExtend(false)}>
+        <Dialog
+          title={`Extend ${d.run.runId}`}
+          onClose={() => setCustomExtend(false)}
+        >
           <div className="mb-3 text-[12px] text-(--text-dim)">
-            Add up to 60 minutes per request. The policy run limit still applies.
+            Add up to 60 minutes per request. The policy run limit still
+            applies.
           </div>
           <VerbError error={extend.error} />
           <label className="mb-3 block text-[12px] text-(--text-dim)">
@@ -729,7 +781,11 @@ export function RunFull({
             />
             <span
               id="extension-minutes-help"
-              className={customMinutesValid ? "mt-1 block text-(--text-faint)" : "mt-1 block text-(--hue-err)"}
+              className={
+                customMinutesValid
+                  ? "mt-1 block text-(--text-faint)"
+                  : "mt-1 block text-(--hue-err)"
+              }
             >
               Enter a whole number from 1 to 60.
             </span>
@@ -738,11 +794,7 @@ export function RunFull({
             <Button onClick={() => setCustomExtend(false)}>Cancel</Button>
             <Button
               variant="primary"
-              disabled={
-                !connected ||
-                extend.isPending ||
-                !customMinutesValid
-              }
+              disabled={!connected || extend.isPending || !customMinutesValid}
               onClick={() =>
                 extend.mutate({
                   id: d.run.runId,

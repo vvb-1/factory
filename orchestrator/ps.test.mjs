@@ -45,7 +45,8 @@ describe("ps parser", () => {
       cpu: 0.1,
       mem: 0.2,
       etime: "01:23",
-      command: "bun event-runtime/cli.mjs serve --port 7404 --adapter-override fake",
+      command:
+        "bun event-runtime/cli.mjs serve --port 7404 --adapter-override fake",
     });
   });
 
@@ -121,8 +122,12 @@ Google 2024 Chrome 1234 hdkiller   42u  IPv4 0x3ef0e58c7a3caa5c      0t0  TCP 12
 describe("string extraction helpers", () => {
   test("extractTicket finds ticket IDs in branches and commands", () => {
     expect(extractTicket("feat/OPS-402-factory-ps")).toBe("OPS-402");
-    expect(extractTicket("/Users/dev/.worktrees/bj29/CLNT-1393")).toBe("CLNT-1393");
-    expect(extractTicket("runners/run-agent.sh --ticket LAB-176")).toBe("LAB-176");
+    expect(extractTicket("/Users/dev/.worktrees/bj29/CLNT-1393")).toBe(
+      "CLNT-1393",
+    );
+    expect(extractTicket("runners/run-agent.sh --ticket LAB-176")).toBe(
+      "LAB-176",
+    );
     expect(extractTicket("no ticket here")).toBe(null);
   });
 
@@ -133,40 +138,81 @@ describe("string extraction helpers", () => {
   });
 
   test("extractAdapterOverride extracts adapter name", () => {
-    expect(extractAdapterOverride("serve --adapter-override fake")).toBe("fake");
-    expect(extractAdapterOverride("work --adapter-override claude")).toBe("claude");
+    expect(extractAdapterOverride("serve --adapter-override fake")).toBe(
+      "fake",
+    );
+    expect(extractAdapterOverride("work --adapter-override claude")).toBe(
+      "claude",
+    );
     expect(extractAdapterOverride("work")).toBe(null);
   });
 
   test("extractWorktreePath resolves worktree root paths", () => {
-    expect(extractWorktreePath("/Users/hdkiller/Develop/.worktrees/factory/OPS-402/app")).toBe(
-      "/Users/hdkiller/Develop/.worktrees/factory/OPS-402",
-    );
+    expect(
+      extractWorktreePath(
+        "/Users/hdkiller/Develop/.worktrees/factory/OPS-402/app",
+      ),
+    ).toBe("/Users/hdkiller/Develop/.worktrees/factory/OPS-402");
   });
 });
 
 describe("process categorization", () => {
   test("categorizes control plane serve, work, and web", () => {
-    const serveProc = { pid: 101, ppid: 1, cpu: 0.1, mem: 0.2, etime: "01:00", command: "bun event-runtime/cli.mjs serve --port 7404" };
+    const serveProc = {
+      pid: 101,
+      ppid: 1,
+      cpu: 0.1,
+      mem: 0.2,
+      etime: "01:00",
+      command: "bun event-runtime/cli.mjs serve --port 7404",
+    };
     const cat = categorizeProcess(serveProc);
     expect(cat.kind).toBe("control-plane");
     expect(cat.service).toBe("serve");
     expect(cat.port).toBe(7404);
 
-    const workProc = { pid: 102, ppid: 1, cpu: 0.1, mem: 0.2, etime: "01:00", command: "bun event-runtime/cli.mjs work" };
+    const workProc = {
+      pid: 102,
+      ppid: 1,
+      cpu: 0.1,
+      mem: 0.2,
+      etime: "01:00",
+      command: "bun event-runtime/cli.mjs work",
+    };
     expect(categorizeProcess(workProc).service).toBe("worker");
 
-    const webProc = { pid: 103, ppid: 1, cpu: 0.1, mem: 0.2, etime: "01:00", command: "bun event-runtime/web/serve.mjs" };
+    const webProc = {
+      pid: 103,
+      ppid: 1,
+      cpu: 0.1,
+      mem: 0.2,
+      etime: "01:00",
+      command: "bun event-runtime/web/serve.mjs",
+    };
     expect(categorizeProcess(webProc).service).toBe("web");
   });
 
   test("categorizes agent runners and ignores desktop electron apps", () => {
-    const runner = { pid: 201, ppid: 1, cpu: 0, mem: 0, etime: "10:00", command: "bash runners/run-agent.sh --ticket OPS-123" };
+    const runner = {
+      pid: 201,
+      ppid: 1,
+      cpu: 0,
+      mem: 0,
+      etime: "10:00",
+      command: "bash runners/run-agent.sh --ticket OPS-123",
+    };
     const catRunner = categorizeProcess(runner);
     expect(catRunner.kind).toBe("agent");
     expect(catRunner.ticket).toBe("OPS-123");
 
-    const helper = { pid: 401, ppid: 1, cpu: 0, mem: 0, etime: "10:00", command: "/Applications/Claude.app/Contents/Frameworks/Claude Helper" };
+    const helper = {
+      pid: 401,
+      ppid: 1,
+      cpu: 0,
+      mem: 0,
+      etime: "10:00",
+      command: "/Applications/Claude.app/Contents/Frameworks/Claude Helper",
+    };
     expect(categorizeProcess(helper).kind).toBe("ignored");
   });
 });
@@ -175,19 +221,26 @@ describe("worktree daemon liveness", () => {
   test("isPidAlive rejects zombie and defunct daemon processes", () => {
     const inspectPid = () => "Z+   [bun] <defunct>";
 
-    expect(isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid })).toBe(false);
+    expect(
+      isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid }),
+    ).toBe(false);
   });
 
   test("isPidAlive rejects a recycled PID whose command does not match the daemon", () => {
     const inspectPid = () => "S+   unrelated-system-process --background";
 
-    expect(isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid })).toBe(false);
+    expect(
+      isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid }),
+    ).toBe(false);
   });
 
   test("isPidAlive accepts a non-zombie process with the expected daemon signature", () => {
-    const inspectPid = () => "S+   bun event-runtime/cli.mjs work --adapter-override fake";
+    const inspectPid = () =>
+      "S+   bun event-runtime/cli.mjs work --adapter-override fake";
 
-    expect(isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid })).toBe(true);
+    expect(
+      isPidAlive(process.pid, "event-runtime/cli.mjs work", { inspectPid }),
+    ).toBe(true);
   });
 
   test("scanWorktrees does not mark a worktree active when its PID was recycled", () => {

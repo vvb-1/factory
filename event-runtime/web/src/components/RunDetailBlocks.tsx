@@ -2,9 +2,22 @@ import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useState, type ReactNode } from "react";
 import { api, artifactUrl } from "../api";
 import { hashPath, hashProject, withProject } from "../hash";
-import { NOT_APPLICABLE, formatBytes, formatDuration, formatRelative } from "../format";
+import {
+  NOT_APPLICABLE,
+  formatBytes,
+  formatDuration,
+  formatRelative,
+} from "../format";
 import { humanizeReason } from "../reasons";
-import type { AdmittedEvent, ArtifactRef, Attempt, LifecycleEvent, RunDetail, RunSpec, RunState } from "../types";
+import type {
+  AdmittedEvent,
+  ArtifactRef,
+  Attempt,
+  LifecycleEvent,
+  RunDetail,
+  RunSpec,
+  RunState,
+} from "../types";
 import {
   Disclosure,
   JsonBlock,
@@ -27,7 +40,9 @@ import { attrIcon } from "./attrIcons";
  * (vite.config.ts); until the chunk lands the JSON block below stands in,
  * which is also exactly what an agent without a view gets.
  */
-const ArtifactPanel = lazy(() => import("./ArtifactView").then((m) => ({ default: m.ArtifactPanel })));
+const ArtifactPanel = lazy(() =>
+  import("./ArtifactView").then((m) => ({ default: m.ArtifactPanel })),
+);
 
 /**
  * The per-ticket Decisions block (WM-594) rides its own chunk for the same
@@ -35,8 +50,12 @@ const ArtifactPanel = lazy(() => import("./ArtifactView").then((m) => ({ default
  * pane renders. Until the chunk lands nothing is shown — a block that answers
  * "why not" a beat late beats a heavier first paint on every view.
  */
-const TicketDecisionsLazy = lazy(() => import("./TicketDecisions").then((m) => ({ default: m.TicketDecisions })));
-export function TicketDecisionsPanel(props: Parameters<typeof import("./TicketDecisions").TicketDecisions>[0]) {
+const TicketDecisionsLazy = lazy(() =>
+  import("./TicketDecisions").then((m) => ({ default: m.TicketDecisions })),
+);
+export function TicketDecisionsPanel(
+  props: Parameters<typeof import("./TicketDecisions").TicketDecisions>[0],
+) {
   return (
     <Suspense fallback={null}>
       <TicketDecisionsLazy {...props} />
@@ -44,8 +63,15 @@ export function TicketDecisionsPanel(props: Parameters<typeof import("./TicketDe
   );
 }
 
-export const TERMINAL: RunState[] = ["COMPLETED", "REFUSED", "FAILED", "TIMED_OUT", "CANCELLED"];
-export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && state !== "VERIFYING";
+export const TERMINAL: RunState[] = [
+  "COMPLETED",
+  "REFUSED",
+  "FAILED",
+  "TIMED_OUT",
+  "CANCELLED",
+];
+export const isCancellable = (state: RunState) =>
+  !TERMINAL.includes(state) && state !== "VERIFYING";
 
 /**
  * The states `reapExpiredLeases` sweeps (lib/worker.mjs) — exactly the states
@@ -54,7 +80,8 @@ export const isCancellable = (state: RunState) => !TERMINAL.includes(state) && s
 export const IN_FLIGHT: RunState[] = ["LEASED", "RUNNING", "VERIFYING"];
 
 /** `off`: no deadline running yet. `spent`: the deadline passed; the runtime has not caught up. */
-export type Clock = { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };
+export type Clock =
+  { kind: "off" } | { kind: "live"; leftMs: number } | { kind: "spent" };
 
 /** A deadline we cannot read is no deadline: better silent than counting down to NaN. */
 export const clockTo = (iso: string, offsetMs: number, now: number): Clock => {
@@ -78,10 +105,18 @@ export const clockTo = (iso: string, offsetMs: number, now: number): Clock => {
  *   never renewed, so when it passes `reapExpiredLeases` re-queues the run
  *   whatever the worker believes it is doing.
  */
-export function deadlinesOf(a: Attempt, timeoutSeconds: number, now: number): { timeout: Clock; lease: Clock } {
+export function deadlinesOf(
+  a: Attempt,
+  timeoutSeconds: number,
+  now: number,
+): { timeout: Clock; lease: Clock } {
   return {
-    timeout: a.started_at ? clockTo(a.started_at, timeoutSeconds * 1000, now) : { kind: "off" },
-    lease: a.lease_expires_at ? clockTo(a.lease_expires_at, 0, now) : { kind: "off" },
+    timeout: a.started_at
+      ? clockTo(a.started_at, timeoutSeconds * 1000, now)
+      : { kind: "off" },
+    lease: a.lease_expires_at
+      ? clockTo(a.lease_expires_at, 0, now)
+      : { kind: "off" },
   };
 }
 
@@ -89,7 +124,8 @@ export function deadlinesOf(a: Attempt, timeoutSeconds: number, now: number): { 
 const budgetHue = (c: Clock, timeoutSeconds: number): string | undefined => {
   if (c.kind === "spent") return "var(--hue-err)";
   // The last tenth of the declared budget — long enough to notice on a long run.
-  if (c.kind === "live" && c.leftMs <= timeoutSeconds * 100) return "var(--hue-warn)";
+  if (c.kind === "live" && c.leftMs <= timeoutSeconds * 100)
+    return "var(--hue-warn)";
   return undefined;
 };
 
@@ -98,7 +134,13 @@ const budgetHue = (c: Clock, timeoutSeconds: number): string | undefined => {
  * local and the verdict stays the runtime's: a spent budget says so rather than
  * claiming the run is TIMED_OUT, which is the state badge's call on the next poll.
  */
-export function BudgetClock({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }) {
+export function BudgetClock({
+  c,
+  timeoutSeconds,
+}: {
+  c: Clock;
+  timeoutSeconds: number;
+}) {
   const budget = `${formatDuration(timeoutSeconds)} budget`;
   if (c.kind === "off")
     return (
@@ -114,7 +156,10 @@ export function BudgetClock({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: n
       </span>
     );
   return (
-    <span style={{ color: hue }} title={`timeout in ${formatDuration(c.leftMs / 1000)}`}>
+    <span
+      style={{ color: hue }}
+      title={`timeout in ${formatDuration(c.leftMs / 1000)}`}
+    >
       timeout in {formatDuration(c.leftMs / 1000)}
     </span>
   );
@@ -129,14 +174,23 @@ export function LeaseClock({ c, urgent }: { c: Clock; urgent: boolean }) {
       </span>
     );
   return (
-    <span style={urgent ? { color: "var(--hue-warn)" } : undefined} title={`reaped in ${formatDuration(c.leftMs / 1000)}`}>
+    <span
+      style={urgent ? { color: "var(--hue-warn)" } : undefined}
+      title={`reaped in ${formatDuration(c.leftMs / 1000)}`}
+    >
       reaped in {formatDuration(c.leftMs / 1000)}
     </span>
   );
 }
 
 /** How much of the budget is spent — the glance; `BudgetClock` is the number. */
-function BudgetMeter({ c, timeoutSeconds }: { c: Clock; timeoutSeconds: number }) {
+function BudgetMeter({
+  c,
+  timeoutSeconds,
+}: {
+  c: Clock;
+  timeoutSeconds: number;
+}) {
   if (c.kind === "off" || timeoutSeconds <= 0) return null;
   const spent = c.kind === "spent" ? 1 : 1 - c.leftMs / (timeoutSeconds * 1000);
   return (
@@ -183,7 +237,10 @@ export function RunFailureBanner({
     <div
       role="alert"
       className={`rounded-md border p-3 ${className}`}
-      style={{ borderColor: hue, background: `color-mix(in oklch, ${hue} 8%, var(--surface-1))` }}
+      style={{
+        borderColor: hue,
+        background: `color-mix(in oklch, ${hue} 8%, var(--surface-1))`,
+      }}
     >
       <div className="flex items-baseline justify-between gap-3">
         <div
@@ -234,7 +291,8 @@ export function ActorRef({
 }
 
 const isTextArtifact = (k: string) =>
-  /^(transcript|diff|report|evidence)$/i.test(k) || /\.(txt|json|jsonl|md|log)$/i.test(k);
+  /^(transcript|diff|report|evidence)$/i.test(k) ||
+  /\.(txt|json|jsonl|md|log)$/i.test(k);
 
 export function ArtifactRow({ a }: { a: ArtifactRef }) {
   const [open, setOpen] = useState(false);
@@ -270,12 +328,17 @@ export function ArtifactRow({ a }: { a: ArtifactRef }) {
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate">
           {a.kind}
-          <span className="mono ml-2 text-[11px] text-(--text-faint)" title={a.sha256}>
+          <span
+            className="mono ml-2 text-[11px] text-(--text-faint)"
+            title={a.sha256}
+          >
             {a.sha256.slice(0, 12)}
           </span>
         </span>
         <span className="flex shrink-0 items-baseline gap-3">
-          <span className="tabular-nums text-(--text-faint)">{formatBytes(a.sizeBytes)}</span>
+          <span className="tabular-nums text-(--text-faint)">
+            {formatBytes(a.sizeBytes)}
+          </span>
           {textFriendly && (
             <button
               type="button"
@@ -297,7 +360,11 @@ export function ArtifactRow({ a }: { a: ArtifactRef }) {
       </div>
       {open && (
         <div className="mt-2">
-          {loading && <div className="text-[11px] text-(--text-faint)">Loading artifact preview…</div>}
+          {loading && (
+            <div className="text-[11px] text-(--text-faint)">
+              Loading artifact preview…
+            </div>
+          )}
           {error && (
             <div className="text-[11px] text-(--hue-err)">
               Failed to load preview: {error}
@@ -339,7 +406,10 @@ const DEFAULT_MODEL_TEXT = "default (CLI)";
  * - the `default` sentinel, and a spec that declares nothing at all, both mean
  *   the CLI chose → `default (CLI)`; `model (observed)` is what it chose
  */
-export const pinnedModelText = (adapter: string, model: string | null | undefined): string => {
+export const pinnedModelText = (
+  adapter: string,
+  model: string | null | undefined,
+): string => {
   if (!MODEL_ADAPTERS.has(adapter)) return NOT_APPLICABLE;
   return model == null || model === DEFAULT_MODEL ? DEFAULT_MODEL_TEXT : model;
 };
@@ -348,7 +418,9 @@ export const pinnedModelText = (adapter: string, model: string | null | undefine
  * Declared intent — same split as `tierText` in the Agents view (WM-211): an
  * exact-id override answers for a definition that names no tier.
  */
-export const modelTierText = (spec: Pick<RunSpec, "adapter" | "modelTier" | "model">): string => {
+export const modelTierText = (
+  spec: Pick<RunSpec, "adapter" | "modelTier" | "model">,
+): string => {
   if (spec.modelTier) return spec.modelTier;
   if (!MODEL_ADAPTERS.has(spec.adapter)) return NOT_APPLICABLE;
   return spec.model ? "override" : "not declared";
@@ -359,8 +431,14 @@ function ModelDetailRow({ label, value }: { label: string; value: ReactNode }) {
   const icon = attrIcon(label);
   return (
     <div className="grid grid-cols-[minmax(0,9.25rem)_minmax(0,1fr)] items-baseline gap-3 py-[3px]">
-      <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-(--text-faint)" title={label}>
-        <i className="inline-flex size-3.5 shrink-0 items-center justify-center not-italic [&>svg]:size-3.5" aria-hidden="true">
+      <div
+        className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-(--text-faint)"
+        title={label}
+      >
+        <i
+          className="inline-flex size-3.5 shrink-0 items-center justify-center not-italic [&>svg]:size-3.5"
+          aria-hidden="true"
+        >
           {icon}
         </i>
         <span>{label}</span>
@@ -376,7 +454,13 @@ function ModelDetailRow({ label, value }: { label: string; value: ReactNode }) {
  * collapses to one honest `n/a` row rather than three — a declared tier that
  * the adapter cannot use is named in its tooltip rather than dropped.
  */
-function ModelRows({ spec, observed }: { spec: RunSpec; observed: string | null }) {
+function ModelRows({
+  spec,
+  observed,
+}: {
+  spec: RunSpec;
+  observed: string | null;
+}) {
   if (!MODEL_ADAPTERS.has(spec.adapter)) {
     return (
       <KV
@@ -437,7 +521,10 @@ function ModelRows({ spec, observed }: { spec: RunSpec; observed: string | null 
           observed ? (
             <ModelCell model={observed} className="text-(--text-dim)" />
           ) : (
-            <span className="text-(--text-faint)" title="observed model not recorded">
+            <span
+              className="text-(--text-faint)"
+              title="observed model not recorded"
+            >
               {NOT_APPLICABLE}
             </span>
           )
@@ -489,9 +576,18 @@ export function ticketIdOf(value: unknown): string | null {
 }
 
 /** The ticket an admitted event is about: its subject, or `payload.ticket`. */
-export function eventTicket(e: Pick<AdmittedEvent, "subject" | "envelope">): string | null {
-  const payload = (e.envelope as { payload?: Record<string, unknown> } | undefined)?.payload;
-  return ticketIdOf(e.subject) ?? ticketIdOf(payload?.ticket) ?? ticketIdOf(payload?.ticketId) ?? null;
+export function eventTicket(
+  e: Pick<AdmittedEvent, "subject" | "envelope">,
+): string | null {
+  const payload = (
+    e.envelope as { payload?: Record<string, unknown> } | undefined
+  )?.payload;
+  return (
+    ticketIdOf(e.subject) ??
+    ticketIdOf(payload?.ticket) ??
+    ticketIdOf(payload?.ticketId) ??
+    null
+  );
 }
 
 export const hashHref = (view: string, ...ids: string[]) =>
@@ -519,7 +615,12 @@ export function ReasonText({
   if (!h.text) return null;
   const refs = h.refs ?? {};
   // Split the sentence around each reference so the reference itself is a link.
-  const targets: Array<{ id: string; href: string; onClick?: () => void; title: string }> = [];
+  const targets: Array<{
+    id: string;
+    href: string;
+    onClick?: () => void;
+    title: string;
+  }> = [];
   if (refs.runId)
     targets.push({
       id: refs.runId,
@@ -531,7 +632,9 @@ export function ReasonText({
     targets.push({
       id: refs.proposalId,
       href: hashHref("proposals", refs.proposalId),
-      onClick: onJumpProposal ? () => onJumpProposal(refs.proposalId!) : undefined,
+      onClick: onJumpProposal
+        ? () => onJumpProposal(refs.proposalId!)
+        : undefined,
       title: `Open proposal ${refs.proposalId}`,
     });
   if (refs.ticket)
@@ -575,7 +678,9 @@ export function ReasonText({
         title={target.title}
         className="text-[inherit]"
       >
-        {target.id.startsWith("run_") || target.id.startsWith("prop_") ? shortId(target.id) : target.id}
+        {target.id.startsWith("run_") || target.id.startsWith("prop_")
+          ? shortId(target.id)
+          : target.id}
       </JumpLink>,
     );
     rest = rest.slice(firstAt + hit.id.length);
@@ -625,19 +730,26 @@ export function RunDetailBlocks({
   /** Panel slot for the inline RunTrace; the full page renders its trace in the main column. */
   afterLifecycle?: ReactNode;
 }) {
-
   // The reaper keys off the run's current attempt (`a.attempt = r.attempts`),
   // so that is the only attempt whose deadlines are still running.
   const current = IN_FLIGHT.includes(d.run.state)
     ? (d.attempts.find((a) => a.attempt === d.run.attempts) ?? null)
     : null;
-  const clocks = current ? deadlinesOf(current, d.run.spec.timeoutSeconds, now) : null;
-  const inputTicket = ticketIdOf((d.run.spec.input as Record<string, unknown> | null | undefined)?.ticket);
+  const clocks = current
+    ? deadlinesOf(current, d.run.spec.timeoutSeconds, now)
+    : null;
+  const inputTicket = ticketIdOf(
+    (d.run.spec.input as Record<string, unknown> | null | undefined)?.ticket,
+  );
 
   // The artifact's view sidecar rides the `/agents` item for this run's agent
   // (WM-454); the same query AgentHoverCard already keeps warm, so no new
   // request per run. No agent, no view → the JSON block, unchanged.
-  const agentsQ = useQuery({ queryKey: ["agents"], queryFn: () => api.agents(), staleTime: 30_000 });
+  const agentsQ = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api.agents(),
+    staleTime: 30_000,
+  });
   const agentDef = (agentsQ.data?.agents ?? []).find(
     (a) => a.ref === d.run.spec.agent || a.id === d.run.spec.agent,
   );
@@ -660,7 +772,11 @@ export function RunDetailBlocks({
         <ModelRows spec={d.run.spec} observed={d.observedModel ?? null} />
         {/* A count, not an identifier — mono bought it nothing but a mismatched
             font next to "any worker" and "26m ago" on the rows around it. */}
-        <KV k="attempts" v={`${d.run.attempts}/${d.run.spec.maxAttempts}`} mono={false} />
+        <KV
+          k="attempts"
+          v={`${d.run.attempts}/${d.run.spec.maxAttempts}`}
+          mono={false}
+        />
         <InputRows input={d.run.spec.input} />
         {origin?.eventId && (
           <KV
@@ -668,7 +784,9 @@ export function RunDetailBlocks({
             v={
               origin.eventSource ? (
                 <JumpLink
-                  onClick={() => onJumpEvent(origin.eventSource!, origin.eventId!)}
+                  onClick={() =>
+                    onJumpEvent(origin.eventSource!, origin.eventId!)
+                  }
                   title={origin.eventId}
                 >
                   {`${origin.eventSource} · ${shortId(origin.eventId)}`}
@@ -679,9 +797,30 @@ export function RunDetailBlocks({
             }
           />
         )}
-        <KV k="created" v={<span title={d.run.created_at}>{formatRelative(d.run.created_at, now)}</span>} />
-        <KV k="updated" v={<span title={d.run.updated_at}>{formatRelative(d.run.updated_at, now)}</span>} />
-        <KV k="placement" v={d.run.spec.placement ? JSON.stringify(d.run.spec.placement) : "any worker"} />
+        <KV
+          k="created"
+          v={
+            <span title={d.run.created_at}>
+              {formatRelative(d.run.created_at, now)}
+            </span>
+          }
+        />
+        <KV
+          k="updated"
+          v={
+            <span title={d.run.updated_at}>
+              {formatRelative(d.run.updated_at, now)}
+            </span>
+          }
+        />
+        <KV
+          k="placement"
+          v={
+            d.run.spec.placement
+              ? JSON.stringify(d.run.spec.placement)
+              : "any worker"
+          }
+        />
         <Disclosure label="internals — ids, hashes, paths">
           <KV k="run" v={d.run.runId} />
           <KV k="idempotencyKey" v={d.run.idempotencyKey} />
@@ -718,15 +857,27 @@ export function RunDetailBlocks({
                 attempt #{current.attempt}{" "}
                 {current.started_at ? (
                   <>
-                    started <span className="text-(--text-dim)" title={current.started_at}>{formatRelative(current.started_at, now)}</span>
+                    started{" "}
+                    <span
+                      className="text-(--text-dim)"
+                      title={current.started_at}
+                    >
+                      {formatRelative(current.started_at, now)}
+                    </span>
                   </>
                 ) : (
                   "not started"
                 )}
               </span>
-              <BudgetClock c={clocks.timeout} timeoutSeconds={d.run.spec.timeoutSeconds} />
+              <BudgetClock
+                c={clocks.timeout}
+                timeoutSeconds={d.run.spec.timeoutSeconds}
+              />
             </div>
-            <BudgetMeter c={clocks.timeout} timeoutSeconds={d.run.spec.timeoutSeconds} />
+            <BudgetMeter
+              c={clocks.timeout}
+              timeoutSeconds={d.run.spec.timeoutSeconds}
+            />
             <div className="mt-2 flex items-baseline justify-between gap-4 text-[11px] text-(--text-faint)">
               <span className="flex items-baseline gap-1.5 truncate">
                 lease owner
@@ -736,10 +887,14 @@ export function RunDetailBlocks({
                   <span className="mono">unclaimed</span>
                 )}
               </span>
-              <LeaseClock c={clocks.lease} urgent={clocks.timeout.kind === "spent"} />
+              <LeaseClock
+                c={clocks.lease}
+                urgent={clocks.timeout.kind === "spent"}
+              />
             </div>
             <div className="mt-2 text-[11px] text-(--text-faint)">
-              The lease outlasts the budget by a fixed grace and is never renewed.
+              The lease outlasts the budget by a fixed grace and is never
+              renewed.
             </div>
           </div>
         </Section>
@@ -758,28 +913,54 @@ export function RunDetailBlocks({
             // worth spelling out (WM-136).
             const jumped = prev != null && e.from_state !== prev.to_state;
             const hue = STATE_HUES[e.to_state] ?? "var(--hue-idle)";
-            const time = new Date(e.at).toLocaleTimeString([], { hour12: false });
-            const prevTime = prev ? new Date(prev.at).toLocaleTimeString([], { hour12: false }) : null;
+            const time = new Date(e.at).toLocaleTimeString([], {
+              hour12: false,
+            });
+            const prevTime = prev
+              ? new Date(prev.at).toLocaleTimeString([], { hour12: false })
+              : null;
             const isSameTime = prevTime !== null && time === prevTime;
             const deltaSeconds = prev
-              ? Math.max(0, Math.round((new Date(e.at).getTime() - new Date(prev.at).getTime()) / 1000))
+              ? Math.max(
+                  0,
+                  Math.round(
+                    (new Date(e.at).getTime() - new Date(prev.at).getTime()) /
+                      1000,
+                  ),
+                )
               : 0;
             return (
               <li key={e.seq} className="flex gap-2.5 py-1">
-                <span className="mono w-[52px] shrink-0 pt-0.5 text-[11px] tabular-nums text-(--text-faint)" title={e.at}>
-                  {isSameTime ? <span className="opacity-60">+{deltaSeconds}s</span> : time}
+                <span
+                  className="mono w-[52px] shrink-0 pt-0.5 text-[11px] tabular-nums text-(--text-faint)"
+                  title={e.at}
+                >
+                  {isSameTime ? (
+                    <span className="opacity-60">+{deltaSeconds}s</span>
+                  ) : (
+                    time
+                  )}
                 </span>
                 {/* Rail: a dot per transition, joined to the next one. */}
-                <span className="relative flex w-2 shrink-0 justify-center" aria-hidden="true">
+                <span
+                  className="relative flex w-2 shrink-0 justify-center"
+                  aria-hidden="true"
+                >
                   {i < d.lifecycle.length - 1 && (
                     <span className="absolute top-2.5 bottom-[-4px] w-px bg-(--border)" />
                   )}
-                  <span className="relative mt-[7px] size-1.5 shrink-0 rounded-full" style={{ background: hue }} />
+                  <span
+                    className="relative mt-[7px] size-1.5 shrink-0 rounded-full"
+                    style={{ background: hue }}
+                  />
                 </span>
                 <span className="flex min-w-0 flex-1 items-start gap-x-2">
                   <span className="flex w-[100px] shrink-0 items-center gap-1">
                     {jumped && (
-                      <span className="shrink-0 text-[10px] text-(--text-faint)" title={`from ${e.from_state ?? "·"}`}>
+                      <span
+                        className="shrink-0 text-[10px] text-(--text-faint)"
+                        title={`from ${e.from_state ?? "·"}`}
+                      >
                         {e.from_state ?? "·"}→
                       </span>
                     )}
@@ -809,17 +990,27 @@ export function RunDetailBlocks({
       {d.attempts.length > 0 && (
         <Section title="Attempts" card={false}>
           {d.attempts.map((a) => (
-            <div key={a.attempt} className="mb-1.5 rounded-md border border-(--border) bg-(--surface-0) px-3 py-2 last:mb-0">
+            <div
+              key={a.attempt}
+              className="mb-1.5 rounded-md border border-(--border) bg-(--surface-0) px-3 py-2 last:mb-0"
+            >
               <div className="flex items-center justify-between gap-2">
-                <span className="mono text-[12px] font-medium text-(--text)">#{a.attempt}</span>
+                <span className="mono text-[12px] font-medium text-(--text)">
+                  #{a.attempt}
+                </span>
                 {a.terminal_state ? (
                   <StateBadge state={a.terminal_state} />
                 ) : (
-                  <span className="text-[11px] text-(--text-faint)">in flight</span>
+                  <span className="text-[11px] text-(--text-faint)">
+                    in flight
+                  </span>
                 )}
               </div>
               {a.reason_code && (
-                <div className="mono mt-1 truncate text-[11px] text-(--hue-err)" title={a.reason_code}>
+                <div
+                  className="mono mt-1 truncate text-[11px] text-(--hue-err)"
+                  title={a.reason_code}
+                >
                   {a.reason_code}
                 </div>
               )}
@@ -828,13 +1019,23 @@ export function RunDetailBlocks({
                   owner off the edge (WM-136). */}
               <div className="mt-1.5 grid grid-cols-[minmax(0,4.5rem)_minmax(0,1fr)] items-baseline gap-x-3 gap-y-0.5 text-[11px] text-(--text-faint)">
                 <span>owner</span>
-                <span className="min-w-0 truncate" title={a.lease_owner ?? "unclaimed"}>
-                  {a.lease_owner ? <ActorRef actor={a.lease_owner} /> : <span className="mono">unclaimed</span>}
+                <span
+                  className="min-w-0 truncate"
+                  title={a.lease_owner ?? "unclaimed"}
+                >
+                  {a.lease_owner ? (
+                    <ActorRef actor={a.lease_owner} />
+                  ) : (
+                    <span className="mono">unclaimed</span>
+                  )}
                 </span>
                 {a.workspace_path && (
                   <>
                     <span>workspace</span>
-                    <span className="mono min-w-0 truncate" title={a.workspace_path}>
+                    <span
+                      className="mono min-w-0 truncate"
+                      title={a.workspace_path}
+                    >
                       {a.workspace_path}
                     </span>
                   </>
@@ -843,7 +1044,9 @@ export function RunDetailBlocks({
                   <>
                     <span>started</span>
                     <span className="min-w-0 truncate">
-                      <span title={a.started_at}>{formatRelative(a.started_at, now)}</span>
+                      <span title={a.started_at}>
+                        {formatRelative(a.started_at, now)}
+                      </span>
                     </span>
                   </>
                 )}
@@ -851,7 +1054,9 @@ export function RunDetailBlocks({
                   <>
                     <span>finished</span>
                     <span className="min-w-0 truncate">
-                      <span title={a.finished_at}>{formatRelative(a.finished_at, now)}</span>
+                      <span title={a.finished_at}>
+                        {formatRelative(a.finished_at, now)}
+                      </span>
                     </span>
                   </>
                 )}

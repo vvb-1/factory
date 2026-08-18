@@ -1,9 +1,24 @@
 import { describe, expect, test, afterAll, afterEach } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PROMPT_SUFFIX, PUSH_CREDENTIAL_ENV as CLAUDE_PUSH_CREDENTIAL_ENV } from "./claude.mjs";
-import { adapterExecuteTimeoutMs, DYNAMIC_DEADLINE_ADAPTERS, LEASE_GRACE_SECONDS } from "../worker.mjs";
+import {
+  PROMPT_SUFFIX,
+  PUSH_CREDENTIAL_ENV as CLAUDE_PUSH_CREDENTIAL_ENV,
+} from "./claude.mjs";
+import {
+  adapterExecuteTimeoutMs,
+  DYNAMIC_DEADLINE_ADAPTERS,
+  LEASE_GRACE_SECONDS,
+} from "../worker.mjs";
 import {
   buildAgyArgv,
   CliNotFoundError,
@@ -100,18 +115,31 @@ const CAPTURED = {
     error: null,
     duration_seconds: 5.5,
     num_turns: 1,
-    usage: { input_tokens: 100, output_tokens: 20, thinking_tokens: 5, cache_read_tokens: 0, total_tokens: 120 },
+    usage: {
+      input_tokens: 100,
+      output_tokens: 20,
+      thinking_tokens: 5,
+      cache_read_tokens: 0,
+      total_tokens: 120,
+    },
   },
 };
 
-const step = (stepUpdate) => ({ event: "step_update", step_update: stepUpdate });
+const step = (stepUpdate) => ({
+  event: "step_update",
+  step_update: stepUpdate,
+});
 
 describe("mapStreamEvent (real agy stream-json shapes)", () => {
   test("tool ACTIVE → tool_use keyed by step_index", () => {
     expect(mapStreamEvent(step(CAPTURED.toolActive))).toEqual([
       {
         kind: "tool_use",
-        payload: { id: "3", name: "list_dir", input: { DirectoryPath: "/tmp/ws" } },
+        payload: {
+          id: "3",
+          name: "list_dir",
+          input: { DirectoryPath: "/tmp/ws" },
+        },
       },
     ]);
   });
@@ -156,7 +184,10 @@ describe("mapStreamEvent (real agy stream-json shapes)", () => {
   });
 
   test("terminal result reaches the trace with status, error and tokens", () => {
-    const events = mapStreamEvent({ event: "result", result: CAPTURED.resultError });
+    const events = mapStreamEvent({
+      event: "result",
+      result: CAPTURED.resultError,
+    });
     const kinds = events.map((e) => e.kind);
     expect(kinds).toContain("usage");
     expect(kinds).toContain("lifecycle");
@@ -179,7 +210,10 @@ describe("mapStreamEvent (real agy stream-json shapes)", () => {
   });
 
   test("successful result emits the final answer as assistant_text", () => {
-    const events = mapStreamEvent({ event: "result", result: CAPTURED.resultSuccess });
+    const events = mapStreamEvent({
+      event: "result",
+      result: CAPTURED.resultSuccess,
+    });
     const text = events.find((e) => e.kind === "assistant_text");
     expect(text.payload.text).toBe("/tmp/ws\ninput.json");
     // A clean run has nothing to report as a failure.
@@ -187,10 +221,16 @@ describe("mapStreamEvent (real agy stream-json shapes)", () => {
   });
 
   test("unrecognized events are ignored silently", () => {
-    expect(mapStreamEvent({ event: "init", conversation_id: "abc" })).toEqual([]);
+    expect(mapStreamEvent({ event: "init", conversation_id: "abc" })).toEqual(
+      [],
+    );
     expect(mapStreamEvent(null)).toEqual([]);
     expect(mapStreamEvent("not an object")).toEqual([]);
-    expect(mapStreamEvent(step({ step_type: "checkpoint", state: "ACTIVE", step_index: 1 }))).toEqual([]);
+    expect(
+      mapStreamEvent(
+        step({ step_type: "checkpoint", state: "ACTIVE", step_index: 1 }),
+      ),
+    ).toEqual([]);
   });
 
   test("very long assistant text is clipped", () => {
@@ -294,11 +334,22 @@ describe("buildAgyArgv", () => {
       spec: { timeoutSeconds: 1_800 },
       maxRunMinutes,
     });
-    const argv = buildAgyArgv({ prompt: "x", def: {}, model: "default", workspaceDir: "/w", timeoutMs });
-    const printSeconds = Number.parseInt(argv[argv.indexOf("--print-timeout") + 1], 10);
+    const argv = buildAgyArgv({
+      prompt: "x",
+      def: {},
+      model: "default",
+      workspaceDir: "/w",
+      timeoutMs,
+    });
+    const printSeconds = Number.parseInt(
+      argv[argv.indexOf("--print-timeout") + 1],
+      10,
+    );
     expect(Number.isFinite(printSeconds)).toBe(true);
     expect(printSeconds).toBeGreaterThanOrEqual(1_800);
-    expect(printSeconds).toBeLessThanOrEqual(maxRunMinutes * 60 + LEASE_GRACE_SECONDS);
+    expect(printSeconds).toBeLessThanOrEqual(
+      maxRunMinutes * 60 + LEASE_GRACE_SECONDS,
+    );
     expect(printSeconds).toBeLessThan(1_000_000);
   });
 
@@ -361,7 +412,9 @@ describe("safeChildEnvironment", () => {
 
 describe("resolveAgyCommand", () => {
   test("resolves agy on PATH", () => {
-    const found = resolveAgyCommand({ which: (cmd) => (cmd === "agy" ? "/usr/local/bin/agy" : null) });
+    const found = resolveAgyCommand({
+      which: (cmd) => (cmd === "agy" ? "/usr/local/bin/agy" : null),
+    });
     expect(found).toEqual({ command: "agy", args: [] });
 
     const missing = resolveAgyCommand({ which: () => null });
@@ -378,7 +431,9 @@ describe("execute with fake binary", () => {
   /** Fake agy emitting the line shapes captured from the real CLI (WM-435). */
   function writeFakeAgy(binDir, lines) {
     const fakeAgy = path.join(binDir, "agy");
-    const body = lines.map((l) => `echo ${JSON.stringify(JSON.stringify(l))}`).join("\n");
+    const body = lines
+      .map((l) => `echo ${JSON.stringify(JSON.stringify(l))}`)
+      .join("\n");
     writeFileSync(fakeAgy, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
     return fakeAgy;
   }
@@ -416,7 +471,12 @@ describe("execute with fake binary", () => {
     });
 
     expect(res.exitCode).toBe(0);
-    expect(traces.map((t) => t.kind)).toEqual(["tool_use", "tool_result", "assistant_text", "usage"]);
+    expect(traces.map((t) => t.kind)).toEqual([
+      "tool_use",
+      "tool_result",
+      "assistant_text",
+      "usage",
+    ]);
     // The tool call and its result correlate by step_index.
     expect(traces[0].payload.id).toBe("3");
     expect(traces[1].payload.toolUseId).toBe("3");
@@ -471,7 +531,13 @@ describe("execute with fake binary", () => {
       { event: "step_update", step_update: CAPTURED.toolActive },
       {
         event: "result",
-        result: { status: "SUCCESS", response: "done", duration_seconds: 1, num_turns: 1, usage: {} },
+        result: {
+          status: "SUCCESS",
+          response: "done",
+          duration_seconds: 1,
+          num_turns: 1,
+          usage: {},
+        },
       },
     ]);
 

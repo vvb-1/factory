@@ -13,7 +13,8 @@ import { validate } from "./schema.mjs";
 
 const EXAMPLE_REQUEST = {
   schemaVersion: "factory.decision-request/v1",
-  question: "WM-313 changes how the pi adapter reads FACTORY_EVENT_SECRET. May I proceed?",
+  question:
+    "WM-313 changes how the pi adapter reads FACTORY_EVENT_SECRET. May I proceed?",
   context:
     "The ticket moves secret handling from env to a file the worker mounts…\n\nRisk: a wrong path leaks the secret into the run journal.",
   recommended: "authorise",
@@ -21,7 +22,8 @@ const EXAMPLE_REQUEST = {
     {
       id: "authorise",
       label: "Authorise within these paths",
-      description: "Re-dispatch me with your approval bound to WM-313 as written now.",
+      description:
+        "Re-dispatch me with your approval bound to WM-313 as written now.",
       effect: "authorise",
       tone: "primary",
       scope: {
@@ -100,12 +102,21 @@ function dismissRequest(overrides = {}) {
 function requestForEffect(effect) {
   const option = { id: "choice", label: "Choose", effect };
   if (effect === "authorise") {
-    option.scope = { paths: ["event-runtime/lib/decision.mjs"], summary: "Validate decisions." };
+    option.scope = {
+      paths: ["event-runtime/lib/decision.mjs"],
+      summary: "Validate decisions.",
+    };
   }
   const request = dismissRequest({ options: [option] });
   if (effect === "reject_proposal") {
     request.fields = [
-      { id: "reason", kind: "text", label: "Reason", required: true, whenOption: ["choice"] },
+      {
+        id: "reason",
+        kind: "text",
+        label: "Reason",
+        required: true,
+        whenOption: ["choice"],
+      },
     ];
   }
   return request;
@@ -123,11 +134,14 @@ describe("contract schemas", () => {
     // clean run against any value proves the schema stays inside the subset.
     for (const schema of [DECISION_REQUEST_SCHEMA, DECISION_RESPONSE_SCHEMA]) {
       const errors = validate(schema, {}).errors;
-      expect(errors.some((e) => e.includes("unsupported schema keyword"))).toBe(false);
+      expect(errors.some((e) => e.includes("unsupported schema keyword"))).toBe(
+        false,
+      );
     }
     const walk = (node, at) => {
       if (node === null || typeof node !== "object") return;
-      if (Array.isArray(node)) return node.forEach((n, i) => walk(n, `${at}[${i}]`));
+      if (Array.isArray(node))
+        return node.forEach((n, i) => walk(n, `${at}[${i}]`));
       if (node.type === "object" && at !== "response.properties.fields") {
         expect(node.additionalProperties, `${at} must be closed`).toBe(false);
       }
@@ -137,26 +151,36 @@ describe("contract schemas", () => {
     walk(DECISION_RESPONSE_SCHEMA, "response");
     // The response's `fields` map is keyed by request-declared ids — closed by
     // the validator, not the schema.
-    expect(DECISION_RESPONSE_SCHEMA.properties.fields.additionalProperties).toEqual({});
+    expect(
+      DECISION_RESPONSE_SCHEMA.properties.fields.additionalProperties,
+    ).toEqual({});
   });
 
   test("encode the closed effect and widget enums", () => {
-    expect(DECISION_REQUEST_SCHEMA.properties.options.items.properties.effect.enum).toEqual(EFFECTS);
-    expect(DECISION_REQUEST_SCHEMA.properties.fields.items.properties.kind.enum).toEqual(WIDGET_KINDS);
+    expect(
+      DECISION_REQUEST_SCHEMA.properties.options.items.properties.effect.enum,
+    ).toEqual(EFFECTS);
+    expect(
+      DECISION_REQUEST_SCHEMA.properties.fields.items.properties.kind.enum,
+    ).toEqual(WIDGET_KINDS);
     expect(Object.keys(EFFECT_REFS)).toEqual(EFFECTS);
   });
 });
 
 describe("validateDecisionRequest", () => {
   test("accepts the §2.1 example verbatim", () => {
-    expect(validateDecisionRequest(EXAMPLE_REQUEST, { refs: ALL_REFS })).toEqual({
+    expect(
+      validateDecisionRequest(EXAMPLE_REQUEST, { refs: ALL_REFS }),
+    ).toEqual({
       valid: true,
       errors: [],
     });
   });
 
   test("enforces the top-level bounds and rejects unknown properties", () => {
-    expect(validateDecisionRequest(dismissRequest(), { refs: {} }).valid).toBe(true);
+    expect(validateDecisionRequest(dismissRequest(), { refs: {} }).valid).toBe(
+      true,
+    );
 
     for (const request of [
       dismissRequest({ question: "" }),
@@ -164,7 +188,13 @@ describe("validateDecisionRequest", () => {
       dismissRequest({ context: "x".repeat(8193) }),
       dismissRequest({ context: "🙂".repeat(4096) }),
       dismissRequest({ options: [] }),
-      dismissRequest({ options: Array.from({ length: 7 }, (_, id) => ({ id: `o${id}`, label: "x", effect: "dismiss" })) }),
+      dismissRequest({
+        options: Array.from({ length: 7 }, (_, id) => ({
+          id: `o${id}`,
+          label: "x",
+          effect: "dismiss",
+        })),
+      }),
       { ...dismissRequest(), unexpected: true },
     ]) {
       expectInvalid(request, {});
@@ -195,27 +225,61 @@ describe("validateDecisionRequest", () => {
   });
 
   test("recommended and whenOption name existing unique options", () => {
-    expect(validateDecisionRequest(dismissRequest({ recommended: "dismiss" }), { refs: {} }).valid).toBe(true);
+    expect(
+      validateDecisionRequest(dismissRequest({ recommended: "dismiss" }), {
+        refs: {},
+      }).valid,
+    ).toBe(true);
     expectInvalid(dismissRequest({ recommended: "missing" }), {});
     expect(
       validateDecisionRequest(
-        dismissRequest({ fields: [{ id: "note", kind: "text", label: "Note", whenOption: ["dismiss"] }] }),
+        dismissRequest({
+          fields: [
+            {
+              id: "note",
+              kind: "text",
+              label: "Note",
+              whenOption: ["dismiss"],
+            },
+          ],
+        }),
         { refs: {} },
       ).valid,
     ).toBe(true);
     expectInvalid(
-      dismissRequest({ fields: [{ id: "note", kind: "text", label: "Note", whenOption: ["missing"] }] }),
+      dismissRequest({
+        fields: [
+          { id: "note", kind: "text", label: "Note", whenOption: ["missing"] },
+        ],
+      }),
       {},
     );
     expectInvalid(
-      dismissRequest({ fields: [{ id: "note", kind: "text", label: "Note", whenOption: ["dismiss", "dismiss"] }] }),
+      dismissRequest({
+        fields: [
+          {
+            id: "note",
+            kind: "text",
+            label: "Note",
+            whenOption: ["dismiss", "dismiss"],
+          },
+        ],
+      }),
       {},
     );
-    expectInvalid(dismissRequest({ fields: [{ id: "note", kind: "text", label: "Note", whenOption: [] }] }), {});
+    expectInvalid(
+      dismissRequest({
+        fields: [{ id: "note", kind: "text", label: "Note", whenOption: [] }],
+      }),
+      {},
+    );
   });
 
   test("scope is present exactly for authorise and observes its bounds", () => {
-    expect(validateDecisionRequest(requestForEffect("authorise"), { refs: ALL_REFS }).valid).toBe(true);
+    expect(
+      validateDecisionRequest(requestForEffect("authorise"), { refs: ALL_REFS })
+        .valid,
+    ).toBe(true);
 
     const missing = requestForEffect("authorise");
     delete missing.options[0].scope;
@@ -239,7 +303,10 @@ describe("validateDecisionRequest", () => {
     noPaths.options[0].scope.paths = [];
     expectInvalid(noPaths);
     const tooManyPaths = requestForEffect("authorise");
-    tooManyPaths.options[0].scope.paths = Array.from({ length: 33 }, (_, index) => `p${index}`);
+    tooManyPaths.options[0].scope.paths = Array.from(
+      { length: 33 },
+      (_, index) => `p${index}`,
+    );
     expectInvalid(tooManyPaths);
     const longSummary = requestForEffect("authorise");
     longSummary.options[0].scope.summary = "x".repeat(501);
@@ -265,7 +332,9 @@ describe("validateDecisionRequest", () => {
 
     for (const [effect, requiredRefs] of Object.entries(requirements)) {
       const request = requestForEffect(effect);
-      expect(validateDecisionRequest(request, { refs: ALL_REFS }).valid).toBe(true);
+      expect(validateDecisionRequest(request, { refs: ALL_REFS }).valid).toBe(
+        true,
+      );
       for (const ref of requiredRefs) {
         const refs = { ...ALL_REFS };
         delete refs[ref];
@@ -275,7 +344,11 @@ describe("validateDecisionRequest", () => {
   });
 
   test("reject_proposal requires an applicable required text field", () => {
-    expect(validateDecisionRequest(requestForEffect("reject_proposal"), { refs: ALL_REFS }).valid).toBe(true);
+    expect(
+      validateDecisionRequest(requestForEffect("reject_proposal"), {
+        refs: ALL_REFS,
+      }).valid,
+    ).toBe(true);
 
     const absent = requestForEffect("reject_proposal");
     absent.fields = [];
@@ -286,11 +359,20 @@ describe("validateDecisionRequest", () => {
     expectInvalid(optional);
 
     const wrongKind = requestForEffect("reject_proposal");
-    wrongKind.fields[0] = { id: "reason", kind: "confirm", label: "Reason", required: true };
+    wrongKind.fields[0] = {
+      id: "reason",
+      kind: "confirm",
+      label: "Reason",
+      required: true,
+    };
     expectInvalid(wrongKind);
 
     const gatedElsewhere = requestForEffect("reject_proposal");
-    gatedElsewhere.options.push({ id: "other", label: "Other", effect: "dismiss" });
+    gatedElsewhere.options.push({
+      id: "other",
+      label: "Other",
+      effect: "dismiss",
+    });
     gatedElsewhere.fields[0].whenOption = ["other"];
     expectInvalid(gatedElsewhere);
   });
@@ -301,19 +383,61 @@ describe("validateDecisionRequest", () => {
       kind: "text",
       label: `Field ${index}`,
     }));
-    expect(validateDecisionRequest(dismissRequest({ fields: sixFields }), { refs: {} }).valid).toBe(true);
-    expectInvalid(dismissRequest({ fields: [...sixFields, { id: "f6", kind: "text", label: "Seven" }] }), {});
-    expectInvalid(dismissRequest({ fields: [sixFields[0], { ...sixFields[0] }] }), {});
-    expectInvalid(dismissRequest({ fields: [{ id: "Bad", kind: "text", label: "Bad" }] }), {});
-    expectInvalid(dismissRequest({ fields: [{ id: "x", kind: "unknown", label: "Bad" }] }), {});
-    expectInvalid(dismissRequest({ fields: [{ id: "x", kind: "confirm", label: "Bad", maxLength: 2 }] }), {});
-    expectInvalid(dismissRequest({ fields: [{ id: "x", kind: "text", label: "Bad", maxLength: 8193 }] }), {});
+    expect(
+      validateDecisionRequest(dismissRequest({ fields: sixFields }), {
+        refs: {},
+      }).valid,
+    ).toBe(true);
     expectInvalid(
-      dismissRequest({ fields: [{ id: "x", kind: "text", label: "Bad", placeholder: "p".repeat(281) }] }),
+      dismissRequest({
+        fields: [...sixFields, { id: "f6", kind: "text", label: "Seven" }],
+      }),
       {},
     );
-    expectInvalid(dismissRequest({ fields: [{ id: "x", kind: "number", label: "Bad", choices: [] }] }), {});
-    expectInvalid(dismissRequest({ fields: [{ id: "x", kind: "single-choice", label: "No choices" }] }), {});
+    expectInvalid(
+      dismissRequest({ fields: [sixFields[0], { ...sixFields[0] }] }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({ fields: [{ id: "Bad", kind: "text", label: "Bad" }] }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({ fields: [{ id: "x", kind: "unknown", label: "Bad" }] }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({
+        fields: [{ id: "x", kind: "confirm", label: "Bad", maxLength: 2 }],
+      }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({
+        fields: [{ id: "x", kind: "text", label: "Bad", maxLength: 8193 }],
+      }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({
+        fields: [
+          { id: "x", kind: "text", label: "Bad", placeholder: "p".repeat(281) },
+        ],
+      }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({
+        fields: [{ id: "x", kind: "number", label: "Bad", choices: [] }],
+      }),
+      {},
+    );
+    expectInvalid(
+      dismissRequest({
+        fields: [{ id: "x", kind: "single-choice", label: "No choices" }],
+      }),
+      {},
+    );
 
     expect(
       validateDecisionRequest(
@@ -335,7 +459,14 @@ describe("validateDecisionRequest", () => {
     ).toBe(true);
     expectInvalid(
       dismissRequest({
-        fields: [{ id: "pick", kind: "single-choice", label: "Pick", choices: [{ id: "a", label: "A" }] }],
+        fields: [
+          {
+            id: "pick",
+            kind: "single-choice",
+            label: "Pick",
+            choices: [{ id: "a", label: "A" }],
+          },
+        ],
       }),
       {},
     );
@@ -375,7 +506,15 @@ describe("validateDecisionRequest", () => {
     );
     expectInvalid(
       dismissRequest({
-        fields: [{ id: "count", kind: "number", label: "Count", minimum: 2, maximum: 1 }],
+        fields: [
+          {
+            id: "count",
+            kind: "number",
+            label: "Count",
+            minimum: 2,
+            maximum: 1,
+          },
+        ],
       }),
       {},
     );
@@ -422,7 +561,12 @@ const RESPONSE_REQUEST = dismissRequest({
       maximum: 3,
       integer: true,
     },
-    { id: "other_note", kind: "text", label: "Other note", whenOption: ["other"] },
+    {
+      id: "other_note",
+      kind: "text",
+      label: "Other note",
+      whenOption: ["other"],
+    },
   ],
 });
 
@@ -431,7 +575,13 @@ function validResponse() {
     schemaVersion: "factory.decision-response/v1",
     requestHash: decisionRequestHash(RESPONSE_REQUEST),
     optionId: "save",
-    fields: { note: "yes", single: "a", multi: ["a", "b"], confirm: true, count: 2 },
+    fields: {
+      note: "yes",
+      single: "a",
+      multi: ["a", "b"],
+      confirm: true,
+      count: 2,
+    },
     decidedBy: "operator",
     decidedAt: "2026-08-16T12:41:07.000Z",
   };
@@ -447,26 +597,42 @@ function expectInvalidResponse(mutator) {
 
 describe("decisionRequestHash", () => {
   test("uses canonical JSON key ordering", () => {
-    const reordered = { options: RESPONSE_REQUEST.options, question: RESPONSE_REQUEST.question, fields: RESPONSE_REQUEST.fields, schemaVersion: RESPONSE_REQUEST.schemaVersion };
-    expect(decisionRequestHash(reordered)).toBe(decisionRequestHash(RESPONSE_REQUEST));
-    expect(decisionRequestHash(RESPONSE_REQUEST)).toMatch(/^sha256:[a-f0-9]{64}$/);
+    const reordered = {
+      options: RESPONSE_REQUEST.options,
+      question: RESPONSE_REQUEST.question,
+      fields: RESPONSE_REQUEST.fields,
+      schemaVersion: RESPONSE_REQUEST.schemaVersion,
+    };
+    expect(decisionRequestHash(reordered)).toBe(
+      decisionRequestHash(RESPONSE_REQUEST),
+    );
+    expect(decisionRequestHash(RESPONSE_REQUEST)).toMatch(
+      /^sha256:[a-f0-9]{64}$/,
+    );
   });
 });
 
 describe("validateDecisionResponse", () => {
   test("accepts every widget kind when applicable values satisfy the request", () => {
-    expect(validateDecisionResponse(validResponse(), RESPONSE_REQUEST)).toEqual({ valid: true, errors: [] });
+    expect(validateDecisionResponse(validResponse(), RESPONSE_REQUEST)).toEqual(
+      { valid: true, errors: [] },
+    );
   });
 
   test("a field gated on the chosen option applies; the same field is rejected for another option", () => {
     const other = validResponse();
     other.optionId = "other";
     other.fields.other_note = "shown for other";
-    expect(validateDecisionResponse(other, RESPONSE_REQUEST)).toEqual({ valid: true, errors: [] });
+    expect(validateDecisionResponse(other, RESPONSE_REQUEST)).toEqual({
+      valid: true,
+      errors: [],
+    });
 
     const otherMissingOptional = validResponse();
     otherMissingOptional.optionId = "other";
-    expect(validateDecisionResponse(otherMissingOptional, RESPONSE_REQUEST).valid).toBe(true);
+    expect(
+      validateDecisionResponse(otherMissingOptional, RESPONSE_REQUEST).valid,
+    ).toBe(true);
   });
 
   test("optional applicable fields may be omitted but must be well-typed when present", () => {
@@ -479,11 +645,18 @@ describe("validateDecisionResponse", () => {
       optionId: "dismiss",
       fields: {},
     };
-    expect(validateDecisionResponse(omitted, optionalRequest)).toEqual({ valid: true, errors: [] });
+    expect(validateDecisionResponse(omitted, optionalRequest)).toEqual({
+      valid: true,
+      errors: [],
+    });
     const badType = { ...omitted, fields: { n: "1" } };
-    expect(validateDecisionResponse(badType, optionalRequest).valid).toBe(false);
+    expect(validateDecisionResponse(badType, optionalRequest).valid).toBe(
+      false,
+    );
     const belowMin = { ...omitted, fields: { n: -1 } };
-    expect(validateDecisionResponse(belowMin, optionalRequest).valid).toBe(false);
+    expect(validateDecisionResponse(belowMin, optionalRequest).valid).toBe(
+      false,
+    );
   });
 
   test("requires the exact request hash and a declared option", () => {
@@ -507,7 +680,9 @@ describe("validateDecisionResponse", () => {
     const emptyMulti = validResponse();
     emptyMulti.requestHash = decisionRequestHash(defaultRequiredMulti);
     emptyMulti.fields.multi = [];
-    expect(validateDecisionResponse(emptyMulti, defaultRequiredMulti).valid).toBe(false);
+    expect(
+      validateDecisionResponse(emptyMulti, defaultRequiredMulti).valid,
+    ).toBe(false);
     expectInvalidResponse((response) => {
       response.fields.confirm = false;
     });
@@ -588,11 +763,18 @@ describe("validateDecisionResponse", () => {
     });
     const invalidRequest = clone(RESPONSE_REQUEST);
     invalidRequest.options = [];
-    expect(validateDecisionResponse(validResponse(), invalidRequest).valid).toBe(false);
+    expect(
+      validateDecisionResponse(validResponse(), invalidRequest).valid,
+    ).toBe(false);
 
     const semanticallyInvalidRequest = clone(RESPONSE_REQUEST);
     delete semanticallyInvalidRequest.fields[1].choices;
-    expect(() => validateDecisionResponse(validResponse(), semanticallyInvalidRequest)).not.toThrow();
-    expect(validateDecisionResponse(validResponse(), semanticallyInvalidRequest).valid).toBe(false);
+    expect(() =>
+      validateDecisionResponse(validResponse(), semanticallyInvalidRequest),
+    ).not.toThrow();
+    expect(
+      validateDecisionResponse(validResponse(), semanticallyInvalidRequest)
+        .valid,
+    ).toBe(false);
   });
 });

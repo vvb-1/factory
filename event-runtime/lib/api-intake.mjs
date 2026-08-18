@@ -15,26 +15,48 @@ function repoForGitHubSlug(repos, slug) {
   return null;
 }
 
-function successfulPullRequestWorkflow({ event, deliveryId, payload, repos, nowMs }) {
+function successfulPullRequestWorkflow({
+  event,
+  deliveryId,
+  payload,
+  repos,
+  nowMs,
+}) {
   const run = payload?.workflow_run;
-  if (event !== "workflow_run" || payload?.action !== "completed" || run?.conclusion !== "success") return null;
+  if (
+    event !== "workflow_run" ||
+    payload?.action !== "completed" ||
+    run?.conclusion !== "success"
+  )
+    return null;
   if (!deliveryId || typeof deliveryId !== "string") {
     return { ok: false, ignored: false, reason: "missing_delivery_id" };
   }
 
   const repo = repoForGitHubSlug(repos, payload.repository?.full_name);
   if (!repo) return { ok: false, ignored: true, reason: "unconfigured_repo" };
-  if (repo.reportOnly) return { ok: false, ignored: true, reason: "repo_report_only" };
-  if (run.event !== "pull_request") return { ok: false, ignored: true, reason: "not_pull_request_head" };
+  if (repo.reportOnly)
+    return { ok: false, ignored: true, reason: "repo_report_only" };
+  if (run.event !== "pull_request")
+    return { ok: false, ignored: true, reason: "not_pull_request_head" };
 
-  const pullRequests = Array.isArray(run.pull_requests) ? run.pull_requests : [];
+  const pullRequests = Array.isArray(run.pull_requests)
+    ? run.pull_requests
+    : [];
   const selected = pullRequests.filter((pr) => pr?.base?.ref === repo.base);
-  if (selected.length === 0) return { ok: false, ignored: true, reason: "not_base_branch" };
-  if (selected.length !== 1) return { ok: false, ignored: false, reason: "ambiguous_pull_request_head" };
+  if (selected.length === 0)
+    return { ok: false, ignored: true, reason: "not_base_branch" };
+  if (selected.length !== 1)
+    return { ok: false, ignored: false, reason: "ambiguous_pull_request_head" };
 
   const prNumber = selected[0]?.number;
   const headSha = run.head_sha;
-  if (!Number.isInteger(prNumber) || prNumber < 1 || typeof headSha !== "string" || headSha.trim() === "") {
+  if (
+    !Number.isInteger(prNumber) ||
+    prNumber < 1 ||
+    typeof headSha !== "string" ||
+    headSha.trim() === ""
+  ) {
     return { ok: false, ignored: false, reason: "malformed_payload" };
   }
   const eventId = `merge-pr:${repo.name}:${prNumber}:${headSha}`;

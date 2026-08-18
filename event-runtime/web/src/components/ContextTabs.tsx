@@ -20,12 +20,17 @@ export const savePinnedRuns = (runs: string[]) => {
     sessionStorage.setItem(PINNED_RUNS_STORAGE_KEY, JSON.stringify(runs));
   } catch {}
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("factory:pinnedRunsChanged", { detail: runs }));
+    window.dispatchEvent(
+      new CustomEvent("factory:pinnedRunsChanged", { detail: runs }),
+    );
   }
 };
 
 const getHashRunId = () => {
-  const m = typeof window !== "undefined" ? window.location.hash.match(/^#\/runs?\/([^?&#]+)/) : null;
+  const m =
+    typeof window !== "undefined"
+      ? window.location.hash.match(/^#\/runs?\/([^?&#]+)/)
+      : null;
   return m ? decodeURIComponent(m[1]) : null;
 };
 
@@ -98,7 +103,8 @@ export function ContextTabs({
   const plusRef = useRef<HTMLButtonElement>(null);
   const listboxRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
-  const [internalPinned, setInternalPinned] = useState<string[]>(readPinnedRuns);
+  const [internalPinned, setInternalPinned] =
+    useState<string[]>(readPinnedRuns);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -138,7 +144,9 @@ export function ContextTabs({
     [repos, openRepos],
   );
   const clampedPickerHighlight =
-    available.length === 0 ? 0 : Math.min(pickerHighlight, available.length - 1);
+    available.length === 0
+      ? 0
+      : Math.min(pickerHighlight, available.length - 1);
 
   useEffect(() => {
     setPickerHighlight((current) =>
@@ -154,10 +162,16 @@ export function ContextTabs({
         : active.kind;
 
   const activeTab = () =>
-    stripRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]') ?? null;
+    stripRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]') ??
+    null;
 
   const tabIds = useMemo(
-    () => ["all", ...openRepos, ...pinnedRuns.map((id) => `run:${id}`), INFLIGHT],
+    () => [
+      "all",
+      ...openRepos,
+      ...pinnedRuns.map((id) => `run:${id}`),
+      INFLIGHT,
+    ],
     [openRepos, pinnedRuns],
   );
   const [tabStopId, setTabStopId] = useState<string | null>(null);
@@ -165,7 +179,7 @@ export function ContextTabs({
   const effectiveTabStop =
     tabStopId && tabIds.includes(tabStopId)
       ? tabStopId
-    : tabIds.includes(activeId)
+      : tabIds.includes(activeId)
         ? activeId
         : "all";
 
@@ -222,12 +236,19 @@ export function ContextTabs({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const currentId = (e.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-context-tab]")?.getAttribute("data-context-tab");
+    const currentId = (e.target as HTMLElement | null)
+      ?.closest<HTMLButtonElement>("[data-context-tab]")
+      ?.getAttribute("data-context-tab");
     if (!currentId) return;
     const currentIndex = tabIds.indexOf(currentId);
     if (currentIndex === -1) return;
 
-    if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
+    if (
+      e.key === "ArrowRight" ||
+      e.key === "ArrowLeft" ||
+      e.key === "Home" ||
+      e.key === "End"
+    ) {
       e.preventDefault();
       const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
       const nextId =
@@ -237,7 +258,9 @@ export function ContextTabs({
             ? tabIds[tabIds.length - 1]
             : tabIds[(currentIndex + delta + tabIds.length) % tabIds.length];
       setTabStopId(nextId);
-      stripRef.current?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`)?.focus();
+      stripRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-context-tab="${nextId}"]`)
+        ?.focus();
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       e.stopPropagation();
@@ -314,7 +337,9 @@ export function ContextTabs({
 
   const groupedTabButtonClass = (id: string) =>
     `flex h-7 items-center gap-1 rounded-full py-0 pl-3 pr-1 text-[12px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-(--accent) focus-visible:ring-offset-1 focus-visible:ring-offset-(--surface-1) ${
-      activeId === id ? "text-(--text)" : "text-(--text-dim) group-hover:text-(--text)"
+      activeId === id
+        ? "text-(--text)"
+        : "text-(--text-dim) group-hover:text-(--text)"
     }`;
 
   const closeTabClass =
@@ -338,7 +363,8 @@ export function ContextTabs({
           title="All (g 0)"
           className={tabClass("all")}
           onClick={() => {
-            if (activeRunId && typeof window !== "undefined") window.location.hash = "#/runs";
+            if (activeRunId && typeof window !== "undefined")
+              window.location.hash = "#/runs";
             onSelect({ kind: "all" });
           }}
           onFocus={() => setTabStopId("all")}
@@ -359,16 +385,23 @@ export function ContextTabs({
           className="flex min-w-0 items-center gap-0.5 overflow-x-auto"
         >
           {openRepos.map((name, idx) => (
-            <div key={name} role="presentation" className={`group ${groupedTabClass(name)}`}>
+            <div
+              key={name}
+              role="presentation"
+              className={`group ${groupedTabClass(name)}`}
+            >
               <button
                 type="button"
                 data-context-tab={name}
                 tabIndex={effectiveTabStop === name ? 0 : -1}
-                aria-pressed={!activeRunId && active.kind === "repo" && active.name === name}
+                aria-pressed={
+                  !activeRunId && active.kind === "repo" && active.name === name
+                }
                 title={idx < 9 ? `${name} (g ${idx + 1})` : name}
                 className={groupedTabButtonClass(name)}
                 onClick={() => {
-                  if (activeRunId && typeof window !== "undefined") window.location.hash = `#/runs?project=${encodeURIComponent(name)}`;
+                  if (activeRunId && typeof window !== "undefined")
+                    window.location.hash = `#/runs?project=${encodeURIComponent(name)}`;
                   onSelect({ kind: "repo", name });
                 }}
                 onFocus={() => setTabStopId(name)}
@@ -403,7 +436,11 @@ export function ContextTabs({
             const isRunActive = activeRunId === runId;
             const tabKey = `run:${runId}`;
             return (
-              <div key={tabKey} role="presentation" className={`group ${groupedTabClass(tabKey)}`}>
+              <div
+                key={tabKey}
+                role="presentation"
+                className={`group ${groupedTabClass(tabKey)}`}
+              >
                 <button
                   type="button"
                   data-context-tab={tabKey}
@@ -418,7 +455,9 @@ export function ContextTabs({
                   onFocus={() => setTabStopId(tabKey)}
                   title={`Run ${runId}`}
                 >
-                  <span className="opacity-70 text-[10px]" aria-hidden="true">▶</span>
+                  <span className="opacity-70 text-[10px]" aria-hidden="true">
+                    ▶
+                  </span>
                   <span className="mono max-w-32 truncate">{runId}</span>
                 </button>
                 <button
@@ -454,7 +493,8 @@ export function ContextTabs({
           onClick={() => {
             const next = toggleInflight(active);
             if (activeRunId && typeof window !== "undefined") {
-              window.location.hash = next.kind === "inflight" ? "#/runs?project=inflight" : "#/runs";
+              window.location.hash =
+                next.kind === "inflight" ? "#/runs?project=inflight" : "#/runs";
             }
             onSelect(next);
           }}
@@ -484,7 +524,9 @@ export function ContextTabs({
           onClick={() => setPicker((open) => !open)}
           onKeyDown={handlePickerTriggerKeyDown}
         >
-          <span aria-hidden="true" className="text-[14px] leading-none">+</span>
+          <span aria-hidden="true" className="text-[14px] leading-none">
+            +
+          </span>
           <span>Repo</span>
         </button>
         {picker && (
@@ -503,10 +545,14 @@ export function ContextTabs({
             onKeyDown={handlePickerKeyDown}
           >
             {reposError ? (
-              <div className="px-3 py-2 text-[12px] text-(--text-faint)">Cannot reach /repos.</div>
+              <div className="px-3 py-2 text-[12px] text-(--text-faint)">
+                Cannot reach /repos.
+              </div>
             ) : available.length === 0 ? (
               <div className="px-3 py-2 text-[12px] text-(--text-faint)">
-                {repos.length === 0 ? "No repos available." : "All repos are open."}
+                {repos.length === 0
+                  ? "No repos available."
+                  : "All repos are open."}
               </div>
             ) : (
               available.map((r, i) => (
@@ -526,7 +572,9 @@ export function ContextTabs({
                   onClick={() => selectPickerRepo(r.name)}
                 >
                   {r.name}
-                  {r.team ? <span className="ml-2 text-(--text-faint)">{r.team}</span> : null}
+                  {r.team ? (
+                    <span className="ml-2 text-(--text-faint)">{r.team}</span>
+                  ) : null}
                 </button>
               ))
             )}

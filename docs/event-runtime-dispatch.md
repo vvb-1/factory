@@ -59,7 +59,7 @@ disagree.
 
 **The claim protocol is the dispatcher's, verbatim.** `tick.mjs` claims by
 writing the assignee and reading it back — Linear has no compare-and-swap, so
-the read-back *is* the concurrency control — and serializes the
+the read-back _is_ the concurrency control — and serializes the
 read-decide-claim window through a machine-local lock file
 (`~/.factory/locks/<repo>.dispatch.lock`), because every local supervisor
 authenticates as the same Linear user (OPS-40) and the read-back cannot tell
@@ -79,7 +79,7 @@ only when the ticket still looks like our claim (In Progress, assigned to us,
 Blocked or In Review keeps that state.
 
 **A recorded asymmetry, not a contradiction.** `tick.mjs` deliberately does
-*not* treat an assignee on a Todo ticket as a gate — with one shared Linear
+_not_ treat an assignee on a Todo ticket as a gate — with one shared Linear
 identity, "has an assignee" is indistinguishable from "was claimed and never
 cleared", and skipping such tickets forever is the reaper's failure to fix,
 not dispatch's to avoid. The event run's rule is stricter: assigned →
@@ -150,12 +150,12 @@ ambiguous glob overlap errs toward collision — a false positive serializes
 two tickets, a false negative puts two agents in one file.
 
 **Collision mode (WM-677).** `config/policy.yaml` `dispatch.owned_paths_collision`
-selects what a collision *does*:
+selects what a collision _does_:
 
-| mode | on overlap | still refuses |
-| --- | --- | --- |
-| `strict` (default when absent) | refuse, `owned_paths_overlap` | — |
-| `advisory` | record on the proposal as `evidence.ownedPathsOverlap` (`{ticket, path, inFlightPath}` per pair) and dispatch | `**` on either side → `owned_paths_conflict_hard` |
+| mode                           | on overlap                                                                                                    | still refuses                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `strict` (default when absent) | refuse, `owned_paths_overlap`                                                                                 | —                                                 |
+| `advisory`                     | record on the proposal as `evidence.ownedPathsOverlap` (`{ticket, path, inFlightPath}` per pair) and dispatch | `**` on either side → `owned_paths_conflict_hard` |
 
 Advisory exists because the strict oracle refuses far more than it protects:
 tickets scope themselves with qualified claims (`views/*.tsx (formatter
@@ -165,7 +165,7 @@ became two running workers under strict, while six textually-overlapping PRs
 rebased onto develop clean the same day. Textual overlap is a rebase job and
 `merge-fix` already does it; the pool should not idle waiting for it. What
 advisory keeps hard is only the `**` sentinel, whose whole meaning is
-"alone". Two tickets naming the *same file* is not hard: same file is not
+"alone". Two tickets naming the _same file_ is not hard: same file is not
 same lines — tickets qualify claims (`App.tsx (interval constants only)`) for
 exactly this — and an identical-file rule tried first refused four tickets in
 one batch on `App.tsx`/`hooks.ts`/`api.mjs`. Merging remains serialized (`concurrency.max_concurrent_merges`),
@@ -237,7 +237,7 @@ and it is the wrong shape three ways:
   `factory.trace/v1` events (assistant text, tool use, usage) and captures
   the transcript as a run artifact; a shelled runner collapses all of that
   into an opaque exit code. No trace, no usage, no transcript artifact, no
-  verified result contract — the run would be *less* observable than a
+  verified result contract — the run would be _less_ observable than a
   read-only status report, on the one run class that mutates code.
 - **Duplicated machinery.** The adapter already owns the timeout discipline
   (TERM, then KILL), subscription auth (strips `ANTHROPIC_API_KEY`,
@@ -291,7 +291,7 @@ event-runtime-workers.md §5), with one permanent exception:
 - **The ship chain's deploy-branch merge is PERMANENTLY `watched`.** That
   watched approval **is** the human master-merge decision — policy.yaml:
   master/main always goes through a human, on every repo. It is not an
-  approval *about* the decision; it is the decision, relocated into the
+  approval _about_ the decision; it is the decision, relocated into the
   runtime's inbox. Because §2's earned-automation ratchet only ever loosens,
   this one must be enforced **structurally (WM-111), not by convention**:
   registry validation fails closed on `approval: auto` for any agent whose

@@ -16,8 +16,16 @@ const registry = loadRegistry();
 const PV = "git:test-pv";
 // See repository.test.mjs: neutralise the operator's global git config so a
 // signing key or a global hooks path cannot hang the fixture (OPS-441).
-const HERMETIC = ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "commit.template="];
-const git = (args, cwd) => execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
+const HERMETIC = [
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "commit.template=",
+];
+const git = (args, cwd) =>
+  execFileSync("git", [...HERMETIC, ...args], { cwd, encoding: "utf8" }).trim();
 
 const fixtures = [];
 let previousReposRoot;
@@ -70,13 +78,22 @@ function harness() {
   const workspaces = mkdtempSync(path.join(os.tmpdir(), "evrt-sweep-ws-"));
   fixtures.push(workspaces);
   const adapters = { pi: fake, actions: fake };
-  const workerOpts = { workspacesRoot: workspaces, owner: "w-test", policyVersion: PV };
+  const workerOpts = {
+    workspacesRoot: workspaces,
+    owner: "w-test",
+    policyVersion: PV,
+  };
 
   async function approveNext(agentRef) {
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const proposal = openProposals(db, {}).find((p) => p.spec?.agent === agentRef);
+    const proposal = openProposals(db, {}).find(
+      (p) => p.spec?.agent === agentRef,
+    );
     expect(proposal).toBeTruthy();
-    const approved = approveProposal(db, registry, proposal.id, { actor: "operator", policyVersion: PV });
+    const approved = approveProposal(db, registry, proposal.id, {
+      actor: "operator",
+      policyVersion: PV,
+    });
     const summary = await runOnce(db, registry, adapters, workerOpts);
     return { proposal, runId: approved.runId, summary };
   }
@@ -105,20 +122,32 @@ describe("sweep chain: scan → approved apply (WM-74)", () => {
 
     expect(resolveChains(db, registry).emitted).toBe(1);
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    const apply = openProposals(db, {}).find((p) => p.spec?.agent === "sweep-apply@1");
+    const apply = openProposals(db, {}).find(
+      (p) => p.spec?.agent === "sweep-apply@1",
+    );
     expect(apply.status).toBe("open"); // retirement never happens unapproved
     expect(apply.spec.input).toEqual({
       repo: "bj29",
       plan: [
-        { issueId: "CLNT-997", action: "retire-shipped", reason: "fake: shipped in PR #1" },
-        { issueId: "CLNT-997", action: "comment-evidence", reason: "fake: shipped in PR #1" },
+        {
+          issueId: "CLNT-997",
+          action: "retire-shipped",
+          reason: "fake: shipped in PR #1",
+        },
+        {
+          issueId: "CLNT-997",
+          action: "comment-evidence",
+          reason: "fake: shipped in PR #1",
+        },
       ],
     });
 
     const applied = await approveNext("sweep-apply@1");
     expect(applied.summary.terminalState).toBe("COMPLETED");
     const result = JSON.parse(
-      db.query(`SELECT result_json FROM results WHERE run_id = ?`).get(applied.runId).result_json,
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(applied.runId).result_json,
     );
     expect(result.artifact.applied).toEqual([
       { issueId: "CLNT-997", action: "retire-shipped" },
@@ -130,9 +159,15 @@ describe("sweep chain: scan → approved apply (WM-74)", () => {
     const { db, approveNext } = harness();
     admitEvent(db, registry, sweepEnvelope("clean", "sweep-2"));
     await approveNext("sweep-scan@1");
-    expect(resolveChains(db, registry)).toEqual({ emitted: 0, skipped: 1, errors: [] });
+    expect(resolveChains(db, registry)).toEqual({
+      emitted: 0,
+      skipped: 1,
+      errors: [],
+    });
     planAdmittedEvents(db, registry, { policyVersion: PV });
-    expect(openProposals(db, {}).find((p) => p.spec?.agent === "sweep-apply@1")).toBeUndefined();
+    expect(
+      openProposals(db, {}).find((p) => p.spec?.agent === "sweep-apply@1"),
+    ).toBeUndefined();
   });
 
   test("the apply registry is state transitions and comments only — no delete, no archive", () => {

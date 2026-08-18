@@ -19,30 +19,47 @@ const REAPER_SCRIPT = path.join(FACTORY_ROOT, "orchestrator", "reaper.mjs");
 
 describe("resolveTemplate", () => {
   test("substitutes placeholders inside argv elements", () => {
-    expect(resolveTemplate(["gh", "run", "rerun", "{runId}", "--repo", "{repo}"], { runId: 42, repo: "wm/x" }))
-      .toEqual(["gh", "run", "rerun", "42", "--repo", "wm/x"]);
-    expect(resolveTemplate(["notify", "CI RED {repo}: {summary}"], { repo: "wm/x", summary: "boom" }))
-      .toEqual(["notify", "CI RED wm/x: boom"]);
+    expect(
+      resolveTemplate(["gh", "run", "rerun", "{runId}", "--repo", "{repo}"], {
+        runId: 42,
+        repo: "wm/x",
+      }),
+    ).toEqual(["gh", "run", "rerun", "42", "--repo", "wm/x"]);
+    expect(
+      resolveTemplate(["notify", "CI RED {repo}: {summary}"], {
+        repo: "wm/x",
+        summary: "boom",
+      }),
+    ).toEqual(["notify", "CI RED wm/x: boom"]);
   });
 
   test("missing or non-primitive fields fail closed", () => {
-    expect(() => resolveTemplate(["x", "{gone}"], {})).toThrow('missing input field "gone"');
-    expect(() => resolveTemplate(["x", "{obj}"], { obj: { a: 1 } })).toThrow("must be a primitive");
+    expect(() => resolveTemplate(["x", "{gone}"], {})).toThrow(
+      'missing input field "gone"',
+    );
+    expect(() => resolveTemplate(["x", "{obj}"], { obj: { a: 1 } })).toThrow(
+      "must be a primitive",
+    );
   });
 
   test("hostile input stays a single inert argument — no shell exists", () => {
-    const argv = resolveTemplate(["echo", "{msg}"], { msg: "; rm -rf / && echo pwned" });
+    const argv = resolveTemplate(["echo", "{msg}"], {
+      msg: "; rm -rf / && echo pwned",
+    });
     expect(argv).toEqual(["echo", "; rm -rf / && echo pwned"]);
   });
 
   test("factoryRoot is injected from config, never from input (OPS-404)", () => {
-    expect(resolveTemplate(["bun", "{factoryRoot}/orchestrator/reaper.mjs", "--apply"], {})).toEqual([
-      "bun",
-      REAPER_SCRIPT,
-      "--apply",
-    ]);
     expect(
-      resolveTemplate(["bun", "{factoryRoot}/orchestrator/reaper.mjs"], { factoryRoot: "/tmp/pwn" }),
+      resolveTemplate(
+        ["bun", "{factoryRoot}/orchestrator/reaper.mjs", "--apply"],
+        {},
+      ),
+    ).toEqual(["bun", REAPER_SCRIPT, "--apply"]);
+    expect(
+      resolveTemplate(["bun", "{factoryRoot}/orchestrator/reaper.mjs"], {
+        factoryRoot: "/tmp/pwn",
+      }),
     ).toEqual(["bun", REAPER_SCRIPT]);
   });
 });
@@ -57,7 +74,9 @@ describe("execute", () => {
       timeoutMs: 5000,
     });
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-    const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+    );
     expect(result.terminalState).toBe("completed");
     expect(result.artifact.command).toEqual(["echo", "hello"]);
     expect(result.artifact.exitCode).toBe(0);
@@ -73,7 +92,9 @@ describe("execute", () => {
       timeoutMs: 5000,
     });
     expect(outcome.exitCode).toBe(1);
-    expect(() => readFileSync(path.join(workspaceDir, "result.json"))).toThrow();
+    expect(() =>
+      readFileSync(path.join(workspaceDir, "result.json")),
+    ).toThrow();
   });
 
   test("timeout TERMs the child and reports timedOut", async () => {
@@ -89,7 +110,12 @@ describe("execute", () => {
 
   test("a definition without a command template is refused", async () => {
     await expect(
-      execute({ spec: spec({}), def: { ref: "x@1" }, workspaceDir: ws(), timeoutMs: 1000 }),
+      execute({
+        spec: spec({}),
+        def: { ref: "x@1" },
+        workspaceDir: ws(),
+        timeoutMs: 1000,
+      }),
     ).rejects.toThrow("no command template");
   });
 
@@ -102,7 +128,9 @@ describe("execute", () => {
       timeoutMs: 5000,
     });
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-    const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+    );
     expect(result.artifact.command).toEqual(["test", "-f", REAPER_SCRIPT]);
     expect(result.artifact.command.join(" ")).not.toContain("/tmp/pwn");
   });
@@ -178,8 +206,14 @@ describe("execute", () => {
 function sampleFromSchema(schema) {
   if (!schema || typeof schema !== "object") return "x";
   if (schema.const !== undefined) return schema.const;
-  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
-  const types = schema.type === undefined ? ["object"] : Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (Array.isArray(schema.enum) && schema.enum.length > 0)
+    return schema.enum[0];
+  const types =
+    schema.type === undefined
+      ? ["object"]
+      : Array.isArray(schema.type)
+        ? schema.type
+        : [schema.type];
   const type = types.find((t) => t !== "null") ?? "string";
   switch (type) {
     case "string": {
@@ -227,9 +261,13 @@ describe("command-adapter registry (OPS-404)", () => {
     }
     expect(offenders).toEqual([]);
     const reaper = registry.agents.get("reaper@1");
-    expect(validate(reaper.inputSchema, { loop: "reaper", slot: "2026-08-14T04:00:00.000Z", factoryRoot: "/tmp/pwn" }).valid).toBe(
-      false,
-    );
+    expect(
+      validate(reaper.inputSchema, {
+        loop: "reaper",
+        slot: "2026-08-14T04:00:00.000Z",
+        factoryRoot: "/tmp/pwn",
+      }).valid,
+    ).toBe(false);
   });
 
   test("every registered command template resolves against a schema-valid input", () => {
@@ -237,7 +275,10 @@ describe("command-adapter registry (OPS-404)", () => {
     for (const agent of commandDefs) {
       const input = sampleFromSchema(agent.inputSchema);
       const checked = validate(agent.inputSchema, input);
-      expect(checked.valid, `${agent.ref} sample is not schema-valid: ${checked.errors?.join("; ")}`).toBe(true);
+      expect(
+        checked.valid,
+        `${agent.ref} sample is not schema-valid: ${checked.errors?.join("; ")}`,
+      ).toBe(true);
       expect(input).not.toHaveProperty("factoryRoot");
       const argv = resolveTemplate(agent.command, input);
       expect(argv.every((el) => typeof el === "string")).toBe(true);
@@ -246,7 +287,12 @@ describe("command-adapter registry (OPS-404)", () => {
   });
 
   test("a reaper run planned from a clock tick resolves its argv and executes", async () => {
-    const db = openDb(path.join(mkdtempSync(path.join(os.tmpdir(), "evrt-reaper-")), "runtime.db"));
+    const db = openDb(
+      path.join(
+        mkdtempSync(path.join(os.tmpdir(), "evrt-reaper-")),
+        "runtime.db",
+      ),
+    );
     // Only the reaper schedule may tick here (WM-629). Spreading the shipped
     // schedules pulled in every enabled one — e.g. merge-factory — whose
     // repository-workspace agent makes planAdmittedEvents run pinRepo(), i.e.
@@ -257,7 +303,11 @@ describe("command-adapter registry (OPS-404)", () => {
     const withReaper = {
       ...registry,
       schedules: {
-        reaper: { ...registry.schedules.reaper, enabled: true, approval: "auto" },
+        reaper: {
+          ...registry.schedules.reaper,
+          enabled: true,
+          approval: "auto",
+        },
       },
     };
     emitDueTicks(db, withReaper, { now: Date.parse("2026-08-14T04:30:00Z") });
@@ -268,9 +318,15 @@ describe("command-adapter registry (OPS-404)", () => {
     const planned = JSON.parse(row.spec_json);
     expect(planned.agent).toBe("reaper@1");
     expect(planned.adapter).toBe("command");
-    expect(validate(registry.agents.get("reaper@1").inputSchema, planned.input).valid).toBe(true);
+    expect(
+      validate(registry.agents.get("reaper@1").inputSchema, planned.input)
+        .valid,
+    ).toBe(true);
 
-    const argv = resolveTemplate(registry.agents.get("reaper@1").command, planned.input);
+    const argv = resolveTemplate(
+      registry.agents.get("reaper@1").command,
+      planned.input,
+    );
     expect(argv).toEqual(["bun", REAPER_SCRIPT, "--apply"]);
     expect(existsSync(argv[1])).toBe(true);
 
@@ -280,12 +336,17 @@ describe("command-adapter registry (OPS-404)", () => {
     const workspaceDir = ws();
     const outcome = await execute({
       spec: planned,
-      def: { ref: "reaper@1", command: ["test", "-f", "{factoryRoot}/orchestrator/reaper.mjs"] },
+      def: {
+        ref: "reaper@1",
+        command: ["test", "-f", "{factoryRoot}/orchestrator/reaper.mjs"],
+      },
       workspaceDir,
       timeoutMs: 5000,
     });
     expect(outcome).toEqual({ exitCode: 0, timedOut: false });
-    const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+    );
     expect(result.artifact.command).toEqual(["test", "-f", REAPER_SCRIPT]);
   });
 });
@@ -303,7 +364,12 @@ describe("sandboxed execution (WM-185)", () => {
     // like /opt/homebrew/bin/bun does not exist in the Alpine guest — so a
     // bare "bun" would fail deep inside the VM with a useless message.
     await expect(
-      execute({ spec: spec({}), def: sandboxDef(["bun", "--version"]), workspaceDir: ws(), timeoutMs: 5000 }),
+      execute({
+        spec: spec({}),
+        def: sandboxDef(["bun", "--version"]),
+        workspaceDir: ws(),
+        timeoutMs: 5000,
+      }),
     ).rejects.toThrow(/must start with an absolute guest path/);
   });
 
@@ -311,7 +377,9 @@ describe("sandboxed execution (WM-185)", () => {
     await expect(
       execute({
         spec: spec({}),
-        def: sandboxDef(["/bin/true"], { sandbox: { provider: "firecracker" } }),
+        def: sandboxDef(["/bin/true"], {
+          sandbox: { provider: "firecracker" },
+        }),
         workspaceDir: ws(),
         timeoutMs: 5000,
       }),
@@ -340,12 +408,22 @@ describe("sandboxed execution (WM-185)", () => {
     expect(seen.command).toEqual(["/bin/echo", "hi"]);
     expect(seen.policy).toEqual({ provider: "gondolin", allowedHosts: [] });
     expect(seen.workspaceDir).toBe(workspaceDir);
-    const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+    const result = JSON.parse(
+      readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+    );
     expect(result.artifact.command).toEqual(["/bin/echo", "hi"]);
     expect(result.artifact.outputTail).toContain("hi");
-    expect(readFileSync(path.join(workspaceDir, "out.txt"), "utf8")).toBe("hi\n");
-    expect(readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8")).toContain("adapter=command");
-    expect(trace.some((t) => t.kind === "lifecycle" && t.payload.note === "sandbox_console")).toBe(true);
+    expect(readFileSync(path.join(workspaceDir, "out.txt"), "utf8")).toBe(
+      "hi\n",
+    );
+    expect(
+      readFileSync(path.join(workspaceDir, SANDBOX_CONSOLE_FILE), "utf8"),
+    ).toContain("adapter=command");
+    expect(
+      trace.some(
+        (t) => t.kind === "lifecycle" && t.payload.note === "sandbox_console",
+      ),
+    ).toBe(true);
   });
 
   test("a cancelled sandboxed command resolves like a cancelled host command: null exit, not timed out", async () => {
@@ -358,7 +436,13 @@ describe("sandboxed execution (WM-185)", () => {
       abortSignal: ac.signal,
       runSandbox: ({ abortSignal }) =>
         new Promise((_, reject) => {
-          abortSignal.addEventListener("abort", () => reject(Object.assign(new Error("runner exited (null)"), { code: "sandbox_runner_crashed" })));
+          abortSignal.addEventListener("abort", () =>
+            reject(
+              Object.assign(new Error("runner exited (null)"), {
+                code: "sandbox_runner_crashed",
+              }),
+            ),
+          );
         }),
     });
     setTimeout(() => ac.abort(), 5);
@@ -372,24 +456,42 @@ describe("sandboxed execution (WM-185)", () => {
     "produces the same result contract as the host path, from inside the VM",
     async () => {
       const workspaceDir = ws();
-      const def = sandboxDef(["/bin/sh", "-c", "echo sandboxed-output > /workspace/captured.txt; echo sandboxed-output"], {
-        captureStdout: "captured.txt",
-      });
+      const def = sandboxDef(
+        [
+          "/bin/sh",
+          "-c",
+          "echo sandboxed-output > /workspace/captured.txt; echo sandboxed-output",
+        ],
+        {
+          captureStdout: "captured.txt",
+        },
+      );
 
-      const outcome = await execute({ spec: spec({}), def, workspaceDir, timeoutMs: 120_000 });
+      const outcome = await execute({
+        spec: spec({}),
+        def,
+        workspaceDir,
+        timeoutMs: 120_000,
+      });
       expect(outcome).toEqual({ exitCode: 0, timedOut: false });
 
       // result.json is written on the host, with the same shape the
       // unsandboxed path produces — downstream verification cannot tell which
       // path ran, which is the point.
-      const result = JSON.parse(readFileSync(path.join(workspaceDir, "result.json"), "utf8"));
+      const result = JSON.parse(
+        readFileSync(path.join(workspaceDir, "result.json"), "utf8"),
+      );
       expect(result.schemaVersion).toBe("factory.agent-result/v1");
       expect(result.terminalState).toBe("completed");
       expect(result.artifact.exitCode).toBe(0);
       expect(result.artifact.outputTail).toContain("sandboxed-output");
-      expect(result.artifacts).toEqual([{ kind: "output", path: "captured.txt" }]);
+      expect(result.artifacts).toEqual([
+        { kind: "output", path: "captured.txt" },
+      ]);
       // The guest wrote this file through the mount; the host must see it.
-      expect(readFileSync(path.join(workspaceDir, "captured.txt"), "utf8")).toContain("sandboxed-output");
+      expect(
+        readFileSync(path.join(workspaceDir, "captured.txt"), "utf8"),
+      ).toContain("sandboxed-output");
     },
     180_000,
   );

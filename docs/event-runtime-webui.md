@@ -319,15 +319,15 @@ no shared set. Every rule below is checkable in review.
    icons. If a word fits in the space, no glyph and no icon.
 2. **Approved unicode glyphs.** A _closed_ set, each with exactly one meaning:
 
-   | Glyph     | Meaning                     | Where                                            |
-   | --------- | --------------------------- | ------------------------------------------------ |
-   | `▶`       | collapse/expand chevron     | `GroupHeaderRow` only — 9px, `rotate-90` on open |
+   | Glyph     | Meaning                     | Where                                                               |
+   | --------- | --------------------------- | ------------------------------------------------------------------- |
+   | `▶`       | collapse/expand chevron     | `GroupHeaderRow` only — 9px, `rotate-90` on open                    |
    | `→`       | transition / direction      | lifecycle spans (`QUEUED → RUNNING`), feed transitions, sort orders |
-   | `×`       | dismiss/remove this item    | chips and tokens only — never "failed"           |
-   | `↑` / `↓` | sort direction              | `Th` header cells only                           |
-   | `·`       | inline metadata separator   | footer/status lines                              |
-   | `…`       | truncation / "more follows" | labels, placeholders (`add…`), loading copy      |
-   | `⌘` etc.  | keyboard hints              | inside `<kbd>` or `.mono` spans only             |
+   | `×`       | dismiss/remove this item    | chips and tokens only — never "failed"                              |
+   | `↑` / `↓` | sort direction              | `Th` header cells only                                              |
+   | `·`       | inline metadata separator   | footer/status lines                                                 |
+   | `…`       | truncation / "more follows" | labels, placeholders (`add…`), loading copy                         |
+   | `⌘` etc.  | keyboard hints              | inside `<kbd>` or `.mono` spans only                                |
 
    Rules: always `aria-hidden` (the control carries the accessible name);
    never a glyph as the _only_ content of an interactive element without
@@ -349,7 +349,7 @@ no shared set. Every rule below is checkable in review.
    timeout, adapter, capabilities of a definition. Radix Icons is the one
    sanctioned package — 15×15 viewBox, ~1px optical weight, `currentColor`,
    tree-shaken per-icon imports (`import { TimerIcon } from
-   "@radix-ui/react-icons"`). Rendered at **14px** (`size-3.5`) next to
+"@radix-ui/react-icons"`). Rendered at **14px** (`size-3.5`) next to
    12–13px body text — the 15-grid glyph at 14px sits at the label's own
    optical weight, which is the point: it must not out-shout the word. Rules:
 
@@ -366,39 +366,40 @@ no shared set. Every rule below is checkable in review.
      by construction (WM-483). Views do not pass `icon=` themselves except to
      override deliberately. Current map:
 
-     | Glyph              | Attribute(s)                                                        |
-     | ------------------ | ------------------------------------------------------------------- |
-     | `PersonIcon`       | agent, decided by                                                   |
-     | `Component1Icon`   | adapter                                                             |
-     | `Pencil1Icon`      | mutating                                                            |
-     | `CubeIcon`         | workspace                                                           |
-     | `LockClosedIcon`   | capabilities                                                        |
-     | `DesktopIcon`      | host, hosts                                                         |
-     | `CodeIcon`         | command                                                             |
-     | `ListBulletIcon`   | actionRegistry                                                      |
-     | `PlayIcon`         | execution, execution mode                                           |
-     | `SewingPinIcon`    | placement                                                           |
-     | `GearIcon`         | worker (the entity; `workerId` is an id and stays unmapped)          |
-     | `TargetIcon`       | target                                                              |
-     | `LightningBoltIcon`| model tier                                                          |
-     | `Crosshair2Icon`   | model, model override, model (pinned) — an exact model id           |
-     | `EyeOpenIcon`      | model (observed)                                                    |
-     | `TimerIcon`        | timeout                                                             |
-     | `ReloadIcon`       | attempts                                                            |
-     | `LapTimerIcon`     | ttl, proposal ttl, cadence — an interval, not a moment              |
-     | `FileTextIcon`     | input, input.*                                                      |
-     | `PaperPlaneIcon`   | origin event, event type, type, planned/admitted events             |
-     | `EnterIcon`        | source — where an event came in from; distinct from its type        |
-     | `ChatBubbleIcon`   | reason, proposal reason, planner reason                             |
-     | `CheckCircledIcon` | approval                                                            |
-     | `ClockIcon`        | created, updated, occurredAt, receivedAt, admittedAt, startedAt, stoppedAt, decided at, last fire, last completed, next due — a moment |
-     | `LoopIcon`         | loop, loop name                                                     |
-     | `UpdateIcon`       | catch-up                                                            |
-     | `ArchiveIcon`      | repository                                                          |
-     | `GitHubLogoIcon`   | GitHub                                                              |
-     | `CommitIcon`       | base branch, deploy branch                                          |
+     | Glyph               | Attribute(s)                                                                                                                           |
+     | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+     | `PersonIcon`        | agent, decided by                                                                                                                      |
+     | `Component1Icon`    | adapter                                                                                                                                |
+     | `Pencil1Icon`       | mutating                                                                                                                               |
+     | `CubeIcon`          | workspace                                                                                                                              |
+     | `LockClosedIcon`    | capabilities                                                                                                                           |
+     | `DesktopIcon`       | host, hosts                                                                                                                            |
+     | `CodeIcon`          | command                                                                                                                                |
+     | `ListBulletIcon`    | actionRegistry                                                                                                                         |
+     | `PlayIcon`          | execution, execution mode                                                                                                              |
+     | `SewingPinIcon`     | placement                                                                                                                              |
+     | `GearIcon`          | worker (the entity; `workerId` is an id and stays unmapped)                                                                            |
+     | `TargetIcon`        | target                                                                                                                                 |
+     | `LightningBoltIcon` | model tier                                                                                                                             |
+     | `Crosshair2Icon`    | model, model override, model (pinned) — an exact model id                                                                              |
+     | `EyeOpenIcon`       | model (observed)                                                                                                                       |
+     | `TimerIcon`         | timeout                                                                                                                                |
+     | `ReloadIcon`        | attempts                                                                                                                               |
+     | `LapTimerIcon`      | ttl, proposal ttl, cadence — an interval, not a moment                                                                                 |
+     | `FileTextIcon`      | input, input.*                                                                                                                         |
+     | `PaperPlaneIcon`    | origin event, event type, type, planned/admitted events                                                                                |
+     | `EnterIcon`         | source — where an event came in from; distinct from its type                                                                           |
+     | `ChatBubbleIcon`    | reason, proposal reason, planner reason                                                                                                |
+     | `CheckCircledIcon`  | approval                                                                                                                               |
+     | `ClockIcon`         | created, updated, occurredAt, receivedAt, admittedAt, startedAt, stoppedAt, decided at, last fire, last completed, next due — a moment |
+     | `LoopIcon`          | loop, loop name                                                                                                                        |
+     | `UpdateIcon`        | catch-up                                                                                                                               |
+     | `ArchiveIcon`       | repository                                                                                                                             |
+     | `GitHubLogoIcon`    | GitHub                                                                                                                                 |
+     | `CommitIcon`        | base branch, deploy branch                                                                                                             |
 
      Add to this table in the same PR that adds the registry row.
+
    - Identity rows (`id`, `run`, `version`, hashes, keys, contract) and
      state rows (`state`, `status`, `decision` — those carry a `StateBadge`)
      are **not** in the registry. Inside an iconed section they get an empty
@@ -457,15 +458,15 @@ no shared set. Every rule below is checkable in review.
 Where an icon or glyph may sit, relative to the text it belongs to. Anything
 not in this table is not a placement.
 
-| Context                    | Position                  | Rule                                                                                                           |
-| -------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| State badge / status label | leading, `gap-1.5`        | Icon then word. Never trailing, never alone.                                                                   |
-| `KV` label (attribute icon)| leading, `gap-1.5`        | Icon then label, in the label column, label color. `<Section icons>` opts a section in; every row then resolves from `attrIcons.tsx` by label and unmapped rows keep an empty slot. |
-| Button                     | leading only              | A trailing glyph is reserved for one meaning: `…` = "opens a dialog". Nothing else trails.                     |
-| Table cell                 | leading, baseline-aligned | Same column as its text; a cell is never icon-only unless the header names the meaning and `title` repeats it. |
-| Section / group header     | between chevron and label | Chevron → dot/icon → label → count, in that order (`GroupHeaderRow`).                                          |
-| Nav rail                   | none                      | Text-only until the rail outgrows its labels; a leading icon column is the _only_ shape it may take then.      |
-| Keyboard hint              | trailing                  | Style depends on container — see "Keyboard hints" under §5.3. Never inline in prose.                           |
+| Context                     | Position                  | Rule                                                                                                                                                                                |
+| --------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| State badge / status label  | leading, `gap-1.5`        | Icon then word. Never trailing, never alone.                                                                                                                                        |
+| `KV` label (attribute icon) | leading, `gap-1.5`        | Icon then label, in the label column, label color. `<Section icons>` opts a section in; every row then resolves from `attrIcons.tsx` by label and unmapped rows keep an empty slot. |
+| Button                      | leading only              | A trailing glyph is reserved for one meaning: `…` = "opens a dialog". Nothing else trails.                                                                                          |
+| Table cell                  | leading, baseline-aligned | Same column as its text; a cell is never icon-only unless the header names the meaning and `title` repeats it.                                                                      |
+| Section / group header      | between chevron and label | Chevron → dot/icon → label → count, in that order (`GroupHeaderRow`).                                                                                                               |
+| Nav rail                    | none                      | Text-only until the rail outgrows its labels; a leading icon column is the _only_ shape it may take then.                                                                           |
+| Keyboard hint               | trailing                  | Style depends on container — see "Keyboard hints" under §5.3. Never inline in prose.                                                                                                |
 
 Icons and glyphs sit **on the text baseline** and take the text color of
 their label (`currentColor`); an icon lighter or brighter than its own label
@@ -475,11 +476,11 @@ is a bug.
 
 Icon size follows the type size next to it — it is never set independently:
 
-| Text size        | Icon | Where                                            |
-| ---------------- | ---- | ------------------------------------------------ |
-| 11px (badges)    | 12px | `StateBadge`, table cells, chips                 |
+| Text size        | Icon | Where                                                                                        |
+| ---------------- | ---- | -------------------------------------------------------------------------------------------- |
+| 11px (badges)    | 12px | `StateBadge`, table cells, chips                                                             |
 | 12–13px (body)   | 14px | Default. Buttons, list rows, KV labels and values (Radix attribute icons render at 14px too) |
-| 14–15px (titles) | 16px | `DetailPane` title, `Dialog` title, empty states |
+| 14–15px (titles) | 16px | `DetailPane` title, `Dialog` title, empty states                                             |
 
 Chevrons and sort arrows are the exception: 9px, because they are affordance
 punctuation, not content.
@@ -648,13 +649,13 @@ under the buttons (404/409 are normal, §6), never as a toast alone.
 Visible shortcuts use two idioms; compact utility and standard dismiss
 controls deliberately avoid another piece of visible text:
 
-| Control or surface                                                                                         | Shortcut treatment                                                     | Why                                                                                             |
-| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Bordered, text-labeled control — especially an action `Button`, nav item, tab, or chip                    | trailing faint mono text: `mono ml-1 text-(--text-faint)`              | a box inside a box is noise; the control's border is already the container                      |
-| Standalone or unbordered surface — input placeholder, ⌘K row, `?` dialog, footer legend                   | visible `<kbd>` box, 10px, `border-(--border)`                         | there is no container, so the box supplies one                                                  |
-| Compact icon-only utility control — specifically `CopyActions` (WM-302)                                   | no visible text hint; put the chord in both `title` and `aria-label`   | labels or badges would turn a compact utility row back into a competing action toolbar          |
-| Standard dismiss / close control                                                                          | no `Esc` badge                                                         | `Esc` is the global, standard dismissal path; the text label and accessible name remain `Close` |
-| Prose or body copy                                                                                         | never                                                                  | a shortcut is surfaced by its control or callout, not described in surrounding prose            |
+| Control or surface                                                                      | Shortcut treatment                                                   | Why                                                                                             |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Bordered, text-labeled control — especially an action `Button`, nav item, tab, or chip  | trailing faint mono text: `mono ml-1 text-(--text-faint)`            | a box inside a box is noise; the control's border is already the container                      |
+| Standalone or unbordered surface — input placeholder, ⌘K row, `?` dialog, footer legend | visible `<kbd>` box, 10px, `border-(--border)`                       | there is no container, so the box supplies one                                                  |
+| Compact icon-only utility control — specifically `CopyActions` (WM-302)                 | no visible text hint; put the chord in both `title` and `aria-label` | labels or badges would turn a compact utility row back into a competing action toolbar          |
+| Standard dismiss / close control                                                        | no `Esc` badge                                                       | `Esc` is the global, standard dismissal path; the text label and accessible name remain `Close` |
+| Prose or body copy                                                                      | never                                                                | a shortcut is surfaced by its control or callout, not described in surrounding prose            |
 
 For a bordered text control, the visible hint is `aria-hidden` (the accessible
 name is "Cancel", not "Cancel x"). For an icon-only `CopyActions` control,
@@ -1335,7 +1336,7 @@ and read by the UI, exactly as the agent registry is in §10.6.
 ### 10.15 Chain trace (`#/chain/:correlationId`) — WM-527
 
 The Graph (§10.13) answers "what can happen"; the chain trace answers "what
-happened to *this* one, and where did it start". A chain instance is stitched
+happened to _this_ one, and where did it start". A chain instance is stitched
 by two ids the emitter writes on every hop (`lib/chain.mjs`): `correlationId`,
 inherited unchanged from the origin event (falling back to the origin's own
 `eventId` when it carried none), and `causationId`, the run id that produced
@@ -1358,7 +1359,7 @@ layer spacing because chains are long and thin.
 - **Same chrome as the map.** `j`/`k` (and arrows) walk nodes in reading
   order, `z` / **Show on canvas** pans the selection into view, `Esc` closes,
   **Reset layout** re-runs elk. The panel links out to Events, Runs, the run
-  page, Proposals and Agents, and to the parent run / origin event *inside*
+  page, Proposals and Agents, and to the parent run / origin event _inside_
   the chain. Positions are reused across the 3 s poll while node/edge
   identity is unchanged (§10.13's identity rule).
 

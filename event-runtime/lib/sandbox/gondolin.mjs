@@ -26,13 +26,23 @@ import path from "node:path";
 import { FACTORY_ROOT } from "../config.mjs";
 import { normalizePolicy, resolveSecretValues } from "./policy.mjs";
 
-export { normalizePolicy, resolveSecretValues, SandboxPolicyError } from "./policy.mjs";
+export {
+  normalizePolicy,
+  resolveSecretValues,
+  SandboxPolicyError,
+} from "./policy.mjs";
 
 /** The SDK's package.json declares engines.node >= 23.6.0; below that it will not import. */
 export const MIN_NODE_MAJOR = 23;
 export const MIN_NODE_MINOR = 6;
 
-export const RUNNER_PATH = path.join(FACTORY_ROOT, "event-runtime", "lib", "sandbox", "runner.mjs");
+export const RUNNER_PATH = path.join(
+  FACTORY_ROOT,
+  "event-runtime",
+  "lib",
+  "sandbox",
+  "runner.mjs",
+);
 
 /** Grace between SIGTERM and SIGKILL for the runner child, matching the command adapter. */
 export const KILL_GRACE_MS = 10_000;
@@ -91,7 +101,16 @@ export function preflight({
       return null;
     }
   },
-  sdkExists = () => existsSync(path.join(FACTORY_ROOT, "node_modules", "@earendil-works", "gondolin", "package.json")),
+  sdkExists = () =>
+    existsSync(
+      path.join(
+        FACTORY_ROOT,
+        "node_modules",
+        "@earendil-works",
+        "gondolin",
+        "package.json",
+      ),
+    ),
 } = {}) {
   // `cause` separates two things `available: false` used to conflate (WM-312):
   //
@@ -104,7 +123,15 @@ export function preflight({
   //
   // Rendering both as "available no" is what let the sandbox sit switched off
   // fleet-wide for a day, indistinguishable from a laptop that lacks QEMU.
-  const report = { available: false, reason: null, cause: null, qemu: null, node: null, nodeVersion: null, sdk: false };
+  const report = {
+    available: false,
+    reason: null,
+    cause: null,
+    qemu: null,
+    node: null,
+    nodeVersion: null,
+    sdk: false,
+  };
 
   const qemuBin = qemuBinaryFor();
   report.qemu = which(qemuBin);
@@ -118,7 +145,8 @@ export function preflight({
   // the Node that satisfies the SDK may not be the one first on PATH (nvm).
   const nodeBin = env.FACTORY_SANDBOX_NODE || which("node");
   if (!nodeBin) {
-    report.reason = "node is not on PATH — the Gondolin SDK requires Node (see runner.mjs); set FACTORY_SANDBOX_NODE";
+    report.reason =
+      "node is not on PATH — the Gondolin SDK requires Node (see runner.mjs); set FACTORY_SANDBOX_NODE";
     report.cause = "host";
     return report;
   }
@@ -210,7 +238,15 @@ export async function runInSandbox({
   const secrets = resolveSecretValues(policy, hostEnv);
 
   const guestCwd = workspaceDir ? policy.workspaceMount : undefined;
-  const request = JSON.stringify({ policy, secrets, command, cwd: guestCwd, env, timeoutMs, shell });
+  const request = JSON.stringify({
+    policy,
+    secrets,
+    command,
+    cwd: guestCwd,
+    env,
+    timeoutMs,
+    shell,
+  });
 
   return new Promise((resolve, reject) => {
     const child = spawn(report.node, [RUNNER_PATH], {
@@ -218,7 +254,11 @@ export async function runInSandbox({
       // The runner resolves the SDK from FACTORY_ROOT/node_modules and needs
       // nothing else; it must not inherit the worker's credentials, since
       // keeping secrets off the guest is the entire point of the sandbox.
-      env: { PATH: hostEnv.PATH ?? "", HOME: hostEnv.HOME ?? "", TMPDIR: hostEnv.TMPDIR ?? "" },
+      env: {
+        PATH: hostEnv.PATH ?? "",
+        HOME: hostEnv.HOME ?? "",
+        TMPDIR: hostEnv.TMPDIR ?? "",
+      },
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -296,7 +336,11 @@ export async function runInSandbox({
 
     child.on("error", (err) => {
       cleanup();
-      reject(new SandboxUnavailableError(`failed to spawn the sandbox runner (${report.node}): ${err.message}`));
+      reject(
+        new SandboxUnavailableError(
+          `failed to spawn the sandbox runner (${report.node}): ${err.message}`,
+        ),
+      );
     });
 
     child.on("close", (runnerExit) => {

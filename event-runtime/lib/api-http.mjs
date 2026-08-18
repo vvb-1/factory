@@ -27,9 +27,7 @@ export function send(res, status, body) {
   const req = res.req;
   const pathname = req?.url?.split("?", 1)[0];
   const etagEligible =
-    req?.method === "GET" &&
-    status === 200 &&
-    COLLECTION_PATHS.has(pathname);
+    req?.method === "GET" && status === 200 && COLLECTION_PATHS.has(pathname);
   if (etagEligible) {
     const etag = `"${createHash("sha256").update(json).digest("hex")}"`;
     const ifNoneMatch = req.headers["if-none-match"];
