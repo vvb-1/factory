@@ -301,6 +301,12 @@ export async function waitFor(box, needle, timeoutMs = 15_000) {
 }
 
 export function exitOf(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({
+      code: child.exitCode,
+      signal: child.signalCode,
+    });
+  }
   return new Promise((resolve) => {
     let resolved = false;
     const done = (code, signal) => {
