@@ -209,6 +209,46 @@ describe("HoverCard", () => {
     expect(onOpenChange).toHaveBeenCalledWith(true);
   });
 
+  test("opening a second card closes a first card held open by focus", async () => {
+    const r = render(
+      <>
+        <HoverCard
+          label="Agent A"
+          openDelayMs={0}
+          closeDelayMs={0}
+          trigger="agent-a"
+        >
+          <span>first card</span>
+        </HoverCard>
+        <HoverCard
+          label="Agent B"
+          openDelayMs={0}
+          closeDelayMs={0}
+          trigger="agent-b"
+        >
+          <span>second card</span>
+        </HoverCard>
+      </>,
+    );
+    const triggers = r.container.querySelectorAll<HTMLElement>(
+      "[aria-haspopup='dialog']",
+    );
+
+    await act(async () => triggers[0].focus());
+    await waitFor(() =>
+      expect(r.getByRole("dialog", { name: "Agent A" })).toBeTruthy(),
+    );
+    expect(document.activeElement).toBe(triggers[0]);
+
+    fireEvent.mouseEnter(triggers[1]);
+
+    await waitFor(() => {
+      const dialogs = r.getAllByRole("dialog");
+      expect(dialogs).toHaveLength(1);
+      expect(dialogs[0].getAttribute("aria-label")).toBe("Agent B");
+    });
+  });
+
   test("opens on hover and closes when the pointer leaves", async () => {
     const r = render(<Fixture />);
     const trigger = triggerOf(r.container);
