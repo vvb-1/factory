@@ -2,6 +2,7 @@ import "../test-dom";
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   Agents,
   adapterText,
@@ -82,6 +83,17 @@ function renderAgents(focusAgentRef: string | null = null) {
       focusAgentRef={focusAgentRef}
       onSelectAgent={noop}
     />,
+  );
+}
+
+function SelectableAgents() {
+  const [selectedRef, setSelectedRef] = useState<string | null>(null);
+  return (
+    <Agents
+      context={{ kind: "all" }}
+      focusAgentRef={selectedRef}
+      onSelectAgent={setSelectedRef}
+    />
   );
 }
 
@@ -244,6 +256,38 @@ describe("Agents table columns (WM-211)", () => {
       );
       expect(headers.filter((t) => /claude1/.test(t))).toHaveLength(1);
       expect(headers.filter((t) => /command1/.test(t))).toHaveLength(1);
+    });
+  });
+});
+
+describe("Agents table keyboard navigation (WM-732)", () => {
+  test("rows are named, activate with Enter, and arrow between visible agents", async () => {
+    const agents = [stubAgent("alpha"), stubAgent("beta"), stubAgent("gamma")];
+    await withAgents(agents, async () => {
+      const r = renderWithClient(<SelectableAgents />);
+      const alpha = await r.findByRole("row", { name: /alpha@1/ });
+      const beta = r.getByRole("row", { name: /beta@1/ });
+
+      alpha.focus();
+      fireEvent.keyDown(alpha, { key: "Enter" });
+      expect(
+        r.getByRole("button", { name: "Copy agent ref (c)" }),
+      ).toBeTruthy();
+      expect(alpha.getAttribute("aria-selected")).toBe("true");
+
+      const bubbledKeys: string[] = [];
+      const recordBubbledKey = (event: KeyboardEvent) =>
+        bubbledKeys.push(event.key);
+      window.addEventListener("keydown", recordBubbledKey);
+      fireEvent.keyDown(alpha, { key: "ArrowDown" });
+      window.removeEventListener("keydown", recordBubbledKey);
+      expect(document.activeElement).toBe(beta);
+      expect(beta.getAttribute("aria-selected")).toBe("true");
+      expect(bubbledKeys).toEqual([]);
+
+      fireEvent.keyDown(beta, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(alpha);
+      expect(alpha.getAttribute("aria-selected")).toBe("true");
     });
   });
 });

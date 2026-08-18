@@ -455,9 +455,49 @@ export function Agents({
                 const renderRow = (a: AgentDef) => (
                   <tr
                     key={a.ref}
+                    data-agent-ref={a.ref}
+                    tabIndex={0}
                     onClick={() => onSelectAgent(a.ref)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onSelectAgent(a.ref);
+                        return;
+                      }
+                      if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                        return;
+
+                      event.preventDefault();
+                      // Agents also supports global j/k + arrow list shortcuts.
+                      // This row owns its arrow event, so do not let the global
+                      // handler advance selection a second time.
+                      event.stopPropagation();
+                      const current = event.currentTarget;
+                      const rows = Array.from(
+                        current.parentElement?.querySelectorAll<HTMLTableRowElement>(
+                          "tr[data-agent-ref]",
+                        ) ?? [],
+                      );
+                      const currentIndex = rows.indexOf(current);
+                      const offset = event.key === "ArrowDown" ? 1 : -1;
+                      const next =
+                        rows[
+                          Math.max(
+                            0,
+                            Math.min(rows.length - 1, currentIndex + offset),
+                          )
+                        ];
+                      if (!next) return;
+                      next.focus();
+                      next.scrollIntoView?.({ block: "nearest" });
+                      const nextRef = next.dataset.agentRef;
+                      if (nextRef) onSelectAgent(nextRef);
+                    }}
+                    aria-label={a.ref}
                     aria-selected={a.ref === selectedRef}
-                    className={`cursor-pointer hover:bg-(--surface-1) ${a.ref === selectedRef ? "row-selected" : ""}`}
+                    className={`cursor-pointer hover:bg-(--surface-1) focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-(--accent) ${a.ref === selectedRef ? "row-selected" : ""}`}
                   >
                     <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
                       {a.ref}
