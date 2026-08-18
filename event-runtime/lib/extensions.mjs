@@ -22,9 +22,17 @@
  *      registered — while every other extension still loads. `serve`/`work`
  *      never fail to start because a third-party manifest is broken.
  *   3. **Reserved manifest keys are accepted, not rejected.** `connectors`,
- *      `views`, `panels`, `config` and `hooks` belong to follow-up tickets;
- *      a manifest that carries them loads its packs and adapters here and
- *      records a "not supported yet" anomaly for the rest.
+ *      `views`, `panels` and `hooks` belong to follow-up tickets; a manifest
+ *      that carries them loads its packs and adapters here and records a
+ *      "not supported yet" anomaly for the rest.
+ *   4. **Config is declared, validated, defaulted (WM-841).** An extension
+ *      may declare `contributes.config: { namespace, schema }`; the operator's
+ *      values live on the policy entry (`extensions[].config`). At load the
+ *      schema is read, `default`s are applied, and the effective object is
+ *      validated with lib/schema.mjs — a violation disables the extension
+ *      (misconfigured code must not run). `getExtensionConfig(name)` hands the
+ *      effective object to that extension's adapters/hooks/panels, and
+ *      `loadedExtensions()` is the snapshot `GET /config` publishes.
  *
  * Ordering matters for callers: `adapterRegistry.toMap()` is a snapshot, so
  * `loadExtensions` must run before a CLI takes the map it hands to
@@ -57,9 +65,18 @@ export const RESERVED_CONTRIBUTIONS = Object.freeze([
   "connectors",
   "views",
   "panels",
-  "config",
   "hooks",
 ]);
+
+/** Policy entry fields `extensions[]` accepts besides `path`. */
+const ENTRY_FIELDS = new Set(["path", "config"]);
+
+/**
+ * The last `loadExtensions` result, kept so `getExtensionConfig` (adapters,
+ * hooks, panels) and `GET /config` (lib/api-config.mjs) read the same effective
+ * objects the loader validated. `serve` and `work` each load once at start.
+ */
+let LOADED = { extensions: [], disabled: [] };
 
 /** Thrown only for a malformed `extensions:` policy block; per-extension faults are anomalies. */
 export class ExtensionError extends Error {
@@ -92,7 +109,9 @@ function readPolicy(root) {
  * is reported per entry so one typo does not hide the other extensions.
  *
  * @param {{ root?: string, policy?: object }} [options]
- * @returns {{ roots: Array<{ path: string, index: number }>, anomalies: string[] }}
+ * @returns {{ roots: Array<{ path: string, index: number, config?: object }>, anomalies: string[] }}
+ *   `config` is the operator's raw values for the extension (validated by
+ *   `loadExtensions` against the schema the manifest declares).
  */
 export function loadExtensionRoots({ root = reposRoot(), policy } = {}) {
   const parsed = policy ?? readPolicy(root);
@@ -112,7 +131,7 @@ export function loadExtensionRoots({ root = reposRoot(), policy } = {}) {
       anomalies.push(`${at} must be an object with path (entry skipped)`);
       return;
     }
-    const unknown = Object.keys(entry).filter((key) => key !== "path");
+    const unknown = Object.keys(entry).filter((key) => !ENTRY_FIELDS.has(key));
     if (unknown.length > 0) {
       anomalies.push(
         `${at}: unknown field${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `"${k}"`).join(", ")} (entry skipped)`,
@@ -123,13 +142,26 @@ export function loadExtensionRoots({ root = reposRoot(), policy } = {}) {
       anomalies.push(`${at}.path must be a non-empty string (entry skipped)`);
       return;
     }
+    if (
+      Object.hasOwn(entry, "config") &&
+      (typeof entry.config !== "object" ||
+        entry.config === null ||
+        Array.isArray(entry.config))
+    ) {
+      anomalies.push(`${at}.config must be an object (entry skipped)`);
+      return;
+    }
     const resolved = path.resolve(root, expandHome(entry.path));
     if (seen.has(resolved)) {
       anomalies.push(`${at}: duplicate extension path ${resolved} (skipped)`);
       return;
     }
     seen.add(resolved);
-    roots.push({ path: resolved, index });
+    roots.push({
+      path: resolved,
+      index,
+      ...(Object.hasOwn(entry, "config") ? { config: entry.config } : {}),
+    });
   });
   return { roots, anomalies };
 }
@@ -221,7 +253,143 @@ export function validateExtensionManifest(dir) {
       );
     }
   }
+  if (contributes.config) {
+    const rel = contributes.config.schema;
+    const abs = path.resolve(root, rel);
+    if (!isInside(root, abs)) {
+      errors.push(
+        `${file}: contributes.config.schema "${rel}" escapes the extension directory`,
+      );
+    } else if (!existsSync(abs) || !statSync(abs).isFile()) {
+      errors.push(
+        `${file}: contributes.config.schema "${rel}" is not a file (${abs})`,
+      );
+    }
+  }
   return result(manifest);
+}
+
+/** Deep-clone JSON data (schema defaults are shared with the effective object otherwise). */
+function cloneJson(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Fill `default`s from a schema into a value, recursively through
+ * `properties`. A nested object property with no value is only created when
+ * a default inside it produces something — an empty object would trip that
+ * property's own `required` where absence would not.
+ */
+export function applyConfigDefaults(schema, value) {
+  if (!isPlainObject(schema)) return cloneJson(value);
+  let out = cloneJson(value);
+  if (out === undefined) {
+    if (Object.hasOwn(schema, "default")) out = cloneJson(schema.default);
+    else if (schema.type === "object" || isPlainObject(schema.properties))
+      out = {};
+    else return undefined;
+  }
+  if (isPlainObject(out) && isPlainObject(schema.properties)) {
+    for (const [key, sub] of Object.entries(schema.properties)) {
+      if (Object.hasOwn(out, key)) {
+        out[key] = applyConfigDefaults(sub, out[key]);
+        continue;
+      }
+      const filled = applyConfigDefaults(sub, undefined);
+      if (filled === undefined) continue;
+      if (isPlainObject(filled) && Object.keys(filled).length === 0) continue;
+      out[key] = filled;
+    }
+  }
+  return out;
+}
+
+/** `default` is an annotation lib/schema.mjs does not know; strip it before validating. */
+function withoutDefaults(schema) {
+  if (Array.isArray(schema)) return schema.map(withoutDefaults);
+  if (!isPlainObject(schema)) return schema;
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "default") continue;
+    out[key] = withoutDefaults(value);
+  }
+  return out;
+}
+
+/**
+ * Resolve one extension's effective config: read the declared schema, apply
+ * its defaults over the operator's values, validate the result. Returns
+ * `null` when the manifest declares no config and the policy gives none;
+ * throws an ExtensionError naming the fault (and the failing value path)
+ * otherwise, which `loadExtensions` turns into a disabling anomaly.
+ *
+ * @param {string} dir - the extension directory
+ * @param {object} manifest - a schema-valid manifest
+ * @param {object|undefined} values - the policy entry's `config`
+ * @returns {{ namespace: string, schema: string, schemaJson: object, values: object }|null}
+ */
+export function resolveExtensionConfig(dir, manifest, values) {
+  const declared = manifest.contributes?.config;
+  if (!declared) {
+    if (values !== undefined) {
+      throw new ExtensionError(
+        "policy.yaml gives config values but the manifest declares no contributes.config",
+      );
+    }
+    return null;
+  }
+  const schemaFile = path.resolve(dir, declared.schema);
+  let schemaJson;
+  try {
+    schemaJson = JSON.parse(readFileSync(schemaFile, "utf8"));
+  } catch (err) {
+    throw new ExtensionError(
+      `contributes.config.schema "${declared.schema}" is not valid JSON — ${err.message}`,
+    );
+  }
+  const effective = applyConfigDefaults(schemaJson, values ?? {});
+  const check = validate(withoutDefaults(schemaJson), effective);
+  if (!check.valid) {
+    throw new ExtensionError(
+      `config does not match ${declared.schema} — ${check.errors.join("; ")}`,
+    );
+  }
+  return {
+    namespace: declared.namespace,
+    schema: declared.schema,
+    schemaJson,
+    values: effective,
+  };
+}
+
+/**
+ * The effective config object of a loaded extension — schema defaults applied
+ * over the operator's policy values, validated at load. `undefined` when no
+ * extension of that name loaded (unknown, or disabled by an anomaly).
+ *
+ * @param {string} name - the manifest `name` (`publisher/extension`)
+ * @returns {object|undefined}
+ */
+export function getExtensionConfig(name) {
+  return LOADED.extensions.find((e) => e.name === name)?.config?.values;
+}
+
+/**
+ * Snapshot of the last `loadExtensions` run for read-only surfaces
+ * (`GET /config`, lib/api-config.mjs): every accepted extension with its
+ * config, and every extension a fault disabled with the reason.
+ *
+ * @returns {{
+ *   extensions: Array<{ name: string, version: string, path: string, config: { namespace: string, schema: string, schemaJson: object, values: object }|null }>,
+ *   disabled: Array<{ name: string|null, version: string|null, path: string, namespace: string|null, reason: string }>,
+ * }}
+ */
+export function loadedExtensions() {
+  return LOADED;
 }
 
 function isInside(root, abs) {
@@ -260,11 +428,13 @@ function packRootFor(extensionRoot, rel) {
  * @param {Array<object>} [options.packRoots] - the policy `packs:` roots the extension packs join (default: loadPackRoots({ root }))
  * @param {string} [options.registryRoot] - the built-in registry root the dry load uses (tests point it at a copy)
  * @returns {Promise<{
- *   extensions: Array<{ name: string, version: string, path: string, packs: string[], adapters: string[], reserved: string[] }>,
+ *   extensions: Array<{ name: string, version: string, path: string, packs: string[], adapters: string[], reserved: string[], config: { namespace: string, schema: string, values: object }|null }>,
  *   packRoots: Array<object>,
  *   anomalies: string[],
+ *   disabled: Array<{ name: string|null, version: string|null, path: string, namespace: string|null, reason: string }>,
  * }>} `packRoots` is the full list — policy packs first, then every accepted
  *   extension pack in policy order — ready to hand to `loadRegistry`.
+ *   `disabled` lists every extension an anomaly skipped, for `/config`.
  */
 export async function loadExtensions({
   root = reposRoot(),
@@ -279,17 +449,27 @@ export async function loadExtensions({
   const accepted = [...basePackRoots];
   const acceptedPackNames = new Set(basePackRoots.map((p) => p.name));
   const acceptedAdapterNames = new Set();
+  const acceptedNamespaces = new Map();
+  const disabled = [];
+  const loaded = [];
   const dryLoad = (candidates) =>
     loadRegistry({
       ...(registryRoot ? { root: registryRoot } : {}),
       packRoots: candidates,
     });
 
-  for (const { path: dir } of roots) {
+  for (const { path: dir, config: values } of roots) {
+    const checked = validateExtensionManifest(dir);
     const skip = (reason) => {
       anomalies.push(`extension ${dir}: ${reason} (extension skipped)`);
+      disabled.push({
+        name: checked.manifest?.name ?? null,
+        version: checked.manifest?.version ?? null,
+        path: dir,
+        namespace: checked.manifest?.contributes?.config?.namespace ?? null,
+        reason,
+      });
     };
-    const checked = validateExtensionManifest(dir);
     if (!checked.valid) {
       skip(checked.errors.join("; "));
       continue;
@@ -297,6 +477,16 @@ export async function loadExtensions({
     const manifest = checked.manifest;
     const label = `${manifest.name}@${manifest.version}`;
     const contributes = manifest.contributes ?? {};
+
+    // Config: schema + defaults + validation, before any extension code is
+    // imported — misconfigured code must not run (WM-841).
+    let config;
+    try {
+      config = resolveExtensionConfig(dir, manifest, values);
+    } catch (err) {
+      skip(`${label}: ${err.message}`);
+      continue;
+    }
 
     // Packs: resolve to pack roots and prove they load with everything
     // accepted so far. The registry's own errors identify both packs on a
@@ -348,6 +538,12 @@ export async function loadExtensions({
       skip(`${label}: ${adapterFault}`);
       continue;
     }
+    if (config && acceptedNamespaces.has(config.namespace)) {
+      skip(
+        `${label}: config namespace "${config.namespace}" is already used by ${acceptedNamespaces.get(config.namespace)}`,
+      );
+      continue;
+    }
 
     // Accept: commit packs, register adapters, record the reserved keys.
     accepted.push(...extPackRoots);
@@ -357,6 +553,8 @@ export async function loadExtensions({
       acceptedAdapterNames.add(name);
     }
     for (const warning of checked.warnings) anomalies.push(warning);
+    if (config) acceptedNamespaces.set(config.namespace, manifest.name);
+    const { schemaJson, ...publicConfig } = config ?? {};
     extensions.push({
       name: manifest.name,
       version: manifest.version,
@@ -366,8 +564,16 @@ export async function loadExtensions({
       reserved: RESERVED_CONTRIBUTIONS.filter((key) =>
         Object.hasOwn(contributes, key),
       ),
+      config: config ? publicConfig : null,
+    });
+    loaded.push({
+      name: manifest.name,
+      version: manifest.version,
+      path: dir,
+      config: config ? { ...publicConfig, schemaJson } : null,
     });
   }
 
-  return { extensions, packRoots: accepted, anomalies };
+  LOADED = { extensions: loaded, disabled };
+  return { extensions, packRoots: accepted, anomalies, disabled };
 }

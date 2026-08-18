@@ -1,6 +1,6 @@
 {
   "title": "factory-extension.json — the manifest of one factory extension (docs/extensions.md)",
-  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `connectors`, `views`, `panels`, `config` and `hooks` are reserved keys: the loader accepts them and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs and adapters here. Adapter names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
+  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `connectors`, `views`, `panels` and `hooks` are reserved keys: the loader accepts them and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs and adapters here. Adapter names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
   "type": "object",
   "required": ["name", "version"],
   "additionalProperties": false,
@@ -57,7 +57,22 @@
           "description": "reserved — declarative Overview panels; lands in WM-840"
         },
         "config": {
-          "description": "reserved — extension config schemas; lands in WM-841"
+          "type": "object",
+          "required": ["namespace", "schema"],
+          "additionalProperties": false,
+          "description": "the extension's operator config (docs/extensions.md § Config): a JSON-schema file for the values policy.yaml `extensions[].config` supplies; validated at load, defaults applied, surfaced read-only in GET /config and Settings",
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$",
+              "description": "the name the values are published under; unique across loaded extensions"
+            },
+            "schema": {
+              "type": "string",
+              "pattern": "\\.json$",
+              "description": "relative path to a JSON-schema (the lib/schema.mjs subset plus `default`) describing the config object"
+            }
+          }
         },
         "hooks": {
           "description": "reserved — lifecycle hooks; lands in WM-842"

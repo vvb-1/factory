@@ -45,12 +45,25 @@ export interface ConfigEntry {
   reload?: ConfigReload;
   note?: string;
 }
+/** One extension in the `extensions` config section (WM-841): effective, redacted values or the anomaly that disabled it. */
+export interface ConfigExtension {
+  name: string | null;
+  version: string | null;
+  path: string;
+  namespace: string | null;
+  reload: ConfigReload;
+  schema: Record<string, unknown> | null;
+  values: Record<string, unknown> | null;
+  anomaly: string | null;
+}
 export interface ConfigSection {
   id: string;
   title: string;
   source: { file: string; kind: "yaml" | "json" | "registry" };
   reload: ConfigReload;
   entries: ConfigEntry[];
+  /** Only on the `extensions` section. */
+  extensions?: ConfigExtension[];
 }
 export interface ConfigView {
   generatedAt: string;

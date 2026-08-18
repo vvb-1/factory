@@ -19,10 +19,13 @@ Today an extension can contribute:
 - **adapters** — harness adapters satisfying the contract in
   [`event-runtime-workers.md` §2c](event-runtime-workers.md#2c-adapter-registry-and-contract--shipped-wm-837);
   they are registered into the adapter registry with the extension's name as
-  their `source`.
+  their `source`;
+- **config** — a JSON-schema for the extension's operator settings, validated
+  at load with defaults applied and shown read-only in `GET /config` and
+  Settings (§Config below).
 
-The manifest also **reserves** `connectors`, `views`, `panels`, `config` and
-`hooks` for the tickets that land them (§Panels, §Config, §Hooks below). A
+The manifest also **reserves** `connectors`, `views`, `panels` and `hooks` for
+the tickets that land them (§Panels, §Hooks below). A
 manifest that carries a reserved key loads its packs and adapters and records a
 "not supported yet" configuration anomaly for the rest — it is accepted, not
 rejected, so an extension written for a later runtime still does what this one
@@ -40,6 +43,7 @@ Implementation: `event-runtime/lib/extensions.mjs`, schema
   pack/                       # a filesystem pack (pack.json, pins.json, agents/, schemas/, …)
   adapters/
     argent.mjs                # an adapter module (execute + SANDBOX_SUPPORT)
+  config.schema.json          # the shape of the extension's operator config (§Config)
 ```
 
 Nothing about the layout is fixed except the manifest's name and place: every
@@ -56,20 +60,22 @@ directory, and must stay inside it.
   "factory": { "min": "0.x" },
   "contributes": {
     "packs": ["./pack"],
-    "adapters": { "argent": "./adapters/argent.mjs" }
+    "adapters": { "argent": "./adapters/argent.mjs" },
+    "config": { "namespace": "mobile", "schema": "./config.schema.json" }
   }
 }
 ```
 
-| Key                                                                | Required | Meaning                                                                                                                                                                                                                                         |
-| :----------------------------------------------------------------- | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                                                             | yes      | `publisher/extension`, matching `^[a-z0-9-]+/[a-z0-9-]+$`. Recorded as the `source` of every adapter the extension registers, so `bun event-runtime/cli.mjs adapters` can say where an adapter came from.                                       |
-| `version`                                                          | yes      | Semver (`MAJOR.MINOR.PATCH`, optional pre-release/build).                                                                                                                                                                                       |
-| `description`                                                      | no       | Up to 200 characters, for listings.                                                                                                                                                                                                             |
-| `factory.min`                                                      | no       | The oldest factory the extension was written for. Informational until the runtime carries a version; the loader records it and does not enforce it.                                                                                             |
-| `contributes.packs`                                                | no       | Array of relative directories, each containing a `pack.json`. The pack's `name` and `namespace` come from its own `pack.json` (`docs/kernel-and-packs.md` § Pack format) — the policy entry names the extension, not the pack.                  |
-| `contributes.adapters`                                             | no       | Object `name → relative .mjs path`. Names must match the adapter pattern `^[a-z][a-z0-9-]*$`; the module must export `execute` and `SANDBOX_SUPPORT`. An extension may not replace an existing adapter (built-in or from an earlier extension). |
-| `contributes.connectors`, `.views`, `.panels`, `.config`, `.hooks` | no       | **Reserved.** Accepted by the schema, ignored by the loader, reported as a configuration anomaly `contributes.<key> is not supported yet`.                                                                                                      |
+| Key                                                     | Required | Meaning                                                                                                                                                                                                                                         |
+| :------------------------------------------------------ | :------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                                                  | yes      | `publisher/extension`, matching `^[a-z0-9-]+/[a-z0-9-]+$`. Recorded as the `source` of every adapter the extension registers, so `bun event-runtime/cli.mjs adapters` can say where an adapter came from.                                       |
+| `version`                                               | yes      | Semver (`MAJOR.MINOR.PATCH`, optional pre-release/build).                                                                                                                                                                                       |
+| `description`                                           | no       | Up to 200 characters, for listings.                                                                                                                                                                                                             |
+| `factory.min`                                           | no       | The oldest factory the extension was written for. Informational until the runtime carries a version; the loader records it and does not enforce it.                                                                                             |
+| `contributes.packs`                                     | no       | Array of relative directories, each containing a `pack.json`. The pack's `name` and `namespace` come from its own `pack.json` (`docs/kernel-and-packs.md` § Pack format) — the policy entry names the extension, not the pack.                  |
+| `contributes.adapters`                                  | no       | Object `name → relative .mjs path`. Names must match the adapter pattern `^[a-z][a-z0-9-]*$`; the module must export `execute` and `SANDBOX_SUPPORT`. An extension may not replace an existing adapter (built-in or from an earlier extension). |
+| `contributes.config`                                    | no       | Object `{ namespace, schema }`: the name the extension's operator values are published under (`^[a-z][a-z0-9-]*$`, unique across loaded extensions) and the relative path of the JSON-schema those values must satisfy. See § Config.           |
+| `contributes.connectors`, `.views`, `.panels`, `.hooks` | no       | **Reserved.** Accepted by the schema, ignored by the loader, reported as a configuration anomaly `contributes.<key> is not supported yet`.                                                                                                      |
 
 Unknown top-level keys and unknown `contributes` keys are schema violations.
 Validate a manifest without loading anything:
@@ -124,10 +130,14 @@ Add its directory to `config/policy.yaml`:
 ```yaml
 extensions:
   - path: ~/.factory/extensions/wattmind-mobile # must contain factory-extension.json
+    config: # optional; the shape is the extension's config schema (§Config)
+      simulator: iPhone-16
+      maxParallel: 2
   - path: vendor/another-extension # relative paths resolve from the factory checkout
 ```
 
-Each entry accepts only `path` (`~` expands to the home directory). Entries
+Each entry accepts `path` (`~` expands to the home directory) and an optional
+`config` object — anything else is an anomaly and the entry is skipped. Entries
 load after the built-in root and after every `packs:` entry, in policy order:
 `packRoots` handed to the registry is `packs:` first, then each accepted
 extension's packs. Restart `serve` and the workers — extensions are read at
@@ -158,7 +168,10 @@ message naming both packs; fix the pack (or the order) and restart.
 3. Add adapters as `.mjs` modules exporting `execute` and `SANDBOX_SUPPORT`;
    the smallest conformant module is
    `event-runtime/test-support/extensions/sample/adapters/echo.mjs`.
-4. `bun event-runtime/cli.mjs extensions validate <dir>` until it is clean,
+4. If the extension needs operator settings, write `config.schema.json` and
+   declare `contributes.config` (§Config); give every setting a `default`
+   where one makes sense.
+5. `bun event-runtime/cli.mjs extensions validate <dir>` until it is clean,
    enable it, `extensions list`, restart.
 
 The fixture `event-runtime/test-support/extensions/sample/` is a complete,
@@ -173,9 +186,126 @@ accepts the key and reports it as not supported yet._
 
 ## Config
 
-_Reserved key `contributes.config` — lands in WM-841 (extension config schemas
-validated at load and surfaced in `/config` + Settings). Until then the loader
-accepts the key and reports it as not supported yet._
+_Shipped in WM-841. Implementation: `resolveExtensionConfig`,
+`applyConfigDefaults`, `getExtensionConfig` and `loadedExtensions` in
+`event-runtime/lib/extensions.mjs`; the `extensions` section of
+`event-runtime/lib/api-config.mjs`; the Extensions section of
+`web/src/views/Settings.tsx`; fixture
+`event-runtime/test-support/extensions/sample/config.schema.json`._
+
+An extension that needs operator-provided settings — API hosts, allow-lists,
+thresholds — declares their **shape** in the manifest and the operator writes
+the **values** in `policy.yaml`. Neither side is trusted on its own: the loader
+checks the values against the shape before any of the extension's code runs.
+
+Manifest:
+
+```json
+"contributes": {
+  "config": { "namespace": "mobile", "schema": "./config.schema.json" }
+}
+```
+
+Schema (`config.schema.json`, relative to the manifest and inside its
+directory):
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "simulator": {
+      "type": "string",
+      "default": "iPhone-16",
+      "description": "booted before each run"
+    },
+    "maxParallel": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "default": 1
+    },
+    "apiToken": { "type": "string", "description": "masked in /config" }
+  }
+}
+```
+
+Values (`config/policy.yaml`):
+
+```yaml
+extensions:
+  - path: ~/.factory/extensions/wattmind-mobile
+    config:
+      maxParallel: 2
+      apiToken: sk-live-…
+```
+
+What the loader does with them, in order:
+
+1. **Reads the schema.** It must be a file inside the extension directory
+   (`extensions validate` checks this too) and valid JSON. The keyword subset
+   is `event-runtime/lib/schema.mjs`'s — `type`, `enum`, `const`, `required`,
+   `properties`, `additionalProperties`, `items`, `min/max*`, `pattern`,
+   `description` — plus `default`. Anything else (`anyOf`, `$ref`, …) fails
+   closed like every other contract in the runtime.
+2. **Applies defaults.** Every `default` under `properties`, recursively, is
+   filled in where the operator gave nothing; a nested object property is only
+   created when a default inside it produces something. With no `config:` in
+   the policy at all the effective object is _just_ the defaults, so an
+   extension whose every setting has a default needs no operator input.
+3. **Validates the effective object** with `schema.mjs validate`. A violation
+   is a configuration anomaly that **disables the extension whole** — nothing
+   of it is registered, its adapters are not even imported — with a message
+   naming the failing path:
+
+   ```text
+   extension ~/.factory/extensions/wattmind-mobile: wattmind/mobile@1.0.0: config does not match ./config.schema.json — $.maxParallel: above maximum 4 (extension skipped)
+   ```
+
+   Two more faults are treated the same way: policy `config:` values for an
+   extension whose manifest declares no `contributes.config` (the values would
+   silently do nothing otherwise), and a `namespace` another loaded extension
+   already uses.
+
+The extension's own code reads the result by name:
+
+```js
+import { getExtensionConfig } from "../../lib/extensions.mjs";
+const cfg = getExtensionConfig("wattmind/mobile"); // { simulator: "iPhone-16", maxParallel: 2, apiToken: "sk-live-…" }
+```
+
+`getExtensionConfig` returns the effective object — defaults applied,
+validated — or `undefined` when no extension of that name loaded (unknown, or
+disabled by an anomaly). It reads the last `loadExtensions` run in the process,
+which `serve` and `work` do once at start; a config change is a **restart**.
+
+### In `/config` and Settings
+
+`GET /config` gains a section `{ id: "extensions", reload: "restart" }` with
+one item per extension the loader saw:
+
+```json
+{ "name": "wattmind/mobile", "version": "1.0.0", "path": "…", "namespace": "mobile",
+  "reload": "restart", "schema": { … }, "values": { "simulator": "iPhone-16", "maxParallel": 2, "apiToken": "[redacted]" },
+  "anomaly": null }
+```
+
+A disabled extension appears with `values: null` and its `anomaly`; an
+extension that declares no config appears with `namespace: null`. The
+section's `entries` mirror the same rows (key = namespace) so the Settings
+search covers them. Settings renders it as the **Extensions** section — name,
+namespace, version, path, the effective values with the schema's
+`description`s as notes, a collapsed copy of the schema, and the anomaly in
+place of the values when the extension is disabled. Read-only, like every
+other Settings section: values change in `policy.yaml`, then restart.
+
+**Redaction rule.** Before publishing, every value whose key matches
+`/token|secret|key|password/i` — at any depth of the effective object — is
+replaced by `"[redacted]"` (`redactSecrets` in `lib/api-config.mjs`). Empty
+and `null` values are left as they are so "unset" stays visible. The schema is
+published as written; do not put a real secret in a `default`. The masking is
+by key name only: name secret settings so the rule catches them (`apiToken`,
+not `credential`).
 
 ## Hooks
 

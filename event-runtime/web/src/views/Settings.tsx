@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchConfig,
   type ConfigEntry,
+  type ConfigExtension,
   type ConfigReload,
   type ConfigSection,
 } from "../api";
@@ -94,6 +95,136 @@ function SettingsRow({
         </span>
         <ReloadChip reload={reload} />
       </div>
+    </div>
+  );
+}
+
+/** The entry key the server publishes for an extension (mirrors lib/api-config.mjs). */
+function extensionKey(ext: ConfigExtension): string {
+  return ext.namespace ?? ext.name ?? ext.path;
+}
+
+function schemaDescriptions(
+  schema: ConfigExtension["schema"],
+): Record<string, string> {
+  const properties = (schema?.properties ?? {}) as Record<
+    string,
+    { description?: unknown }
+  >;
+  return Object.fromEntries(
+    Object.entries(properties).flatMap(([key, prop]) =>
+      typeof prop?.description === "string" ? [[key, prop.description]] : [],
+    ),
+  );
+}
+
+/**
+ * One extension of the Extensions section (WM-841): what loaded, under which
+ * namespace, with its effective (defaulted, validated, redacted) values — or
+ * the anomaly that disabled it. Read-only, like every other section.
+ */
+function ExtensionRow({
+  section,
+  ext,
+}: {
+  section: ConfigSection;
+  ext: ConfigExtension;
+}) {
+  const descriptions = schemaDescriptions(ext.schema);
+  const values = ext.values ? Object.entries(ext.values) : [];
+  return (
+    <div className="border-b border-(--border) last:border-b-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2.5">
+        <span className="mono min-w-0 break-words text-[12px] font-medium text-(--text)">
+          {ext.name ?? ext.path}
+        </span>
+        {ext.namespace && (
+          <span
+            className="mono shrink-0 rounded border border-(--border) bg-(--surface-2) px-1.5 py-0.5 text-xs text-(--text-dim)"
+            title="config namespace"
+          >
+            {ext.namespace}
+          </span>
+        )}
+        {ext.version && (
+          <span className="mono shrink-0 text-xs text-(--text-faint)">
+            v{ext.version}
+          </span>
+        )}
+        {ext.name && (
+          <span
+            className="mono min-w-0 truncate text-xs text-(--text-faint)"
+            title={ext.path}
+          >
+            {ext.path}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <span
+            className="mono shrink-0 rounded border border-(--border) px-1.5 py-0.5 text-xs text-(--text-faint)"
+            title={section.source.file}
+          >
+            {sourceName(section.source.file)}
+          </span>
+          <ReloadChip reload={ext.reload} />
+        </span>
+      </div>
+      {ext.anomaly ? (
+        <div
+          role="status"
+          className="mx-3 mb-2.5 rounded border border-(--hue-err) px-2.5 py-2 text-[12px] text-(--hue-err)"
+        >
+          disabled — {ext.anomaly}
+        </div>
+      ) : ext.values === null ? (
+        <div className="px-3 pb-2.5 text-xs text-(--text-faint)">
+          Declares no config.
+        </div>
+      ) : (
+        <>
+          <div className="mx-3 mb-2 overflow-hidden rounded border border-(--border) bg-(--surface-1)">
+            {values.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-(--text-faint)">
+                No values set and the schema declares no defaults.
+              </div>
+            ) : (
+              values.map(([key, value]) => {
+                const shown = displayValue(value);
+                return (
+                  <div
+                    key={key}
+                    className="grid min-w-0 gap-2 border-b border-(--border) px-3 py-2 last:border-b-0 md:grid-cols-[minmax(10rem,0.8fr)_minmax(12rem,1.4fr)]"
+                  >
+                    <div className="mono min-w-0 break-words text-[12px] text-(--text)">
+                      {key}
+                    </div>
+                    <div className="min-w-0 overflow-x-auto">
+                      <pre
+                        className={`mono w-max min-w-full whitespace-pre text-[12px] ${shown === EMPTY ? "text-(--text-faint)" : "text-(--text-dim)"}`}
+                      >
+                        {shown}
+                      </pre>
+                      {descriptions[key] && (
+                        <div className="mt-1 text-xs text-(--text-faint)">
+                          {descriptions[key]}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {ext.schema && (
+            <details className="mx-3 mb-2.5 text-xs text-(--text-faint)">
+              <summary className="cursor-pointer select-none">schema</summary>
+              <pre className="mono mt-1 overflow-x-auto text-[11px] text-(--text-dim)">
+                {JSON.stringify(ext.schema, null, 2)}
+              </pre>
+            </details>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -242,13 +373,34 @@ export function Settings({
                     </span>
                   </div>
                   <div className="min-w-0 overflow-hidden rounded-md border border-(--border) bg-(--surface-0)">
-                    {section.entries.map((entry) => (
-                      <SettingsRow
-                        key={entry.key}
-                        section={section}
-                        entry={entry}
-                      />
-                    ))}
+                    {section.extensions && section.extensions.length === 0 && (
+                      <div className="px-3 py-2.5 text-xs text-(--text-faint)">
+                        No extensions enabled — add them under{" "}
+                        <span className="mono">extensions:</span> in
+                        policy.yaml.
+                      </div>
+                    )}
+                    {section.extensions
+                      ? section.extensions
+                          .filter((ext) =>
+                            section.entries.some(
+                              (entry) => entry.key === extensionKey(ext),
+                            ),
+                          )
+                          .map((ext) => (
+                            <ExtensionRow
+                              key={`${extensionKey(ext)}:${ext.path}`}
+                              section={section}
+                              ext={ext}
+                            />
+                          ))
+                      : section.entries.map((entry) => (
+                          <SettingsRow
+                            key={entry.key}
+                            section={section}
+                            entry={entry}
+                          />
+                        ))}
                   </div>
                 </section>
               ))
