@@ -348,7 +348,10 @@ describe("ListToolbar (WM-543)", () => {
     expect(classes(tools)).toContain("flex-nowrap");
     expect(classes(tools)).toContain("flex-[1_1_14rem]");
     expect(classes(tools)).not.toContain("w-max");
-    expect(classes(tools)).toContain("justify-end");
+    // Right-aligned only from `sm` up; below that, overflow runs off the
+    // trailing edge rather than back over the nav sidebar (WM-96 follow-up).
+    expect(classes(tools)).toContain("justify-start");
+    expect(classes(tools)).toContain("sm:justify-end");
     expect(classes(tools.parentElement as HTMLElement)).toContain("flex-wrap");
 
     const filter = r.getByRole("combobox").parentElement?.parentElement;
@@ -356,6 +359,97 @@ describe("ListToolbar (WM-543)", () => {
     expect(classes(filter)).toContain("min-w-36");
     expect(classes(filter)).toContain("max-w-56");
     expect(classes(filter)).toContain("flex-[1_1_14rem]");
+  });
+
+  test("masks the scrollable edge of an overflowing tab strip and clears it once fully visible (WM-96)", () => {
+    const r = render(
+      <ListToolbar
+        tabs={
+          <div role="tablist" aria-label="Event status" className="flex">
+            <button role="tab" aria-selected="true">
+              All
+            </button>
+            <button role="tab" aria-selected="false">
+              Cancelled
+            </button>
+          </div>
+        }
+        tools={<button>Display</button>}
+      />,
+    );
+    const tablist = r.getByRole("tablist");
+    const scroller = tablist.parentElement as HTMLElement;
+
+    // No overflow: no mask.
+    expect(scroller.style.maskImage).toBeFalsy();
+
+    // Overflowing and scrolled to the start: only the trailing edge fades.
+    Object.defineProperty(scroller, "scrollWidth", {
+      value: 400,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "clientWidth", {
+      value: 200,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "scrollLeft", {
+      value: 0,
+      configurable: true,
+    });
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+    expect(scroller.style.maskImage).toContain("to right");
+    expect(scroller.style.maskImage).not.toContain("transparent, black 2rem");
+
+    // Scrolled to the trailing edge: only the leading edge fades.
+    Object.defineProperty(scroller, "scrollLeft", {
+      value: 200,
+      configurable: true,
+    });
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+    expect(scroller.style.maskImage).toContain("to left");
+
+    // Scrolled to the middle: both edges fade.
+    Object.defineProperty(scroller, "scrollLeft", {
+      value: 100,
+      configurable: true,
+    });
+    act(() => {
+      fireEvent.scroll(scroller);
+    });
+    expect(scroller.style.maskImage).toContain("transparent, black 2rem");
+  });
+
+  test("scrolls a focused tab into view so keyboard users can reach clipped tabs (WM-96)", () => {
+    const scrolls: HTMLElement[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolls.push(this);
+    };
+    try {
+      const r = render(
+        <ListToolbar
+          tabs={
+            <div role="tablist" aria-label="Event status" className="flex">
+              <button role="tab" aria-selected="false">
+                Cancelled
+              </button>
+            </div>
+          }
+          tools={<button>Display</button>}
+        />,
+      );
+      const tab = r.getByRole("tab", { name: "Cancelled" });
+      act(() => {
+        fireEvent.focus(tab);
+      });
+      expect(scrolls).toEqual([tab]);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 });
 

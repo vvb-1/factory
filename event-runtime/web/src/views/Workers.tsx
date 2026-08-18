@@ -773,7 +773,7 @@ export function Workers({
                       setTabChoice(event.target.value as WorkerTab);
                       if (focusHealth) onFocusHealthChange(null);
                     }}
-                    className="min-w-36 rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
+                    className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
                   >
                     {WORKER_TABS.map((t) => (
                       <option key={t} value={t}>
