@@ -1359,71 +1359,69 @@ describe("Proposals copy chords and hints (WM-233)", () => {
 });
 
 describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
-  let origProposals: typeof api.proposals;
-  let origReject: typeof api.reject;
-
-  beforeEach(() => {
-    origProposals = api.proposals;
-    origReject = api.reject;
-  });
-
-  afterEach(() => {
-    api.proposals = origProposals;
-    api.reject = origReject;
-  });
-
   test("Cmd+Enter and Ctrl+Enter submit reject dialog when valid and connected", async () => {
     const p1 = stubProposal("prop_reject_hotkey", "open", {
       agent: "triage-scan",
     });
     const rejectedCalls: { id: string; why?: string }[] = [];
-    api.proposals = async () => ({ proposals: [p1] });
-    api.reject = async (id: string, why?: string) => {
-      rejectedCalls.push({ id, why });
-      return { rejected: true };
-    };
 
-    const r = renderProposals({
-      focusProposalId: "prop_reject_hotkey",
-      connected: true,
-    });
-    await waitFor(() =>
-      expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
-    );
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+        reject: async (id: string, why?: string) => {
+          rejectedCalls.push({ id, why });
+          return { rejected: true };
+        },
+      },
+      async () => {
+        const r = renderProposals({
+          focusProposalId: "prop_reject_hotkey",
+          connected: true,
+        });
+        await waitFor(() =>
+          expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
+        );
 
-    fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const reasonInput = await waitFor(
-      () => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
-    );
+        fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
+        const reasonInput = await waitFor(
+          () =>
+            r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
+        );
 
-    // Enter with metaKey (Cmd+Enter)
-    await act(async () => {
-      changeInput(reasonInput, "Not needed right now");
-    });
-    fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
+        // Enter with metaKey (Cmd+Enter)
+        await act(async () => {
+          changeInput(reasonInput, "Not needed right now");
+        });
+        fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
 
-    await waitFor(() =>
-      expect(rejectedCalls).toEqual([
-        { id: "prop_reject_hotkey", why: "Not needed right now" },
-      ]),
-    );
+        await waitFor(() =>
+          expect(rejectedCalls).toEqual([
+            { id: "prop_reject_hotkey", why: "Not needed right now" },
+          ]),
+        );
 
-    // Ctrl+Enter also works on reopened dialog
-    fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const reasonInput2 = await waitFor(
-      () => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
-    );
+        // Ctrl+Enter also works on reopened dialog
+        fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
+        const reasonInput2 = await waitFor(
+          () =>
+            r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
+        );
 
-    await act(async () => {
-      changeInput(reasonInput2, "Second rejection reason");
-    });
-    fireEvent.keyDown(reasonInput2, { key: "Enter", ctrlKey: true });
+        await act(async () => {
+          changeInput(reasonInput2, "Second rejection reason");
+        });
+        fireEvent.keyDown(reasonInput2, { key: "Enter", ctrlKey: true });
 
-    await waitFor(() =>
-      expect(rejectedCalls).toEqual([
-        { id: "prop_reject_hotkey", why: "Not needed right now" },
-        { id: "prop_reject_hotkey", why: "Second rejection reason" },
-      ]),
+        await waitFor(() =>
+          expect(rejectedCalls).toEqual([
+            { id: "prop_reject_hotkey", why: "Not needed right now" },
+            { id: "prop_reject_hotkey", why: "Second rejection reason" },
+          ]),
+        );
+      },
     );
   });
 
@@ -1432,54 +1430,64 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
       agent: "triage-scan",
     });
     const rejectedCalls: { id: string; why?: string }[] = [];
-    api.proposals = async () => ({ proposals: [p1] });
-    api.reject = async (id: string, why?: string) => {
-      rejectedCalls.push({ id, why });
-      return { rejected: true };
-    };
 
-    const r = renderProposals({
-      focusProposalId: "prop_reject_disconn",
-      connected: true,
-    });
-    await waitFor(() =>
-      expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+        reject: async (id: string, why?: string) => {
+          rejectedCalls.push({ id, why });
+          return { rejected: true };
+        },
+      },
+      async () => {
+        const r = renderProposals({
+          focusProposalId: "prop_reject_disconn",
+          connected: true,
+        });
+        await waitFor(() =>
+          expect(r.getByRole("button", { name: /^Reject/ })).toBeTruthy(),
+        );
+
+        fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
+        const reasonInput = await waitFor(
+          () =>
+            r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
+        );
+
+        // Empty / whitespace reason does not submit on Cmd+Enter
+        await act(async () => {
+          changeInput(reasonInput, "   ");
+        });
+        fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
+        expect(rejectedCalls).toEqual([]);
+
+        // Fill valid reason but disconnect
+        await act(async () => {
+          changeInput(reasonInput, "Valid reason");
+        });
+
+        // Rerender with connected={false}
+        r.rerender(
+          <Proposals
+            connected={false}
+            context={{ kind: "all" }}
+            onRunQueued={noop}
+            focusProposalId="prop_reject_disconn"
+            onSelectProposal={noop}
+            focusExpired={false}
+            onFocusExpiredConsumed={noop}
+            onJumpAgent={noop}
+            onJumpEvent={noop}
+          />,
+        );
+
+        fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
+        expect(rejectedCalls).toEqual([]);
+      },
     );
-
-    fireEvent.click(r.getByRole("button", { name: /^Reject/ }));
-    const reasonInput = await waitFor(
-      () => r.getByPlaceholderText(/Reason \(required/i) as HTMLInputElement,
-    );
-
-    // Empty / whitespace reason does not submit on Cmd+Enter
-    await act(async () => {
-      changeInput(reasonInput, "   ");
-    });
-    fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
-    expect(rejectedCalls).toEqual([]);
-
-    // Fill valid reason but disconnect
-    await act(async () => {
-      changeInput(reasonInput, "Valid reason");
-    });
-
-    // Rerender with connected={false}
-    r.rerender(
-      <Proposals
-        connected={false}
-        context={{ kind: "all" }}
-        onRunQueued={noop}
-        focusProposalId="prop_reject_disconn"
-        onSelectProposal={noop}
-        focusExpired={false}
-        onFocusExpiredConsumed={noop}
-        onJumpAgent={noop}
-        onJumpEvent={noop}
-      />,
-    );
-
-    fireEvent.keyDown(reasonInput, { key: "Enter", metaKey: true });
-    expect(rejectedCalls).toEqual([]);
   });
 
   test("Enter key submits single-proposal approve dialog when connected", async () => {
@@ -1488,28 +1496,39 @@ describe("Proposals single-proposal reject dialog hotkeys (WM-236)", () => {
       decision: "run",
     });
     const approvedCalls: string[] = [];
-    api.proposals = async () => ({ proposals: [p1] });
-    api.approve = async (id: string) => {
-      approvedCalls.push(id);
-      return { approved: true, runId: "run_approved_1" };
-    };
 
-    const r = renderProposals({
-      focusProposalId: "prop_approve_hotkey",
-      connected: true,
-    });
-    const approveBtn = await waitFor(() =>
-      r.getByRole("button", { name: /^Approve/ }),
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [p1] }),
+        status: async () => createStatusFixture(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+        approve: async (id: string) => {
+          approvedCalls.push(id);
+          return { approved: true, runId: "run_approved_1" };
+        },
+      },
+      async () => {
+        const r = renderProposals({
+          focusProposalId: "prop_approve_hotkey",
+          connected: true,
+        });
+        const approveBtn = await waitFor(() =>
+          r.getByRole("button", { name: /^Approve/ }),
+        );
+        expect(approveBtn.textContent).toContain("a");
+
+        // Open confirmation dialog
+        fireEvent.click(approveBtn);
+        await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+        // Press Enter to confirm approval
+        fireEvent.keyDown(document.body, { key: "Enter" });
+        await waitFor(() =>
+          expect(approvedCalls).toEqual(["prop_approve_hotkey"]),
+        );
+      },
     );
-    expect(approveBtn.textContent).toContain("a");
-
-    // Open confirmation dialog
-    fireEvent.click(approveBtn);
-    await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
-
-    // Press Enter to confirm approval
-    fireEvent.keyDown(document.body, { key: "Enter" });
-    await waitFor(() => expect(approvedCalls).toEqual(["prop_approve_hotkey"]));
   });
 });
 

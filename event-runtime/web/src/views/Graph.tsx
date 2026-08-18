@@ -416,7 +416,6 @@ export function Graph({
       minZoom: zoom,
       maxZoom: zoom,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMatch, flowReady]);
 
   const emptyCopy = registry.isPending

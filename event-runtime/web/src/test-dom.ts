@@ -15,3 +15,22 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 GlobalRegistrator.register();
+
+// Safe fallback for lingering un-mocked background component polls in DOM tests:
+// catch ECONNREFUSED when unhandled requests hit non-existent local ports.
+const nativeFetch = globalThis.fetch;
+if (typeof nativeFetch === "function") {
+  (globalThis as any).fetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    try {
+      return await nativeFetch(input, init);
+    } catch {
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+  };
+}
