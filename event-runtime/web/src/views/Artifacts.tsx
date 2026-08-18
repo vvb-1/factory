@@ -135,9 +135,31 @@ function artifactShaFromHash(hash = window.location.hash): string | null {
   }
 }
 
+function artifactInspectorHash(sha256: string): string {
+  return `#/artifacts/${encodeURIComponent(sha256)}`;
+}
+
 function openArtifactInspector(sha256: string) {
   if (!ARTIFACT_HASH.test(sha256)) return;
-  window.location.hash = `#/artifacts/${encodeURIComponent(sha256)}`;
+  window.location.hash = artifactInspectorHash(sha256);
+}
+
+/** The name a downloaded copy gets: short SHA plus the first kind as extension. */
+function downloadName(sha256: string, kinds: string[]): string {
+  return `${sha256.slice(0, 12)}${kinds[0] ? `.${kinds[0]}` : ""}`;
+}
+
+/**
+ * Bytes the text viewer cannot honestly draw. `Response.text()` decodes as
+ * UTF-8, so a zip or an image comes back as NULs and U+FFFD replacements —
+ * rendering that as numbered lines is noise the operator has to scroll past.
+ */
+function looksBinary(raw: string): boolean {
+  const sample = raw.slice(0, 4096);
+  if (!sample) return false;
+  if (sample.includes("\u0000")) return true;
+  const undecodable = sample.replace(/[^\uFFFD]/g, "").length;
+  return undecodable / sample.length > 0.02;
 }
 
 function containsArtifactHash(
@@ -331,8 +353,12 @@ export function Artifacts({
     [linkedEvents, producerRunIds],
   );
   const selectedKinds = selected ? kindsOf(selected) : [];
+  const selectedName = selectedSha
+    ? downloadName(selectedSha, selectedKinds)
+    : "";
+  const binary = contentQ.data !== undefined && looksBinary(contentQ.data);
   const preview =
-    contentQ.data === undefined
+    contentQ.data === undefined || binary
       ? null
       : formattedContent(contentQ.data, selectedKinds);
   const parsedArtifact = useMemo(
@@ -550,13 +576,27 @@ export function Artifacts({
           <tbody>
             {ordered.map((artifact) => {
               const artifactKinds = kindsOf(artifact);
-              const name = `${artifact.sha256.slice(0, 12)}${artifactKinds[0] ? `.${artifactKinds[0]}` : ""}`;
+              const name = downloadName(artifact.sha256, artifactKinds);
               return (
                 <tr
                   key={artifact.sha256}
-                  onClick={() => selectArtifact(artifact.sha256)}
+                  tabIndex={0}
+                  // A modified click on the SHA link is the browser's to handle
+                  // (new tab, copy link) — selecting here would navigate this
+                  // tab out from under it.
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey)
+                      return;
+                    selectArtifact(artifact.sha256);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    if (event.target !== event.currentTarget) return;
+                    event.preventDefault();
+                    selectArtifact(artifact.sha256);
+                  }}
                   aria-selected={artifact.sha256 === selectedSha}
-                  className={`cursor-pointer hover:bg-(--surface-1) ${artifact.sha256 === selectedSha ? "row-selected" : ""}`}
+                  className={`cursor-pointer hover:bg-(--surface-1) focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-(--accent) ${artifact.sha256 === selectedSha ? "row-selected" : ""}`}
                 >
                   <td
                     className="mono max-w-48 border-b border-(--border) px-3 py-1.5 whitespace-nowrap"
@@ -564,13 +604,21 @@ export function Artifacts({
                   >
                     <span className="inline-flex items-center gap-2">
                       <a
+                        href={artifactInspectorHash(artifact.sha256)}
+                        className="text-(--accent) hover:underline"
+                        title={`Inspect ${artifact.sha256}`}
+                      >
+                        {artifact.sha256.slice(0, 12)}
+                      </a>
+                      <a
                         href={artifactUrl(artifact.sha256, name)}
                         download={name}
                         onClick={(event) => event.stopPropagation()}
-                        className="text-(--accent) hover:underline"
-                        aria-label={`Download artifact ${artifact.sha256}`}
+                        aria-label={`Download ${name}`}
+                        title={`Download ${name}`}
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-(--border) text-(--text-faint) hover:border-(--border-strong) hover:text-(--accent)"
                       >
-                        {artifact.sha256.slice(0, 12)}
+                        <span aria-hidden="true">↓</span>
                       </a>
                       {!artifact.referenced && (
                         <span
@@ -694,11 +742,8 @@ export function Artifacts({
           actions={
             <>
               <a
-                href={artifactUrl(
-                  selectedSha,
-                  `${selectedSha.slice(0, 12)}${selectedKinds[0] ? `.${selectedKinds[0]}` : ""}`,
-                )}
-                download
+                href={artifactUrl(selectedSha, selectedName)}
+                download={selectedName}
                 className="inline-flex rounded-md border border-(--border-strong) px-2.5 py-1.5 text-[12px] font-medium hover:bg-(--surface-2)"
               >
                 Download
@@ -870,12 +915,14 @@ export function Artifacts({
                 <p className="mt-0.5 text-[11px] text-(--text-faint)">
                   {viewShown
                     ? `${producerAgent?.outputView?.title ?? "view"} · ${producerAgent?.ref}`
-                    : matchCount === null
-                      ? `${previewLines.length.toLocaleString()} lines`
-                      : `${matchCount.toLocaleString()} matching lines`}
+                    : binary
+                      ? "not text"
+                      : matchCount === null
+                        ? `${previewLines.length.toLocaleString()} lines`
+                        : `${matchCount.toLocaleString()} matching lines`}
                 </p>
               </div>
-              {!viewShown && (
+              {!viewShown && !binary && (
                 <FilterInput
                   value={contentSearch}
                   onChange={setContentSearch}
@@ -893,6 +940,36 @@ export function Artifacts({
               <div className="mt-3 text-[12px] text-(--hue-err)">
                 Could not load artifact content:{" "}
                 {(contentQ.error as Error).message}
+              </div>
+            )}
+            {binary && (
+              <div className="mt-3 rounded-md border border-(--border) bg-(--surface-0) p-4 text-[12px]">
+                <p className="text-(--text-dim)">
+                  These bytes cannot be previewed as text. Download the file to
+                  open it in a local viewer.
+                </p>
+                <dl className="mono mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11.5px]">
+                  <dt className="text-(--text-faint)">File</dt>
+                  <dd className="break-all">{selectedName}</dd>
+                  <dt className="text-(--text-faint)">Size</dt>
+                  <dd>
+                    {selected ? formatBytes(selected.sizeBytes) : "unknown"}
+                  </dd>
+                  <dt className="text-(--text-faint)">Kinds</dt>
+                  <dd>
+                    {selectedKinds.length
+                      ? selectedKinds.join(", ")
+                      : "unknown"}
+                  </dd>
+                </dl>
+                <a
+                  href={artifactUrl(selectedSha, selectedName)}
+                  download={selectedName}
+                  aria-label="Download file"
+                  className="mt-3 inline-flex rounded-md border border-transparent bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:opacity-90"
+                >
+                  Download file
+                </a>
               </div>
             )}
             {preview !== null && (

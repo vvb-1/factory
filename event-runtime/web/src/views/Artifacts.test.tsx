@@ -163,7 +163,7 @@ describe("Artifacts inventory (WM-207)", () => {
     }
     expect(view.queryByRole("columnheader", { name: "Orphan" })).toBeNull();
     const download = view.getByRole("link", {
-      name: `Download artifact ${"a".repeat(64)}`,
+      name: "Download aaaaaaaaaaaa.report",
     });
     expect(download.getAttribute("href")).toContain(
       `/api/artifacts/${"a".repeat(64)}`,
@@ -179,8 +179,8 @@ describe("Artifacts inventory (WM-207)", () => {
     const view = renderArtifacts();
     await waitFor(() => expect(view.getByText("aaaaaaaaaaaa")).toBeTruthy());
 
-    const downloads = view.getAllByRole("link", { name: /Download artifact/ });
-    expect(downloads.map((link) => link.textContent)).toEqual([
+    const shas = view.getAllByRole("link", { name: /^[0-9a-f]{12}$/ });
+    expect(shas.map((link) => link.textContent)).toEqual([
       "cccccccccccc",
       "bbbbbbbbbbbb",
       "aaaaaaaaaaaa",
@@ -294,6 +294,108 @@ describe("Artifacts inventory (WM-207)", () => {
     );
     fireEvent.click(runLink.getByRole("link", { name: "Open" }));
     expect(window.location.hash).toBe(`#/${`artifacts/${"b".repeat(64)}`}`);
+  });
+});
+
+describe("Artifact rows inspect on click, download on demand (WM-699)", () => {
+  const SHA_A = "a".repeat(64);
+
+  test("the SHA is a deep link into the inspector, not a download", async () => {
+    globalThis.fetch = mock(
+      async () => new Response("line one\nline two", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const view = renderArtifacts();
+    await waitFor(() => expect(view.getByText("aaaaaaaaaaaa")).toBeTruthy());
+
+    const sha = view.getByRole("link", { name: "aaaaaaaaaaaa" });
+    expect(sha.getAttribute("href")).toBe(`#/artifacts/${SHA_A}`);
+    expect(sha.hasAttribute("download")).toBe(false);
+
+    fireEvent.click(sha);
+    expect(window.location.hash).toBe(`#/artifacts/${SHA_A}`);
+    expect(
+      await view.findByRole("region", { name: "Artifact content" }),
+    ).toBeTruthy();
+  });
+
+  test("the row download control does not select the row", async () => {
+    const view = renderArtifacts();
+    await waitFor(() => expect(view.getByText("aaaaaaaaaaaa")).toBeTruthy());
+
+    const download = view.getByRole("link", {
+      name: "Download aaaaaaaaaaaa.report",
+    });
+    expect(download.getAttribute("download")).toBe("aaaaaaaaaaaa.report");
+    expect(download.getAttribute("href")).toContain(
+      `/api/artifacts/${SHA_A}?name=`,
+    );
+
+    fireEvent.click(download);
+    expect(window.location.hash).not.toContain(SHA_A);
+    expect(
+      view.queryByRole("region", { name: "Artifact metadata" }),
+    ).toBeNull();
+  });
+
+  test("rows take Tab focus and select on Enter and Space", async () => {
+    globalThis.fetch = mock(
+      async () => new Response("line one", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const view = renderArtifacts();
+    await waitFor(() => expect(view.getByText("aaaaaaaaaaaa")).toBeTruthy());
+
+    const row = view.getByText("1.0 KB").closest("tr");
+    expect(row?.getAttribute("tabindex")).toBe("0");
+
+    fireEvent.keyDown(row!, { key: "Enter" });
+    expect(window.location.hash).toBe(`#/artifacts/${SHA_A}`);
+    expect(
+      await view.findByRole("region", { name: "Artifact content" }),
+    ).toBeTruthy();
+
+    window.location.hash = "#/artifacts";
+    fireEvent.keyDown(view.getByText("512 B").closest("tr")!, { key: " " });
+    expect(window.location.hash).toBe(`#/artifacts/${"c".repeat(64)}`);
+  });
+
+  test("a modified click leaves the current view for the browser to handle", async () => {
+    const view = renderArtifacts();
+    await waitFor(() => expect(view.getByText("aaaaaaaaaaaa")).toBeTruthy());
+
+    fireEvent.click(view.getByText("1.0 KB").closest("tr")!, {
+      metaKey: true,
+    });
+    expect(window.location.hash).toBe("#/artifacts");
+    expect(
+      view.queryByRole("region", { name: "Artifact metadata" }),
+    ).toBeNull();
+  });
+
+  test("a binary artifact offers metadata and a download instead of a text preview", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response("PK\u0003\u0004\u0000\u0000\uFFFD\uFFFD\u0001\u0002", {
+          status: 200,
+        }),
+    ) as unknown as typeof fetch;
+    window.location.hash = `#/artifacts/${SHA_A}`;
+    const view = renderArtifacts();
+
+    expect(await view.findByText(/cannot be previewed/i)).toBeTruthy();
+    expect(view.queryByRole("region", { name: "Artifact content" })).toBeNull();
+    expect(
+      view.queryByRole("combobox", { name: "Search artifact content" }),
+    ).toBeNull();
+
+    const prominent = view.getByRole("link", { name: "Download file" });
+    expect(prominent.getAttribute("href")).toContain(
+      `/api/artifacts/${SHA_A}?name=aaaaaaaaaaaa.report`,
+    );
+    expect(prominent.getAttribute("download")).toBe("aaaaaaaaaaaa.report");
+    expect(
+      view.getByRole("region", { name: "Artifact metadata" }).textContent,
+    ).toContain("1.0 KB");
+    expect(view.getByRole("link", { name: "Download" })).toBeTruthy();
   });
 });
 
