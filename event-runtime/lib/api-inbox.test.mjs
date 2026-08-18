@@ -235,7 +235,8 @@ describe("human inbox API (WM-285)", () => {
       // The fresh request is pending, so a bare resolve is still refused.
       const resolved = await fetch(s.url(`/inbox/${id}/resolve`), {
         method: "POST",
-        body: "{}",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: "manual dismissal" }),
       });
       expect(resolved.status).toBe(409);
 
