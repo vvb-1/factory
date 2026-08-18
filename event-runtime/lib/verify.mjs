@@ -10,11 +10,13 @@
  * partial acceptances. These checks verify form, not truth (§9): semantic
  * evidence checking is slice 2.
  */
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { globToRegExp } from "../../orchestrator/owned-paths.mjs";
 import { canonicalJson, hashBytes, hashJson, sha256Hex } from "./canonical.mjs";
 import { validateDecisionRequest } from "./decision.mjs";
+import { reposRoot } from "./repos.mjs";
 import { validate } from "./schema.mjs";
 import { PathViolation, safeJoin } from "./workspace.mjs";
 
@@ -61,12 +63,266 @@ export const REFUSAL_REASONS = [
 ];
 
 export class ContractViolation extends Error {
-  constructor(violations, { reasonCode = "contract_violation" } = {}) {
+  constructor(
+    violations,
+    { reasonCode = "contract_violation", handoff = null } = {},
+  ) {
     super(`contract violation: ${violations.join("; ")}`);
     this.name = "ContractViolation";
     this.violations = violations;
     this.reasonCode = reasonCode;
+    // WM-718: when the handoff gate refuses, the worker-observed verification
+    // (commands, exit codes, output tails, diff, deviations) rides along so
+    // the worker can post it on the ticket and hold the PR.
+    if (handoff) this.handoff = handoff;
   }
+}
+
+/**
+ * Handoff verification (WM-718). The dispatch agent's `## Handoff` used to
+ * claim "Verification: pass" for commands it had not run on the final tree
+ * (3 of 10 PRs on 2026-08-18 failed CI on exactly the check the ticket named).
+ * The repo `verify:` gate below is deliberately a subset of CI (WM-528), so
+ * it let those through. This is the same check made honest: the WORKER runs
+ * the ticket's own Verification Command, the web build when the diff reaches
+ * `event-runtime/web/src/**`, and compares the diff with the ticket's Owned
+ * Paths — and authors the Verification line itself.
+ */
+export const HANDOFF_REASON_CODES = new Set([
+  "handoff_verification_failed",
+  "handoff_verification_unspecified",
+  "handoff_owned_paths_violation",
+]);
+export const HANDOFF_TAIL_LINES = 40;
+export const HANDOFF_WEB_SRC_PREFIX = "event-runtime/web/src/";
+export const HANDOFF_WEB_BUILD_DIR = "event-runtime/web";
+export const HANDOFF_WEB_BUILD_COMMAND = "bun run build";
+export const DEFAULT_OWNED_PATHS_CONFORMANCE = "advisory";
+export const HANDOFF_COMMENT_HEADING =
+  "## Handoff verification (worker-observed)";
+
+/** `dispatch.owned_paths_conformance` in config/policy.yaml: advisory (default) | strict. */
+export function policyOwnedPathsConformance(root = reposRoot()) {
+  const file = path.join(root, "config", "policy.yaml");
+  if (!existsSync(file)) return DEFAULT_OWNED_PATHS_CONFORMANCE;
+  try {
+    const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.dispatch
+      ?.owned_paths_conformance;
+    return value === "strict" ? "strict" : DEFAULT_OWNED_PATHS_CONFORMANCE;
+  } catch {
+    return DEFAULT_OWNED_PATHS_CONFORMANCE;
+  }
+}
+
+/** Last N non-empty lines of a command's output, ANSI stripped. */
+export function outputTail(output, lines = HANDOFF_TAIL_LINES) {
+  return (
+    String(output ?? "")
+      // eslint-disable-next-line no-control-regex -- \x1b is the ANSI escape byte being stripped, not a typo
+      .replace(/\x1b\[[0-9;]*m/g, "")
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim().length > 0)
+      .slice(-lines)
+      .join("\n")
+  );
+}
+
+/**
+ * Run one handoff command as ordinary code in the worktree, capturing the
+ * whole output to `logPath` and returning an observation the worker can quote.
+ */
+function runHandoffCommand({ command, cwd, logPath, timeoutMs }) {
+  const fd = openSync(logPath, "w");
+  let res;
+  try {
+    res = spawnSync("/bin/bash", ["-c", command], {
+      cwd,
+      stdio: ["ignore", fd, fd],
+      timeout: timeoutMs,
+    });
+  } finally {
+    closeSync(fd);
+  }
+  const output = readFileSync(logPath, "utf8");
+  const timedOut = res.error?.code === "ETIMEDOUT";
+  const exitCode = timedOut ? null : (res.status ?? (res.error ? 1 : 0));
+  return {
+    command,
+    cwd,
+    exitCode,
+    timedOut,
+    passed: !timedOut && exitCode === 0,
+    output,
+    tail: outputTail(output),
+    logPath,
+  };
+}
+
+/** Best-effort timeout for the pre-diff `git fetch origin <base>` (F4). */
+const FETCH_BASE_TIMEOUT_MS = 10_000;
+
+/**
+ * Files the PR carries: `merge-base(origin/<base>, HEAD)..HEAD` in the
+ * worktree. `null` files means the diff could not be computed (not a git
+ * checkout, unknown base) — reported, never silently treated as empty.
+ *
+ * `origin/<base>` in the worktree can be stale by the time the handoff gate
+ * runs — the worktree was materialized once, but develop keeps moving while
+ * the agent works. A quiet, best-effort `git fetch origin <base>` right
+ * before computing merge-base keeps the deviation diff honest against
+ * current develop; a fetch failure (offline, auth, timeout) never blocks the
+ * gate — it proceeds against the local ref and says so via `base_ref_stale`.
+ *
+ * `git` defaults to the real `execFileSync` runner and exists only so tests
+ * can inject a stub that records call order and fails the fetch on cue.
+ */
+export function changedFilesSince({
+  worktreePath,
+  base,
+  git = (args, { timeout = 60_000 } = {}) =>
+    execFileSync("git", args, {
+      cwd: worktreePath,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout,
+    }).trim(),
+}) {
+  let baseRefStale = false;
+  if (base) {
+    try {
+      git(["fetch", "--quiet", "origin", base], {
+        timeout: FETCH_BASE_TIMEOUT_MS,
+      });
+    } catch {
+      baseRefStale = true;
+    }
+  }
+  const staleField = baseRefStale ? { base_ref_stale: true } : {};
+  const candidates = base ? [`origin/${base}`, base] : [];
+  for (const ref of candidates) {
+    try {
+      const mergeBase = git(["merge-base", ref, "HEAD"]);
+      const out = git(["diff", "--name-only", `${mergeBase}..HEAD`]);
+      const files = out ? out.split("\n").filter(Boolean) : [];
+      return { ok: true, baseRef: ref, mergeBase, files, ...staleField };
+    } catch (err) {
+      const stderr = String(err?.stderr ?? err?.message ?? "")
+        .trim()
+        .split("\n")
+        .pop();
+      if (ref === candidates.at(-1))
+        return {
+          ok: false,
+          baseRef: ref,
+          files: null,
+          error: stderr,
+          ...staleField,
+        };
+    }
+  }
+  return {
+    ok: false,
+    baseRef: null,
+    files: null,
+    error: base ? "base unresolved" : "no base branch on the worktree record",
+    ...staleField,
+  };
+}
+
+/** Files outside every Owned Paths glob (`**` owns everything). */
+export function ownedPathsDeviations(files = [], ownedPaths = []) {
+  if (!Array.isArray(files)) return [];
+  const globs = (ownedPaths ?? []).map((g) => String(g).trim()).filter(Boolean);
+  if (globs.length === 0 || globs.includes("**")) return [];
+  const matchers = globs.map((g) => globToRegExp(g));
+  return files.filter((file) => !matchers.some((re) => re.test(file)));
+}
+
+function fenceBlock(text) {
+  const body = String(text ?? "").trim() || "(no output)";
+  return `\`\`\`\n${body}\n\`\`\``;
+}
+
+function commandLine(label, obs) {
+  if (!obs) return null;
+  const verdict = obs.timedOut
+    ? "TIMED OUT"
+    : obs.passed
+      ? "exit 0 (pass)"
+      : `exit ${obs.exitCode} (FAIL)`;
+  return `- ${label}: \`${obs.command}\` — ${verdict}`;
+}
+
+/**
+ * The worker-authored Handoff verification (WM-718). Composed only from what
+ * the worker observed; the agent's own claim, when present, is kept below it
+ * labelled agent-reported and never becomes the Verification line.
+ */
+export function composeHandoffVerification(handoff) {
+  const lines = [HANDOFF_COMMENT_HEADING];
+  const primary = handoff.verification;
+  if (primary) {
+    lines.push(commandLine("Verification", primary));
+    lines.push(fenceBlock(primary.tail));
+    if (primary.source === "repo_verify") {
+      lines.push(
+        "  (no `## Verification Command` parsed on the ticket — the repo `verify:` command stood in for it)",
+      );
+    }
+  } else if (handoff.reasonCode === "handoff_verification_unspecified") {
+    lines.push(
+      "- Verification: NONE — the ticket has no parseable `## Verification Command` and the repo declares no `verify:` command; the handoff is refused (fail-closed).",
+    );
+  }
+  if (handoff.repoVerify && handoff.repoVerify !== primary)
+    lines.push(commandLine("Repo verify", handoff.repoVerify));
+  if (handoff.webBuild) {
+    lines.push(
+      commandLine(
+        `Web build (${HANDOFF_WEB_SRC_PREFIX}** changed)`,
+        handoff.webBuild,
+      ),
+    );
+    if (!handoff.webBuild.passed) lines.push(fenceBlock(handoff.webBuild.tail));
+  } else if (handoff.diff?.ok) {
+    lines.push(`- Web build: skipped (no ${HANDOFF_WEB_SRC_PREFIX}** changes)`);
+  }
+  if (handoff.diff?.ok) {
+    const n = handoff.diff.files.length;
+    lines.push(
+      `- Files: ${n} changed vs ${handoff.diff.baseRef} (${handoff.diff.mergeBase.slice(0, 12)})`,
+    );
+    const deviations = handoff.ownedPathsDeviations ?? [];
+    if (!handoff.ownedPathsKnown) {
+      lines.push(
+        "- Owned Paths deviations: unknown (ticket Owned Paths did not parse)",
+      );
+    } else if (deviations.length === 0) {
+      lines.push("- Owned Paths deviations: none");
+    } else {
+      lines.push(
+        `- Owned Paths deviations (${handoff.ownedPathsConformance}): ${deviations.length} file(s) outside the ticket's Owned Paths`,
+      );
+      for (const file of deviations) lines.push(`  - \`${file}\``);
+    }
+  } else {
+    lines.push(
+      `- Files: diff unavailable (${handoff.diff?.error ?? "unknown"}); Owned Paths deviations: unknown`,
+    );
+  }
+  if (handoff.descriptionHash) {
+    lines.push(
+      `- ticket description hash at claim: \`${handoff.descriptionHash}\``,
+    );
+  }
+  const claim = handoff.agentReported;
+  if (claim && (claim.command || claim.output)) {
+    lines.push(
+      `- agent-reported: \`${claim.command ?? "(no command)"}\` — ${claim.passed === true ? "pass" : "not passed"}${claim.output ? `, ${String(claim.output).split("\n").filter(Boolean).slice(-1)[0]}` : ""}`,
+    );
+  }
+  return lines.filter((line) => line !== null).join("\n");
 }
 
 function normalizeFailureOutput(output) {
@@ -635,37 +891,167 @@ function verifyCompleted({
     }
   }
 
-  let repoVerifyPassed = false;
-  if (worktreeRecord?.verify && candidate.artifact?.outcome === "PR_OPEN") {
+  // Handoff gate (WM-718): a PR_OPEN result from a real worktree run is
+  // verified by the worker, not by the agent's say-so. A bare `{}` record is
+  // the worker's timeout preflight asking for form-only checks — no gate.
+  const handoffChecks = [];
+  let handoff = null;
+  const isHandoff =
+    candidate.artifact?.outcome === "PR_OPEN" &&
+    Boolean(
+      worktreeRecord &&
+      (worktreeRecord.path || worktreeRecord.verify || worktreeRecord.repo),
+    );
+  if (isHandoff) {
     const worktreePath =
       worktreeRecord.path && existsSync(worktreeRecord.path)
         ? worktreeRecord.path
         : path.join(workspaceDir, "repo");
-    const verifyLogPath = path.join(workspaceDir, ".verify.log");
-    const verifyLogFd = openSync(verifyLogPath, "w");
-    let vres;
-    try {
-      vres = spawnSync("/bin/bash", ["-c", worktreeRecord.verify], {
-        cwd: worktreePath,
-        stdio: ["ignore", verifyLogFd, verifyLogFd],
-        timeout: verifyTimeoutMs,
-      });
-    } finally {
-      closeSync(verifyLogFd);
-    }
-    const output = readFileSync(verifyLogPath, "utf8");
-    if (vres.error?.code === "ETIMEDOUT" || vres.status !== 0) {
-      const timedOut = vres.error?.code === "ETIMEDOUT";
-      const why = timedOut
+    const ticketCommand =
+      typeof worktreeRecord.handoff?.verificationCommand === "string" &&
+      worktreeRecord.handoff.verificationCommand.trim()
+        ? worktreeRecord.handoff.verificationCommand.trim()
+        : null;
+    const ownedPaths = Array.isArray(worktreeRecord.handoff?.ownedPaths)
+      ? worktreeRecord.handoff.ownedPaths
+      : [];
+    const ownedPathsKnown =
+      worktreeRecord.handoff?.ownedPathsParsed === true ||
+      (ownedPaths.length > 0 && !ownedPaths.includes("**"));
+    const conformance = policyOwnedPathsConformance();
+    const claim = candidate.artifact?.verification ?? null;
+    handoff = {
+      ticket: worktreeRecord.ticket ?? spec.input?.ticket ?? null,
+      repo: worktreeRecord.repo ?? spec.input?.repo ?? null,
+      github: worktreeRecord.github ?? null,
+      prNumber: candidate.artifact?.prNumber ?? null,
+      prUrl: candidate.artifact?.prUrl ?? null,
+      verification: null,
+      repoVerify: null,
+      webBuild: null,
+      diff: null,
+      ownedPaths,
+      ownedPathsKnown,
+      ownedPathsConformance: conformance,
+      ownedPathsDeviations: [],
+      descriptionHash: worktreeRecord.handoff?.descriptionHash ?? null,
+      agentReported: claim
+        ? {
+            command: claim.command ?? null,
+            passed: claim.passed === true,
+            output: claim.output ?? null,
+          }
+        : null,
+      reasonCode: null,
+    };
+    const refuse = (reasonCode, violation) => {
+      handoff.reasonCode = reasonCode;
+      throw new ContractViolation([violation], { reasonCode, handoff });
+    };
+    const failureWhy = (obs) =>
+      obs.timedOut
         ? `timed out after ${verifyTimeoutMs}ms`
-        : repoVerifyFailureExcerpt(output) || `exit ${vres.status}`;
-      const baselineStillRed =
-        !timedOut && matchesRedBaseline(worktreeRecord.baseline, output);
-      throw new ContractViolation([`repo_verify_failed: ${why}`], {
-        reasonCode: baselineStillRed ? "baseline_red" : "contract_violation",
-      });
+        : repoVerifyFailureExcerpt(obs.output) || `exit ${obs.exitCode}`;
+
+    // Fail-closed: something must stand behind the Verification line.
+    if (!worktreeRecord.verify && !ticketCommand) {
+      refuse(
+        "handoff_verification_unspecified",
+        "handoff_verification_unspecified: the ticket has no parseable `## Verification Command` and the repo declares no `verify:` command",
+      );
     }
-    repoVerifyPassed = true;
+
+    // 1. The repo's own verify command (the pre-WM-718 gate, kept as-is: it
+    //    is what the red-baseline logic is keyed on).
+    if (worktreeRecord.verify) {
+      const obs = runHandoffCommand({
+        command: worktreeRecord.verify,
+        cwd: worktreePath,
+        logPath: path.join(workspaceDir, ".verify.log"),
+        timeoutMs: verifyTimeoutMs,
+      });
+      obs.source = "repo_verify";
+      handoff.repoVerify = obs;
+      if (!obs.passed) {
+        const baselineStillRed =
+          !obs.timedOut &&
+          matchesRedBaseline(worktreeRecord.baseline, obs.output);
+        handoff.reasonCode = baselineStillRed
+          ? "baseline_red"
+          : "handoff_verification_failed";
+        throw new ContractViolation(
+          [`repo_verify_failed: ${failureWhy(obs)}`],
+          { reasonCode: handoff.reasonCode, handoff },
+        );
+      }
+      handoffChecks.push("repo_verify_passed");
+    }
+
+    // 2. The ticket's exact Verification Command on the final tree.
+    if (ticketCommand) {
+      const obs = runHandoffCommand({
+        command: ticketCommand,
+        cwd: worktreePath,
+        logPath: path.join(workspaceDir, ".verify.ticket.log"),
+        timeoutMs: verifyTimeoutMs,
+      });
+      obs.source = "ticket";
+      handoff.verification = obs;
+      if (!obs.passed) {
+        refuse(
+          "handoff_verification_failed",
+          `ticket_verify_failed: ${failureWhy(obs)}`,
+        );
+      }
+      handoffChecks.push("ticket_verify_passed");
+    } else {
+      handoff.verification = handoff.repoVerify;
+    }
+
+    // 3. What the PR actually carries.
+    handoff.diff = changedFilesSince({
+      worktreePath,
+      base: worktreeRecord.base ?? null,
+    });
+    const files = handoff.diff.files ?? [];
+
+    // 4. tsc + vite for anything under event-runtime/web/src/** — the check
+    //    #593 failed on, regardless of what the ticket's command covers.
+    if (
+      files.some((file) => file.startsWith(HANDOFF_WEB_SRC_PREFIX)) &&
+      existsSync(path.join(worktreePath, HANDOFF_WEB_BUILD_DIR, "package.json"))
+    ) {
+      const obs = runHandoffCommand({
+        command: HANDOFF_WEB_BUILD_COMMAND,
+        cwd: path.join(worktreePath, HANDOFF_WEB_BUILD_DIR),
+        logPath: path.join(workspaceDir, ".verify.web.log"),
+        timeoutMs: verifyTimeoutMs,
+      });
+      obs.command = `cd ${HANDOFF_WEB_BUILD_DIR} && ${HANDOFF_WEB_BUILD_COMMAND}`;
+      handoff.webBuild = obs;
+      if (!obs.passed) {
+        refuse(
+          "handoff_verification_failed",
+          `web_build_failed: ${failureWhy(obs)}`,
+        );
+      }
+      handoffChecks.push("web_build_passed");
+    }
+
+    // 5. Owned Paths conformance: listed always; refused under strict.
+    if (handoff.diff.ok && ownedPathsKnown) {
+      handoff.ownedPathsDeviations = ownedPathsDeviations(files, ownedPaths);
+      if (handoff.ownedPathsDeviations.length === 0) {
+        handoffChecks.push("owned_paths_conformant");
+      } else if (conformance === "strict") {
+        refuse(
+          "handoff_owned_paths_violation",
+          `owned_paths_violation: ${handoff.ownedPathsDeviations.length} file(s) outside the ticket's Owned Paths: ${handoff.ownedPathsDeviations.join(", ")}`,
+        );
+      } else {
+        handoffChecks.push("owned_paths_deviations_advisory");
+      }
+    }
   }
 
   // Runtime-injected artifacts (e.g. the adapter's transcript): best-effort —
@@ -728,7 +1114,7 @@ function verifyCompleted({
         ...(SEMANTIC_CHECKS[spec.outputContract]
           ? ["evidence_recomputed"]
           : []),
-        ...(repoVerifyPassed ? ["repo_verify_passed"] : []),
+        ...handoffChecks,
       ],
     },
     artifacts: collected,
@@ -741,5 +1127,10 @@ function verifyCompleted({
     journalHead,
     verificationStatus: "passed",
   };
-  return { kind: "completed", result, receipt };
+  return {
+    kind: "completed",
+    result,
+    receipt,
+    ...(handoff ? { handoff } : {}),
+  };
 }

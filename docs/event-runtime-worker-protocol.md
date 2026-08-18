@@ -345,6 +345,59 @@ Successful response (`200`):
 }
 ```
 
+### 7a. Handoff verification for dispatch runs (WM-718)
+
+A `dispatch@1` result whose artifact says `outcome: "PR_OPEN"` is a handoff:
+the agent claims the ticket is implemented, verified, and under review. The
+worker does not take that on trust. Before such a result is submitted as
+`completed`, the worker — ordinary code in `event-runtime/lib/verify.mjs`,
+outside the model process — runs in the delegated worktree, in this order:
+
+1. the repo's declared `verify:` command from `config/repos.yaml` (the
+   pre-existing §9 gate; a failure that matches the recorded red baseline is
+   still `baseline_red`, still blocks the ticket);
+2. the ticket's own `## Verification Command` (parsed at claim time from the
+   ticket description — a fenced block or a single line under that heading —
+   and persisted on the worktree record), exactly as written;
+3. `cd event-runtime/web && bun run build` (tsc + vite) when
+   `git diff --name-only merge-base(origin/<base>, HEAD)..HEAD` touches
+   `event-runtime/web/src/**`, regardless of what the ticket's command covers;
+4. Owned Paths conformance: the same diff against the ticket's parsed Owned
+   Paths. Files outside the set are listed as deviations; under
+   `dispatch.owned_paths_conformance: strict` (config/policy.yaml, default
+   `advisory`) they refuse the handoff.
+
+Each command runs with the repo-verify timeout (`FACTORY_REPO_VERIFY_TIMEOUT_MS`,
+default 600 s) and its full output lands in the workspace (`.verify.log`,
+`.verify.ticket.log`, `.verify.web.log`). Failure-shaped outcomes:
+
+| condition                                                  | reasonCode                         |
+| ---------------------------------------------------------- | ---------------------------------- |
+| any of the commands exits non-zero or times out            | `handoff_verification_failed`      |
+| no ticket command parses **and** the repo has no `verify:` | `handoff_verification_unspecified` |
+| deviations under `owned_paths_conformance: strict`         | `handoff_owned_paths_violation`    |
+
+These are agent errors (bounded by `maxAttempts`, never an environment retry).
+The run is FAILED with no accepted result — nothing downstream chains a review
+— and the journal reason carries the last lines of the failing output. Because
+the agent opens the PR itself and has already moved the ticket to In Review,
+the worker then applies the structural hold: the PR is converted to draft with
+a comment quoting the observed failure (`gh pr ready --undo`), and the ticket
+returns to **Todo + `ai:agent-ready`** (not Blocked — the harness caught the
+agent, the spec is fine).
+
+On pass and on failure alike the worker posts a **worker-authored**
+`## Handoff verification (worker-observed)` comment on the ticket: the
+command it ran, the exit code, the last 40 lines of output, the web-build
+result, the file count against `origin/<base>`, the Owned Paths deviations,
+and — when known — the ticket's description hash at claim time, so a reader
+can tell whether the ticket was amended after the agent claimed it.
+The agent's own `artifact.verification` claim is quoted below it labelled
+`agent-reported`; it never becomes the Verification line. On pass the accepted
+result's `verification.checks` gains `repo_verify_passed`,
+`ticket_verify_passed`, `web_build_passed`, and either `owned_paths_conformant`
+or `owned_paths_deviations_advisory`, as applicable.
+
 ## 8. Durable worker result buffer
 
 A successful adapter exit is not durable until its result can survive both a

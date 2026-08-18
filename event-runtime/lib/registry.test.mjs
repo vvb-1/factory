@@ -137,17 +137,15 @@ describe("registry", () => {
     // WM-469 intentionally adds the three declarative kernel-control fields
     // to the affected definitions while preserving their refs and pins
     // (digest regenerated on top of the #559 baseline).
-    // Regenerated after WM-610 prettier reformat of code and markdown files.
-    // Regenerated (WM-722): merge-scan/merge-fix adapter pi→claude; event-types.json is a registry input.
-    // Regenerated (WM-391): dispatch admits and documents bounded humanDecision authorisations.
     // Regenerated (WM-694): dispatch input admits a pinned per-ticket modelTier override.
+    // Regenerated (WM-718): mechanical handoff verification in dispatch prompt (re-pinned dispatch.json).
     // Regenerated 2026-08-18 (ops/triage-8h-clock): dropped work-scan@1 LOW_SUPPLY
     // and triage-apply@1 DETAIL_CHANGED chain edges to factory.triage.requested,
     // added the triage-factory 8h schedule. Operator decision 2026-08-18: stop
     // burning the pi/codex adapter's quota on ~30-minute chain-triggered triage
     // scans; triage now runs on a fixed 8h clock plus manual operator injection.
     const expected =
-      "sha256:1e6e9eb418c087aaf0bfcdc74b55c79a3a0a22bf84f81b7e1eab5fc4fb9a17f4";
+      "sha256:f56a7411ba3a3684c2b4cc9d382cc7508f6da33b29ca7668eccfbdc465fa39cb";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -164,8 +162,11 @@ describe("registry", () => {
     const def = registry.agents.get("dispatch@1");
     expect(def.pack).toBe("event-runtime");
     expect(Object.keys(def)).not.toContain("pack");
+    // WM-718 and WM-391 changed dispatch@1's prompt and input schema, so its
+    // pin — and therefore this defHash — legitimately moved, exactly as it did
+    // for WM-610. Still not a provenance break: `pack` stays non-enumerable.
     expect(computeDefHash(def)).toBe(
-      "sha256:614eccc3078f9d4d71eb6349d03e45020ff083f54546dbe15d9c1ce3d981d6f2",
+      "sha256:cf85bb4e0cc3ca02a05ad9f780beed32daf80e86500136d84d19643ef46ae4ed",
     );
   });
 

@@ -4,9 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { hashJson, sha256Hex } from "./canonical.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
+import { execFileSync } from "node:child_process";
 import {
   ContractViolation,
+  changedFilesSince,
+  composeHandoffVerification,
   normalizeFailureOutput,
+  outputTail,
+  ownedPathsDeviations,
+  policyOwnedPathsConformance,
   verifyResult,
 } from "./verify.mjs";
 
@@ -713,6 +719,10 @@ describe("worktree baseline verification (WM-334)", () => {
     }
   });
 
+  // WM-718: a post-agent repo verify failure at handoff is the handoff gate
+  // refusing (`handoff_verification_failed`), no longer a generic
+  // `contract_violation` — same FAILED path, but named so the ticket goes back
+  // to Todo + ai:agent-ready and the PR is held as draft.
   test("shared baseline output plus a new failure does not classify as baseline_red", () => {
     const dir = worktreeWorkspace(
       "printf 'entry chunk exceeds budget\\nnew failure in CI\\n' >&2; exit 9",
@@ -733,11 +743,12 @@ describe("worktree baseline verification (WM-334)", () => {
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.reasonCode).toBe("contract_violation");
+      expect(err.reasonCode).toBe("handoff_verification_failed");
+      expect(err.handoff.repoVerify.exitCode).toBe(9);
     }
   });
 
-  test("an unrelated post-agent failure remains an ordinary contract violation", () => {
+  test("an unrelated post-agent failure refuses the handoff (not baseline_red)", () => {
     const dir = worktreeWorkspace(
       "printf 'new test regression\\nerror: script \"build\" exited with code 1\\n' >&2; exit 9",
       {
@@ -758,7 +769,8 @@ describe("worktree baseline verification (WM-334)", () => {
       throw new Error("expected ContractViolation");
     } catch (err) {
       expect(err).toBeInstanceOf(ContractViolation);
-      expect(err.reasonCode).toBe("contract_violation");
+      expect(err.reasonCode).toBe("handoff_verification_failed");
+      expect(err.violations[0]).toStartWith("repo_verify_failed:");
     }
   });
 
@@ -920,5 +932,175 @@ describe("evidence retention (OPS-206)", () => {
     } catch (err) {
       expect(err.violations[0]).toStartWith("evidence_too_large:");
     }
+  });
+});
+
+describe("handoff verification helpers (WM-718)", () => {
+  test("outputTail keeps the last N non-empty lines, ANSI stripped", () => {
+    const out = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join(
+      "\n\n",
+    );
+    const tail = outputTail(`\u001b[31m${out}\u001b[0m\n`);
+    expect(tail.split("\n")).toHaveLength(40);
+    expect(tail.startsWith("line 11")).toBe(true);
+    expect(tail).not.toContain("\u001b");
+  });
+
+  test("ownedPathsDeviations: files outside every glob; ** or unknown owns everything", () => {
+    const files = ["src/a.mjs", "docs/x.md", "web/src/App.tsx", "Makefile"];
+    expect(ownedPathsDeviations(files, ["src/**", "web/src/*.tsx"])).toEqual([
+      "docs/x.md",
+      "Makefile",
+    ]);
+    expect(ownedPathsDeviations(files, ["**"])).toEqual([]);
+    expect(ownedPathsDeviations(files, [])).toEqual([]);
+    expect(ownedPathsDeviations(null, ["src/**"])).toEqual([]);
+  });
+
+  test("changedFilesSince diffs merge-base(origin/<base>)..HEAD and reports an unusable tree instead of guessing", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-diff-"));
+    const git = (...args) => execFileSync("git", args, { cwd: dir });
+    git("init", "-q", "-b", "develop");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(path.join(dir, "base.txt"), "base\n");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    git("update-ref", "refs/remotes/origin/develop", "HEAD");
+    git("checkout", "-qb", "feat/x");
+    mkdirSync(path.join(dir, "src"));
+    writeFileSync(path.join(dir, "src", "new.mjs"), "x\n");
+    writeFileSync(path.join(dir, "base.txt"), "changed\n");
+    git("add", "-A");
+    git("commit", "-qm", "work");
+    // Uncommitted noise is not part of the PR and is not counted.
+    writeFileSync(path.join(dir, "scratch.txt"), "wip\n");
+    const diff = changedFilesSince({ worktreePath: dir, base: "develop" });
+    expect(diff.ok).toBe(true);
+    expect(diff.baseRef).toBe("origin/develop");
+    expect(diff.files).toEqual(["base.txt", "src/new.mjs"]);
+
+    const notGit = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-nogit-"));
+    const none = changedFilesSince({ worktreePath: notGit, base: "develop" });
+    expect(none.ok).toBe(false);
+    expect(none.files).toBeNull();
+    expect(
+      changedFilesSince({ worktreePath: dir, base: null }).error,
+    ).toContain("no base branch");
+  });
+
+  test("changedFilesSince fetches origin/<base> before computing merge-base (WM-718 F4)", () => {
+    const calls = [];
+    const gitStub = (args) => {
+      calls.push(args);
+      if (args[0] === "fetch") return "";
+      if (args[0] === "merge-base") return "deadbeef";
+      if (args[0] === "diff") return "a.txt\nb.txt";
+      throw new Error(`unexpected git call: ${args.join(" ")}`);
+    };
+    const diff = changedFilesSince({
+      worktreePath: "/irrelevant",
+      base: "develop",
+      git: gitStub,
+    });
+    expect(diff.ok).toBe(true);
+    expect(diff.files).toEqual(["a.txt", "b.txt"]);
+    expect(diff.base_ref_stale).toBeUndefined();
+    // The fetch must precede the merge-base computation it is meant to keep
+    // honest — not race it, not follow it.
+    expect(calls[0]).toEqual(["fetch", "--quiet", "origin", "develop"]);
+    expect(calls[1][0]).toBe("merge-base");
+  });
+
+  test("changedFilesSince proceeds on the local ref and flags base_ref_stale when the fetch fails (WM-718 F4)", () => {
+    const calls = [];
+    const gitStub = (args) => {
+      calls.push(args);
+      if (args[0] === "fetch") throw new Error("network unreachable");
+      if (args[0] === "merge-base") return "deadbeef";
+      if (args[0] === "diff") return "a.txt";
+      throw new Error(`unexpected git call: ${args.join(" ")}`);
+    };
+    const diff = changedFilesSince({
+      worktreePath: "/irrelevant",
+      base: "develop",
+      git: gitStub,
+    });
+    expect(diff.ok).toBe(true);
+    expect(diff.base_ref_stale).toBe(true);
+    // Still computed against the local origin/develop ref — a fetch failure
+    // degrades, it never blocks the gate.
+    expect(diff.baseRef).toBe("origin/develop");
+    expect(calls[0][0]).toBe("fetch");
+    expect(calls[1]).toEqual(["merge-base", "origin/develop", "HEAD"]);
+  });
+
+  test("policyOwnedPathsConformance defaults to advisory and only 'strict' tightens", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-policy-"));
+    expect(policyOwnedPathsConformance(root)).toBe("advisory");
+    mkdirSync(path.join(root, "config"));
+    const file = path.join(root, "config", "policy.yaml");
+    writeFileSync(file, "dispatch:\n  owned_paths_conformance: strict\n");
+    expect(policyOwnedPathsConformance(root)).toBe("strict");
+    writeFileSync(file, "dispatch:\n  owned_paths_conformance: bogus\n");
+    expect(policyOwnedPathsConformance(root)).toBe("advisory");
+    writeFileSync(file, "dispatch: [not: valid\n");
+    expect(policyOwnedPathsConformance(root)).toBe("advisory");
+  });
+
+  test("composeHandoffVerification is built from observation; the agent's claim is only agent-reported", () => {
+    const body = composeHandoffVerification({
+      verification: {
+        source: "ticket",
+        command: "bun test",
+        exitCode: 1,
+        timedOut: false,
+        passed: false,
+        tail: "(fail) x > y\n1 fail",
+      },
+      repoVerify: {
+        source: "repo_verify",
+        command: "bun test event-runtime/lib",
+        exitCode: 0,
+        passed: true,
+        tail: "ok",
+      },
+      webBuild: null,
+      diff: {
+        ok: true,
+        baseRef: "origin/develop",
+        mergeBase: "abcdef1234567890",
+        files: ["a.mjs", "docs/b.md"],
+      },
+      ownedPathsKnown: true,
+      ownedPathsConformance: "advisory",
+      ownedPathsDeviations: ["docs/b.md"],
+      descriptionHash: "sha256:deadbeef",
+      agentReported: { command: "bun test", passed: true, output: "all green" },
+    });
+    const lines = body.split("\n");
+    expect(lines[0]).toBe("## Handoff verification (worker-observed)");
+    expect(lines[1]).toBe("- Verification: `bun test` — exit 1 (FAIL)");
+    expect(body).toContain("(fail) x > y");
+    expect(body).toContain(
+      "- Repo verify: `bun test event-runtime/lib` — exit 0 (pass)",
+    );
+    expect(body).toContain("- Web build: skipped");
+    expect(body).toContain(
+      "- Files: 2 changed vs origin/develop (abcdef123456)",
+    );
+    expect(body).toContain(
+      "- Owned Paths deviations (advisory): 1 file(s) outside the ticket's Owned Paths",
+    );
+    expect(body).toContain("  - `docs/b.md`");
+    // WM-718 F5: descriptionHash is otherwise dead — this is the one place
+    // it is read, so a reader can tell if the ticket was amended after claim.
+    expect(body).toContain(
+      "- ticket description hash at claim: `sha256:deadbeef`",
+    );
+    expect(body).toContain("- agent-reported: `bun test` — pass, all green");
+    expect(lines.filter((l) => l.startsWith("- Verification:"))).toHaveLength(
+      1,
+    );
   });
 });

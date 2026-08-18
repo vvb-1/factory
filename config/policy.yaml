@@ -37,6 +37,18 @@ dispatch:
   # Merging stays serialized (max_concurrent_merges below), which is where real
   # conflicts are caught.
   owned_paths_collision: advisory
+  # Owned Paths conformance at handoff (WM-718). After a dispatch agent
+  # returns PR_OPEN the worker diffs merge-base(origin/<base>)..HEAD in the
+  # worktree against the ticket's parsed Owned Paths.
+  #   advisory — files outside the set are listed in the worker-authored
+  #              Handoff verification comment as "Owned Paths deviations" and
+  #              the run completes. Default when this key is absent.
+  #   strict   — any deviation refuses the handoff (handoff_owned_paths_violation):
+  #              the PR is held as draft and the ticket returns to Todo + agent-ready.
+  # Advisory to start: surfacing the deviation is what was missing (#558's
+  # 800-line reflow, #593's four out-of-scope files went unnoticed); refusing
+  # is one key flip once the listing proves accurate.
+  owned_paths_conformance: advisory
 
 concurrency:
   # Per-repo admission ceiling. Actual execution remains bounded by worker

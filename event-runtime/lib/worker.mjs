@@ -44,7 +44,17 @@ import {
 import { closeOpenProposalForRun } from "./proposals.mjs";
 import { computeDefHash, createReceipt, verifyDefHash } from "./receipts.mjs";
 import { traceRecorder } from "./trace.mjs";
-import { ContractViolation, verifyResult } from "./verify.mjs";
+import {
+  ContractViolation,
+  composeHandoffVerification,
+  HANDOFF_REASON_CODES,
+  verifyResult,
+} from "./verify.mjs";
+import {
+  effectiveOwnedPaths,
+  parseOwnedPaths,
+  parseVerificationCommand,
+} from "../../orchestrator/owned-paths.mjs";
 import { HEARTBEAT_STALE_MS, satisfiesPlacement } from "./workers.mjs";
 import {
   assertSandboxWorkspaceSupported,
@@ -424,7 +434,10 @@ const ENVIRONMENT_FAILURES = new Set([
   "linear_unconfigured",
   "registry_stale",
 ]);
-const AGENT_FAILURES = new Set(["contract_violation"]);
+// The handoff gate (WM-718) catching the agent's own red is an agent error:
+// bounded by maxAttempts like any contract violation, never an environment
+// retry and never fatal — the ticket is already back in Todo + agent-ready.
+const AGENT_FAILURES = new Set(["contract_violation", ...HANDOFF_REASON_CODES]);
 const FATAL_FAILURES = new Set([
   "cli_not_found",
   "sandbox_unsupported",
@@ -1294,6 +1307,148 @@ function defaultUnclaimTicket({ repo, ticket, why, log = null, fetchTicket }) {
   }
 }
 
+function defaultFetchTicket(ticket) {
+  return JSON.parse(runLinearCli(["get", ticket, "--json"]));
+}
+
+/**
+ * The claim-time facts the handoff gate (WM-718) needs and the run spec does
+ * not carry: the ticket's Verification Command and Owned Paths. Read once
+ * here, persisted on the worktree record, so verify.mjs runs exactly what the
+ * agent was told to run. A read failure degrades to "no ticket command" (the
+ * repo `verify:` still gates) rather than killing a run before it started.
+ */
+function ticketHandoffContext(ticket, fetchTicket) {
+  try {
+    const cur = fetchTicket(ticket);
+    const description = cur?.description ?? "";
+    const parsed = parseOwnedPaths(description);
+    return {
+      verificationCommand: parseVerificationCommand(description),
+      ownedPaths: effectiveOwnedPaths(description),
+      ownedPathsParsed: parsed.length > 0,
+      descriptionHash: hashJson(description),
+    };
+  } catch (err) {
+    return {
+      verificationCommand: null,
+      ownedPaths: ["**"],
+      ownedPathsParsed: false,
+      unavailable: String(err?.message ?? err),
+    };
+  }
+}
+
+function defaultCommentTicket({ ticket, body }) {
+  runLinearCli(["comment", ticket, body]);
+  return true;
+}
+
+/**
+ * The handoff gate refused (WM-718): the agent already moved the ticket to
+ * In Review, so the ordinary un-claim (which only acts on In Progress) is a
+ * no-op here. Return it to Todo + ai:agent-ready — the harness caught the
+ * agent, the spec is fine — and leave the worker-observed verification as
+ * the record of why. Never Blocked.
+ *
+ * `runCli` defaults to the real `runLinearCli` and exists only so tests can
+ * inject a stub that fails the first call without touching Linear.
+ */
+export function defaultReturnHandoffTicket({
+  ticket,
+  body,
+  fetchTicket,
+  runCli = runLinearCli,
+}) {
+  try {
+    const cur =
+      typeof fetchTicket === "function"
+        ? fetchTicket(ticket)
+        : defaultFetchTicket(ticket);
+    const state = cur?.state?.name;
+    if (!cur || !["In Progress", "In Review"].includes(state)) return false;
+    const args = [
+      "state",
+      ticket,
+      "Todo",
+      "--unassign",
+      "--add",
+      "ai:agent-ready",
+      "--remove",
+      "ai:in-progress",
+      "--remove",
+      "ai:needs-review",
+    ];
+    let agentReadyRestored = true;
+    let labelWarning = null;
+    try {
+      runCli(args);
+    } catch {
+      // `--add ai:agent-ready` can fail independently of the state move
+      // (e.g. the Owned Paths closure check re-running on `--add`). Retry as
+      // two separate calls — state+unassign+removes first, then the label
+      // add on its own — so a labels-endpoint failure never silently strands
+      // the ticket Todo/unassigned WITHOUT the label that makes it
+      // dispatchable again.
+      runCli(
+        args.filter((a, i) => !(a === "--add" || args[i - 1] === "--add")),
+      );
+      try {
+        runCli(["labels", ticket, "--add", "ai:agent-ready"]);
+      } catch (err) {
+        agentReadyRestored = false;
+        labelWarning = String(err?.stderr ?? err?.message ?? err)
+          .trim()
+          .split("\n")
+          .pop();
+        // This must never be silent: the ticket is now Todo/unassigned
+        // without the label that makes it dispatchable, and nothing else
+        // will notice.
+        console.error(
+          `[worker] ai:agent-ready NOT restored on ${ticket} after handoff return: ${labelWarning}`,
+        );
+      }
+    }
+    const finalBody = agentReadyRestored
+      ? body
+      : [
+          body,
+          `**ai:agent-ready NOT restored** — the label add failed after the ticket returned to Todo (${labelWarning ?? "unknown error"}). This ticket will not redispatch until the label is added manually.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+    if (finalBody) runCli(["comment", ticket, finalBody]);
+    return { ok: true, agentReadyRestored, warning: labelWarning };
+  } catch {
+    return false;
+  }
+}
+
+/** Convert an already-opened PR to draft and say why, so nobody merges a red handoff. */
+function defaultHoldPullRequest({ github, prNumber, body }) {
+  if (!github || !Number.isInteger(prNumber)) return false;
+  const gh = (args) =>
+    execFileSync("gh", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: workerSubprocessTimeoutMs(),
+    });
+  let held = false;
+  try {
+    gh(["pr", "ready", "--undo", String(prNumber), "--repo", github]);
+    held = true;
+  } catch {
+    /* already a draft, or gh unavailable — the comment still lands */
+  }
+  try {
+    gh(["pr", "comment", String(prNumber), "--repo", github, "--body", body]);
+    held = true;
+  } catch {
+    /* intentionally ignored */
+  }
+  return held;
+}
+
 const BASELINE_COMMENT_MARKER = "wm:baseline:red:";
 
 function baselineFailureSignature({ why, log = null, baseline = null }) {
@@ -1463,6 +1618,11 @@ export async function executeClaimed(
       countLeases: () => 0,
       claimTicket: () => ({ ok: true }),
       unclaimTicket: () => true,
+      // The stub never reaches Linear or GitHub — including the WM-718
+      // handoff comment, PR hold, and ticket return.
+      commentTicket: () => true,
+      returnHandoffTicket: () => true,
+      holdPullRequest: () => false,
     };
   }
   const linearConfigured =
@@ -1491,6 +1651,18 @@ export async function executeClaimed(
         ...args,
         fetchTicket: dispatchOpts?.fetchTicket,
       }));
+  const fetchTicketFn = dispatchOpts?.fetchTicket ?? defaultFetchTicket;
+  const commentTicketFn = dispatchOpts?.commentTicket ?? defaultCommentTicket;
+  const returnHandoffTicketFn =
+    dispatchOpts?.returnHandoffTicket ??
+    ((args) =>
+      defaultReturnHandoffTicket({
+        ...args,
+        fetchTicket: dispatchOpts?.fetchTicket,
+      }));
+  const holdPullRequestFn =
+    dispatchOpts?.holdPullRequest ?? defaultHoldPullRequest;
+  let handoffContext = null;
 
   const nowFn = typeof now === "function" ? now : () => now ?? Date.now();
 
@@ -1928,6 +2100,7 @@ export async function executeClaimed(
         }
 
         ticketClaimed = true;
+        handoffContext = ticketHandoffContext(ticketId, fetchTicketFn);
         writeWorkerLease({
           repo: repoName,
           ticket: ticketId,
@@ -1969,7 +2142,12 @@ export async function executeClaimed(
     assertSandboxWorkspaceSupported(workspaceDir, def);
     checkoutPath = created.checkout?.path ?? null;
     checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
-    worktreeRecord = created.worktree ?? null;
+    worktreeRecord = created.worktree
+      ? {
+          ...created.worktree,
+          ...(handoffContext ? { handoff: handoffContext } : {}),
+        }
+      : null;
     db.query(
       `UPDATE attempts SET workspace_path = ? WHERE run_id = ? AND attempt = ?`,
     ).run(workspaceDir, runId, attempt);
@@ -2303,12 +2481,54 @@ export async function executeClaimed(
     } catch (err) {
       if (!(err instanceof ContractViolation)) throw err;
       const reasonCode =
-        err.reasonCode === "baseline_red"
-          ? "baseline_red"
+        err.reasonCode === "baseline_red" ||
+        HANDOFF_REASON_CODES.has(err.reasonCode)
+          ? err.reasonCode
           : "contract_violation";
-      const failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
+      let failureReason = `${reasonCode}: ${err.violations.join(", ")}`;
+      const handoff = err.handoff ?? null;
+      const handoffBody = handoff
+        ? `${composeHandoffVerification(handoff)}\n\n**Result:** run ${runId} FAILED \`${reasonCode}\` — ${err.violations.join("; ")}`
+        : null;
+      // WM-718: the PR is the agent's, already opened; the structural hold is
+      // to draft it and quote the observed failure where the reviewer looks.
+      if (
+        HANDOFF_REASON_CODES.has(reasonCode) &&
+        handoff?.prNumber &&
+        mayMutateClaimedTicket()
+      ) {
+        try {
+          holdPullRequestFn({
+            repo: repoName,
+            github: handoff.github,
+            prNumber: handoff.prNumber,
+            prUrl: handoff.prUrl,
+            body: `${handoffBody}\n\nConverted to draft by the factory worker: the handoff did not verify.`,
+          });
+        } catch {
+          /* intentionally ignored */
+        }
+      }
       if (mayMutateClaimedTicket()) {
-        if (reasonCode === "baseline_red") {
+        if (HANDOFF_REASON_CODES.has(reasonCode)) {
+          try {
+            const returned = returnHandoffTicketFn({
+              repo: repoName,
+              ticket: ticketId,
+              why: failureReason,
+              body: `${handoffBody}\n\nClaim released back to Todo + ai:agent-ready.`,
+              handoff,
+            });
+            // Surface a failed label restore in the journal/returned summary
+            // too — the comment posted on the ticket is not the only place a
+            // human (or the next dispatch pass) looks.
+            if (returned && returned.agentReadyRestored === false) {
+              failureReason = `${failureReason} (ai:agent-ready NOT restored: ${returned.warning ?? "unknown error"})`;
+            }
+          } catch {
+            /* intentionally ignored */
+          }
+        } else if (reasonCode === "baseline_red") {
           try {
             blockTicketFn({
               repo: repoName,
@@ -2385,7 +2605,14 @@ export async function executeClaimed(
       });
       cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
-      return { runId, attempt, terminalState: "FAILED", reasonCode };
+      return {
+        runId,
+        attempt,
+        terminalState: "FAILED",
+        reasonCode,
+        detail: failureReason,
+        ...(handoff ? { handoff } : {}),
+      };
     }
 
     if (verified.kind === "refused") {
@@ -2504,6 +2731,23 @@ export async function executeClaimed(
       };
     }
 
+    // WM-718: the Handoff's Verification line is worker-authored. Post what
+    // was observed on the ticket; the agent's claim rides below it labelled
+    // agent-reported. Best effort — a comment failure never fails a verified
+    // run.
+    if (verified.handoff && mayMutateClaimedTicket()) {
+      try {
+        commentTicketFn({
+          repo: repoName,
+          ticket: ticketId,
+          body: composeHandoffVerification(verified.handoff),
+          handoff: verified.handoff,
+        });
+      } catch {
+        /* intentionally ignored */
+      }
+    }
+
     // Copy verified artifact files into the durable content-addressed store
     // (§7) BEFORE the workspace dies and before the row referencing them
     // commits. Orphans from a failed commit are harmless; dead links are not.
@@ -2609,6 +2853,7 @@ export async function executeClaimed(
       terminalState: "COMPLETED",
       reasonCode: "ok",
       receipt: published.receipt,
+      ...(verified.handoff ? { handoff: verified.handoff } : {}),
     };
   } catch (err) {
     if (mayMutateClaimedTicket()) {

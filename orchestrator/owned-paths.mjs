@@ -102,6 +102,80 @@ export function effectiveOwnedPaths(description = "") {
   return own.length ? own : ["**"];
 }
 
+/**
+ * Extract the ticket's Verification Command (WM-718) from a Linear issue
+ * description: the section headed `Verification Command` (or `Verification`,
+ * levels 2-4), read as either a fenced ``` block, a single line wrapped in
+ * backticks, or — failing both — the first bare non-prose line. Multi-line
+ * fenced blocks are joined with ` && ` (comment lines dropped, backslash
+ * continuations rejoined) so "all of these must pass" is what actually runs.
+ * Returns null when the section is missing or holds nothing runnable; the
+ * worker's handoff gate then falls back to the repo's `verify:` command and,
+ * absent both, refuses the handoff (fail-closed).
+ */
+export function parseVerificationCommand(description = "") {
+  const section = String(description ?? "")
+    .split(/^#{2,4}\s+/m)
+    .find((s) => {
+      const heading = s.split("\n")[0];
+      return /^Verification(\s+Command)?\s*:?\s*$/i.test(heading.trim());
+    });
+  if (!section) return null;
+
+  const body = section.split("\n").slice(1);
+  const fenced = [];
+  let inFence = false;
+  let sawFence = false;
+  for (const raw of body) {
+    if (/^\s*```/.test(raw)) {
+      if (inFence) break;
+      inFence = true;
+      sawFence = true;
+      continue;
+    }
+    if (inFence) fenced.push(raw);
+  }
+  if (sawFence) return joinCommandLines(fenced);
+
+  for (const raw of body) {
+    const line = raw.trim();
+    if (!line) continue;
+    const ticked = /^`([^`]+)`\.?$/.exec(line);
+    if (ticked) return normalizeCommandLine(ticked[1]);
+    // A bare line: accept only when it does not read as prose.
+    if (/[.!?]$/.test(line) && !/\)$/.test(line)) return null;
+    return normalizeCommandLine(line) || null;
+  }
+  return null;
+}
+
+function normalizeCommandLine(line) {
+  return String(line ?? "")
+    .trim()
+    .replace(/^\$\s+/, "")
+    .trim();
+}
+
+function joinCommandLines(lines) {
+  const commands = [];
+  let pending = "";
+  for (const raw of lines) {
+    let line = raw.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+    if (!pending && /^\s*#/.test(line)) continue;
+    line = pending ? `${pending} ${line.trim()}` : normalizeCommandLine(line);
+    if (line.endsWith("\\")) {
+      pending = line.slice(0, -1).trimEnd();
+      continue;
+    }
+    pending = "";
+    if (line) commands.push(line);
+  }
+  if (pending) commands.push(pending);
+  if (commands.length === 0) return null;
+  return commands.length === 1 ? commands[0] : commands.join(" && ");
+}
+
 /** Escape regex metacharacters that are not glob syntax. */
 function escapeLiteral(s) {
   return s.replace(/[.+^${}()|[\]\\]/g, "\\$&");
