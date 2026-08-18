@@ -193,7 +193,8 @@ if [[ -z "${_WORKTREE_DAEMONS_LOADED:-}" ]]; then
   # Helper to restart a specific daemon
   restart_daemon() { # <worktree> <daemon_name: serve|worker|web>
     local wt="$1" daemon="$2"
-    local rdir hdir api_port="" web_port=""
+    local rdir hdir api_port="" web_port="" adapter_override=""
+    local ADAPTER_ARGS=()
     rdir="$(run_dir "$wt")"
     hdir="$(event_home "$wt")"
 
@@ -204,6 +205,13 @@ if [[ -z "${_WORKTREE_DAEMONS_LOADED:-}" ]]; then
     [[ -n "$api_port" ]] || api_port="$HERE_API_PORT"
     [[ -n "$web_port" ]] || web_port="$HERE_WEB_PORT"
 
+    if [[ "$daemon" == "worker" || "$daemon" == "serve" ]]; then
+      adapter_override="$(resolve_adapter_override "$wt" "$api_port")"
+      if [[ -n "$adapter_override" ]]; then
+        ADAPTER_ARGS=(--adapter-override "$adapter_override")
+      fi
+    fi
+
     local timestamp
     timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
@@ -212,14 +220,14 @@ if [[ -z "${_WORKTREE_DAEMONS_LOADED:-}" ]]; then
         printf '%s [supervisor] restarting dead worker\n' "$timestamp" >> "$rdir/worker.log"
         spawn_daemon "$rdir/worker.pid" "$rdir/worker.log" "$wt" \
           env FACTORY_EVENT_HOME="$hdir" FACTORY_EVENT_PORT="$api_port" \
-          bun event-runtime/cli.mjs work
+          bun event-runtime/cli.mjs work ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"}
         info "restarted worker (new pid $(cat "$rdir/worker.pid" 2>/dev/null || true))"
         ;;
       serve)
         printf '%s [supervisor] restarting dead serve daemon\n' "$timestamp" >> "$rdir/serve.log"
         spawn_daemon "$rdir/serve.pid" "$rdir/serve.log" "$wt" \
           env FACTORY_EVENT_HOME="$hdir" FACTORY_EVENT_PORT="$api_port" \
-          bun event-runtime/cli.mjs serve
+          bun event-runtime/cli.mjs serve ${ADAPTER_ARGS[@]+"${ADAPTER_ARGS[@]}"}
         info "restarted serve daemon (new pid $(cat "$rdir/serve.pid" 2>/dev/null || true))"
         ;;
       web)

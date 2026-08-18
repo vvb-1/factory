@@ -236,6 +236,96 @@ test("rotate_log_file and rotate_daemon_logs rotate oversized logs", () => {
   }
 });
 
+test("restart_daemon preserves the fake adapter reported by a live serve", () => {
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "restart-worker-adapter-test-"),
+  );
+  const runDir = path.join(testDir, ".factory", "run");
+  const spawnedArgs = path.join(testDir, "spawned.args");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    const result = sh(`
+      write_ports "${testDir}" 7654 7655
+      health_json() { printf '%s' '{"env":{"home":"${testDir}/.factory/event-runtime","adapter":"fake"}}'; }
+      spawn_daemon() {
+        local pidfile="$1"
+        shift 3
+        printf '%s\\n' "$@" > "${spawnedArgs}"
+        printf '12345\\n' > "$pidfile"
+      }
+      restart_daemon "${testDir}" worker
+      cat "${spawnedArgs}"
+    `);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "bun\nevent-runtime/cli.mjs\nwork\n--adapter-override\nfake\n",
+    );
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("restart_daemon defaults a dead serve restart to the fake adapter", () => {
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "restart-serve-adapter-test-"),
+  );
+  const runDir = path.join(testDir, ".factory", "run");
+  const spawnedArgs = path.join(testDir, "spawned.args");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    const result = sh(`
+      write_ports "${testDir}" 7656 7657
+      health_json() { true; }
+      spawn_daemon() {
+        local pidfile="$1"
+        shift 3
+        printf '%s\\n' "$@" > "${spawnedArgs}"
+        printf '12345\\n' > "$pidfile"
+      }
+      restart_daemon "${testDir}" serve
+      cat "${spawnedArgs}"
+    `);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "bun\nevent-runtime/cli.mjs\nserve\n--adapter-override\nfake\n",
+    );
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
+test("restart_daemon preserves an explicitly configured live adapter mode", () => {
+  const testDir = mkdtempSync(
+    path.join(tmpdir(), "restart-live-adapter-test-"),
+  );
+  const runDir = path.join(testDir, ".factory", "run");
+  const spawnedArgs = path.join(testDir, "spawned.args");
+  mkdirSync(runDir, { recursive: true });
+
+  try {
+    const result = sh(`
+      write_ports "${testDir}" 7658 7659
+      write_adapter_override "${testDir}" ""
+      health_json() { true; }
+      spawn_daemon() {
+        local pidfile="$1"
+        shift 3
+        printf '%s\\n' "$@" > "${spawnedArgs}"
+        printf '12345\\n' > "$pidfile"
+      }
+      restart_daemon "${testDir}" serve
+      cat "${spawnedArgs}"
+    `);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("bun\nevent-runtime/cli.mjs\nserve\n");
+    expect(result.stdout).not.toContain("--adapter-override");
+  } finally {
+    rmSync(testDir, { recursive: true, force: true });
+  }
+});
+
 test("supervise_tick restarts dead daemon and logs restart line", () => {
   const testDir = mkdtempSync(path.join(tmpdir(), "supervise-restart-test-"));
   const runDir = path.join(testDir, ".factory", "run");

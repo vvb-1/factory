@@ -243,6 +243,46 @@ write_ports() { # <worktree> <api> <web>
   printf 'api=%s\nweb=%s\n' "$2" "$3" >"$(run_dir "$1")/ports"
 }
 
+# Persist the adapter override separately from daemon pidfiles so a supervisor
+# can safely reconstruct a dead serve command. An empty value explicitly means
+# live adapters; a missing file is different and defaults to fake below.
+write_adapter_override() { # <worktree> <adapter-or-empty>
+  mkdir -p "$(run_dir "$1")"
+  printf 'adapter=%s\n' "$2" >"$(run_dir "$1")/adapter"
+}
+
+read_adapter_override() { # <worktree> → prints adapter, including empty for live
+  local f line
+  f="$(run_dir "$1")/adapter"
+  [[ -f "$f" ]] || return 1
+  IFS= read -r line <"$f" || true
+  [[ "$line" == adapter=* ]] || return 1
+  printf '%s' "${line#adapter=}"
+}
+
+# Prefer the running control API because it is the effective configuration,
+# and refresh the persistent state while it is available. If serve is already
+# dead, use the last recorded configuration. Legacy worktrees have no adapter
+# file, so fail closed to the harmless fake adapter.
+resolve_adapter_override() { # <worktree> <api_port>
+  local wt="$1" api_port="$2" hjson="" reported_home="" adapter=""
+  hjson="$(health_json "$api_port")"
+  if [[ -n "$hjson" ]]; then
+    reported_home="$(health_field "$hjson" home)"
+    if [[ "$reported_home" == "$(event_home "$wt")" ]]; then
+      adapter="$(health_field "$hjson" adapter)"
+      write_adapter_override "$wt" "$adapter"
+      printf '%s' "$adapter"
+      return 0
+    fi
+  fi
+  if adapter="$(read_adapter_override "$wt")"; then
+    printf '%s' "$adapter"
+  else
+    printf 'fake'
+  fi
+}
+
 # Port selection and reservation are separate from TCP bind: dependency
 # installation and the web build can take long enough for a second worktree to
 # observe the selected pair as still free. A short global allocator lock makes
@@ -777,4 +817,3 @@ locked_bun_install() { # <dir>
 }
 
 source "$(dirname "${BASH_SOURCE[0]}")/worktree-daemons.sh"
-
