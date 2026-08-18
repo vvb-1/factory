@@ -41,6 +41,14 @@ export const TRIGGER_GAP = 8;
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+interface OpenHoverCard {
+  owner: object;
+  close: () => void;
+}
+
+/** The card primitive is a singleton layer, even across separate React roots. */
+let openHoverCard: OpenHoverCard | null = null;
+
 /** Never squeeze the panel below this; scroll it instead. */
 export const MIN_PANEL_HEIGHT = 120;
 
@@ -168,6 +176,7 @@ export function HoverCard({
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ownerRef = useRef<object>({});
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const focusPanelRef = useRef(false);
   const suppressFocusOpenRef = useRef(false);
@@ -200,12 +209,6 @@ export function HoverCard({
     );
   }, [width, estimatedHeight]);
 
-  const openNow = useCallback(() => {
-    clearTimer();
-    reposition();
-    setOpen(true);
-  }, [clearTimer, reposition]);
-
   /**
    * Touches state only, so it is safe to hand to a caller's render prop. The
    * pending open timer is cancelled by the effect below rather than here: a
@@ -216,9 +219,22 @@ export function HoverCard({
     setDismissals((n) => n + 1);
   }, []);
 
+  const openNow = useCallback(() => {
+    clearTimer();
+    if (openHoverCard?.owner !== ownerRef.current) openHoverCard?.close();
+    openHoverCard = { owner: ownerRef.current, close };
+    reposition();
+    setOpen(true);
+  }, [clearTimer, close, reposition]);
+
   useEffect(() => {
     if (dismissals > 0) clearTimer();
   }, [dismissals, clearTimer]);
+
+  useEffect(() => {
+    if (!open && openHoverCard?.owner === ownerRef.current)
+      openHoverCard = null;
+  }, [open]);
 
   const scheduleOpen = useCallback(() => {
     clearTimer();
@@ -244,11 +260,11 @@ export function HoverCard({
           (active != null && panelRef.current?.contains(active)) ||
           (active != null && wrapperRef.current?.contains(active));
         if (inside) return;
-        setOpen(false);
+        close();
       },
       Math.max(0, closeDelayMs),
     );
-  }, [clearTimer, closeDelayMs]);
+  }, [clearTimer, close, closeDelayMs]);
 
   /**
    * Hand focus back to the trigger without reopening: the focus event this
@@ -265,7 +281,13 @@ export function HoverCard({
     });
   }, []);
 
-  useEffect(() => clearTimer, [clearTimer]);
+  useEffect(
+    () => () => {
+      clearTimer();
+      if (openHoverCard?.owner === ownerRef.current) openHoverCard = null;
+    },
+    [clearTimer],
+  );
 
   /**
    * Escape anywhere closes the card. When focus is inside it, the operator
