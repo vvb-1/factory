@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { FACTORY_ROOT } from "./config.mjs";
+import { DEFAULT_MAX_IN_FLIGHT } from "./planner.mjs";
 
 export class RepoError extends Error {
   constructor(message) {
@@ -126,6 +127,9 @@ function normalizeOwnedPathsPolicy(raw = {}, repoName, file) {
  *                        deployBranch: string|null, team: string|null, project: string|null,
  *                        reportOnly: boolean, maxInFlight: number|null, smokeDeadlineSeconds: number|null,
  *                        mergeCi: {workflow: string, requiredChecks: string[]}|null,
+ *                        escalatePaths: string[]|null, smokeWorkflow: string|null, smokeUrl: string|null,
+ *                        deployment: {url: string|null, branch: string|null, revisionField: string|null}|null,
+ *                        security: {pythonVersion: string|null}|null,
  *                        worktreeRoot: string|null, worktreeUp: string|null, worktreeDown: string|null,
  *                        worktreeWarm: string|null, verify: string|null,
  *                        ownedPathsPolicy: { direct: Array<{source: string, requires: string[]}>, pinManifests: string[] }}>
@@ -192,6 +196,46 @@ export function loadRepos({ root = reposRoot() } = {}) {
       }
       mergeCi = { workflow, requiredChecks: [...requiredChecks] };
     }
+    let escalatePaths = null;
+    if (entry.escalate_paths !== undefined && entry.escalate_paths !== null) {
+      if (
+        !Array.isArray(entry.escalate_paths) ||
+        !entry.escalate_paths.every(
+          (glob) => typeof glob === "string" && glob.trim().length > 0,
+        )
+      ) {
+        throw new RepoError(
+          `${file}: repo ${entry.name} escalate_paths must be an array of non-empty path globs`,
+        );
+      }
+      escalatePaths = [...entry.escalate_paths];
+    }
+    let deployment = null;
+    if (entry.deployment !== undefined && entry.deployment !== null) {
+      if (
+        typeof entry.deployment !== "object" ||
+        Array.isArray(entry.deployment)
+      ) {
+        throw new RepoError(
+          `${file}: repo ${entry.name} deployment must be an object`,
+        );
+      }
+      deployment = {
+        url: entry.deployment.url ?? null,
+        branch: entry.deployment.branch ?? null,
+        revisionField: entry.deployment.revision_field ?? null,
+      };
+    }
+    let security = null;
+    if (entry.security !== undefined && entry.security !== null) {
+      if (typeof entry.security !== "object" || Array.isArray(entry.security)) {
+        throw new RepoError(
+          `${file}: repo ${entry.name} security must be an object`,
+        );
+      }
+      // Deliberate allow-list: never pass through credential-shaped additions.
+      security = { pythonVersion: entry.security.python_version ?? null };
+    }
     repos.set(entry.name, {
       name: entry.name,
       path: expandHome(entry.path),
@@ -208,7 +252,12 @@ export function loadRepos({ root = reposRoot() } = {}) {
       // inventing a number here would state a limit this file never set.
       maxInFlight,
       smokeDeadlineSeconds,
+      smokeWorkflow: entry.smoke_workflow ?? null,
+      smokeUrl: entry.smoke_url ?? null,
+      deployment,
+      security,
       mergeCi,
+      escalatePaths,
       worktreeRoot: entry.worktree_root
         ? expandHome(entry.worktree_root)
         : null,
@@ -231,7 +280,7 @@ export function loadRepos({ root = reposRoot() } = {}) {
  * repos.yaml entry, in file order.
  *
  * An explicit allow-list, not the parsed entry: repos.yaml also carries
- * `escalate_paths`, `security`, and whatever the next policy field turns out to
+ * credential-bearing settings and whatever the next policy field turns out to
  * be, and a passthrough would publish each new key the moment someone adds it.
  * Nothing here reads `.env` or any credential — these are paths, branches, and
  * commands the repo already documents.
@@ -251,8 +300,18 @@ export function reposView(repos) {
     deployBranch: repo.deployBranch,
     reportOnly: repo.reportOnly,
     maxInFlight: repo.maxInFlight,
+    effective: {
+      maxInFlight: repo.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT,
+      maxInFlightSource: repo.maxInFlight === null ? "default" : "repo",
+    },
     smokeDeadlineSeconds: repo.smokeDeadlineSeconds,
+    smokeWorkflow: repo.smokeWorkflow,
+    smokeUrl: repo.smokeUrl,
+    deployment: repo.deployment,
+    security: repo.security,
     mergeCi: repo.mergeCi,
+    escalatePaths: repo.escalatePaths,
+    ownedPathsPolicy: repo.ownedPathsPolicy,
     worktreeRoot: repo.worktreeRoot,
     hasWorktreeUp: repo.worktreeUp !== null,
     hasWorktreeDown: repo.worktreeDown !== null,

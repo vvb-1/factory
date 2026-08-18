@@ -15,7 +15,7 @@ import type {
   OutboxRow,
   JanitorResult,
   Proposal,
-  RepoItem,
+  RepoItem as BaseRepoItem,
   RunDetail,
   RunListItem,
   StatusView,
@@ -59,6 +59,29 @@ export interface ConfigView {
     scheduleCount: number;
   };
   sections: ConfigSection[];
+}
+
+/** Deliberately allow-listed repository settings returned by GET /repos. */
+export interface RepoItem extends BaseRepoItem {
+  effective?: {
+    maxInFlight: number;
+    maxInFlightSource: "repo" | "default";
+  };
+  smokeDeadlineSeconds?: number | null;
+  smokeWorkflow?: string | null;
+  smokeUrl?: string | null;
+  deployment?: {
+    url: string | null;
+    branch: string | null;
+    revisionField: string | null;
+  } | null;
+  security?: { pythonVersion: string | null } | null;
+  mergeCi?: { workflow: string; requiredChecks: string[] } | null;
+  escalatePaths?: string[] | null;
+  ownedPathsPolicy?: {
+    direct: { source: string; requires: string[] }[];
+    pinManifests: string[];
+  };
 }
 
 type CachedResponse = { etag: string; body: unknown };

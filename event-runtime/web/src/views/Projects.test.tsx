@@ -3,7 +3,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { Projects } from "./Projects";
 import { renderWithClient, restoreApi, withApi } from "../test-render";
-import type { JanitorResult, RepoItem } from "../types";
+import type { JanitorResult } from "../types";
+import type { RepoItem } from "../api";
 import { CONTEXT_STORAGE_KEY } from "../context";
 import { goPrefix } from "../goSequence";
 
@@ -28,6 +29,15 @@ function repo(overrides: Partial<RepoItem> = {}): RepoItem {
     deployBranch: "master",
     reportOnly: false,
     maxInFlight: null,
+    effective: { maxInFlight: 3, maxInFlightSource: "default" },
+    smokeDeadlineSeconds: null,
+    smokeWorkflow: null,
+    smokeUrl: null,
+    deployment: null,
+    security: null,
+    mergeCi: null,
+    escalatePaths: [],
+    ownedPathsPolicy: { direct: [], pinManifests: [] },
     worktreeRoot: "/tmp/worktrees/factory",
     hasWorktreeUp: true,
     hasWorktreeDown: true,
@@ -36,6 +46,98 @@ function repo(overrides: Partial<RepoItem> = {}): RepoItem {
     ...overrides,
   };
 }
+
+describe("Projects repository policy configuration (WM-703)", () => {
+  test("groups configured values by what they govern and identifies their source", async () => {
+    await withApi(
+      {
+        repos: async () => ({
+          repos: [
+            repo({
+              effective: { maxInFlight: 20, maxInFlightSource: "repo" },
+              mergeCi: {
+                workflow: "CI",
+                requiredChecks: ["Shadow runner fleet available", "Verify"],
+              },
+              escalatePaths: [
+                "src/auth/email-and-pass/**",
+                "app/migrations/**",
+              ],
+              ownedPathsPolicy: {
+                direct: [
+                  {
+                    source: "shared/**",
+                    requires: ["dist/**", "plugins/core/**"],
+                  },
+                ],
+                pinManifests: ["event-runtime/agents/*.json"],
+              },
+              deployBranch: "master",
+              smokeWorkflow: "smoke-prod.yml",
+              smokeUrl: "https://example.com/healthz",
+              smokeDeadlineSeconds: 600,
+              deployment: {
+                url: "https://example.com",
+                branch: "master",
+                revisionField: "revision",
+              },
+              security: { pythonVersion: "3.12" },
+            }),
+          ],
+        }),
+      },
+      async () => {
+        const r = renderProjects("factory");
+        await r.findByText("Dispatch");
+
+        for (const title of [
+          "Dispatch",
+          "Merge gate",
+          "Owned paths policy",
+          "Deploy & smoke",
+          "Security",
+        ]) {
+          expect(r.getByText(title)).toBeTruthy();
+        }
+        expect(r.getAllByText("config/repos.yaml").length).toBe(5);
+        expect(r.getByText("repo value")).toBeTruthy();
+        expect(r.getByText("Shadow runner fleet available")).toBeTruthy();
+        expect(r.getByText("src/auth/email-and-pass/**")).toBeTruthy();
+        expect(r.getByText("shared/**")).toBeTruthy();
+        expect(r.getByText("event-runtime/agents/*.json")).toBeTruthy();
+        expect(r.getByText("smoke-prod.yml")).toBeTruthy();
+        expect(r.getByText("3.12")).toBeTruthy();
+      },
+    );
+  });
+
+  test("warns when escalate_paths is absent", async () => {
+    await withApi(
+      { repos: async () => ({ repos: [repo({ escalatePaths: null })] }) },
+      async () => {
+        const r = renderProjects("factory");
+        expect(
+          await r.findByText(
+            "escalate_paths not declared — every PR escalates",
+          ),
+        ).toBeTruthy();
+      },
+    );
+  });
+
+  test("distinguishes an explicitly empty escalate_paths list", async () => {
+    await withApi(
+      { repos: async () => ({ repos: [repo({ escalatePaths: [] })] }) },
+      async () => {
+        const r = renderProjects("factory");
+        expect(await r.findByText("explicitly none")).toBeTruthy();
+        expect(
+          r.queryByText("escalate_paths not declared — every PR escalates"),
+        ).toBeNull();
+      },
+    );
+  });
+});
 
 function janitor(overrides: Partial<JanitorResult> = {}): JanitorResult {
   return {
@@ -705,7 +807,10 @@ describe("Projects mobile layout (WM-169)", () => {
       const pane = r.container.querySelector("aside");
       expect(pane?.className).toContain("w-full");
       expect(pane?.className).toContain("max-w-full");
-      expect(pane?.className).toContain("sm:w-[540px]");
+      expect(pane?.className).toContain("lg:w-[540px]");
+      expect(r.getByTestId("projects-list-pane").className).toContain(
+        "hidden lg:flex",
+      );
     });
   });
 });

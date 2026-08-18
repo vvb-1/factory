@@ -1292,13 +1292,20 @@ worktrees a repo owns.
   team, and GitHub slug. `j`/`k` move, `c` copies the repo name,
   `#/projects/:name` is shareable per §10.8, and the empty state names the
   file that is empty (`config/repos.yaml`) rather than saying "no results".
-- **Detail panel.** **Configuration** — path (click to copy), GitHub link,
-  base and deploy branch, execution mode spelled out ("Autonomous
-  Dispatchable" / "Report Only (Watched)"), max in flight, worktree root, and
-  the verify command verbatim, since a paraphrased verify command is worse
-  than none. **Worktree Automation Scripts** renders `up`/`down`/`warm` as
-  three present-or-absent tiles: the shape of a repo's automation is
-  something you check before dispatching to it, not after.
+- **Detail panel.** Repository settings are grouped by what they govern, and
+  every group names `config/repos.yaml` as its source. **Dispatch** shows the
+  dispatchable/report-only mode, effective max in flight and whether it came
+  from the repo or the planner default, base branch, worktree root and script
+  capabilities, and the verify command verbatim. **Merge gate** shows the
+  `merge_ci` workflow and required checks plus every `escalate_paths` glob;
+  missing `escalate_paths` warns that every PR escalates, while an explicit
+  empty list says so. **Owned paths policy** shows direct source/required-path
+  rules and pin manifests, or the default. **Deploy & smoke** shows deploy
+  branch, the allow-listed deployment URL/branch/revision field, smoke
+  workflow/URL/deadline. **Security** currently allow-lists only
+  `python_version`, or states that defaults apply. Long path/check lists are
+  untruncated monospace chips inside their own scrolling containers, and all
+  other absent values use the shared empty-value placeholder.
 - **Janitor, Dry before Apply (OPS-362).** `POST /repos/:name/janitor` — §2's
   one mutation exception, specified in §7 — is wired as two buttons in an
   order the UI enforces rather than suggests: **Run Dry Janitor** first, and

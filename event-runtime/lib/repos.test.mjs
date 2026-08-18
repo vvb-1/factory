@@ -45,6 +45,14 @@ const YAML = `repos:
     worktree_root: ~/Develop/.worktrees/full
     max_in_flight: 20
     verify: npm run typecheck
+    smoke_workflow: smoke-prod.yml
+    smoke_url: https://full.example.com/healthz
+    smoke_deadline_seconds: 420
+    deployment:
+      url: https://full.example.com
+      branch: master
+      revision_field: revision
+      webhook_secret: never-publish-deployment-secret
     owned_paths_policy:
       direct:
         - source: shared/**
@@ -60,6 +68,7 @@ const YAML = `repos:
         - Verify
     security:
       python_version: "3.12"
+      api_token: never-publish-security-token
     escalate_paths:
       - src/auth/**
 
@@ -84,11 +93,20 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       deployBranch: "master",
       reportOnly: false,
       maxInFlight: 20,
-      smokeDeadlineSeconds: null,
+      smokeDeadlineSeconds: 420,
+      smokeWorkflow: "smoke-prod.yml",
+      smokeUrl: "https://full.example.com/healthz",
+      deployment: {
+        url: "https://full.example.com",
+        branch: "master",
+        revisionField: "revision",
+      },
+      security: { pythonVersion: "3.12" },
       mergeCi: {
         workflow: "CI",
         requiredChecks: ["Shadow runner fleet available", "Verify"],
       },
+      escalatePaths: ["src/auth/**"],
       worktreeRoot: path.join(home, "Develop/.worktrees/full"),
       worktreeUp: "bin/worktree-up.sh",
       worktreeDown: "bin/worktree-down.sh",
@@ -116,7 +134,12 @@ describe("loadRepos reads the registry fields the operator surfaces need (OPS-29
       // fabricated one here would read as a limit repos.yaml never set.
       maxInFlight: null,
       smokeDeadlineSeconds: null,
+      smokeWorkflow: null,
+      smokeUrl: null,
+      deployment: null,
+      security: null,
       mergeCi: null,
+      escalatePaths: null,
       worktreeRoot: null,
       worktreeDown: null,
       verify: null,
@@ -340,11 +363,14 @@ describe("reposView is what the control API serves", () => {
     expect(rows[0]).not.toHaveProperty("worktreeDown");
   });
 
-  test("the projection is an allow-list, so policy keys cannot leak by being added", () => {
+  test("the projection is an allow-list containing only deliberately published config", () => {
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([
         "base",
         "deployBranch",
+        "deployment",
+        "effective",
+        "escalatePaths",
         "github",
         "hasWorktreeDown",
         "hasWorktreeUp",
@@ -352,10 +378,14 @@ describe("reposView is what the control API serves", () => {
         "maxInFlight",
         "mergeCi",
         "name",
+        "ownedPathsPolicy",
         "path",
         "project",
         "reportOnly",
+        "security",
         "smokeDeadlineSeconds",
+        "smokeUrl",
+        "smokeWorkflow",
         "team",
         "verify",
         "worktreeRoot",
@@ -363,8 +393,45 @@ describe("reposView is what the control API serves", () => {
     }
     const serialized = JSON.stringify(rows);
     expect(serialized).not.toContain("escalate_paths");
-    expect(serialized).not.toContain("src/auth");
     expect(serialized).not.toContain("python_version");
+    expect(serialized).not.toContain("never-publish-deployment-secret");
+    expect(serialized).not.toContain("never-publish-security-token");
+  });
+
+  test("policy fields preserve escalate_paths null versus empty and allow-list security", () => {
+    expect(rows[0]).toMatchObject({
+      escalatePaths: ["src/auth/**"],
+      ownedPathsPolicy: {
+        direct: [
+          { source: "shared/**", requires: ["dist/**", "plugins/core/**"] },
+        ],
+        pinManifests: ["event-runtime/agents/*.json"],
+      },
+      security: { pythonVersion: "3.12" },
+    });
+    expect(rows[1]).toMatchObject({ escalatePaths: null, security: null });
+
+    const explicit = reposView(
+      loadRepos({
+        root: factoryRoot(`repos:
+  - name: none
+    path: /tmp/none
+    escalate_paths: []
+`),
+      }),
+    );
+    expect(explicit[0].escalatePaths).toEqual([]);
+  });
+
+  test("effective max in flight identifies repo values and the planner default", () => {
+    expect(rows[0].effective).toEqual({
+      maxInFlight: 20,
+      maxInFlightSource: "repo",
+    });
+    expect(rows[1].effective).toEqual({
+      maxInFlight: 3,
+      maxInFlightSource: "default",
+    });
   });
 
   test("the dispatch/report-only distinction survives the wire", () => {

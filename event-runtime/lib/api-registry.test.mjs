@@ -97,10 +97,23 @@ describe("agent and repository registry surfacing (OPS-212)", () => {
         deployBranch: "master",
         reportOnly: false,
         maxInFlight: 20,
+        effective: {
+          maxInFlight: 20,
+          maxInFlightSource: "repo",
+        },
         smokeDeadlineSeconds: null,
+        smokeWorkflow: null,
+        smokeUrl: null,
+        deployment: null,
+        security: null,
         mergeCi: {
           workflow: "CI",
           requiredChecks: ["Shadow runner fleet available", "Verify"],
+        },
+        escalatePaths: ["src/auth/**"],
+        ownedPathsPolicy: {
+          direct: [],
+          pinManifests: [],
         },
         worktreeRoot: path.join(
           process.env.HOME ?? "",
@@ -114,11 +127,16 @@ describe("agent and repository registry surfacing (OPS-212)", () => {
       expect(rows[1]).toMatchObject({
         reportOnly: true,
         maxInFlight: null,
+        effective: {
+          maxInFlight: 3,
+          maxInFlightSource: "default",
+        },
         mergeCi: null,
+        escalatePaths: null,
         hasWorktreeDown: false,
       });
-      // Merge-policy paths are config, not registry: the wire never carries them.
-      expect(JSON.stringify(rows)).not.toContain("src/auth");
+      // Wire names are deliberate camelCase projections, never raw YAML keys.
+      expect(JSON.stringify(rows)).not.toContain("escalate_paths");
     } finally {
       close();
       server.close();
