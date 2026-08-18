@@ -22,6 +22,7 @@ import type {
   RunDetail,
   RunListItem,
   StatusView,
+  TicketSummary,
   TraceView,
   Worker,
 } from "./types";
@@ -227,6 +228,19 @@ export function fetchArtifacts(filters?: {
   );
 }
 
+export function fetchTickets(
+  filters: { since?: string | number; limit?: number; repo?: string } = {},
+) {
+  return call<{ tickets: TicketSummary[] }>(
+    "GET",
+    withQuery("/tickets", {
+      since: filters.since != null ? String(filters.since) : undefined,
+      limit: filters.limit != null ? String(filters.limit) : undefined,
+      repo: filters.repo || undefined,
+    }),
+  );
+}
+
 export const api = {
   health: () =>
     call<{ ok: boolean; policyVersion: string; env: EnvIdentity }>(
@@ -372,6 +386,9 @@ export const api = {
       `/schedules/${encodeURIComponent(loop)}/run`,
       prNumbers === undefined ? {} : { prNumbers },
     ),
+  // Recent ticket summaries across factory runs (GET /tickets).
+  tickets: (since?: string | number, limit = 50, repo?: string) =>
+    fetchTickets({ since, limit, repo }),
 };
 
 // Decision detail endpoints are named exports so the generic API test harness

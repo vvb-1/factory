@@ -380,6 +380,7 @@ export function createDefaultApiMocks(): Record<ApiKey, any> {
     workers: mock(async (): Promise<{ workers: Worker[] }> => ({
       workers: [],
     })),
+    tickets: mock(async () => ({ tickets: [] })),
     inbox: mock(async (_status = "open") => ({ items: [] })),
     ackInbox: mock(async (id: string) => ({ item: { id } })),
     resolveInbox: mock(async (id: string, _reason?: string) => ({
