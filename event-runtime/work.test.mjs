@@ -458,16 +458,27 @@ describe("work-scan registration (WM-110)", () => {
     );
   });
 
-  test("every LLM route is the pi adapter; command/actions routes are untouched (WM-215)", () => {
+  test("every LLM route is the pi adapter except the WM-722 merge exceptions; command/actions routes are untouched (WM-215)", () => {
     const byAdapter = {};
     for (const mapping of Object.values(registry.eventTypes)) {
       if (!mapping.agent) continue;
       (byAdapter[mapping.adapter] ??= []).push(mapping.agent);
     }
-    // No committed route rides claude. It stays a supported adapter — the
-    // per-route exception and `--adapter-override claude` both select it —
-    // but the default harness is pi.
-    expect(byAdapter.claude).toBeUndefined();
+    // The default harness is pi. The only committed claude routes are the
+    // WM-722 merge-scan/merge-fix exceptions (standard tier → sonnet); any
+    // other route riding claude must be an explicit, reviewed decision.
+    expect([...byAdapter.claude].sort()).toEqual([
+      "merge-fix@1",
+      "merge-scan@2",
+    ]);
+    for (const ref of byAdapter.claude) {
+      const resolved = resolveModel(
+        registry.agents.get(ref),
+        "claude",
+        registry.modelTiers,
+      );
+      expect(resolved).toBe(registry.modelTiers.claude.standard);
+    }
     expect(byAdapter.pi.length).toBeGreaterThan(0);
     // Every pi route resolves a model: loadRegistry fails closed otherwise,
     // but assert the values so a silently-null resolution can't pass.
