@@ -102,9 +102,7 @@ describe("PanelGrid (WM-840)", () => {
         const grid = await findByLabelText("Panels");
         expect(within(grid).getByText("Open inbox items")).toBeTruthy();
         expect(within(grid).getByText("builtin")).toBeTruthy();
-        expect(
-          within(grid).getByText("1 · from packs and extensions"),
-        ).toBeTruthy();
+        expect(within(grid).getByText("1 panel")).toBeTruthy();
         // The table over /items, with the panel's columns and tones.
         await findByText("WM-1 needs a decision");
         const tile = container.querySelector('[data-panel="inbox-open"]')!;

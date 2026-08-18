@@ -1814,9 +1814,7 @@ describe("Overview declarative panels (WM-840)", () => {
         await waitFor(() => expect(api.panels).toHaveBeenCalled());
         await r.findByText("Worker Fleet Capacity");
         expect(r.queryByLabelText("Panels")).toBeNull();
-        expect(r.container.textContent).not.toContain(
-          "from packs and extensions",
-        );
+        expect(r.container.textContent).not.toContain("1 panel");
       },
     );
   });

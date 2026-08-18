@@ -67,7 +67,8 @@ function PanelTile({
         </span>
         {aside && <span className="ml-auto">{aside}</span>}
       </div>
-      <div className="min-w-0 overflow-x-auto">{children}</div>
+      {/* Long tables scroll inside the tile so one busy panel cannot stretch the whole grid row. */}
+      <div className="max-h-[24rem] min-w-0 overflow-auto">{children}</div>
     </div>
   );
 }
@@ -274,10 +275,21 @@ export function PanelGrid({
           Panels
         </span>
         <span className="ml-auto text-right text-[11px] text-(--text-faint)">
-          {panels.length} · from packs and extensions
+          {panels.length === 1 ? "1 panel" : `${panels.length} panels`}
         </span>
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
+      {/*
+        Columns size to content, not to a breakpoint: one panel takes the full
+        width, three share it, and no tile is ever squeezed under ~22rem while
+        an empty column sits beside it (UX critique, WM-840).
+      */}
+      <div
+        className="grid gap-3"
+        style={{
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(min(100%, 22rem), 1fr))",
+        }}
+      >
         {panels.map((panel) => (
           <TileBoundary key={panel.name} panel={panel}>
             <PanelBody panel={panel} allowed={allowed} onJumpRun={onJumpRun} />
