@@ -158,20 +158,22 @@ export function AgentHoverCard({
                 </span>
               </div>
 
+              {/* A registry served mid-migration can omit either block, and a
+                  card that throws takes the whole view down with it. */}
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-(--text-faint)">Workspace</span>
                 <span className="mono text-(--text-dim)">
-                  {agent.workspace.type}
+                  {agent.workspace?.type ?? EMPTY_VALUE}
                 </span>
               </div>
 
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-(--text-faint)">Limits</span>
                 <span className="mono text-(--text-dim)">
-                  {agent.limits.timeout_seconds != null
+                  {agent.limits?.timeout_seconds != null
                     ? `${agent.limits.timeout_seconds}s`
                     : EMPTY_VALUE}{" "}
-                  timeout · {agent.limits.attempts ?? EMPTY_VALUE} attempts
+                  timeout · {agent.limits?.attempts ?? EMPTY_VALUE} attempts
                 </span>
               </div>
 

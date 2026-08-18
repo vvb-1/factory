@@ -1,6 +1,12 @@
 import "../test-dom";
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import {
   CLOSE_MS,
   computeHoverCardPosition,
@@ -174,7 +180,12 @@ describe("HoverCard", () => {
     await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
 
     fireEvent.mouseLeave(trigger);
-    await waitFor(() => expect(r.queryByRole("dialog")).toBeNull());
+    // The close is deferred by a timer, so the state update lands outside the
+    // event handler; drain it inside `act` rather than polling for it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(r.queryByRole("dialog")).toBeNull();
   });
 
   test("stays open while the pointer is over the panel", async () => {
@@ -186,7 +197,9 @@ describe("HoverCard", () => {
 
     fireEvent.mouseLeave(trigger);
     fireEvent.mouseEnter(r.getByRole("dialog"));
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
     expect(r.queryByRole("dialog")).toBeTruthy();
   });
 
@@ -205,7 +218,9 @@ describe("HoverCard", () => {
       key: "Enter",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
     expect(r.queryByRole("dialog")).toBeNull();
   });
 
@@ -278,7 +293,9 @@ describe("HoverCard", () => {
 
     fireEvent.scroll(r.getByRole("dialog"));
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
     expect(r.queryByRole("dialog")).toBeTruthy();
   });
 

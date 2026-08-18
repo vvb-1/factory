@@ -157,17 +157,16 @@ export function HoverCard({
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const focusPanelRef = useRef(false);
   const suppressFocusOpenRef = useRef(false);
-  const onOpenChangeRef = useRef(onOpenChange);
-  onOpenChangeRef.current = onOpenChange;
   const notifiedRef = useRef(open);
+  const [dismissals, setDismissals] = useState(0);
   const panelId = useId();
   const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (notifiedRef.current === open) return;
     notifiedRef.current = open;
-    onOpenChangeRef.current?.(open);
-  }, [open]);
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -193,10 +192,19 @@ export function HoverCard({
     setOpen(true);
   }, [clearTimer, reposition]);
 
-  const closeNow = useCallback(() => {
-    clearTimer();
+  /**
+   * Touches state only, so it is safe to hand to a caller's render prop. The
+   * pending open timer is cancelled by the effect below rather than here: a
+   * function that reads a ref must not be callable during render.
+   */
+  const close = useCallback(() => {
     setOpen(false);
-  }, [clearTimer]);
+    setDismissals((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (dismissals > 0) clearTimer();
+  }, [dismissals, clearTimer]);
 
   const scheduleOpen = useCallback(() => {
     clearTimer();
@@ -254,12 +262,12 @@ export function HoverCard({
       const inside =
         (panelRef.current?.contains(active as Node) ?? false) ||
         (wrapperRef.current?.contains(active as Node) ?? false);
-      closeNow();
+      close();
       if (inside) restoreFocus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, closeNow, restoreFocus]);
+  }, [open, close, restoreFocus]);
 
   // The panel is pinned to viewport coordinates, so any scroll that is not the
   // panel's own would leave it describing a row that has moved on.
@@ -268,7 +276,7 @@ export function HoverCard({
     const onScroll = (e: Event) => {
       const target = e.target as Node | null;
       if (target && panelRef.current?.contains(target)) return;
-      closeNow();
+      close();
     };
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", reposition);
@@ -276,7 +284,7 @@ export function HoverCard({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", reposition);
     };
-  }, [open, closeNow, reposition]);
+  }, [open, close, reposition]);
 
   // ArrowDown means "take me into the card", so land focus there once it exists.
   useEffect(() => {
@@ -310,7 +318,7 @@ export function HoverCard({
     [openNow],
   );
 
-  const api: HoverCardApi = { close: closeNow };
+  const api: HoverCardApi = { close };
   const body = typeof children === "function" ? children(api) : children;
   const triggerBody = typeof trigger === "function" ? trigger(api) : trigger;
 
