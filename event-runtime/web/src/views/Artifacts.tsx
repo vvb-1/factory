@@ -47,7 +47,7 @@ const COMMON_KINDS = ["report", "log", "transcript", "ci-log"];
 function kindsOf(artifact: ArtifactInventoryItem): string[] {
   return [
     ...new Set(
-      artifact.references.flatMap((reference) => reference.kind ?? []),
+      (artifact.references ?? []).flatMap((reference) => reference.kind ?? []),
     ),
   ];
 }
@@ -85,7 +85,9 @@ const ARTIFACTS_DISPLAY: DisplayConfig<ArtifactInventoryItem> = {
       key: "references",
       label: "Referenced by",
       get: (artifact) =>
-        artifact.references.map((reference) => reference.runId).join(", "),
+        (artifact.references ?? [])
+          .map((reference) => reference.runId)
+          .join(", "),
       column: "references",
     },
   ],
@@ -107,7 +109,7 @@ function matchesSearch(
   if (!term) return true;
   return [
     artifact.sha256,
-    ...artifact.references.flatMap((reference) => [
+    ...(artifact.references ?? []).flatMap((reference) => [
       reference.runId,
       reference.kind,
       reference.agent,
@@ -334,7 +336,7 @@ export function Artifacts({
   const linkedEvents = (eventsQ.data?.events ?? []) as LinkedEvent[];
   const producerRunIds = useMemo(
     () =>
-      new Set(selected?.references.map((reference) => reference.runId) ?? []),
+      new Set(selected?.references?.map((reference) => reference.runId) ?? []),
     [selected],
   );
   const consumers = useMemo(
@@ -372,7 +374,7 @@ export function Artifacts({
   const producerAgent: AgentDef | undefined = useMemo(() => {
     const refs =
       selected?.references
-        .map((reference) => reference.agent)
+        ?.map((reference) => reference.agent)
         .filter(Boolean) ?? [];
     const defs = agentsQ.data?.agents ?? [];
     for (const ref of refs) {
@@ -417,7 +419,13 @@ export function Artifacts({
     }),
     [artifacts],
   );
-  const summary: StatusView["artifacts"] = metrics ?? fallbackMetrics;
+  const summary: StatusView["artifacts"] = {
+    files: metrics?.files ?? fallbackMetrics.files,
+    bytes: metrics?.bytes ?? fallbackMetrics.bytes,
+    orphans: metrics?.orphans ?? fallbackMetrics.orphans,
+    orphanBytes: metrics?.orphanBytes ?? fallbackMetrics.orphanBytes,
+    at: metrics?.at,
+  };
   const filtered = Boolean(
     filters.kind || filters.orphan != null || filters.search.trim(),
   );
@@ -676,9 +684,9 @@ export function Artifacts({
                   )}
                   {shown.has("references") && (
                     <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                      {artifact.references.length > 0 ? (
+                      {(artifact.references?.length ?? 0) > 0 ? (
                         <div className="flex flex-nowrap gap-2">
-                          {artifact.references.map((reference) => (
+                          {(artifact.references ?? []).map((reference) => (
                             <JumpLink
                               key={`${reference.runId}:${reference.kind ?? "unknown"}`}
                               onClick={() => onJumpRun(reference.runId)}
@@ -834,7 +842,7 @@ export function Artifacts({
                       Producing runs
                     </div>
                     <div className="mt-1.5 flex flex-wrap gap-2">
-                      {selected.references.length ? (
+                      {selected.references?.length ? (
                         selected.references.map((reference) => (
                           <JumpLink
                             key={`${reference.runId}:${reference.kind ?? "unknown"}`}

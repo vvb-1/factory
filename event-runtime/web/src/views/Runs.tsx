@@ -465,7 +465,7 @@ export function Runs({
   const staleRuns = useMemo(
     () =>
       new Set(
-        (statusQ.data?.anomalies.stalledWorkers ?? []).map((w) => w.runId),
+        (statusQ.data?.anomalies?.stalledWorkers ?? []).map((w) => w.runId),
       ),
     [statusQ.data],
   );
@@ -689,7 +689,7 @@ export function Runs({
     },
   });
 
-  const byState = statusQ.data?.runs.byState ?? {};
+  const byState = statusQ.data?.runs?.byState ?? {};
   const tabCount = (t: RunTab) => {
     if (fetchAll) {
       return t === "ALL"
@@ -722,7 +722,10 @@ export function Runs({
   };
   useTabKeys(RUN_TABS, tab, selectTab);
 
-  const d = detail.data;
+  // A query can resolve with a partial payload while caches hydrate. Treat a
+  // detail without its root run as unpopulated so every guarded d.run access
+  // below stays on the loading/fallback path.
+  const d = detail.data?.run ? detail.data : undefined;
   const attemptsExhausted = d
     ? d.run.attempts >= d.run.spec.maxAttempts
     : false;
@@ -730,10 +733,10 @@ export function Runs({
   const selProposal = useMemo(() => {
     if (sel?.runId && proposalByRunId.has(sel.runId))
       return proposalByRunId.get(sel.runId)!;
-    if (d?.run.runId && proposalByRunId.has(d.run.runId))
+    if (d?.run?.runId && proposalByRunId.has(d.run.runId))
       return proposalByRunId.get(d.run.runId)!;
     return null;
-  }, [sel?.runId, d?.run.runId, proposalByRunId]);
+  }, [sel?.runId, d?.run?.runId, proposalByRunId]);
 
   /** Agent behind the selected proposal — drives the approve dialog's risk card. */
   const approveAgent = useProposalAgent(selProposal);
@@ -742,7 +745,7 @@ export function Runs({
     selProposal &&
     selProposal.status === "open" &&
     selProposal.decision === "run" &&
-    (sel?.state === "PROPOSED" || d?.run.state === "PROPOSED"),
+    (sel?.state === "PROPOSED" || d?.run?.state === "PROPOSED"),
   );
 
   const pendingC = useRef<number>(0);
@@ -913,8 +916,8 @@ export function Runs({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sel?.runId,
-    d?.run.runId,
-    d?.run.state,
+    d?.run?.runId,
+    d?.run?.state,
     attemptsExhausted,
     connected,
     canApprove,
