@@ -341,11 +341,11 @@ describe("durable autonomous merge registry (WM-398/WM-403)", () => {
   test("central mappings register scan, bounded fix, deterministic apply, landed verify, and explicit verify", () => {
     expect(registry.eventTypes["factory.merge.requested"]).toMatchObject({
       agent: "merge-scan@2",
-      adapter: "pi",
+      adapter: "claude",
     });
     expect(registry.eventTypes["factory.merge-fix.requested"]).toMatchObject({
       agent: "merge-fix@1",
-      adapter: "pi",
+      adapter: "claude",
     });
     expect(registry.eventTypes["factory.merge-apply.requested"].agent).toBe(
       "merge-apply@2",
@@ -655,7 +655,7 @@ describe("merge-scan repository workspace and result contract (WM-425)", () => {
       const summary = await runOnce(
         db,
         registry,
-        { pi: adapter },
+        { claude: adapter },
         { workspacesRoot: workspaces, owner: "merge-test", policyVersion: PV },
       );
 

@@ -138,8 +138,9 @@ describe("registry", () => {
     // to the affected definitions while preserving their refs and pins
     // (digest regenerated on top of the #559 baseline).
     // Regenerated after WM-610 prettier reformat of code and markdown files.
+    // Regenerated (WM-722): merge-scan/merge-fix adapter pi→claude; event-types.json is a registry input.
     const expected =
-      "sha256:f618f5d7bbcbdac48dadf5ed490ebeefee9734ac9f78e535ef5bb29ba9ee414b";
+      "sha256:c9df6589c6a12567263dccbfc737b6a6acbb8132e0ac9216dbb7a35e527f6fbf";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
