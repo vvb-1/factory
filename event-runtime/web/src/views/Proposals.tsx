@@ -1731,6 +1731,27 @@ export function Proposals({
           title="Approve and queue this run?"
           onClose={() => setConfirmApprove(false)}
           wide
+          footer={
+            <>
+              <Button onClick={() => setConfirmApprove(false)}>Not yet</Button>
+              <span title={approvalDisabledReason}>
+                <Button
+                  variant="primary"
+                  disabled={!canApprove || !connected || approve.isPending}
+                  onClick={() => {
+                    if (!canApprove || proposalIsExpired(sel)) return;
+                    setConfirmApprove(false);
+                    approve.mutate(sel);
+                  }}
+                >
+                  Approve and queue{" "}
+                  <span className="mono ml-1 opacity-80" aria-hidden="true">
+                    ↵
+                  </span>
+                </Button>
+              </span>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             You are approving this exact immutable spec — the agent below runs
@@ -1738,25 +1759,6 @@ export function Proposals({
           </div>
           {/* Shared with the Runs view's approve dialog (WM-505). */}
           <ApprovalRiskDetails proposal={sel} agent={selAgent} />
-          <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={() => setConfirmApprove(false)}>Not yet</Button>
-            <span title={approvalDisabledReason}>
-              <Button
-                variant="primary"
-                disabled={!canApprove || !connected || approve.isPending}
-                onClick={() => {
-                  if (!canApprove || proposalIsExpired(sel)) return;
-                  setConfirmApprove(false);
-                  approve.mutate(sel);
-                }}
-              >
-                Approve and queue{" "}
-                <span className="mono ml-1 opacity-80" aria-hidden="true">
-                  ↵
-                </span>
-              </Button>
-            </span>
-          </div>
         </Dialog>
       )}
 
@@ -1765,6 +1767,29 @@ export function Proposals({
           title="Proposal expired — re-planned against current state"
           onClose={() => setReplan(null)}
           wide
+          footer={
+            <>
+              <Button onClick={() => setReplan(null)}>Not yet</Button>
+              <span
+                title={
+                  replanExpired
+                    ? "This replacement proposal has expired and can no longer be approved."
+                    : undefined
+                }
+              >
+                <Button
+                  variant="primary"
+                  disabled={!connected || replanExpired || approve.isPending}
+                  onClick={approveReplan}
+                >
+                  Approve new proposal{" "}
+                  <span className="mono ml-1 opacity-80" aria-hidden="true">
+                    ↵
+                  </span>
+                </Button>
+              </span>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             The TTL passed, so the planner re-read authoritative state and
@@ -1773,27 +1798,6 @@ export function Proposals({
           </div>
           <div className="mb-3 max-h-[38vh] overflow-auto">
             <SpecDiff before={replan.before.spec} after={replan.after.spec} />
-          </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={() => setReplan(null)}>Not yet</Button>
-            <span
-              title={
-                replanExpired
-                  ? "This replacement proposal has expired and can no longer be approved."
-                  : undefined
-              }
-            >
-              <Button
-                variant="primary"
-                disabled={!connected || replanExpired || approve.isPending}
-                onClick={approveReplan}
-              >
-                Approve new proposal{" "}
-                <span className="mono ml-1 opacity-80" aria-hidden="true">
-                  ↵
-                </span>
-              </Button>
-            </span>
           </div>
         </Dialog>
       )}
@@ -1846,6 +1850,24 @@ export function Proposals({
           title={`Approve and queue ${approvableSelected.length} run${approvableSelected.length === 1 ? "" : "s"}?`}
           onClose={() => setBulkConfirmOpen(false)}
           wide
+          footer={
+            <>
+              <Button onClick={() => setBulkConfirmOpen(false)}>Not yet</Button>
+              <Button
+                variant="primary"
+                autoFocus
+                disabled={!connected || bulkApproving}
+                onClick={() => {
+                  void handleBulkApprove();
+                }}
+              >
+                Approve and queue{" "}
+                <span className="mono ml-1 opacity-80" aria-hidden="true">
+                  ↵
+                </span>
+              </Button>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             You are approving{" "}
@@ -1889,22 +1911,6 @@ export function Proposals({
               </div>
             ))}
           </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={() => setBulkConfirmOpen(false)}>Not yet</Button>
-            <Button
-              variant="primary"
-              autoFocus
-              disabled={!connected || bulkApproving}
-              onClick={() => {
-                void handleBulkApprove();
-              }}
-            >
-              Approve and queue{" "}
-              <span className="mono ml-1 opacity-80" aria-hidden="true">
-                ↵
-              </span>
-            </Button>
-          </div>
         </Dialog>
       )}
 
@@ -1912,6 +1918,20 @@ export function Proposals({
         <Dialog
           title={`Reject ${rejectableSelected.length} selected proposal${rejectableSelected.length === 1 ? "" : "s"}`}
           onClose={() => setBulkRejectOpen(false)}
+          footer={
+            <>
+              <Button onClick={() => setBulkRejectOpen(false)}>Cancel</Button>
+              <Button
+                variant="danger"
+                disabled={!bulkReason.trim() || bulkRejecting || !connected}
+                onClick={handleBulkReject}
+              >
+                {bulkRejecting
+                  ? "Rejecting…"
+                  : `Reject ${rejectableSelected.length} proposals`}
+              </Button>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             Provide a rejection reason for all {rejectableSelected.length}{" "}
@@ -1957,18 +1977,6 @@ export function Proposals({
             placeholder="Reason (required — rejections are audit records)"
             className="w-full rounded-md border border-(--border-strong) bg-(--surface-0) px-2.5 py-1.5 text-[12px] text-(--text) outline-none focus:border-(--accent)"
           />
-          <div className="mt-4 flex justify-end gap-2">
-            <Button onClick={() => setBulkRejectOpen(false)}>Cancel</Button>
-            <Button
-              variant="danger"
-              disabled={!bulkReason.trim() || bulkRejecting || !connected}
-              onClick={handleBulkReject}
-            >
-              {bulkRejecting
-                ? "Rejecting…"
-                : `Reject ${rejectableSelected.length} proposals`}
-            </Button>
-          </div>
         </Dialog>
       )}
     </div>

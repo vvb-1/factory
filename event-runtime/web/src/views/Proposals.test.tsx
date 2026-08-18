@@ -1617,3 +1617,43 @@ describe("Proposals long-list window (WM-563)", () => {
     );
   });
 });
+
+describe("Proposals approval modal pinned footer (WM-829)", () => {
+  test("renders approve modal with pinned footer containing action buttons", async () => {
+    const proposal = stubProposal("prop_pinned_footer");
+    let approvedId: string | null = null;
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [proposal] }),
+        status: async () => stubStatus(),
+        approve: async (id: string) => {
+          approvedId = id;
+          return { approved: true, runId: `run_${id}` };
+        },
+      },
+      async () => {
+        const r = renderProposals({
+          focusProposalId: proposal.id,
+        });
+
+        const approveBtn = await r.findByRole("button", { name: /^Approve/ });
+        fireEvent.click(approveBtn);
+
+        const dialog = await r.findByRole("dialog", {
+          name: "Approve and queue this run?",
+        });
+        expect(dialog.className).toContain("flex flex-col");
+
+        const confirmBtn = r.getByRole("button", { name: /Approve and queue/ });
+        const notYetBtn = r.getByRole("button", { name: "Not yet" });
+
+        // Confirm and cancel buttons are inside the pinned footer container with border-t
+        expect(confirmBtn.closest("div")?.className).toContain("border-t");
+        expect(notYetBtn.closest("div")?.className).toContain("border-t");
+
+        fireEvent.click(confirmBtn);
+        await waitFor(() => expect(approvedId).toBe("prop_pinned_footer"));
+      },
+    );
+  });
+});

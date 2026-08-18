@@ -1622,6 +1622,23 @@ export function Runs({
           title={`Approve and queue run ${shortId(selProposal.runId ?? d.run.runId)}?`}
           onClose={() => setConfirmApprove(false)}
           wide
+          footer={
+            <>
+              <Button onClick={() => setConfirmApprove(false)}>Not yet</Button>
+              <Button
+                variant="primary"
+                disabled={!connected || approve.isPending}
+                onClick={() => {
+                  approve.mutate(selProposal.id);
+                }}
+              >
+                Approve and queue{" "}
+                <span className="mono ml-1 opacity-80" aria-hidden="true">
+                  ↵
+                </span>
+              </Button>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             You are approving this exact immutable spec — the agent below runs
@@ -1631,21 +1648,6 @@ export function Runs({
           </div>
           <ApprovalRiskDetails proposal={selProposal} agent={approveAgent} />
           <VerbError error={approve.error} />
-          <div className="flex justify-end gap-2">
-            <Button onClick={() => setConfirmApprove(false)}>Not yet</Button>
-            <Button
-              variant="primary"
-              disabled={!connected || approve.isPending}
-              onClick={() => {
-                approve.mutate(selProposal.id);
-              }}
-            >
-              Approve and queue{" "}
-              <span className="mono ml-1 opacity-80" aria-hidden="true">
-                ↵
-              </span>
-            </Button>
-          </div>
         </Dialog>
       )}
 
@@ -1653,6 +1655,23 @@ export function Runs({
         <Dialog
           title={`Cancel ${d.run.runId}?`}
           onClose={() => setConfirm(null)}
+          footer={
+            <>
+              <Button onClick={() => setConfirm(null)}>Keep run</Button>
+              <Button
+                variant="danger"
+                disabled={cancel.isPending}
+                onClick={() =>
+                  cancel.mutate({
+                    id: d.run.runId,
+                    reason: cancelReason.trim() || undefined,
+                  })
+                }
+              >
+                Cancel run
+              </Button>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             {d.run.state === "RUNNING"
@@ -1666,21 +1685,6 @@ export function Runs({
             placeholder="Reason (optional)"
             className="mb-3 w-full rounded-md border border-(--border-strong) bg-(--surface-0) px-2.5 py-1.5 text-(--text) outline-none focus:border-(--accent)"
           />
-          <div className="flex justify-end gap-2">
-            <Button onClick={() => setConfirm(null)}>Keep run</Button>
-            <Button
-              variant="danger"
-              disabled={cancel.isPending}
-              onClick={() =>
-                cancel.mutate({
-                  id: d.run.runId,
-                  reason: cancelReason.trim() || undefined,
-                })
-              }
-            >
-              Cancel run
-            </Button>
-          </div>
         </Dialog>
       )}
 
@@ -1688,22 +1692,24 @@ export function Runs({
         <Dialog
           title="Retry past attempt budget?"
           onClose={() => setConfirm(null)}
+          footer={
+            <>
+              <Button onClick={() => setConfirm(null)}>Leave it</Button>
+              <Button
+                variant="primary"
+                disabled={retry.isPending}
+                onClick={() => retry.mutate({ id: d.run.runId, force: true })}
+              >
+                Force retry
+              </Button>
+            </>
+          }
         >
           <div className="mb-3 text-[12px] text-(--text-dim)">
             Used {d.run.attempts}/{d.run.spec.maxAttempts} attempts. Forcing
             retry is recorded as an operator override.
           </div>
           <VerbError error={retry.error} />
-          <div className="mt-3 flex justify-end gap-2">
-            <Button onClick={() => setConfirm(null)}>Leave it</Button>
-            <Button
-              variant="primary"
-              disabled={retry.isPending}
-              onClick={() => retry.mutate({ id: d.run.runId, force: true })}
-            >
-              Force retry
-            </Button>
-          </div>
         </Dialog>
       )}
     </div>
