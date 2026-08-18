@@ -53,6 +53,7 @@ import { homedir } from "node:os";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
 import { emitFactoryEvent } from "../lib/emit-event.mjs";
+import { githubForge, loadForge } from "../lib/forge/index.mjs";
 
 export function parseArgs(argv) {
   const val = (f) => {
@@ -104,7 +105,7 @@ export function parseWorktreeBranches(porcelain) {
 /**
  * WM-17: the reason this branch must not be torn down, or null when it is free.
  *
- * `openPrs` is what `gh pr list --state open --json number,headRefName`
+ * `openPrs` is what the Forge's open-PR listing (`number,headRefName`)
  * returned, and only an actual list belongs here: an empty one means "no open
  * PR", a null one means "could not tell", and the caller has to separate those
  * two before it deletes anything — this function cannot.
@@ -118,29 +119,22 @@ export function openPrHold(branch, openPrs) {
 }
 
 /**
- * Open PRs in a repo, or null when `gh` could not answer.
+ * Open PRs in a repo, or null when the forge could not answer.
  * Fail closed (return null) when hitting the fetch limit so we never miss
  * an open PR holder due to pagination limits (WM-56).
+ *
+ * `run` is the legacy spawnSync-shaped seam the tests inject; when given it
+ * drives the GitHub implementation, otherwise the policy-selected forge is used.
  */
-export function listOpenPrs(repoPath, run = spawnSync, limit = 200) {
-  const r = run(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--state",
-      "open",
-      "--limit",
-      String(limit),
-      "--json",
-      "number,headRefName",
-    ],
-    { cwd: repoPath, encoding: "utf8" },
-  );
-  if (r.status !== 0) return null;
+export function listOpenPrs(repoPath, run = undefined, limit = 200) {
+  const forge = run ? githubForge({ exec: run }) : loadForge();
   try {
-    const parsed = JSON.parse(r.stdout || "[]");
-    if (!Array.isArray(parsed)) return null;
+    const parsed = forge.prList(null, {
+      state: "open",
+      limit,
+      fields: ["number", "headRefName"],
+      cwd: repoPath,
+    });
     if (parsed.length >= limit) return null;
     return parsed;
   } catch {

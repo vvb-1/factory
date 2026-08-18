@@ -13,10 +13,10 @@
  *  - Deleting branches that are still the head of other open PRs (WM-17, Legalease #261)
  */
 import { readFileSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { ROOT } from "../lib/schedule.mjs";
+import { githubForge, loadForge } from "../lib/forge/index.mjs";
 
 export const EXIT = {
   SAFE: 0,
@@ -108,49 +108,40 @@ export function evaluateBranchGuard({ branch, repo, targetPr, openPrs }) {
 }
 
 /**
- * Resolve the head branch for a PR using gh pr view.
- * Returns null when gh fails.
+ * The forge to ask. `run` is the legacy spawnSync-shaped seam the tests inject;
+ * when given it drives the GitHub implementation, otherwise policy selects.
  */
-export function resolveHeadBranch(repoPath, pr, run = spawnSync) {
-  const r = run(
-    "gh",
-    ["pr", "view", String(pr), "--json", "headRefName", "-q", ".headRefName"],
-    {
+const forgeFor = (run) => (run ? githubForge({ exec: run }) : loadForge());
+
+/**
+ * Resolve the head branch for a PR via the forge.
+ * Returns null when the forge fails or names no branch.
+ */
+export function resolveHeadBranch(repoPath, pr, run = undefined) {
+  try {
+    const view = forgeFor(run).prView(null, pr, {
+      fields: ["headRefName"],
       cwd: repoPath,
-      encoding: "utf8",
-    },
-  );
-  if (r.status !== 0) return null;
-  const out = (r.stdout || "").trim();
-  return out || null;
+    });
+    const out = String(view?.headRefName ?? "").trim();
+    return out || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
- * List open PRs in a repository using gh pr list.
- * Returns null when gh fails.
+ * List open PRs in a repository via the forge.
+ * Returns null when the forge fails.
  */
-export function listOpenPrs(repoPath, run = spawnSync) {
-  const r = run(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--state",
-      "open",
-      "--limit",
-      "200",
-      "--json",
-      "number,headRefName",
-    ],
-    {
-      cwd: repoPath,
-      encoding: "utf8",
-    },
-  );
-  if (r.status !== 0) return null;
+export function listOpenPrs(repoPath, run = undefined) {
   try {
-    const parsed = JSON.parse(r.stdout || "[]");
-    return Array.isArray(parsed) ? parsed : null;
+    return forgeFor(run).prList(null, {
+      state: "open",
+      limit: 200,
+      fields: ["number", "headRefName"],
+      cwd: repoPath,
+    });
   } catch {
     return null;
   }

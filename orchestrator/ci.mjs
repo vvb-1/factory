@@ -7,13 +7,14 @@
  *   bun orchestrator/ci.mjs --since 14d     # default 14d
  *
  * friction.mjs measures agent transcripts; this measures the other clock an
- * agent waits on — `gh pr checks --watch` in factory-merge/factory-ship sits
+ * agent waits on — the PR-checks watch in factory-merge/factory-ship sits
  * idle for however long the workflow run takes. A slow or flaky CI job costs
  * every PR that touches it, not just the run that happened to hit it, so it
  * belongs in the same "repeats across runs" bucket factory-retro already
  * applies to transcripts.
  *
- * Pulls `gh run list` per repo's base branch, groups by workflow name, and
+ * Pulls the workflow-run list (via the Forge connector, `lib/forge/`) per
+ * repo's base branch, groups by workflow name, and
  * flags two shapes:
  *   - repeat failures: a workflow that failed more than once in the window
  *   - a duration trend: the recent third of runs running meaningfully slower
@@ -26,6 +27,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 
 const argv = process.argv.slice(2);
 const val = (f) => {
@@ -68,25 +70,25 @@ const c = {
   green: (s) => `\x1b[32m${s}\x1b[0m`,
 };
 
+const forge = loadForge();
+
 function runList(nameWithOwner, branch) {
-  const p = Bun.spawnSync([
-    "gh",
-    "run",
-    "list",
-    "--repo",
-    nameWithOwner,
-    "--branch",
-    branch,
-    "--created",
-    `>=${sinceDate}`,
-    "--limit",
-    "200",
-    "--json",
-    "databaseId,name,workflowName,status,conclusion,createdAt,startedAt,updatedAt",
-  ]);
-  if (p.exitCode !== 0) return null;
   try {
-    return JSON.parse(p.stdout.toString());
+    return forge.runList(nameWithOwner, {
+      branch,
+      created: `>=${sinceDate}`,
+      limit: 200,
+      fields: [
+        "databaseId",
+        "name",
+        "workflowName",
+        "status",
+        "conclusion",
+        "createdAt",
+        "startedAt",
+        "updatedAt",
+      ],
+    });
   } catch {
     return null;
   }

@@ -8,7 +8,7 @@
  *           judgment applies
  * Exit 2  — a listed surface is in the diff; NEVER auto-merge, hand to a human
  * Exit 3  — the gate could not be evaluated (unknown repo, no `escalate_paths`
- *           key, `gh pr diff` failed or named no files at all). NOT a pass:
+ *           key, the PR diff could not be read or named no files at all). NOT a pass:
  *           treat the PR as escalated until the check can actually run.
  *
  * "Nothing matched" and "there was nothing to match" are different answers and
@@ -41,6 +41,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { globsOverlap } from "./owned-paths.mjs";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 
 export const EXIT = { CLEAN: 0, ESCALATE: 2, CANNOT_EVALUATE: 3 };
 
@@ -226,16 +227,15 @@ if (import.meta.main) {
     raw = injected;
   } else {
     const repoPath = String(repo.path).replace(/^~/, homedir());
-    const diff = spawnSync("gh", ["pr", "diff", pr, "--name-only"], {
-      cwd: repoPath,
-      encoding: "utf8",
-    });
-    if (diff.status !== 0) {
-      console.error(`gh pr diff failed: ${(diff.stderr || "").trim()}`);
+    try {
+      raw = loadForge().prDiffFiles(null, pr, { cwd: repoPath }).join("\n");
+    } catch (err) {
+      console.error(
+        `PR diff read failed: ${String(err.stderr || err.message || "").trim()}`,
+      );
       console.error(`cannot see the diff => treat as ESCALATE, not as clean`);
       process.exit(EXIT.CANNOT_EVALUATE);
     }
-    raw = diff.stdout;
   }
 
   const changed = resolveChangedFiles(raw);
@@ -245,7 +245,7 @@ if (import.meta.main) {
       `zero files match every glob list => treat PR #${pr} as ESCALATED, not as clean`,
     );
     console.error(
-      `Check: \`gh pr diff ${pr} --name-only\` in ${repo.name} — an empty result usually means the wrong PR number, a closed or cross-fork PR, or a \`gh\` auth failure.`,
+      `Check the changed-file list of PR #${pr} in ${repo.name} directly on the forge — an empty result usually means the wrong PR number, a closed or cross-fork PR, or a forge auth failure.`,
     );
     process.exit(EXIT.CANNOT_EVALUATE);
   }

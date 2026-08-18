@@ -14,6 +14,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 
 const c = {
   bold: (s) => `\x1b[1m${s}\x1b[0m`,
@@ -236,44 +237,42 @@ export async function gatherPulse({
   // 5. Open GitHub PRs
   if (fetchGitHub) {
     try {
-      const p = sh([
-        "gh",
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--limit",
-        "15",
-        "--json",
-        "number,title,headRefName,isDraft,statusCheckRollup",
-      ]);
-      if (p.ok && p.out) {
-        const prs = JSON.parse(p.out);
-        pulse.prs.total = prs.length;
-        pulse.prs.candidates = prs.map((pr) => {
-          const checks = pr.statusCheckRollup ?? [];
-          let ciStatus = "NONE";
-          if (checks.length > 0) {
-            const hasFailure = checks.some((c) => c.conclusion === "FAILURE");
-            const hasPending = checks.some(
-              (c) => c.status === "IN_PROGRESS" || c.status === "QUEUED",
-            );
-            const allSuccess = checks.every((c) => c.conclusion === "SUCCESS");
-            if (hasFailure) ciStatus = "FAILING";
-            else if (hasPending) ciStatus = "PENDING";
-            else if (allSuccess) ciStatus = "PASSING";
-          }
-          return {
-            number: pr.number,
-            title: pr.title,
-            headRefName: pr.headRefName,
-            isDraft: pr.isDraft,
-            ciStatus,
-          };
-        });
-      }
+      const prs = loadForge().prList(null, {
+        state: "open",
+        limit: 15,
+        fields: [
+          "number",
+          "title",
+          "headRefName",
+          "isDraft",
+          "statusCheckRollup",
+        ],
+        cwd: ROOT,
+      });
+      pulse.prs.total = prs.length;
+      pulse.prs.candidates = prs.map((pr) => {
+        const checks = pr.statusCheckRollup ?? [];
+        let ciStatus = "NONE";
+        if (checks.length > 0) {
+          const hasFailure = checks.some((c) => c.conclusion === "FAILURE");
+          const hasPending = checks.some(
+            (c) => c.status === "IN_PROGRESS" || c.status === "QUEUED",
+          );
+          const allSuccess = checks.every((c) => c.conclusion === "SUCCESS");
+          if (hasFailure) ciStatus = "FAILING";
+          else if (hasPending) ciStatus = "PENDING";
+          else if (allSuccess) ciStatus = "PASSING";
+        }
+        return {
+          number: pr.number,
+          title: pr.title,
+          headRefName: pr.headRefName,
+          isDraft: pr.isDraft,
+          ciStatus,
+        };
+      });
     } catch {
-      // gh CLI not available or errored
+      // forge not available or errored
     }
   }
 

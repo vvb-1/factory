@@ -22,6 +22,7 @@ import {
   readPinManifestRequirements,
   ownedPathsClosureGaps,
 } from "../../orchestrator/owned-paths.mjs";
+import { loadForge } from "../../lib/forge/index.mjs";
 import { budgetExhausted } from "../../lib/spend.mjs";
 import { liveWorkerLeases } from "../../lib/worker-leases.mjs";
 import { findArtifact, pinRunArtifact } from "./artifacts.mjs";
@@ -238,21 +239,9 @@ function fetchViewerDefault() {
 
 function fetchPullRequestDefault(payload) {
   try {
-    return JSON.parse(
-      execFileSync(
-        "gh",
-        [
-          "pr",
-          "view",
-          String(payload?.pr),
-          "--repo",
-          payload?.github,
-          "--json",
-          "state,headRefOid",
-        ],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-      ),
-    );
+    return loadForge().prView(payload?.github, payload?.pr, {
+      fields: ["state", "headRefOid"],
+    });
   } catch (err) {
     const stderr = String(err?.stderr ?? "");
     if (/not found|no pull request/i.test(stderr)) return null;

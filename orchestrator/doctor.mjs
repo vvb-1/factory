@@ -25,6 +25,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { gql } from "./reaper.mjs";
 import { factoryRoot } from "../lib/factory-root.mjs";
+import { loadForge } from "../lib/forge/index.mjs";
 import { harnessGitignoreIsCurrent } from "../lib/factory-gitignore.mjs";
 import {
   browserLaunchCheck,
@@ -91,7 +92,11 @@ for (const [bin, fix] of [
     "install Claude Code, then `claude setup-token` for unattended runs",
   ],
   ["git", "xcode-select --install"],
-  ["gh", "brew install gh && gh auth login"],
+  // The forge's CLI (gh for GitHub); a memory forge needs none.
+  ...(() => {
+    const cli = loadForge().cli;
+    return cli.bin ? [[cli.bin, cli.install]] : [];
+  })(),
 ]) {
   const r = sh(`command -v ${bin}`);
   check(r.status === 0, bin, r.stdout.trim(), fix);
