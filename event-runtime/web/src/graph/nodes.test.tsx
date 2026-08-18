@@ -563,6 +563,7 @@ describe("Graph view inspect loop", () => {
                 onSelectNode={() => {}}
                 onJumpAgent={() => {}}
                 onJumpEvents={() => {}}
+                onJumpProposal={() => {}}
               />,
             );
           }
