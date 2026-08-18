@@ -539,15 +539,24 @@ describe("human inbox ledger (WM-285)", () => {
       },
     ];
     expect(
-      await reconcileInbox(db, { now: 180_000, linearIssues: unescalatedIssues }),
-    ).toEqual([{ id: "escalated", resolvedBy: "auto:linear_escalation_cleared" }]);
+      await reconcileInbox(db, {
+        now: 180_000,
+        linearIssues: unescalatedIssues,
+      }),
+    ).toEqual([
+      { id: "escalated", resolvedBy: "auto:linear_escalation_cleared" },
+    ]);
     expect(getInboxItem(db, "escalated").resolvedAt).not.toBeNull();
 
     // ESCALATED without observed transition: mere absence of label on creation does not resolve
     const unescalatedFromStartDb = openDb(":memory:");
     createInboxItem(
       unescalatedFromStartDb,
-      { kind: "ESCALATED", title: "fresh escalation", refs: { issue: "WM-20" } },
+      {
+        kind: "ESCALATED",
+        title: "fresh escalation",
+        refs: { issue: "WM-20" },
+      },
       { id: "fresh-escalated", now: 1000 },
     );
     const noLabelIssues = async () => [

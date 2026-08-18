@@ -261,7 +261,10 @@ test("Rerun CI maps a short repo name to its GitHub slug, and Ship refuses a rep
   };
   const rerun = render(
     <InboxActions
-      item={item({ kind: "CI RED", refs: { repo: "factory", runId: "123", pr: "PR #123" } })}
+      item={item({
+        kind: "CI RED",
+        refs: { repo: "factory", runId: "123", pr: "PR #123" },
+      })}
       connected
       onResolve={() => {}}
       onItemChange={() => {}}
@@ -271,7 +274,9 @@ test("Rerun CI maps a short repo name to its GitHub slug, and Ship refuses a rep
   );
   fireEvent.click(rerun.getByRole("button", { name: "Rerun CI" }));
   await waitFor(() => expect(replay).toHaveBeenCalledTimes(1));
-  const envelope = replay.mock.calls[0][0] as { payload: { repo: string; runId: string } };
+  const envelope = replay.mock.calls[0][0] as {
+    payload: { repo: string; runId: string };
+  };
   expect(envelope.payload.repo).toBe("watt-mind/factory");
   expect(envelope.payload.runId).toBe("123");
   expect(() =>
