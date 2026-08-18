@@ -872,6 +872,7 @@ export function App() {
                   onSelectNode={(id) => navigate(hashPath("graph", id))}
                   onJumpAgent={jumpToAgent}
                   onJumpEvents={jumpToEvents}
+                  onJumpProposal={jumpToProposal}
                 />
               </Suspense>
             ) : view === "agents" ? (
