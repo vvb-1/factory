@@ -23,7 +23,7 @@
   },
   "mutating": true,
   "pins": {
-    "agents/dispatch.md": "sha256:ca3d1eb3dd65baacda9dc981425bf344828c79d25e05fcad58759a293fad323f",
+    "agents/dispatch.md": "sha256:552d1354c1fb9b95e961853c67544beae5bd7ae93850abbdbfa577b1d122a730",
     "schemas/dispatch.input.json": "sha256:b5c0643c0ed41272900b4d31947b0b1e96a45c092623514b6e14ef20a8bdf485",
     "schemas/dispatch.output.json": "sha256:bc25aee1baa16aa21f50e9a3f8c320e57cec11cbdf31c822baee838d49ddb672"
   }

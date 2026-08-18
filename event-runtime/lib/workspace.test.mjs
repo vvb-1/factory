@@ -306,6 +306,10 @@ describe("worktree workspaces (WM-108)", () => {
       repoPath: repoDir,
       down: "bin/worktree-down.sh",
       verify: "echo verified",
+      // WM-718: the handoff gate diffs against `base` and holds the PR by
+      // its GitHub slug (null when repos.yaml declares none).
+      base: "develop",
+      github: null,
     });
     const link = path.join(dir, "repo");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);

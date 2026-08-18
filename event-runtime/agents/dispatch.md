@@ -35,9 +35,18 @@ steal a claim, never queue behind the holder.
    `Owned Paths`. Work discovered outside that set becomes a new `Triage`
    issue (`tools/linear.mjs file`) — never a widening of this one.
 3. **Verify** with the ticket's exact `Verification Command`, run inside
-   `./repo`. Never proceed past failing output; never weaken a test to get
-   green. The runtime re-runs the repo's declared verify command after you —
-   your report is not the evidence, the output is.
+   `./repo` on the final tree (after your last commit), **and** the full
+   `bun test` (or the repo's full suite) before you return. Never proceed
+   past failing output; never weaken a test to get green. **The worker
+   verifies the handoff mechanically after you return:** it re-runs the
+   repo's declared verify command and the ticket's exact
+   `Verification Command`, runs `cd event-runtime/web && bun run build` when
+   your diff touches `event-runtime/web/src/**`, and diffs
+   `origin/<base>..HEAD` against the ticket's Owned Paths. A non-zero exit
+   fails the run (`handoff_verification_failed`), converts your PR to a
+   draft with the observed output quoted, and returns the ticket to Todo +
+   `ai:agent-ready`. Your report is not the evidence, the output is — and
+   the worker reads the exit code itself.
 4. **Run the UX gate when required.** A critique is required when the change
    introduces or materially changes a user-completable flow, interaction,
    state transition, error/recovery path, responsive layout, authentication,
@@ -89,6 +98,14 @@ shell` means the spawn prompt was defective: correct its path/launch details
    - Files: <n> changed, all within Owned Paths
    - Risks: <reviewer focus, or "none known">
    ```
+
+   The Verification line that counts is **worker-authored**: after you
+   return, the worker posts `## Handoff verification (worker-observed)` on
+   the ticket with the command it ran, the exit code, the last 40 lines of
+   output, the file count against `origin/<base>`, and any Owned Paths
+   deviations. Your own line above is kept as `agent-reported` commentary; it
+   cannot assert a pass the worker did not observe, so make sure the tree you
+   push is the tree that passed.
 
    Then move the ticket to `In Review` + `ai:needs-review`, removing
    `ai:in-progress`.

@@ -315,6 +315,10 @@ function materializeWorktree({
     repoPath: repo.path,
     down: repo.worktreeDown,
     verify: repo.verify,
+    // The handoff gate (WM-718) diffs the final tree against the repo's base
+    // branch and addresses the opened PR by its GitHub slug.
+    base: repo.base ?? null,
+    github: repo.github ?? null,
   };
   // Persist teardown facts before bring-up starts. A script can create its
   // worktree and daemons before timing out; the marker lets the janitor find
