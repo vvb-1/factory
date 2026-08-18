@@ -81,6 +81,8 @@ export function apiClient({ port = DEFAULT_PORT, host = API_HOST } = {}) {
         body: JSON.stringify({ runId }),
       }),
     agents: () => call("GET", "/agents"),
+    /** Declarative Overview panels (WM-840): `{ panels, endpoints }`, panel data is fetched from each `source.endpoint`. */
+    panels: () => call("GET", "/panels"),
     workers: () => call("GET", "/workers"),
     schedules: () => call("GET", "/schedules"),
     /** Factory repo registry from config/repos.yaml (OPS-299). */

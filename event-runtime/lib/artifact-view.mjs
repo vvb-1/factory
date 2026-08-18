@@ -144,6 +144,50 @@ function relativeNode(base, key) {
   return walkSchema(base, tokens);
 }
 
+/** The per-`as` key checks the schema cannot express (design §2.2 `as` row). */
+function sectionKeyErrors(section, at) {
+  const errors = [];
+  const kind = section.as;
+  const allowed = KEYS_BY_KIND[kind];
+  for (const key of Object.keys(section)) {
+    if (!COMMON_SECTION_KEYS.has(key) && !allowed.has(key)) {
+      errors.push(`${at}: "${key}" is not a key of as=${kind}`);
+    }
+  }
+  for (const key of REQUIRED_BY_KIND[kind] ?? []) {
+    if (!hasOwn(section, key))
+      errors.push(`${at}: as=${kind} requires "${key}"`);
+  }
+  if (kind === "badge" && isObject(section.tone)) {
+    for (const [key, value] of Object.entries(section.tone)) {
+      if (!TONES.includes(value)) {
+        errors.push(
+          `${at}.tone.${key}: badge tone must be one of ${TONES.join("|")}`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * Validate a view document's *shape* only: the v1 schema plus the per-`as`
+ * key rules, with no output schema to resolve pointers against. This is the
+ * check a panel (`factory.panel-view/v1`, lib/panel-view.mjs) gets — its data
+ * comes from an API endpoint that has no published schema — and the first
+ * half of `validateArtifactView`. Never throws.
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateArtifactViewShape(view) {
+  const schemaCheck = validate(ARTIFACT_VIEW_SCHEMA, view, "view");
+  if (!schemaCheck.valid) return { valid: false, errors: schemaCheck.errors };
+  const errors = [];
+  view.sections.forEach((section, i) => {
+    errors.push(...sectionKeyErrors(section, `view.sections[${i}]`));
+  });
+  return { valid: errors.length === 0, errors };
+}
+
 /**
  * Validate a view document against the v1 schema AND against the agent's
  * output schema (pointer drift). Never throws.
@@ -182,16 +226,7 @@ export function validateArtifactView(view, outputSchema) {
   view.sections.forEach((section, i) => {
     const at = `view.sections[${i}]`;
     const kind = section.as;
-    const allowed = KEYS_BY_KIND[kind];
-    for (const key of Object.keys(section)) {
-      if (!COMMON_SECTION_KEYS.has(key) && !allowed.has(key)) {
-        errors.push(`${at}: "${key}" is not a key of as=${kind}`);
-      }
-    }
-    for (const key of REQUIRED_BY_KIND[kind] ?? []) {
-      if (!hasOwn(section, key))
-        errors.push(`${at}: as=${kind} requires "${key}"`);
-    }
+    errors.push(...sectionKeyErrors(section, at));
 
     const node = resolveSchemaPointer(outputSchema, section.path);
     if (node === undefined) {
@@ -230,14 +265,7 @@ export function validateArtifactView(view, outputSchema) {
 
     if (isObject(section.tone)) {
       for (const [key, value] of Object.entries(section.tone)) {
-        if (kind === "badge") {
-          if (!TONES.includes(value)) {
-            errors.push(
-              `${at}.tone.${key}: badge tone must be one of ${TONES.join("|")}`,
-            );
-          }
-          continue;
-        }
+        if (kind === "badge") continue; // checked by sectionKeyErrors
         checkKey("tone", key);
         if (!isObject(value)) {
           errors.push(

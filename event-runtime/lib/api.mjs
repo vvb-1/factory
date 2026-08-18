@@ -24,6 +24,7 @@ import { handleIntakeApiRoute } from "./api-intake.mjs";
 import { handleChainApiRoute } from "./api-chain.mjs";
 import { handleConfigApiRoute } from "./api-config.mjs";
 import { handleMetricsApiRoute } from "./api-metrics.mjs";
+import { handlePanelsApiRoute } from "./api-panels.mjs";
 import { handleRegistryApiRoute } from "./api-registry.mjs";
 import {
   handleRunApiRoute,
@@ -314,6 +315,10 @@ export function createApi({
           ...common,
           send: scheduleSend,
         });
+        if (result !== false) return result;
+      }
+      if (url.pathname === "/panels") {
+        const result = handlePanelsApiRoute(common);
         if (result !== false) return result;
       }
       if (

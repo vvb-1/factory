@@ -2,6 +2,7 @@ import type {
   AdmittedEvent,
   AgentsView,
   ArtifactInventoryItem,
+  ArtifactView,
   ChainListItem,
   ChainView,
   ApproveOutcome,
@@ -76,6 +77,30 @@ export interface ConfigView {
     scheduleCount: number;
   };
   sections: ConfigSection[];
+}
+
+/**
+ * A declarative Overview panel (`factory.panel-view/v1`, WM-840) as `GET
+ * /panels` serves it: already validated by the runtime, bound to one
+ * allow-listed loopback GET route, drawn with the artifact-view vocabulary
+ * over the node `source.path` selects in that route's response.
+ */
+export interface PanelView {
+  name: string;
+  title: string;
+  description: string | null;
+  source: { endpoint: string; query: Record<string, string>; path: string };
+  refreshSeconds: number;
+  /** An artifact-view body without `schemaVersion`; sections' `path` is relative to the selected node. */
+  view: Omit<ArtifactView, "schemaVersion">;
+  /** `builtin`, `pack:<namespace>` or `extension:<name>`. */
+  origin: string;
+  file: string;
+}
+export interface PanelsView {
+  panels: PanelView[];
+  /** The `source.endpoint` allow-list — a client refuses to fetch anything else. */
+  endpoints: string[];
 }
 
 /** Deliberately allow-listed repository settings returned by GET /repos. */
@@ -351,6 +376,14 @@ export const api = {
     ),
   // The agent registry, fully readable: definitions, prompts, schemas, pins.
   agents: () => call<AgentsView>("GET", "/agents"),
+  // Declarative Overview panels (WM-840) and the data behind one of them:
+  // `panelSource` only ever GETs an endpoint the runtime already
+  // allow-listed for the panel; the query is the panel's own `source.query`.
+  panels: () => call<PanelsView>("GET", "/panels"),
+  panelSource: (endpoint: string, query: Record<string, string> = {}) => {
+    const qs = new URLSearchParams(query).toString();
+    return call<unknown>("GET", qs ? `${endpoint}?${qs}` : endpoint);
+  },
   // Every event + run under one correlation id (WM-527); 404 when unknown.
   chain: (correlationId: string) =>
     call<ChainView>("GET", `/chain/${encodeURIComponent(correlationId)}`),

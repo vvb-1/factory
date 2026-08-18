@@ -327,7 +327,10 @@ export default async function serve(args) {
   }
 
   const db = openDb();
-  const registry = loadRegistry({ packRoots: extensions.packRoots });
+  const registry = loadRegistry({
+    packRoots: extensions.packRoots,
+    panelRoots: extensions.panelRoots,
+  });
   registry.anomalies.push(...extensions.anomalies);
   const pv = policyVersion();
   const owner = newWorkerId();

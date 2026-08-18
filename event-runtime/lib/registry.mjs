@@ -15,6 +15,7 @@ import { APPROVAL_MODES, CATCH_UP_MODES, parseCadence } from "./schedules.mjs";
 import { RUNTIME_ROOT } from "./config.mjs";
 import { reposRoot } from "./repos.mjs";
 import { validateArtifactView } from "./artifact-view.mjs";
+import { PANELS_DIR, loadPanelDir, mergePanels } from "./panel-view.mjs";
 
 export class RegistryError extends Error {
   constructor(message) {
@@ -132,6 +133,13 @@ export function createFsPackLoader(
     // absent method as "this pack has no views".
     readArtifactView(entry, def) {
       return loadArtifactView(root, entry.source, def);
+    },
+    // Optional seam member (WM-840): `panels/*.panel.json` under the pack
+    // root, validated by lib/panel-view.mjs; a pack without the directory
+    // contributes no panels, and loadRegistry treats an absent method the
+    // same way.
+    listPanels(origin) {
+      return loadPanelDir(path.join(root, PANELS_DIR), { origin });
     },
     readPinned(relative, def) {
       if (pins === undefined && !builtIn && !ignorePins) {
@@ -617,6 +625,7 @@ function loadAgentDef(pack, loader, entry, { builtIn = false } = {}) {
 export function loadRegistry({
   root = RUNTIME_ROOT,
   packRoots,
+  panelRoots = [],
   modelTiers = loadModelTierMap(),
   loaderFor = defaultLoaderFor,
 } = {}) {
@@ -627,6 +636,8 @@ export function loadRegistry({
     throw new RegistryError("packRoots must be an array");
   if (typeof loaderFor !== "function")
     throw new RegistryError("loaderFor must be a function");
+  if (!Array.isArray(panelRoots))
+    throw new RegistryError("panelRoots must be an array");
 
   const builtIn = {
     kind: "fs",
@@ -652,6 +663,9 @@ export function loadRegistry({
   const agentSources = new Map();
   const views = new Map();
   const anomalies = [];
+  // Panels (WM-840): one batch per contributor, merged after the loop so a
+  // duplicate name is reported against the contributor that got there first.
+  const panelBatches = [];
   const eventTypes = nullDict();
   const edges = nullDict();
   const schedules = nullDict();
@@ -685,6 +699,11 @@ export function loadRegistry({
       if (anomaly) anomalies.push(anomaly);
       views.set(def.ref, { file, view });
     }
+    if (typeof loader.listPanels === "function") {
+      panelBatches.push(
+        loader.listPanels(builtInPack ? "builtin" : `pack:${pack.namespace}`),
+      );
+    }
     mergeMap(
       eventTypes,
       eventSources,
@@ -701,6 +720,19 @@ export function loadRegistry({
       "schedule loop",
     );
   }
+
+  // Extension-contributed panel directories (`contributes.panels`,
+  // lib/extensions.mjs) load after every pack, so a pack panel outranks an
+  // extension panel of the same name exactly as policy order says.
+  for (const { dir, origin, base } of panelRoots) {
+    if (typeof dir !== "string" || typeof origin !== "string") {
+      throw new RegistryError("panelRoots entries must be { dir, origin }");
+    }
+    panelBatches.push(loadPanelDir(dir, { origin, base }));
+  }
+  const merged = mergePanels(panelBatches);
+  anomalies.push(...merged.anomalies);
+  const panels = merged.panels;
 
   for (const [type, mapping] of Object.entries(eventTypes)) {
     if (
@@ -962,6 +994,7 @@ export function loadRegistry({
     })),
     agents,
     views,
+    panels,
     anomalies,
     eventTypes,
     schemas,

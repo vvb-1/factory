@@ -1,0 +1,17 @@
+{
+  "format": "factory.panel-view/v1",
+  "name": "factory/sample:open-proposals",
+  "title": "Open proposals (sample)",
+  "description": "Test fixture: an extension-contributed panel bound to /proposals.",
+  "source": { "endpoint": "/proposals", "path": "/proposals" },
+  "view": {
+    "sections": [
+      {
+        "path": "",
+        "as": "table",
+        "columns": ["id", "status", "createdAt"],
+        "formats": { "createdAt": "datetime" }
+      }
+    ]
+  }
+}

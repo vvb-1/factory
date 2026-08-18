@@ -1758,3 +1758,66 @@ describe("Overview waiting-on-you tile (WM-286)", () => {
     }
   });
 });
+
+describe("Overview declarative panels (WM-840)", () => {
+  const inboxPanel = {
+    name: "inbox-open",
+    title: "Open inbox items",
+    description: null,
+    source: { endpoint: "/inbox", query: { status: "open" }, path: "/items" },
+    refreshSeconds: 30,
+    view: {
+      sections: [
+        { path: "", as: "table" as const, columns: ["kind", "title"] },
+      ],
+    },
+    origin: "builtin",
+    file: "panels/inbox-open.panel.json",
+  };
+
+  test("shows the panel grid below the existing content when at least one panel exists", async () => {
+    await withApi(
+      {
+        status: async () => baseStatus(),
+        panels: async () => ({ panels: [inboxPanel], endpoints: ["/inbox"] }),
+        panelSource: async () => ({
+          items: [{ id: "i1", kind: "BLOCKED", title: "WM-7 waits on you" }],
+        }),
+      },
+      async () => {
+        const r = renderOverview();
+        const grid = await r.findByLabelText("Panels");
+        await waitFor(() =>
+          expect(within(grid).getByText("WM-7 waits on you")).toBeTruthy(),
+        );
+        // Below the content Overview already draws (the housekeeping band is its last).
+        const housekeeping = r.getByText("Worker Fleet Capacity");
+        expect(
+          Boolean(
+            housekeeping.compareDocumentPosition(grid) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+          ),
+        ).toBe(true);
+        expect(within(grid).getByText("Open inbox items")).toBeTruthy();
+      },
+    );
+  });
+
+  test("renders no panel section at all when there are zero panels", async () => {
+    await withApi(
+      {
+        status: async () => baseStatus(),
+        panels: async () => ({ panels: [], endpoints: ["/inbox"] }),
+      },
+      async () => {
+        const r = renderOverview();
+        await waitFor(() => expect(api.panels).toHaveBeenCalled());
+        await r.findByText("Worker Fleet Capacity");
+        expect(r.queryByLabelText("Panels")).toBeNull();
+        expect(r.container.textContent).not.toContain(
+          "from packs and extensions",
+        );
+      },
+    );
+  });
+});
