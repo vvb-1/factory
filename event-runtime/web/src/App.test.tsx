@@ -39,6 +39,10 @@ const STATUS: StatusView = {
 
 const HEALTH = { ok: true, policyVersion: "test", env: ENV };
 let currentStatus = STATUS;
+// "pending" never resolves, which is what a first load looks like before
+// /api/health answers; "error" is a runtime that answered with a failure.
+let healthMode: "ok" | "pending" | "error" = "ok";
+let healthCalls = 0;
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -66,9 +70,20 @@ function renderApp() {
 
 beforeEach(() => {
   currentStatus = STATUS;
+  healthMode = "ok";
+  healthCalls = 0;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.includes("/api/health")) return jsonResponse(HEALTH);
+    if (url.includes("/api/health")) {
+      healthCalls += 1;
+      if (healthMode === "pending") return new Promise<Response>(() => {});
+      if (healthMode === "error")
+        return new Response(JSON.stringify({ error: "runtime down" }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      return jsonResponse(HEALTH);
+    }
     if (url.includes("/api/status")) return jsonResponse(currentStatus);
     if (url.includes("/api/agents")) {
       return jsonResponse({
@@ -251,6 +266,78 @@ describe("bottom status bar", () => {
     expect(themeButton.getAttribute("aria-label")).toBe(
       "Theme: dark. Switch to light.",
     );
+  });
+});
+
+describe("health connection chrome (WM-724)", () => {
+  // The chip is the only styled button in the sidebar header; its label is the
+  // connection word, so the text query doubles as the state assertion.
+  const statusDot = (statusBar: HTMLElement) =>
+    statusBar.querySelector<HTMLElement>("span.rounded-full")!;
+
+  test("a pending first load reads as connecting, not disconnected", async () => {
+    healthMode = "pending";
+    const utils = renderApp();
+    const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
+
+    // The status fixture lands while health is still in flight — that is the
+    // exact window in which the old chrome flashed an outage.
+    await waitFor(() => {
+      expect(
+        utils.sidebar.getByRole("button", { name: "Proposals" }).textContent,
+      ).toContain("9");
+    });
+
+    const chip = utils.sidebar.getByText("connecting");
+    expect(chip.getAttribute("style")).not.toContain("--hue-err");
+    expect(utils.sidebar.queryByText("disconnected")).toBeNull();
+    expect(chip.getAttribute("title")).not.toContain("runtime unreachable");
+
+    expect(statusDot(statusBar).getAttribute("style")).not.toContain(
+      "--hue-err",
+    );
+    expect(statusBar.textContent).not.toContain("runtime unreachable");
+    expect(statusBar.textContent).toContain("connecting");
+
+    // No banner either — pending is not a failure anywhere in the chrome.
+    expect(utils.queryByText(/Runtime unreachable —/)).toBeNull();
+  });
+
+  test("a failed health check turns chip, status bar and banner red together", async () => {
+    healthMode = "error";
+    const utils = renderApp();
+    const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
+
+    await waitFor(() => {
+      expect(utils.sidebar.getByText("disconnected")).toBeTruthy();
+    });
+    expect(
+      utils.sidebar.getByText("disconnected").getAttribute("style"),
+    ).toContain("--hue-err");
+    expect(statusDot(statusBar).getAttribute("style")).toContain("--hue-err");
+    expect(statusBar.textContent).toContain("runtime unreachable");
+    expect(utils.getByText(/Runtime unreachable —/)).toBeTruthy();
+
+    const before = healthCalls;
+    fireEvent.click(utils.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(healthCalls).toBeGreaterThan(before);
+    });
+  });
+
+  test("a healthy runtime names the env on the chip and connects in the status bar", async () => {
+    const utils = renderApp();
+    const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
+
+    await waitFor(() => {
+      expect(utils.sidebar.getByText("dev")).toBeTruthy();
+    });
+    const chip = utils.sidebar.getByText("dev");
+    expect(chip.getAttribute("style")).not.toContain("--hue-err");
+    expect(chip.getAttribute("title")).toContain("/tmp/factory");
+    expect(statusDot(statusBar).getAttribute("style")).toContain("--hue-ok");
+    expect(statusBar.textContent).toContain("connected · test");
+    expect(utils.queryByText(/Runtime unreachable —/)).toBeNull();
   });
 });
 

@@ -342,9 +342,11 @@ export function App() {
     retry: false,
   });
   const connected = health.isSuccess;
-  // Banner only after a failed fetch — first-load pending must not flash
-  // "unreachable" over an empty factory.
-  const healthFailed = !connected && !health.isPending;
+  // A first load that has not answered yet is "connecting", not "down". Every
+  // piece of connection chrome — chip, status bar, banner — reads this rather
+  // than !connected, so an in-flight /health never flashes an outage.
+  const healthPending = health.isPending;
+  const healthFailed = !connected && !healthPending;
 
   const status = useQuery({
     queryKey: ["status"],
@@ -421,18 +423,22 @@ export function App() {
   };
 
   const env = health.data?.env;
-  const envHue = !connected
-    ? "var(--hue-err)"
-    : env?.name === "live"
+  const envHue = connected
+    ? env?.name === "live"
       ? "var(--hue-warn)"
-      : "var(--hue-info)";
-  const envLabel = !connected
-    ? "disconnected"
-    : env
+      : "var(--hue-info)"
+    : healthPending
+      ? "var(--text-dim)"
+      : "var(--hue-err)";
+  const envLabel = connected
+    ? env
       ? env.adapter
         ? `${env.name} · ${env.adapter}`
         : env.name
-      : "…";
+      : "…"
+    : healthPending
+      ? "connecting"
+      : "disconnected";
 
   const goArmed = useGoSequences(
     useMemo(() => {
@@ -619,7 +625,9 @@ export function App() {
               title={
                 env
                   ? `${env.home} · policy ${health.data?.policyVersion} — click to copy home`
-                  : "runtime unreachable"
+                  : healthPending
+                    ? "connecting to the runtime…"
+                    : "runtime unreachable"
               }
               style={{
                 color: envHue,
@@ -999,7 +1007,11 @@ export function App() {
             <span
               className="size-2 shrink-0 rounded-full"
               style={{
-                background: connected ? "var(--hue-ok)" : "var(--hue-err)",
+                background: connected
+                  ? "var(--hue-ok)"
+                  : healthPending
+                    ? "var(--text-dim)"
+                    : "var(--hue-err)",
               }}
             />
             {connected ? (
@@ -1029,6 +1041,8 @@ export function App() {
                   </span>
                 )}
               </span>
+            ) : healthPending ? (
+              <span>connecting…</span>
             ) : (
               <span style={{ color: "var(--hue-err)" }}>
                 runtime unreachable
