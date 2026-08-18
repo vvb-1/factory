@@ -761,7 +761,7 @@ export function Artifacts({
                 Download
               </a>
               <Button
-                disabled={contentQ.data === undefined}
+                disabled={contentQ.data === undefined || binary}
                 onClick={() =>
                   copyText(contentQ.data ?? "", "raw artifact content")
                 }
