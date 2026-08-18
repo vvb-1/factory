@@ -1116,11 +1116,17 @@ describe("planEvent worktree gate (WM-108)", () => {
           `INSERT INTO runs (run_id,idempotency_key,spec_json,spec_hash,state,attempts,created_at,updated_at)
            VALUES ('run_mergefix','mergefix-key',?,'hash','QUEUED',0,?,?)`,
         ).run(
-          JSON.stringify({ agent: "merge-fix@1", input: { repo: "fixture", ticket: "WM-526" } }),
+          JSON.stringify({
+            agent: "merge-fix@1",
+            input: { repo: "fixture", ticket: "WM-526" },
+          }),
           new Date(NOW).toISOString(),
           new Date(NOW).toISOString(),
         );
-        const ref = admit(db, dispatchEnvelope({ repo: "fixture", ticket: "WM-526" }));
+        const ref = admit(
+          db,
+          dispatchEnvelope({ repo: "fixture", ticket: "WM-526" }),
+        );
         const outcome = planEvent(db, synthetic, ref, {
           now: NOW,
           dispatch: {

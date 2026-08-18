@@ -383,17 +383,19 @@ function singletonApplies(registry, envelope, agentRef) {
  */
 function inFlightRunForTicket(db, agentRef, { repo, ticket }) {
   const terminalPlaceholders = [...TERMINAL_STATES].map(() => "?").join(",");
-  return db
-    .query(
-      `SELECT run_id, state, created_at FROM runs
+  return (
+    db
+      .query(
+        `SELECT run_id, state, created_at FROM runs
        WHERE state NOT IN (${terminalPlaceholders})
          AND json_extract(spec_json, '$.agent') = ?
          AND json_extract(spec_json, '$.input.repo') = ?
          AND json_extract(spec_json, '$.input.ticket') = ?
        ORDER BY created_at ASC, rowid ASC
        LIMIT 1`,
-    )
-    .get(...TERMINAL_STATES, agentRef, repo, ticket) ?? null;
+      )
+      .get(...TERMINAL_STATES, agentRef, repo, ticket) ?? null
+  );
 }
 
 export function inFlightDispatchForTicket(db, payload) {
@@ -1238,15 +1240,26 @@ export function planEvent(
     // write transaction, before either side can create another RunSpec.
     const ticketWorktreeBlocker =
       def.ref === "merge-fix@1"
-        ? { run: inFlightDispatchForTicket(db, envelope.payload), reason: "ticket_dispatch_in_flight" }
+        ? {
+            run: inFlightDispatchForTicket(db, envelope.payload),
+            reason: "ticket_dispatch_in_flight",
+          }
         : def.ref === "dispatch@1"
-          ? { run: inFlightRunForTicket(db, "merge-fix@1", envelope.payload), reason: "ticket_merge_fix_in_flight" }
+          ? {
+              run: inFlightRunForTicket(db, "merge-fix@1", envelope.payload),
+              reason: "ticket_merge_fix_in_flight",
+            }
           : null;
     if (ticketWorktreeBlocker?.run) {
       const proposal = insertProposal(db, {
-        id: newProposalId(), event, runId: ticketWorktreeBlocker.run.run_id,
-        decision: "noop", status: "resolved", reason: ticketWorktreeBlocker.reason,
-        at, ttlSeconds,
+        id: newProposalId(),
+        event,
+        runId: ticketWorktreeBlocker.run.run_id,
+        decision: "noop",
+        status: "resolved",
+        reason: ticketWorktreeBlocker.reason,
+        at,
+        ttlSeconds,
       });
       setEventStatus(db, event, "noop");
       return {

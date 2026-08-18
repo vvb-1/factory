@@ -1290,20 +1290,30 @@ describe("merge-fix dispatch worktree exclusion (WM-526)", () => {
       planAdmittedEvents(db, registry, { policyVersion: PV });
 
       expect(
-        db.query(`SELECT status FROM events WHERE source='chain' AND event_id=?`).get(eventId).status,
+        db
+          .query(
+            `SELECT status FROM events WHERE source='chain' AND event_id=?`,
+          )
+          .get(eventId).status,
       ).toBe("noop");
       expect(
-        db.query(`SELECT decision,reason,run_id FROM proposals WHERE event_source='chain' AND event_id=?`).get(eventId),
+        db
+          .query(
+            `SELECT decision,reason,run_id FROM proposals WHERE event_source='chain' AND event_id=?`,
+          )
+          .get(eventId),
       ).toMatchObject({
         decision: "noop",
         reason: "ticket_dispatch_in_flight",
         run_id: dispatchRunId,
       });
       expect(
-        db.query(
-          `SELECT COUNT(*) AS n FROM runs
+        db
+          .query(
+            `SELECT COUNT(*) AS n FROM runs
            WHERE json_extract(spec_json,'$.agent')='merge-fix@1'`,
-        ).get().n,
+          )
+          .get().n,
       ).toBe(0);
       db.close();
     }
@@ -1341,13 +1351,19 @@ describe("merge-fix dispatch worktree exclusion (WM-526)", () => {
     planAdmittedEvents(db, registry, { policyVersion: PV });
 
     expect(
-      db.query(
-        `SELECT COUNT(*) AS n FROM runs
+      db
+        .query(
+          `SELECT COUNT(*) AS n FROM runs
          WHERE json_extract(spec_json,'$.agent')='merge-fix@1'`,
-      ).get().n,
+        )
+        .get().n,
     ).toBe(1);
     expect(
-      db.query(`SELECT status FROM events WHERE source='chain' AND event_id='fix-after-dispatch'`).get().status,
+      db
+        .query(
+          `SELECT status FROM events WHERE source='chain' AND event_id='fix-after-dispatch'`,
+        )
+        .get().status,
     ).toBe("planned");
     db.close();
   });
