@@ -133,7 +133,10 @@ describe("Host and Origin header security confinement (OPS-408)", () => {
   });
 
   test("rejects request with an mDNS .local Host header", async () => {
-    const res = await rawRequest({ host: "device.local:7381", path: "/health" });
+    const res = await rawRequest({
+      host: "device.local:7381",
+      path: "/health",
+    });
     expect(res.status).toBe(403);
     expect(res.json?.error).toBe("invalid_host");
   });
