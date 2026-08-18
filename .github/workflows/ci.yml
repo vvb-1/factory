@@ -127,7 +127,17 @@ jobs:
       - name: Test event-runtime library
         # Spawn-heavy suites can exceed Bun's 5s default on the shared host.
         # Explicit liveness bounds declared by individual tests still win.
-        run: bun test --timeout 20000 --max-concurrency=4 event-runtime/lib
+        run: |
+          set -euo pipefail
+          # Temporary WM-773 operational validation: together with the first
+          # ready-head run, these four repetitions complete the five-run
+          # lock-free stability measurement. Revert to one invocation after
+          # recording the job evidence.
+          for measurement in 2 3 4 5; do
+            started=$SECONDS
+            bun test --timeout 20000 --max-concurrency=4 event-runtime/lib
+            echo "WM-773 measurement $measurement: $((SECONDS - started))s"
+          done
 
   verify:
     name: Full verification
