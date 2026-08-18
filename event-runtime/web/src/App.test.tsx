@@ -248,6 +248,29 @@ describe("sidebar navigation accessibility", () => {
       );
     }
   });
+
+  test("renders navigation rail grouped into functional tiers separated by dividers (WM-819)", async () => {
+    const { sidebar } = renderApp();
+    const separators = sidebar.getAllByRole("separator");
+    expect(separators.length).toBe(3);
+
+    const buttons = sidebar.getAllByRole("button");
+    const labels = buttons.map((b) => b.textContent?.trim()).filter(Boolean);
+    const overviewIdx = labels.findIndex((l) => l?.startsWith("Overview"));
+    const inboxIdx = labels.findIndex((l) => l?.startsWith("Inbox"));
+    const proposalsIdx = labels.findIndex((l) => l?.startsWith("Proposals"));
+    const runsIdx = labels.findIndex((l) => l?.startsWith("Runs"));
+    const eventsIdx = labels.findIndex((l) => l?.startsWith("Events"));
+    const ticketsIdx = labels.findIndex((l) => l?.startsWith("Tickets"));
+    const chainsIdx = labels.findIndex((l) => l?.startsWith("Chains"));
+
+    expect(overviewIdx).toBeLessThan(inboxIdx);
+    expect(inboxIdx).toBeLessThan(proposalsIdx);
+    expect(proposalsIdx).toBeLessThan(runsIdx);
+    expect(runsIdx).toBeLessThan(eventsIdx);
+    expect(eventsIdx).toBeLessThan(ticketsIdx);
+    expect(ticketsIdx).toBeLessThan(chainsIdx);
+  });
 });
 
 describe("Graph proposal navigation (WM-165)", () => {

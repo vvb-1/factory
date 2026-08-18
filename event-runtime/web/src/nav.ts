@@ -8,22 +8,32 @@
 // Inbox's 1–4 status tabs never see them); with no open card the tabs keep
 // their existing binding. Chains rides `g l` ("chain link"): its natural `c`
 // went to Settings (WM-704, config) first (WM-537).
+export type NavGroup = "live" | "work" | "machinery" | "system";
+
 export const NAV = [
-  { key: "overview", label: "Overview", go: "o" },
-  { key: "inbox", label: "Inbox", go: "n" },
-  { key: "events", label: "Events", go: "e" },
-  { key: "chains", label: "Chains", go: "l" },
-  { key: "proposals", label: "Proposals", go: "p" },
-  { key: "runs", label: "Runs", go: "r" },
-  { key: "tickets", label: "Tickets", go: "k" },
-  { key: "projects", label: "Projects", go: "f" },
-  { key: "agents", label: "Agents", go: "t" },
-  { key: "artifacts", label: "Artifacts", go: "y" },
-  { key: "schedules", label: "Schedules", go: "s" },
-  { key: "workers", label: "Workers", go: "w" },
-  { key: "graph", label: "Graph", go: "g" },
-  { key: "settings", label: "Settings", go: "c" },
+  // Attention / Live Actions (badge-carrying / immediate triage)
+  { key: "overview", label: "Overview", go: "o", group: "live" },
+  { key: "inbox", label: "Inbox", go: "n", group: "live" },
+  { key: "proposals", label: "Proposals", go: "p", group: "live" },
+  { key: "runs", label: "Runs", go: "r", group: "live" },
+  { key: "events", label: "Events", go: "e", group: "live" },
+
+  // Work Journey (artifact and execution lifecycle)
+  { key: "tickets", label: "Tickets", go: "k", group: "work" },
+  { key: "chains", label: "Chains", go: "l", group: "work" },
+  { key: "projects", label: "Projects", go: "f", group: "work" },
+  { key: "artifacts", label: "Artifacts", go: "y", group: "work" },
+
+  // Machinery & Topology (configuration, workers, cadence, graph)
+  { key: "agents", label: "Agents", go: "t", group: "machinery" },
+  { key: "workers", label: "Workers", go: "w", group: "machinery" },
+  { key: "schedules", label: "Schedules", go: "s", group: "machinery" },
+  { key: "graph", label: "Graph", go: "g", group: "machinery" },
+
+  // System
+  { key: "settings", label: "Settings", go: "c", group: "system" },
 ] as const;
 
 export type NavItem = (typeof NAV)[number];
 export type NavKey = NavItem["key"];
+
