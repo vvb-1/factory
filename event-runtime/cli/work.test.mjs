@@ -19,6 +19,7 @@ import {
   editStampRoot,
   exitOf,
   killPool,
+  loadAdjustedTimeout,
   makeStampRoot,
   poolSize,
   runCli,
@@ -218,13 +219,15 @@ describe("work command", () => {
       out += b;
     });
 
-    const deadline = Date.now() + 8000;
-    while (
-      Date.now() < deadline &&
-      !out.includes("run_work_proc_test → COMPLETED")
-    ) {
-      await Bun.sleep(100);
-    }
+    const box = {
+      child,
+      get out() {
+        return out;
+      },
+    };
+    expect(await waitFor(box, "run_work_proc_test → COMPLETED", 8000)).toBe(
+      true,
+    );
 
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
@@ -260,10 +263,13 @@ describe("work command", () => {
     child.stderr.on("data", (b) => {
       out += b;
     });
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && !out.includes("adapter override")) {
-      await Bun.sleep(100);
-    }
+    const box = {
+      child,
+      get out() {
+        return out;
+      },
+    };
+    expect(await waitFor(box, "adapter override", 8000)).toBe(true);
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
 
@@ -486,10 +492,13 @@ describe("work command", () => {
     child.stderr.on("data", (b) => {
       out += b;
     });
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && !out.includes("adapter override")) {
-      await Bun.sleep(100);
-    }
+    const box = {
+      child,
+      get out() {
+        return out;
+      },
+    };
+    expect(await waitFor(box, "adapter override", 8000)).toBe(true);
     child.kill("SIGTERM");
     await new Promise((resolve) => child.once("exit", resolve));
 
@@ -595,252 +604,283 @@ describe("work command", () => {
 });
 
 describe("work --reload-on-change (WM-213)", () => {
-  test("plain work never arms the watcher", async () => {
-    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-off-"));
-    const stampRoot = makeStampRoot();
-    const box = spawnWorker(["--adapter-override", "fake", "--poll-ms", "50"], {
-      FACTORY_EVENT_HOME: home,
-      FACTORY_CODE_STAMP_ROOT: stampRoot,
-    });
-    try {
-      expect(await waitFor(box, "adapter override")).toBe(true);
-      editStampRoot(stampRoot, "// v2\n");
-      await Bun.sleep(2500); // well past two reload-check intervals
-      expect(box.out).not.toContain("reload-on-change");
-      expect(box.out).not.toContain("reloading worker");
-      expect(box.child.exitCode).toBe(null); // still running
-    } finally {
-      box.child.kill("SIGTERM");
-      await exitOf(box.child);
-      rmSync(stampRoot, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("an idle worker exits 75 within a poll interval of an uncommitted edit", async () => {
-    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-idle-"));
-    const stampRoot = makeStampRoot();
-    const box = spawnWorker(
-      ["--adapter-override", "fake", "--poll-ms", "50", "--reload-on-change"],
-      {
-        FACTORY_EVENT_HOME: home,
-        FACTORY_CODE_STAMP_ROOT: stampRoot,
-      },
-    );
-    try {
-      expect(await waitFor(box, "reload-on-change: armed at code stamp")).toBe(
-        true,
+  test(
+    "plain work never arms the watcher",
+    async () => {
+      const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-off-"));
+      const stampRoot = makeStampRoot();
+      const box = spawnWorker(
+        ["--adapter-override", "fake", "--poll-ms", "50"],
+        {
+          FACTORY_EVENT_HOME: home,
+          FACTORY_CODE_STAMP_ROOT: stampRoot,
+        },
       );
-      // No commit — only a working-tree write. HEAD is unchanged (this tree has
-      // no git at all), so a HEAD-only stamp would sit here forever.
-      editStampRoot(stampRoot, "// v2\n");
-      const { code } = await exitOf(box.child);
-      expect(code).toBe(75);
-      expect(box.out).toContain("reloading worker (exit 75)");
-      // The log names both stamps so the developer can see what moved.
-      expect(box.out).toMatch(
-        /code changed \(nogit:[0-9a-f]+ → nogit:[0-9a-f]+\)/,
+      try {
+        expect(await waitFor(box, "adapter override")).toBe(true);
+        editStampRoot(stampRoot, "// v2\n");
+        await seedRun(home, {
+          runId: "run_reload_off",
+          input: { repos: ["ok"] },
+        });
+        expect(await waitFor(box, "run_reload_off → COMPLETED")).toBe(true);
+        expect(box.out).not.toContain("reload-on-change");
+        expect(box.out).not.toContain("reloading worker");
+        expect(box.child.exitCode).toBe(null); // still running
+      } finally {
+        box.child.kill("SIGTERM");
+        await exitOf(box.child);
+        rmSync(stampRoot, { recursive: true, force: true });
+      }
+    },
+    loadAdjustedTimeout(30_000),
+  );
+
+  test(
+    "an idle worker exits 75 within a poll interval of an uncommitted edit",
+    async () => {
+      const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-idle-"));
+      const stampRoot = makeStampRoot();
+      const box = spawnWorker(
+        ["--adapter-override", "fake", "--poll-ms", "50", "--reload-on-change"],
+        {
+          FACTORY_EVENT_HOME: home,
+          FACTORY_CODE_STAMP_ROOT: stampRoot,
+        },
       );
-      expect(box.out).toContain("worker stopped (code_reload)");
-    } finally {
-      box.child.kill("SIGKILL");
-      rmSync(stampRoot, { recursive: true, force: true });
-    }
-  }, 30_000);
+      try {
+        expect(
+          await waitFor(box, "reload-on-change: armed at code stamp"),
+        ).toBe(true);
+        // No commit — only a working-tree write. HEAD is unchanged (this tree has
+        // no git at all), so a HEAD-only stamp would sit here forever.
+        editStampRoot(stampRoot, "// v2\n");
+        const { code } = await exitOf(box.child);
+        expect(code).toBe(75);
+        expect(box.out).toContain("reloading worker (exit 75)");
+        // The log names both stamps so the developer can see what moved.
+        expect(box.out).toMatch(
+          /code changed \(nogit:[0-9a-f]+ → nogit:[0-9a-f]+\)/,
+        );
+        expect(box.out).toContain("worker stopped (code_reload)");
+      } finally {
+        box.child.kill("SIGKILL");
+        rmSync(stampRoot, { recursive: true, force: true });
+      }
+    },
+    loadAdjustedTimeout(30_000),
+  );
 
-  test("an idle worker reloads when a per-command module changes", async () => {
-    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-command-"));
-    const stampRoot = makeStampRoot();
-    const box = spawnWorker(
-      ["--adapter-override", "fake", "--poll-ms", "50", "--reload-on-change"],
-      {
-        FACTORY_EVENT_HOME: home,
-        FACTORY_CODE_STAMP_ROOT: stampRoot,
-      },
-    );
-    try {
-      expect(await waitFor(box, "reload-on-change: armed at code stamp")).toBe(
-        true,
+  test(
+    "an idle worker reloads when a per-command module changes",
+    async () => {
+      const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-command-"));
+      const stampRoot = makeStampRoot();
+      const box = spawnWorker(
+        ["--adapter-override", "fake", "--poll-ms", "50", "--reload-on-change"],
+        {
+          FACTORY_EVENT_HOME: home,
+          FACTORY_CODE_STAMP_ROOT: stampRoot,
+        },
       );
-      writeFileSync(
-        path.join(stampRoot, "event-runtime", "cli", "work.mjs"),
-        "// v2\n",
-        "utf8",
+      try {
+        expect(
+          await waitFor(box, "reload-on-change: armed at code stamp"),
+        ).toBe(true);
+        writeFileSync(
+          path.join(stampRoot, "event-runtime", "cli", "work.mjs"),
+          "// v2\n",
+          "utf8",
+        );
+        const { code } = await exitOf(box.child);
+        expect(code).toBe(75);
+        expect(box.out).toContain("reloading worker (exit 75)");
+      } finally {
+        box.child.kill("SIGKILL");
+        rmSync(stampRoot, { recursive: true, force: true });
+      }
+    },
+    loadAdjustedTimeout(30_000),
+  );
+
+  test(
+    "a run in flight defers the reload; the worker restarts only once it is idle",
+    async () => {
+      const { openDb } = await import("../lib/db.mjs");
+      const { createRun, transition } = await import("../lib/lifecycle.mjs");
+      const { canonicalJson, hashJson } = await import("../lib/canonical.mjs");
+
+      const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-busy-"));
+      const stampRoot = makeStampRoot();
+      const db = openDb(path.join(home, "runtime.db"));
+
+      // The fake adapter's "hang" mode occupies the worker for the whole spec
+      // timeout — the in-flight window this reload must not interrupt.
+      const input = { repos: ["hang"] };
+      const spec = {
+        schemaVersion: "factory.run-spec/v1",
+        runId: "run_reload_busy",
+        agent: "factory-status-report@1",
+        input,
+        inputHash: hashJson(input),
+        workspace: { type: "ephemeral", retainOnFailure: false },
+        adapter: "fake",
+        promptVersion: WORKER_POLICY_VERSION,
+        policyVersion: WORKER_POLICY_VERSION,
+        outputContract: "factory.status-report/v1",
+        capabilities: ["linear:read"],
+        timeoutSeconds: 4,
+        maxAttempts: 1,
+        idempotencyKey: "idem_reload_busy",
+      };
+      createRun(db, {
+        runId: spec.runId,
+        idempotencyKey: spec.idempotencyKey,
+        spec,
+        specJson: canonicalJson(spec),
+        specHash: hashJson(spec),
+        actor: "test",
+        policyVersion: "test",
+        now: Date.now(),
+      });
+      transition(db, {
+        runId: spec.runId,
+        to: "APPROVED",
+        actor: "test",
+        now: Date.now(),
+      });
+      transition(db, {
+        runId: spec.runId,
+        to: "QUEUED",
+        actor: "test",
+        now: Date.now(),
+      });
+      db.close();
+      // Keep the queue non-empty when the first run finishes. The worker must
+      // reload at that boundary rather than claiming this run with old code.
+      await seedRun(home, {
+        runId: "run_reload_waiting",
+        input: { repos: ["ok"] },
+      });
+
+      const box = spawnWorker(
+        ["--adapter-override", "fake", "--poll-ms", "50", "--reload-on-change"],
+        {
+          FACTORY_EVENT_HOME: home,
+          FACTORY_CODE_STAMP_ROOT: stampRoot,
+        },
       );
-      const { code } = await exitOf(box.child);
-      expect(code).toBe(75);
-      expect(box.out).toContain("reloading worker (exit 75)");
-    } finally {
-      box.child.kill("SIGKILL");
-      rmSync(stampRoot, { recursive: true, force: true });
-    }
-  }, 30_000);
+      try {
+        expect(await waitFor(box, "claimed run_reload_busy")).toBe(true);
+        editStampRoot(stampRoot, "// v2\n");
 
-  test("a run in flight defers the reload; the worker restarts only once it is idle", async () => {
-    const { openDb } = await import("../lib/db.mjs");
-    const { createRun, transition } = await import("../lib/lifecycle.mjs");
-    const { canonicalJson, hashJson } = await import("../lib/canonical.mjs");
+        expect(
+          await waitFor(box, "reload deferred until run_reload_busy finishes"),
+        ).toBe(true);
+        // Proven, not assumed: the deferral was logged while the run was still
+        // going, and the worker was still alive at that point.
+        expect(box.out).not.toContain("run_reload_busy → ");
+        expect(box.child.exitCode).toBe(null);
 
-    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-reload-busy-"));
-    const stampRoot = makeStampRoot();
-    const db = openDb(path.join(home, "runtime.db"));
+        const { code } = await exitOf(box.child);
+        expect(code).toBe(75);
+        // Order is the guarantee: the run reached a terminal state BEFORE the reload.
+        expect(box.out.indexOf("run_reload_busy → ")).toBeGreaterThan(-1);
+        expect(box.out.indexOf("run_reload_busy → ")).toBeLessThan(
+          box.out.indexOf("reloading worker"),
+        );
+        expect(box.out).not.toContain("claimed run_reload_waiting");
+        // And exactly one deferral line, however many intervals it spanned.
+        expect(box.out.split("reload deferred until").length - 1).toBe(1);
+      } finally {
+        box.child.kill("SIGKILL");
+        rmSync(stampRoot, { recursive: true, force: true });
+      }
 
-    // The fake adapter's "hang" mode occupies the worker for the whole spec
-    // timeout — the in-flight window this reload must not interrupt.
-    const input = { repos: ["hang"] };
-    const spec = {
-      schemaVersion: "factory.run-spec/v1",
-      runId: "run_reload_busy",
-      agent: "factory-status-report@1",
-      input,
-      inputHash: hashJson(input),
-      workspace: { type: "ephemeral", retainOnFailure: false },
-      adapter: "fake",
-      promptVersion: WORKER_POLICY_VERSION,
-      policyVersion: WORKER_POLICY_VERSION,
-      outputContract: "factory.status-report/v1",
-      capabilities: ["linear:read"],
-      timeoutSeconds: 4,
-      maxAttempts: 1,
-      idempotencyKey: "idem_reload_busy",
-    };
-    createRun(db, {
-      runId: spec.runId,
-      idempotencyKey: spec.idempotencyKey,
-      spec,
-      specJson: canonicalJson(spec),
-      specHash: hashJson(spec),
-      actor: "test",
-      policyVersion: "test",
-      now: Date.now(),
-    });
-    transition(db, {
-      runId: spec.runId,
-      to: "APPROVED",
-      actor: "test",
-      now: Date.now(),
-    });
-    transition(db, {
-      runId: spec.runId,
-      to: "QUEUED",
-      actor: "test",
-      now: Date.now(),
-    });
-    db.close();
-    // Keep the queue non-empty when the first run finishes. The worker must
-    // reload at that boundary rather than claiming this run with old code.
-    await seedRun(home, {
-      runId: "run_reload_waiting",
-      input: { repos: ["ok"] },
-    });
-
-    const box = spawnWorker(
-      ["--adapter-override", "fake", "--poll-ms", "50", "--reload-on-change"],
-      {
-        FACTORY_EVENT_HOME: home,
-        FACTORY_CODE_STAMP_ROOT: stampRoot,
-      },
-    );
-    try {
-      expect(await waitFor(box, "claimed run_reload_busy")).toBe(true);
-      editStampRoot(stampRoot, "// v2\n");
-
-      expect(
-        await waitFor(box, "reload deferred until run_reload_busy finishes"),
-      ).toBe(true);
-      // Proven, not assumed: the deferral was logged while the run was still
-      // going, and the worker was still alive at that point.
-      expect(box.out).not.toContain("run_reload_busy → ");
-      expect(box.child.exitCode).toBe(null);
-
-      const { code } = await exitOf(box.child);
-      expect(code).toBe(75);
-      // Order is the guarantee: the run reached a terminal state BEFORE the reload.
-      expect(box.out.indexOf("run_reload_busy → ")).toBeGreaterThan(-1);
-      expect(box.out.indexOf("run_reload_busy → ")).toBeLessThan(
-        box.out.indexOf("reloading worker"),
-      );
-      expect(box.out).not.toContain("claimed run_reload_waiting");
-      // And exactly one deferral line, however many intervals it spanned.
-      expect(box.out.split("reload deferred until").length - 1).toBe(1);
-    } finally {
-      box.child.kill("SIGKILL");
-      rmSync(stampRoot, { recursive: true, force: true });
-    }
-
-    const verifyDb = openDb(path.join(home, "runtime.db"));
-    const row = verifyDb
-      .query(`SELECT state FROM runs WHERE run_id = ?`)
-      .get("run_reload_busy");
-    expect(["TIMED_OUT", "FAILED", "COMPLETED"]).toContain(row?.state);
-    verifyDb.close();
-  }, 45_000);
+      const verifyDb = openDb(path.join(home, "runtime.db"));
+      const row = verifyDb
+        .query(`SELECT state FROM runs WHERE run_id = ?`)
+        .get("run_reload_busy");
+      expect(["TIMED_OUT", "FAILED", "COMPLETED"]).toContain(row?.state);
+      verifyDb.close();
+    },
+    loadAdjustedTimeout(45_000),
+  );
 });
 
 describe("work --drain-file (WM-226)", () => {
-  test("a drain-signalled worker holding a lease finishes its run first, then exits 0", async () => {
-    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-busy-"));
-    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-busy-run-"));
-    const drainFile = path.join(dir, "worker-1.drain");
-    await seedRun(home, {
-      runId: "run_drain_busy",
-      input: { repos: ["hang"] },
-      timeoutSeconds: 4,
-    });
+  test(
+    "a drain-signalled worker holding a lease finishes its run first, then exits 0",
+    async () => {
+      const home = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-busy-"));
+      const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-busy-run-"));
+      const drainFile = path.join(dir, "worker-1.drain");
+      await seedRun(home, {
+        runId: "run_drain_busy",
+        input: { repos: ["hang"] },
+        timeoutSeconds: 4,
+      });
 
-    const box = spawnWorker(
-      [
-        "--adapter-override",
-        "fake",
-        "--poll-ms",
-        "50",
-        "--drain-file",
-        drainFile,
-      ],
-      { FACTORY_EVENT_HOME: home },
-    );
-    try {
-      expect(await waitFor(box, "claimed run_drain_busy")).toBe(true);
-      writeFileSync(drainFile, "scale-down\n", "utf8");
-
-      // Proven, not assumed: still alive and still running the claim a moment
-      // after the flag appeared. A worker that leaves here is one that dropped
-      // a leased run on the floor.
-      await Bun.sleep(500);
-      expect(box.child.exitCode).toBe(null);
-      expect(box.out).not.toContain("run_drain_busy → ");
-
-      const { code } = await exitOf(box.child);
-      expect(code).toBe(0); // a clean drain, not the reload code
-      // Order is the guarantee: the run reached a terminal state BEFORE the exit.
-      expect(box.out.indexOf("run_drain_busy → ")).toBeGreaterThan(-1);
-      expect(box.out.indexOf("run_drain_busy → ")).toBeLessThan(
-        box.out.indexOf("drain requested"),
+      const box = spawnWorker(
+        [
+          "--adapter-override",
+          "fake",
+          "--poll-ms",
+          "50",
+          "--drain-file",
+          drainFile,
+        ],
+        { FACTORY_EVENT_HOME: home },
       );
-      expect(box.out).toContain("worker stopped (drain_requested)");
-    } finally {
-      box.child.kill("SIGKILL");
-      rmSync(home, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 45_000);
+      try {
+        expect(await waitFor(box, "claimed run_drain_busy")).toBe(true);
+        writeFileSync(drainFile, "scale-down\n", "utf8");
 
-  test("plain work ignores a drain file it was never given", async () => {
-    const home = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-off-"));
-    const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-off-run-"));
-    writeFileSync(path.join(dir, "worker-1.drain"), "scale-down\n", "utf8");
-    const box = spawnWorker(["--adapter-override", "fake", "--poll-ms", "50"], {
-      FACTORY_EVENT_HOME: home,
-    });
-    try {
-      expect(await waitFor(box, "adapter override")).toBe(true);
-      await Bun.sleep(1000);
-      expect(box.out).not.toContain("drain-file");
-      expect(box.child.exitCode).toBe(null);
-    } finally {
-      box.child.kill("SIGTERM");
-      await exitOf(box.child);
-      rmSync(home, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }, 30_000);
+        const { code } = await exitOf(box.child);
+        expect(code).toBe(0); // a clean drain, not the reload code
+        // Order is the guarantee: the run reached a terminal state BEFORE the exit.
+        expect(box.out.indexOf("run_drain_busy → ")).toBeGreaterThan(-1);
+        expect(box.out.indexOf("run_drain_busy → ")).toBeLessThan(
+          box.out.indexOf("drain requested"),
+        );
+        expect(box.out).toContain("worker stopped (drain_requested)");
+      } finally {
+        box.child.kill("SIGKILL");
+        rmSync(home, { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    loadAdjustedTimeout(45_000),
+  );
+
+  test(
+    "plain work ignores a drain file it was never given",
+    async () => {
+      const home = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-off-"));
+      const dir = mkdtempSync(path.join(os.tmpdir(), "evrt-drain-off-run-"));
+      writeFileSync(path.join(dir, "worker-1.drain"), "scale-down\n", "utf8");
+      const box = spawnWorker(
+        ["--adapter-override", "fake", "--poll-ms", "50"],
+        {
+          FACTORY_EVENT_HOME: home,
+        },
+      );
+      try {
+        expect(await waitFor(box, "adapter override")).toBe(true);
+        await seedRun(home, {
+          runId: "run_drain_off",
+          input: { repos: ["ok"] },
+        });
+        expect(await waitFor(box, "run_drain_off → COMPLETED")).toBe(true);
+        expect(box.out).not.toContain("drain-file");
+        expect(box.child.exitCode).toBe(null);
+      } finally {
+        box.child.kill("SIGTERM");
+        await exitOf(box.child);
+        rmSync(home, { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    loadAdjustedTimeout(30_000),
+  );
 });

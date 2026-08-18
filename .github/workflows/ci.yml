@@ -124,6 +124,23 @@ jobs:
             bun --version
           fi
 
+      - name: Measure shared-host load factor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cpu_count="$(nproc)"
+          runner_jobs="$(pgrep -fc 'Runner\.Worker' || true)"
+          read -r _ _ _ runnable _ < /proc/loadavg
+          runnable="${runnable%%/*}"
+          runner_jobs="${runner_jobs:-1}"
+          pressure="$runner_jobs"
+          if [ "$runnable" -gt "$pressure" ]; then pressure="$runnable"; fi
+          load_factor=$(( (pressure + cpu_count - 1) / cpu_count ))
+          if [ "$load_factor" -lt 1 ]; then load_factor=1; fi
+          if [ "$load_factor" -gt 4 ]; then load_factor=4; fi
+          echo "CI_LOAD_FACTOR=$load_factor" >> "$GITHUB_ENV"
+          echo "Spawn-test load factor: $load_factor ($pressure runnable/jobs across $cpu_count CPUs)."
+
       - name: Install root dependencies
         run: bun install --frozen-lockfile
 
@@ -188,6 +205,23 @@ jobs:
             bun --version
           fi
 
+      - name: Measure shared-host load factor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cpu_count="$(nproc)"
+          runner_jobs="$(pgrep -fc 'Runner\.Worker' || true)"
+          read -r _ _ _ runnable _ < /proc/loadavg
+          runnable="${runnable%%/*}"
+          runner_jobs="${runner_jobs:-1}"
+          pressure="$runner_jobs"
+          if [ "$runnable" -gt "$pressure" ]; then pressure="$runnable"; fi
+          load_factor=$(( (pressure + cpu_count - 1) / cpu_count ))
+          if [ "$load_factor" -lt 1 ]; then load_factor=1; fi
+          if [ "$load_factor" -gt 4 ]; then load_factor=4; fi
+          echo "CI_LOAD_FACTOR=$load_factor" >> "$GITHUB_ENV"
+          echo "Spawn-test load factor: $load_factor ($pressure runnable/jobs across $cpu_count CPUs)."
+
       - name: Install root dependencies
         run: bun install --frozen-lockfile
 
@@ -213,6 +247,42 @@ jobs:
 
       - name: Formatting check (prettier)
         run: bun run format:check
+
+      - name: Guard host-serialized spawn suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t spawn_suites < <(
+            rg -l --glob '*.test.mjs' \
+              "from [\"']node:child_process[\"']|Bun\\.spawn|spawnTracked|spawnWorker|spawnSupervisor|assertHealthyLiveServe|runNotifierDeliveryCase" \
+              event-runtime/cli event-runtime/demo event-runtime/lib/adapters \
+              | sort
+          )
+
+          if [ "${#spawn_suites[@]}" -eq 0 ]; then
+            echo "::error::Spawn-suite guard found no tests; its search contract is stale."
+            exit 1
+          fi
+
+          unexpected=()
+          for suite in "${spawn_suites[@]}"; do
+            if [[ "$suite" =~ ^event-runtime/cli/[^/]+\.test\.mjs$ ]]; then
+              route="Verify / Integration and spawn tests"
+            elif [[ "$suite" = "event-runtime/demo/seed.test.mjs" ]]; then
+              route="Verify / Integration and spawn tests"
+            elif [[ "$suite" =~ ^event-runtime/lib/adapters/[^/]+\.test\.mjs$ ]]; then
+              route="Fast unit tests / Test event-runtime library"
+            else
+              unexpected+=("$suite")
+              continue
+            fi
+            printf '%s -> %s (lane/fast-unit)\n' "$suite" "$route"
+          done
+
+          if [ "${#unexpected[@]}" -gt 0 ]; then
+            printf '::error::Runtime-spawning test suite is outside a host-locked route: %s\n' "${unexpected[*]}"
+            exit 1
+          fi
 
       - name: Integration and spawn tests
         # event-runtime/lib runs in the separately rerunnable fast-unit job.

@@ -26,6 +26,20 @@ import { spawnTracked, trackProcess } from "../lib/test-helpers-process.mjs";
 
 export const CLI = fileURLToPath(new URL("../cli.mjs", import.meta.url));
 
+const parsedLoadFactor = Number.parseFloat(process.env.CI_LOAD_FACTOR ?? "1");
+
+/**
+ * Stretch only liveness ceilings when CI reports shared-host contention.
+ * Assertions still wait on observable state; this is not a fixed delay.
+ */
+export const CI_LOAD_FACTOR =
+  Number.isFinite(parsedLoadFactor) && parsedLoadFactor >= 1
+    ? Math.min(parsedLoadFactor, 4)
+    : 1;
+
+export const loadAdjustedTimeout = (timeoutMs) =>
+  Math.ceil(timeoutMs * CI_LOAD_FACTOR);
+
 /** A loopback port nothing in these tests ever listens on. */
 export const DEAD_PORT = "59987";
 
@@ -52,6 +66,7 @@ export function runCli(args, env = {}) {
 }
 
 export async function awaitFile(file, label, { timeoutMs = 5000 } = {}) {
+  timeoutMs = loadAdjustedTimeout(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (existsSync(file)) return;
@@ -66,6 +81,7 @@ export async function awaitNotifierDelivery(
   target,
   { timeoutMs = 5000 } = {},
 ) {
+  timeoutMs = loadAdjustedTimeout(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const row = db
@@ -121,7 +137,7 @@ export async function assertHealthyLiveServe() {
   child.stderr.on("data", (b) => {
     out += b;
   });
-  const deadline = Date.now() + 8000;
+  const deadline = Date.now() + loadAdjustedTimeout(8000);
   while (Date.now() < deadline && !out.includes("control API on")) {
     await Bun.sleep(10);
   }
@@ -277,6 +293,7 @@ export function spawnWorker(args, env) {
 }
 
 export async function waitFor(box, needle, timeoutMs = 15_000) {
+  timeoutMs = loadAdjustedTimeout(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline && !box.out.includes(needle))
     await Bun.sleep(50);
