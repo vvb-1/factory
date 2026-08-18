@@ -113,7 +113,10 @@ export function Settings({
     queryFn: fetchConfig,
     ...refetchIntervals.secondary,
   });
-  const sections = query.data?.sections ?? [];
+  const sections = useMemo(
+    () => query.data?.sections ?? [],
+    [query.data?.sections],
+  );
   const selected =
     sections.find((section) => section.id === focusSectionId) ??
     sections[0] ??
