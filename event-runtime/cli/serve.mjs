@@ -110,8 +110,8 @@ export async function tick({
     for (const err of auto.errors) logLine(`schedule approval error: ${err}`);
   });
 
-  await runStep("auto-approve-chains", () => {
-    const auto = autoApproveChains(db, registry, {
+  await runStep("auto-approve-chains", async () => {
+    const auto = await autoApproveChains(db, registry, {
       now,
       policyVersion: pv,
       dispatchEligibility: worktreeDispatchAutoEligibility,

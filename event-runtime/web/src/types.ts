@@ -606,6 +606,13 @@ export interface StatusView {
     orphanBytes: number;
     at?: string;
   };
+  /** `approve.before` hook decisions in the trailing 24h, by hook id (WM-842); absent on a pre-hooks control API. */
+  hooks?: {
+    decisions24h: Record<
+      string,
+      { source: string; point: string; allow: number; deny: number }
+    >;
+  };
   anomalies: {
     configuration?: string[];
     expiredOpenProposals: string[];

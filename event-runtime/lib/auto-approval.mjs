@@ -10,6 +10,7 @@ import path from "node:path";
 import { budgetExhausted } from "../../lib/spend.mjs";
 import { buildChainInput } from "./chain.mjs";
 import { hashJson } from "./canonical.mjs";
+import { defaultHookRegistry } from "./hooks.mjs";
 import { approveProposal } from "./proposals.mjs";
 import { getAgent, getEventType } from "./registry.mjs";
 import { reposRoot } from "./repos.mjs";
@@ -221,12 +222,44 @@ function sameJson(left, right) {
   return hashJson(left) === hashJson(right);
 }
 
-function hasSecurityOrEscalation(labels = []) {
-  return labels.some(
-    (label) =>
-      label === "ai:escalated" ||
-      label === "type:security" ||
-      /security/i.test(label),
+/** `approve.before` hook point (lib/hooks.mjs); the seam an extension gates on. */
+export const APPROVE_BEFORE_HOOK = "approve.before";
+
+function isThenable(value) {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof value.then === "function"
+  );
+}
+
+/** Continue with `fn` after `value`, synchronously unless `value` is a thenable. */
+function after(value, fn) {
+  return isThenable(value) ? value.then(fn) : fn(value);
+}
+
+/**
+ * Run the `approve.before` waterfall for one proposal. Hooks see a copy of
+ * the proposal, its RunSpec, the dispatch recheck evidence (null for
+ * non-dispatch events), the RunSpec's approvalPolicy, the repo and the clock;
+ * `ctx.config` is added per hook by the registry (docs/extensions.md § Hooks).
+ * A throwing registry (a persistence failure, say) is the caller's problem —
+ * `autoApproveChains` turns it into a typed reason, never an approval.
+ *
+ * @returns {import("./hooks.mjs").HookRun | Promise<import("./hooks.mjs").HookRun>}
+ */
+function approveBeforeHooks(hooks, ctx, { evidence = null } = {}) {
+  return hooks.run(
+    APPROVE_BEFORE_HOOK,
+    {
+      proposal: ctx.proposal,
+      spec: ctx.spec,
+      evidence,
+      policy: ctx.spec?.approvalPolicy ?? null,
+      repo: ctx.spec?.input?.repo ?? null,
+      now: ctx.now,
+    },
+    { db: ctx.db, timeoutMs: ctx.hookTimeoutMs, now: ctx.now },
   );
 }
 
@@ -266,7 +299,13 @@ function proposalIntegrity(candidate, mapping, envelope) {
   return null;
 }
 
-function dispatchSafe(envelope, approvalPolicy, dispatchEligibility, dispatch) {
+function dispatchSafe(
+  envelope,
+  approvalPolicy,
+  dispatchEligibility,
+  dispatch,
+  hookCtx,
+) {
   if (typeof dispatchEligibility !== "function")
     return "dispatch_recheck_unavailable";
 
@@ -289,13 +328,19 @@ function dispatchSafe(envelope, approvalPolicy, dispatchEligibility, dispatch) {
     return "dispatch_ineligible:evidence_changed_since_plan";
   }
 
-  const labels = result.evidence?.ticket?.labels ?? [];
-  if (hasSecurityOrEscalation(labels))
-    return "dispatch_ineligible:escalated_or_security";
-  if ((result.evidence?.escalatePathIntersections ?? []).length > 0)
-    return "dispatch_ineligible:escalate_paths_intersect";
-
-  return null;
+  // The escalated/security-label refusal ran inline here before WM-842; it is
+  // now the built-in `factory:escalation-labels` hook, first in the waterfall,
+  // and every hook deny keeps the `dispatch_ineligible:<reason>` shape.
+  return after(
+    approveBeforeHooks(hookCtx.hooks, hookCtx, { evidence: result.evidence }),
+    (verdict) => {
+      if (verdict.decision === "deny")
+        return `dispatch_ineligible:${verdict.reason}`;
+      if ((result.evidence?.escalatePathIntersections ?? []).length > 0)
+        return "dispatch_ineligible:escalate_paths_intersect";
+      return null;
+    },
+  );
 }
 
 function mergeBarrierReason(db, registry, candidate, now) {
@@ -655,12 +700,16 @@ function mergeEligibility(db, registry, candidate, envelope, policy, now) {
     : null;
 }
 
+/**
+ * @returns {string|null|Promise<string|null>} an ineligibility reason, or
+ *   null; a Promise only when an `approve.before` hook answered asynchronously.
+ */
 function eligible(
   db,
   candidate,
   registry,
   policy,
-  { dispatchEligibility, dispatch, now },
+  { dispatchEligibility, dispatch, now, hooks, hookTimeoutMs },
 ) {
   if (candidate.event_source !== CHAIN_APPROVAL_SOURCE)
     return "event_source_not_chain";
@@ -723,15 +772,35 @@ function eligible(
   ) {
     return "triage_action_not_closed";
   }
+  const hookCtx = {
+    hooks,
+    db,
+    now,
+    hookTimeoutMs,
+    proposal: {
+      id: candidate.id,
+      runId: candidate.run_id,
+      eventSource: candidate.event_source,
+      eventId: candidate.event_id,
+      eventType: candidate.event_type,
+      createdAt: candidate.created_at,
+      ttlSeconds: candidate.ttl_seconds,
+    },
+    spec: runSpec,
+  };
   if (envelope.type === "factory.dispatch.requested") {
     return dispatchSafe(
       envelope,
       approvalPolicy,
       dispatchEligibility,
       dispatch,
+      hookCtx,
     );
   }
-  return null;
+  // Every other auto-approval runs the same hooks, with no dispatch evidence.
+  return after(approveBeforeHooks(hooks, hookCtx), (verdict) =>
+    verdict.decision === "deny" ? `hook_denied:${verdict.reason}` : null,
+  );
 }
 
 function noteOpenReason(db, id, reason) {
@@ -740,11 +809,47 @@ function noteOpenReason(db, id, reason) {
   ).run(`auto_approval_ineligible:${reason}`, id);
 }
 
+/** One pass at a time per database: a floating pass and an awaited one must not interleave. */
+const PASSES = new WeakMap();
+
 /**
  * Recheck and approve the currently open, eligible chain proposals once.
  * A second pass finds no approved proposal and therefore cannot double-approve.
+ *
+ * Returns a Promise, but does its work eagerly: with only synchronous
+ * `approve.before` hooks (the built-in one) the whole pass completes before
+ * the Promise is handed back, so a caller that ignores it (planAdmittedEvents)
+ * still gets the pre-WM-842 behaviour. An asynchronous extension hook defers
+ * the rest of the pass; `serve` awaits it. The Promise never rejects — every
+ * fault is a typed reason on the proposal or an `errors` entry.
+ *
+ * @returns {Promise<{ approved: Array<{ proposalId: string, runId: string }>, open: Array<{ proposalId: string, reason: string }>, errors: Array<{ proposalId: string|null, reason: string, message: string }> }>}
  */
-export function autoApproveChains(
+export function autoApproveChains(db, registry, options = {}) {
+  const state = PASSES.get(db) ?? { tail: null };
+  PASSES.set(db, state);
+  // `settled` flips inside runPass's own frame, so a pass that never awaited
+  // is known to be complete before this function returns and leaves no tail
+  // for the next call to queue behind.
+  const marker = { settled: false };
+  const pass = state.tail
+    ? state.tail.then(() => runPass(db, registry, options, marker))
+    : runPass(db, registry, options, marker);
+  if (!marker.settled) {
+    state.tail = pass;
+    pass.finally(() => {
+      if (state.tail === pass) state.tail = null;
+    });
+  }
+  return pass;
+}
+
+/**
+ * The pass itself. `marker.settled` is set in a `finally` inside this async
+ * frame: if no `await` was reached (every hook answered synchronously) it is
+ * true before the returned Promise even exists — the eager guarantee above.
+ */
+async function runPass(
   db,
   registry,
   {
@@ -755,68 +860,105 @@ export function autoApproveChains(
     policy = loadChainAutoApprovalPolicy(),
     runtimeGuard = chainRuntimeGuard,
     runtimeGuardOptions = {},
+    hooks = defaultHookRegistry(),
+    hookTimeoutMs,
   } = {},
+  marker = { settled: false },
 ) {
-  const approved = [];
-  const open = [];
-  const errors = [];
-  const rows = db
-    .query(
-      `SELECT p.id, p.run_id, p.event_source, p.event_id, p.spec_json AS proposal_spec_json, p.spec_hash AS proposal_spec_hash,
-            p.created_at, p.ttl_seconds, e.type AS event_type, e.envelope_json,
-            r.spec_json AS run_spec_json, r.spec_hash AS run_spec_hash
-       FROM proposals p
-       JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
-       JOIN runs r ON r.run_id = p.run_id
-      WHERE p.status = 'open' AND p.decision = 'run' AND e.source = 'chain'
-      ORDER BY p.created_at, p.rowid`,
-    )
-    .all();
-
-  for (const row of rows) {
-    const age = now - Date.parse(row.created_at);
-    const reason =
-      age > row.ttl_seconds * 1000
-        ? "proposal_expired"
-        : eligible(db, row, registry, policy, {
-            dispatchEligibility,
-            dispatch,
-            now,
-          });
-    if (reason) {
-      noteOpenReason(db, row.id, reason);
-      open.push({ proposalId: row.id, reason });
-      continue;
-    }
-    let guardReason;
+  try {
+    const approved = [];
+    const open = [];
+    const errors = [];
+    let rows;
     try {
-      guardReason = runtimeGuard(db, runtimeGuardOptions);
-    } catch {
-      guardReason = "runtime_guard_failed";
-    }
-    if (guardReason) {
-      noteOpenReason(db, row.id, guardReason);
-      open.push({ proposalId: row.id, reason: guardReason });
-      continue;
-    }
-    try {
-      const outcome = approveProposal(db, registry, row.id, {
-        actor: CHAIN_AUTO_APPROVAL_ACTOR,
-        reason: CHAIN_AUTO_APPROVAL_REASON,
-        now,
-        policyVersion,
-      });
-      if (outcome.approved)
-        approved.push({ proposalId: row.id, runId: outcome.runId });
-      else {
-        noteOpenReason(db, row.id, "replanned");
-        open.push({ proposalId: row.id, reason: "replanned" });
-      }
+      rows = db
+        .query(
+          `SELECT p.id, p.run_id, p.event_source, p.event_id, p.spec_json AS proposal_spec_json, p.spec_hash AS proposal_spec_hash,
+              p.created_at, p.ttl_seconds, e.type AS event_type, e.envelope_json,
+              r.spec_json AS run_spec_json, r.spec_hash AS run_spec_hash
+         FROM proposals p
+         JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
+         JOIN runs r ON r.run_id = p.run_id
+        WHERE p.status = 'open' AND p.decision = 'run' AND e.source = 'chain'
+        ORDER BY p.created_at, p.rowid`,
+        )
+        .all();
     } catch (err) {
-      const message = String(err?.message ?? err);
-      noteOpenReason(db, row.id, "approval_error");
-      errors.push({ proposalId: row.id, reason: "approval_error", message });
+      errors.push({
+        proposalId: null,
+        reason: "pass_failed",
+        message: String(err?.message ?? err),
+      });
+      return { approved, open, errors };
     }
+
+    for (const row of rows) {
+      try {
+        const age = now - Date.parse(row.created_at);
+        let reason;
+        if (age > row.ttl_seconds * 1000) reason = "proposal_expired";
+        else {
+          try {
+            reason = eligible(db, row, registry, policy, {
+              dispatchEligibility,
+              dispatch,
+              now,
+              hooks,
+              hookTimeoutMs,
+            });
+            if (isThenable(reason)) reason = await reason;
+          } catch {
+            reason = "approve_hooks_failed";
+          }
+        }
+        if (reason) {
+          noteOpenReason(db, row.id, reason);
+          open.push({ proposalId: row.id, reason });
+          continue;
+        }
+        let guardReason;
+        try {
+          guardReason = runtimeGuard(db, runtimeGuardOptions);
+        } catch {
+          guardReason = "runtime_guard_failed";
+        }
+        if (guardReason) {
+          noteOpenReason(db, row.id, guardReason);
+          open.push({ proposalId: row.id, reason: guardReason });
+          continue;
+        }
+        try {
+          const outcome = approveProposal(db, registry, row.id, {
+            actor: CHAIN_AUTO_APPROVAL_ACTOR,
+            reason: CHAIN_AUTO_APPROVAL_REASON,
+            now,
+            policyVersion,
+          });
+          if (outcome.approved)
+            approved.push({ proposalId: row.id, runId: outcome.runId });
+          else {
+            noteOpenReason(db, row.id, "replanned");
+            open.push({ proposalId: row.id, reason: "replanned" });
+          }
+        } catch (err) {
+          const message = String(err?.message ?? err);
+          noteOpenReason(db, row.id, "approval_error");
+          errors.push({
+            proposalId: row.id,
+            reason: "approval_error",
+            message,
+          });
+        }
+      } catch (err) {
+        errors.push({
+          proposalId: row.id,
+          reason: "pass_row_failed",
+          message: String(err?.message ?? err),
+        });
+      }
+    }
+    return { approved, open, errors };
+  } finally {
+    marker.settled = true;
   }
-  return { approved, open, errors };
 }

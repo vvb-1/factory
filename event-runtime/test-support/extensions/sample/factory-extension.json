@@ -1,7 +1,7 @@
 {
   "name": "factory/sample",
   "version": "1.0.0",
-  "description": "Test fixture: one pack (a copy of test-support/packs/sample under the sample-ext namespace), one trivial adapter, and a config schema.",
+  "description": "Test fixture: one pack (a copy of test-support/packs/sample under the sample-ext namespace), one trivial adapter, a config schema, and one approve.before hook.",
   "factory": {
     "min": "0.1.0"
   },
@@ -13,6 +13,9 @@
     "config": {
       "namespace": "sample",
       "schema": "./config.schema.json"
+    },
+    "hooks": {
+      "approve.before": "./hooks/approve-before.mjs"
     }
   }
 }

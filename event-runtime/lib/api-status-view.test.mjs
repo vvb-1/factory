@@ -36,6 +36,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "./api-test-helpers.mjs";
+import { createHookRegistry } from "./hooks.mjs";
 
 const makeServer = async (...args) => {
   const result = await makeApiServer(...args);
@@ -568,5 +569,66 @@ describe("StatusView and Worker client types pinned to API response (OPS-284)", 
         extractedRenamedKeys,
       );
     }).toThrow();
+  });
+});
+
+describe("GET /status hook decisions (WM-842)", () => {
+  test("hooks.decisions24h counts allow/deny per hook id, only within the trailing 24h", async () => {
+    const dir = tmpDir("evrt-status-hooks-");
+    const db = openDb(path.join(dir, "runtime.db"));
+    const nowMs = Date.parse("2026-08-19T12:00:00.000Z");
+    const hooks = createHookRegistry();
+    hooks.register(
+      "approve.before",
+      {
+        id: "acme/x:gate",
+        default: () => ({ decision: "deny", reason: "no" }),
+      },
+      { source: "extension:acme/x" },
+    );
+    const ctx = (labels) => ({
+      proposal: { id: "p1", runId: "r1" },
+      evidence: { ticket: { labels }, escalatePathIntersections: [] },
+    });
+    hooks.run("approve.before", ctx(["ai:escalated"]), { db, now: nowMs });
+    hooks.run("approve.before", ctx([]), { db, now: nowMs - 3600_000 });
+    hooks.run("approve.before", ctx([]), { db, now: nowMs - 25 * 3600_000 });
+
+    const s = await makeServer({ db, secret: "sec", now: () => nowMs });
+    try {
+      const res = await fetch(s.url("/status"));
+      expect(res.status).toBe(200);
+      const status = await res.json();
+      expect(status.hooks).toEqual({
+        decisions24h: {
+          "factory:escalation-labels": {
+            source: "builtin",
+            point: "approve.before",
+            allow: 1,
+            deny: 1,
+          },
+          "acme/x:gate": {
+            source: "extension:acme/x",
+            point: "approve.before",
+            allow: 0,
+            deny: 1,
+          },
+        },
+      });
+    } finally {
+      s.close();
+    }
+  });
+
+  test("hooks.decisions24h is empty before any hook ever ran (no table yet)", async () => {
+    const dir = tmpDir("evrt-status-hooks-empty-");
+    const db = openDb(path.join(dir, "runtime.db"));
+    const s = await makeServer({ db, secret: "sec", now: () => 100000000 });
+    try {
+      const status = await (await fetch(s.url("/status"))).json();
+      expect(status.hooks).toEqual({ decisions24h: {} });
+    } finally {
+      s.close();
+    }
   });
 });
