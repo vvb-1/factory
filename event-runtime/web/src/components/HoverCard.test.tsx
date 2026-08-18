@@ -8,6 +8,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react";
+import { createPortal } from "react-dom";
 import {
   CLOSE_MS,
   computeHoverCardPosition,
@@ -634,6 +635,40 @@ describe("HoverCard", () => {
     fireEvent.keyDown(panel, { key: "Tab" });
 
     expect(document.activeElement).toBe(trigger);
+  });
+
+  test("Tab from a nested portal does not return focus to the trigger", async () => {
+    const portalHost = document.createElement("div");
+    document.body.appendChild(portalHost);
+    try {
+      const r = render(
+        <HoverCard
+          label="Agent triage-scan"
+          openDelayMs={0}
+          closeDelayMs={0}
+          trigger="triage-scan"
+        >
+          {createPortal(
+            <button type="button">Portal action</button>,
+            portalHost,
+          )}
+        </HoverCard>,
+      );
+      const trigger = triggerOf(r.container);
+      trigger.focus();
+      fireEvent.focus(trigger);
+      await waitFor(() => expect(r.getByRole("dialog")).toBeTruthy());
+
+      const portalAction = r.getByRole("button", { name: "Portal action" });
+      portalAction.focus();
+      const event = createEvent.keyDown(portalAction, { key: "Tab" });
+      fireEvent(portalAction, event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(portalAction);
+    } finally {
+      portalHost.remove();
+    }
   });
 
   test("drops the entry animation when reduced motion is preferred", async () => {

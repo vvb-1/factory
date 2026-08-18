@@ -436,8 +436,11 @@ export function HoverCard({
       if (e.key !== "Tab") return;
       const root = panelRef.current;
       if (!root) return;
-      const stops = getTabbableElements(root);
       const active = document.activeElement;
+      // React events from a nested portal still bubble through this panel's
+      // component tree, but its focused element is not one of the panel edges.
+      if (!active || !root.contains(active)) return;
+      const stops = getTabbableElements(root);
       // A card with nothing focusable holds focus on the panel itself, so
       // either direction is an edge. Otherwise only the far end is: forward
       // from the panel root still walks into the card, as the DOM order says.
