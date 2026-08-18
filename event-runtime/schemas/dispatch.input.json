@@ -14,6 +14,11 @@
       "pattern": "^[A-Z]+-[0-9]+$",
       "description": "Linear issue identifier to implement; must be Todo + ai:agent-ready + unassigned at plan time (docs/event-runtime-dispatch.md §2)"
     },
+    "modelTier": {
+      "type": "string",
+      "enum": ["strong", "standard", "light"],
+      "description": "Optional per-dispatch model tier override; takes precedence over the ticket tier:* label and agent definition"
+    },
     "humanDecision": {
       "type": "object",
       "required": ["schemaVersion", "inboxItemId", "authorisation"],
