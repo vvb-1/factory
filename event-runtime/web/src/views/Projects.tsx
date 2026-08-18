@@ -15,6 +15,7 @@ import { setContextActions } from "../palette";
 import type { JanitorResult, RepoItem } from "../types";
 import { ScopeCaption } from "../components/ContextTabs";
 import { Button as PrimitiveButton } from "../components/ui";
+import { EMPTY } from "../format";
 
 const PROJECT_MODES = ["ALL", "DISPATCHABLE", "REPORT_ONLY"] as const;
 type ProjectMode = (typeof PROJECT_MODES)[number];
@@ -54,6 +55,34 @@ const worktreeScripts = (repo: RepoItem) =>
   ]
     .filter(Boolean)
     .join(" · ");
+
+const emptyValue = <span className="text-(--text-faint)">{EMPTY}</span>;
+
+function ConfigSource() {
+  return (
+    <div className="mb-2 border-b border-(--border) pb-1.5 text-[11px] text-(--text-faint)">
+      Source: <code className="mono text-(--text-dim)">config/repos.yaml</code>
+    </div>
+  );
+}
+
+function ConfigList({ values }: { values: string[] }) {
+  if (values.length === 0) return emptyValue;
+  return (
+    <div className="max-w-full overflow-x-auto pb-1">
+      <div className="flex w-max min-w-full flex-wrap gap-1.5">
+        {values.map((value) => (
+          <code
+            key={value}
+            className="mono whitespace-nowrap rounded border border-(--border) bg-(--surface-1) px-1.5 py-0.5 text-[11px] text-(--text-dim)"
+          >
+            {value}
+          </code>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const defaultProjectOrder = (a: RepoItem, b: RepoItem) =>
   Number(a.reportOnly) - Number(b.reportOnly) ||
@@ -477,184 +506,189 @@ export function Projects({
 
   return (
     <div className="flex h-full min-w-0">
-      <ListPane
-        chrome={
-          <>
-            <h1 className="display mb-4 text-h1 font-semibold">Projects</h1>
-            <ScopeCaption
-              context={context}
-              surface="registry"
-              subject={{ label: "Projects", plural: true }}
-            />
-            <ListToolbar
-              tabs={
-                <>
-                  <select
-                    aria-label="Project mode"
-                    value={filterMode}
-                    onChange={(event) =>
-                      setFilterMode(event.target.value as ProjectMode)
-                    }
-                    className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
-                  >
-                    {PROJECT_MODES.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {mode === "ALL"
-                          ? "All"
-                          : mode === "DISPATCHABLE"
-                            ? "Dispatchable"
-                            : "Report-Only"}{" "}
-                        {modeCounts[mode]}
-                      </option>
-                    ))}
-                  </select>
-                  <div
-                    className="hidden w-max flex-nowrap gap-1 whitespace-nowrap text-[12px] sm:flex"
-                    role="tablist"
-                    aria-label="Project mode"
-                  >
-                    {PROJECT_MODES.map((mode, idx) => (
-                      <PrimitiveButton
-                        bare
-                        key={mode}
-                        type="button"
-                        role="tab"
-                        aria-selected={filterMode === mode}
-                        onClick={() => setFilterMode(mode)}
-                        className={`shrink-0 rounded-md px-2.5 py-1 font-medium transition-colors ${
-                          filterMode === mode
-                            ? "bg-(--surface-3) text-(--text)"
-                            : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
-                        }`}
-                      >
-                        {mode === "ALL"
-                          ? "All"
-                          : mode === "DISPATCHABLE"
-                            ? "Dispatchable"
-                            : "Report-Only"}
-                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                          {modeCounts[mode]}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          className="mono ml-1 text-(--text-faint) text-xs opacity-70"
-                        >
-                          {idx + 1}
-                        </span>
-                      </PrimitiveButton>
-                    ))}
-                  </div>
-                </>
-              }
-              tools={
-                <FilterInput
-                  value={filter}
-                  onChange={setFilter}
-                  placeholder="Filter repo, project, team, github… (/)"
-                  label="Filter repositories"
-                />
-              }
-            />
-          </>
-        }
+      <div
+        data-testid="projects-list-pane"
+        className={`min-h-0 min-w-0 flex-1 ${sel ? "hidden lg:flex" : "flex"}`}
       >
-        <Table
-          aria-label="Projects table"
-          className="w-full min-w-[760px] border-separate border-spacing-0"
-        >
-          <thead>
-            <tr className="text-left">
-              {PROJECTS_SORT.columns.map((column) => {
-                const field = PROJECTS_SORT.sorts.find(
-                  (candidate) => candidate.column === column.key,
-                )!;
-                return (
-                  <Th
-                    key={column.key}
-                    label={column.label}
-                    dir={sort.sortBy === field.key ? sort.sortDir : null}
-                    onSort={() =>
-                      setSort((state) =>
-                        cycleColumnSort(PROJECTS_SORT, state, column.key),
-                      )
-                    }
+        <ListPane
+          chrome={
+            <>
+              <h1 className="display mb-4 text-h1 font-semibold">Projects</h1>
+              <ScopeCaption
+                context={context}
+                surface="registry"
+                subject={{ label: "Projects", plural: true }}
+              />
+              <ListToolbar
+                tabs={
+                  <>
+                    <select
+                      aria-label="Project mode"
+                      value={filterMode}
+                      onChange={(event) =>
+                        setFilterMode(event.target.value as ProjectMode)
+                      }
+                      className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
+                    >
+                      {PROJECT_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode === "ALL"
+                            ? "All"
+                            : mode === "DISPATCHABLE"
+                              ? "Dispatchable"
+                              : "Report-Only"}{" "}
+                          {modeCounts[mode]}
+                        </option>
+                      ))}
+                    </select>
+                    <div
+                      className="hidden w-max flex-nowrap gap-1 whitespace-nowrap text-[12px] sm:flex"
+                      role="tablist"
+                      aria-label="Project mode"
+                    >
+                      {PROJECT_MODES.map((mode, idx) => (
+                        <PrimitiveButton
+                          bare
+                          key={mode}
+                          type="button"
+                          role="tab"
+                          aria-selected={filterMode === mode}
+                          onClick={() => setFilterMode(mode)}
+                          className={`shrink-0 rounded-md px-2.5 py-1 font-medium transition-colors ${
+                            filterMode === mode
+                              ? "bg-(--surface-3) text-(--text)"
+                              : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
+                          }`}
+                        >
+                          {mode === "ALL"
+                            ? "All"
+                            : mode === "DISPATCHABLE"
+                              ? "Dispatchable"
+                              : "Report-Only"}
+                          <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                            {modeCounts[mode]}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className="mono ml-1 text-(--text-faint) text-xs opacity-70"
+                          >
+                            {idx + 1}
+                          </span>
+                        </PrimitiveButton>
+                      ))}
+                    </div>
+                  </>
+                }
+                tools={
+                  <FilterInput
+                    value={filter}
+                    onChange={setFilter}
+                    placeholder="Filter repo, project, team, github… (/)"
+                    label="Filter repositories"
                   />
+                }
+              />
+            </>
+          }
+        >
+          <Table
+            aria-label="Projects table"
+            className="w-full min-w-[760px] border-separate border-spacing-0"
+          >
+            <thead>
+              <tr className="text-left">
+                {PROJECTS_SORT.columns.map((column) => {
+                  const field = PROJECTS_SORT.sorts.find(
+                    (candidate) => candidate.column === column.key,
+                  )!;
+                  return (
+                    <Th
+                      key={column.key}
+                      label={column.label}
+                      dir={sort.sortBy === field.key ? sort.sortDir : null}
+                      onSort={() =>
+                        setSort((state) =>
+                          cycleColumnSort(PROJECTS_SORT, state, column.key),
+                        )
+                      }
+                    />
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r, i) => {
+                return (
+                  <tr
+                    key={r.name}
+                    onClick={() => onSelectRepo(r.name)}
+                    aria-selected={i === selectedIndex}
+                    className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
+                  >
+                    <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap font-semibold text-(--text)">
+                      {r.name}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      {r.team ? (
+                        <span className="rounded bg-(--surface-2) px-1.5 py-0.5 mono text-[11px] font-medium text-(--text-dim)">
+                          {r.team}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
+                      {projectTarget(r)}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
+                        style={
+                          r.reportOnly
+                            ? {
+                                color: "var(--text-faint)",
+                                background:
+                                  "color-mix(in oklch, var(--text-faint) 12%, transparent)",
+                              }
+                            : {
+                                color: "var(--hue-ok)",
+                                background:
+                                  "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
+                              }
+                        }
+                      >
+                        {r.reportOnly ? "Report Only" : "Dispatchable"}
+                      </span>
+                    </td>
+                    <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
+                      {r.base}
+                      {r.deployBranch ? ` → ${r.deployBranch}` : ""}
+                    </td>
+                    <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-xs text-(--text-faint)">
+                      {worktreeScripts(r) || (
+                        <span className="text-(--text-faint)">—</span>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((r, i) => {
-              return (
-                <tr
-                  key={r.name}
-                  onClick={() => onSelectRepo(r.name)}
-                  aria-selected={i === selectedIndex}
-                  className={`cursor-pointer hover:bg-(--surface-1) ${i === selectedIndex ? "row-selected" : ""}`}
-                >
-                  <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap font-semibold text-(--text)">
-                    {r.name}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                    {r.team ? (
-                      <span className="rounded bg-(--surface-2) px-1.5 py-0.5 mono text-[11px] font-medium text-(--text-dim)">
-                        {r.team}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="max-w-64 truncate border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
-                    {projectTarget(r)}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap">
-                    <span
-                      className="rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
-                      style={
-                        r.reportOnly
-                          ? {
-                              color: "var(--text-faint)",
-                              background:
-                                "color-mix(in oklch, var(--text-faint) 12%, transparent)",
-                            }
-                          : {
-                              color: "var(--hue-ok)",
-                              background:
-                                "color-mix(in oklch, var(--hue-ok) 12%, transparent)",
-                            }
-                      }
-                    >
-                      {r.reportOnly ? "Report Only" : "Dispatchable"}
-                    </span>
-                  </td>
-                  <td className="mono border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-(--text-dim)">
-                    {r.base}
-                    {r.deployBranch ? ` → ${r.deployBranch}` : ""}
-                  </td>
-                  <td className="border-b border-(--border) px-3 py-1.5 whitespace-nowrap text-xs text-(--text-faint)">
-                    {worktreeScripts(r) || (
-                      <span className="text-(--text-faint)">—</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {visible.length === 0 && (
-              <ListEmpty
-                colSpan={6}
-                query={query}
-                filtered={repos.length > 0}
-                noun="repositories"
-                empty="No configured repositories in config/repos.yaml."
-              />
-            )}
-          </tbody>
-        </Table>
-      </ListPane>
+              {visible.length === 0 && (
+                <ListEmpty
+                  colSpan={6}
+                  query={query}
+                  filtered={repos.length > 0}
+                  noun="repositories"
+                  empty="No configured repositories in config/repos.yaml."
+                />
+              )}
+            </tbody>
+          </Table>
+        </ListPane>
+      </div>
 
       {sel && (
         <DetailPane
-          widthClass="w-full max-w-full sm:w-[540px]"
+          widthClass="w-full max-w-full lg:w-[540px]"
           title={
             <div className="flex items-center gap-2">
               <span className="mono font-semibold" title={sel.name}>
@@ -770,10 +804,11 @@ export function Projects({
               </div>
             </Section>
 
-            <Section id="project-configuration" title="Configuration" icons>
+            <Section id="project-configuration" title="Dispatch" icons>
+              <ConfigSource />
               <KV k="Name" v={sel.name} />
-              {sel.project && <KV k="Project" v={sel.project} />}
-              {sel.team && <KV k="Team" v={sel.team} />}
+              <KV k="Project" v={sel.project ?? emptyValue} />
+              <KV k="Team" v={sel.team ?? emptyValue} />
               <KV
                 k="Path"
                 v={
@@ -786,10 +821,10 @@ export function Projects({
                   </span>
                 }
               />
-              {sel.github && (
-                <KV
-                  k="GitHub"
-                  v={
+              <KV
+                k="GitHub"
+                v={
+                  sel.github ? (
                     <a
                       href={`https://github.com/${sel.github}`}
                       target="_blank"
@@ -798,13 +833,12 @@ export function Projects({
                     >
                       {sel.github}
                     </a>
-                  }
-                />
-              )}
+                  ) : (
+                    emptyValue
+                  )
+                }
+              />
               <KV k="Base branch" v={sel.base} />
-              {sel.deployBranch && (
-                <KV k="Deploy branch" v={sel.deployBranch} />
-              )}
               <KV
                 k="Execution mode"
                 v={
@@ -822,60 +856,171 @@ export function Projects({
                   </span>
                 }
               />
-              {sel.maxInFlight !== null && (
-                <KV k="Max in flight" v={sel.maxInFlight} />
-              )}
-              {sel.worktreeRoot && (
-                <KV k="Worktrees root" v={sel.worktreeRoot} />
-              )}
-              {sel.verify && (
-                <div className="mt-2">
-                  <div className="text-[11px] text-(--text-faint)">
-                    Verification Command
-                  </div>
-                  <pre className="mono mt-1 overflow-auto rounded bg-(--surface-0) p-2 text-[11px] text-(--text-dim)">
+              <KV
+                k="Max in flight"
+                v={
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="mono text-(--text)">
+                      {sel.effective?.maxInFlight ?? sel.maxInFlight ?? EMPTY}
+                    </span>
+                    <span className="rounded bg-(--surface-2) px-1.5 py-0.5 text-[11px] text-(--text-faint)">
+                      {(sel.effective?.maxInFlightSource ??
+                        (sel.maxInFlight === null ? "default" : "repo")) ===
+                      "repo"
+                        ? "repo value"
+                        : "default · planner.mjs"}
+                    </span>
+                  </span>
+                }
+              />
+              <KV k="Worktrees root" v={sel.worktreeRoot ?? emptyValue} />
+              <KV
+                k="worktree_up"
+                v={sel.hasWorktreeUp ? "configured" : emptyValue}
+              />
+              <KV
+                k="worktree_down"
+                v={sel.hasWorktreeDown ? "configured" : emptyValue}
+              />
+              <KV
+                k="worktree_warm"
+                v={sel.hasWorktreeWarm ? "configured" : emptyValue}
+              />
+              <div className="mt-2">
+                <div className="text-[11px] text-(--text-faint)">
+                  Verification command
+                </div>
+                {sel.verify ? (
+                  <pre className="mono mt-1 overflow-auto rounded bg-(--surface-1) p-2 text-[11px] text-(--text-dim)">
                     {sel.verify}
                   </pre>
+                ) : (
+                  <div className="mt-1">{emptyValue}</div>
+                )}
+              </div>
+            </Section>
+
+            <Section title="Merge gate">
+              <ConfigSource />
+              <KV
+                k="merge_ci workflow"
+                v={sel.mergeCi?.workflow ?? emptyValue}
+              />
+              <div className="py-[3px]">
+                <div className="mb-1 text-(--text-faint)">Required checks</div>
+                {sel.mergeCi ? (
+                  <ConfigList values={sel.mergeCi.requiredChecks} />
+                ) : (
+                  <div className="text-[11px] text-(--text-dim)">
+                    no configured checks — merge waits on repo default
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 border-t border-(--border) pt-2">
+                <div className="mb-1 text-(--text-faint)">escalate_paths</div>
+                {sel.escalatePaths == null ? (
+                  <div
+                    className="rounded border px-2 py-1.5 text-[11px] font-medium"
+                    style={{
+                      borderColor: "var(--hue-warn)",
+                      color: "var(--hue-warn)",
+                      background:
+                        "color-mix(in oklch, var(--hue-warn) 8%, transparent)",
+                    }}
+                  >
+                    escalate_paths not declared — every PR escalates
+                  </div>
+                ) : sel.escalatePaths.length === 0 ? (
+                  <div className="text-[11px] text-(--text-dim)">
+                    explicitly none
+                  </div>
+                ) : (
+                  <ConfigList values={sel.escalatePaths} />
+                )}
+              </div>
+            </Section>
+
+            <Section title="Owned paths policy">
+              <ConfigSource />
+              {(sel.ownedPathsPolicy?.direct.length ?? 0) === 0 &&
+              (sel.ownedPathsPolicy?.pinManifests.length ?? 0) === 0 ? (
+                <div className="text-[12px] text-(--text-dim)">default</div>
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <div className="mb-1 text-(--text-faint)">
+                      Direct sources
+                    </div>
+                    {(sel.ownedPathsPolicy?.direct.length ?? 0) > 0 ? (
+                      <div className="max-w-full space-y-1 overflow-x-auto pb-1">
+                        {sel.ownedPathsPolicy?.direct.map((rule) => (
+                          <div
+                            key={rule.source}
+                            className="mono w-max whitespace-nowrap text-[11px] text-(--text-dim)"
+                          >
+                            <code className="rounded bg-(--surface-1) px-1.5 py-0.5">
+                              {rule.source}
+                            </code>
+                            <span className="px-1.5 text-(--text-faint)">
+                              requires
+                            </span>
+                            {rule.requires.map((required) => (
+                              <code
+                                key={required}
+                                className="mr-1 rounded bg-(--surface-1) px-1.5 py-0.5"
+                              >
+                                {required}
+                              </code>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      emptyValue
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-1 text-(--text-faint)">
+                      Pin manifests
+                    </div>
+                    <ConfigList
+                      values={sel.ownedPathsPolicy?.pinManifests ?? []}
+                    />
+                  </div>
                 </div>
               )}
             </Section>
 
-            <Section title="Worktree Automation Scripts">
-              <div className="grid grid-cols-3 gap-2 text-center text-[12px]">
-                <div
-                  className="rounded border border-(--border) p-2"
-                  style={{ opacity: sel.hasWorktreeUp ? 1 : 0.4 }}
-                >
-                  <div className="text-[11px] text-(--text-faint) uppercase">
-                    Up Script
-                  </div>
-                  <div className="font-semibold">
-                    {sel.hasWorktreeUp ? "Present" : "None"}
-                  </div>
-                </div>
-                <div
-                  className="rounded border border-(--border) p-2"
-                  style={{ opacity: sel.hasWorktreeDown ? 1 : 0.4 }}
-                >
-                  <div className="text-[11px] text-(--text-faint) uppercase">
-                    Down Script
-                  </div>
-                  <div className="font-semibold">
-                    {sel.hasWorktreeDown ? "Present" : "None"}
-                  </div>
-                </div>
-                <div
-                  className="rounded border border-(--border) p-2"
-                  style={{ opacity: sel.hasWorktreeWarm ? 1 : 0.4 }}
-                >
-                  <div className="text-[11px] text-(--text-faint) uppercase">
-                    Warm Script
-                  </div>
-                  <div className="font-semibold">
-                    {sel.hasWorktreeWarm ? "Present" : "None"}
-                  </div>
-                </div>
-              </div>
+            <Section title="Deploy & smoke">
+              <ConfigSource />
+              <KV k="Deploy branch" v={sel.deployBranch ?? emptyValue} />
+              <KV k="Deployment URL" v={sel.deployment?.url ?? emptyValue} />
+              <KV
+                k="Deployment branch"
+                v={sel.deployment?.branch ?? emptyValue}
+              />
+              <KV
+                k="Revision field"
+                v={sel.deployment?.revisionField ?? emptyValue}
+              />
+              <KV k="Smoke workflow" v={sel.smokeWorkflow ?? emptyValue} />
+              <KV k="Smoke URL" v={sel.smokeUrl ?? emptyValue} />
+              <KV
+                k="Smoke deadline"
+                v={
+                  sel.smokeDeadlineSeconds == null
+                    ? emptyValue
+                    : `${sel.smokeDeadlineSeconds} seconds`
+                }
+              />
+            </Section>
+
+            <Section title="Security">
+              <ConfigSource />
+              <KV
+                k="python_version"
+                v={sel.security?.pythonVersion ?? "defaults"}
+              />
             </Section>
 
             <Section
