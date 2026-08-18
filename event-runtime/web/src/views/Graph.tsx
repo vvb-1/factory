@@ -331,17 +331,17 @@ export function Graph({
     const onHashChange = () => {
       // The URL moved under us (Back, or App's own writer landing): a buffered
       // display write would clobber it.
-      hashWriter.current?.cancel();
+      hashWriter.cancel();
       const next = graphDisplayFromHash(window.location.hash);
       setDisplay(next);
       saveGraphDisplayOptions(next);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  }, [hashWriter]);
   // Never flush on unmount: the operator has left the graph and the buffered
   // hash would overwrite the view they went to.
-  useEffect(() => () => hashWriter.current?.cancel(), []);
+  useEffect(() => () => hashWriter.cancel(), [hashWriter]);
 
   const registry = useQuery({
     queryKey: ["agents"],
