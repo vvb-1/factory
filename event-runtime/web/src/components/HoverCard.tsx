@@ -340,6 +340,22 @@ export function HoverCard({
     [openNow],
   );
 
+  /**
+   * The panel is portalled, so React dispatches its events from
+   * `document.body` — but the *native* event carries on to `window`, where the
+   * table's `useListKeys` is listening. Without this, a second ArrowDown after
+   * landing in the card silently moves the selected row underneath it. Only
+   * propagation is stopped: the default is the panel's own scroll, which a card
+   * taller than its `maxHeight` needs.
+   */
+  const onPanelKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.stopPropagation();
+    },
+    [],
+  );
+
   const api: HoverCardApi = { close };
   const body = typeof children === "function" ? children(api) : children;
   const triggerBody = typeof trigger === "function" ? trigger(api) : trigger;
@@ -379,6 +395,7 @@ export function HoverCard({
             onMouseLeave={scheduleClose}
             onFocus={clearTimer}
             onBlur={scheduleClose}
+            onKeyDown={onPanelKeyDown}
             style={{
               position: "fixed",
               top: placement.placeAbove ? undefined : `${placement.top}px`,
