@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import { App } from "./App";
 import { goPrefix } from "./goSequence";
+import { refetchIntervals } from "./hooks";
 import { NAV } from "./nav";
 import type { StatusView } from "./types";
 
@@ -52,6 +53,7 @@ function jsonResponse(body: unknown) {
 }
 
 const realFetch = globalThis.fetch;
+const realPrimaryRefetchInterval = refetchIntervals.primary.refetchInterval;
 
 function renderApp() {
   const queryClient = new QueryClient({
@@ -121,6 +123,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.assign(refetchIntervals.primary, {
+    refetchInterval: realPrimaryRefetchInterval,
+  });
   goPrefix.armedAt = 0;
   cleanup();
   globalThis.fetch = realFetch;
@@ -323,6 +328,11 @@ describe("health connection chrome (WM-724)", () => {
 
   test("a failed health check turns chip, status bar and banner red together", async () => {
     healthMode = "error";
+    // App's explicit two-second policy overrides QueryClient defaults. Disable
+    // it here so only the Retry click can issue a second health request.
+    Object.assign(refetchIntervals.primary, {
+      refetchInterval: () => false,
+    });
     const utils = renderApp();
     const statusBar = utils.getByRole("contentinfo", { name: "Status bar" });
 
@@ -338,9 +348,7 @@ describe("health connection chrome (WM-724)", () => {
 
     const before = healthCalls;
     fireEvent.click(utils.getByRole("button", { name: "Retry" }));
-    await waitFor(() => {
-      expect(healthCalls).toBeGreaterThan(before);
-    });
+    expect(healthCalls).toBe(before + 1);
   });
 
   test("a healthy runtime names the env on the chip and connects in the status bar", async () => {
