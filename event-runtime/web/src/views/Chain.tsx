@@ -2,11 +2,14 @@ import {
   applyNodeChanges,
   Background,
   Controls,
+  Handle,
   MiniMap,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
   type NodeChange,
+  type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQueries, useQuery } from "@tanstack/react-query";
@@ -16,13 +19,16 @@ import { keyGuard, refetchIntervals, useNow } from "../hooks";
 import { hashSearch } from "../hash";
 import {
   buildChainGraph,
-  chainOriginLabel,
   eventNodeId,
   runNodeId,
   type ChainGraph,
   type ChainNode,
 } from "../graph/chainModel";
-import { CHAIN_EDGE_STYLES, chainNodeTypes } from "../graph/chainNodes";
+import {
+  CHAIN_EDGE_STYLES,
+  chainNodeAccessibleName,
+} from "../graph/chainNodes";
+import { handleStyle, Line } from "../graph/nodes";
 import {
   buildChainTimeline,
   chainViewModeFromQuery,
@@ -48,11 +54,134 @@ import {
   Section,
   StateBadge,
   Tabs,
+  ago,
   shortId,
 } from "../components/ui";
 import type { RunDetail } from "../types";
 
-const INITIAL_FIT_MIN_ZOOM = 0.4;
+// React Flow treats a unitless number as a ratio; the ticket's 24 means px.
+const FIT_PADDING = "24px" as const;
+
+function ChainNodeShell({
+  children,
+  accent,
+  selected,
+  accessibleName,
+  title,
+}: {
+  children: React.ReactNode;
+  accent: string;
+  selected?: boolean;
+  accessibleName: string;
+  title: string;
+}) {
+  return (
+    <div
+      className="rounded-md px-3 py-2 text-left"
+      tabIndex={0}
+      role="button"
+      aria-label={accessibleName}
+      aria-selected={selected ? true : false}
+      aria-pressed={selected ? true : false}
+      title={title}
+      style={{
+        width: 236,
+        height: 92,
+        background: selected ? "var(--surface-2)" : "var(--surface-1)",
+        border: "1px solid var(--border)",
+        borderLeft: `3px solid ${accent}`,
+        boxShadow: selected ? "0 0 0 2px var(--accent)" : "none",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Chain cards put the distinguishing subject before shared ids and type. */
+export function ChainEventNode({ data, selected }: NodeProps) {
+  const node = data.node as Extract<ChainNode, { kind: "chainEvent" }>;
+  const ordinal = (data as { ordinal?: number }).ordinal;
+  const event = node.event;
+  const accent = EVENT_STATUS_HUES[event.status] ?? "var(--hue-idle)";
+  const now = Number((data as { now?: number }).now ?? Date.now());
+  const subject = event.subject ?? "—";
+  return (
+    <ChainNodeShell
+      accent={accent}
+      selected={selected}
+      accessibleName={chainNodeAccessibleName(node)}
+      title={event.eventId}
+    >
+      {!node.root && (
+        <Handle type="target" position={Position.Left} style={handleStyle} />
+      )}
+      <div className="flex items-center justify-between gap-1">
+        <span
+          className="text-xs tracking-wide uppercase"
+          style={{ color: accent }}
+        >
+          {node.root ? "origin event" : "event"} · {event.source}
+        </span>
+        <StateBadge state={event.status} hues={EVENT_STATUS_HUES} dot={false} />
+      </div>
+      <div className="mono truncate text-[12px]" title={subject}>
+        {subject}
+        {ordinal ? ` #${ordinal}` : ""}
+      </div>
+      <Line dim>{event.type}</Line>
+      <Line dim>
+        <span title={event.admittedAt}>{ago(event.admittedAt, now)}</span>
+        {event.repos.length ? ` · ${event.repos.join(", ")}` : ""}
+      </Line>
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+    </ChainNodeShell>
+  );
+}
+
+export function ChainRunNode({ data, selected }: NodeProps) {
+  const node = data.node as Extract<ChainNode, { kind: "chainRun" }>;
+  const run = node.run;
+  const accent = STATE_HUES[run.state] ?? "var(--hue-idle)";
+  const now = Number((data as { now?: number }).now ?? Date.now());
+  const when = run.finishedAt ?? run.startedAt ?? run.created_at;
+  return (
+    <ChainNodeShell
+      accent={accent}
+      selected={selected}
+      accessibleName={chainNodeAccessibleName(node)}
+      title={run.runId}
+    >
+      {!node.root && (
+        <Handle type="target" position={Position.Left} style={handleStyle} />
+      )}
+      <div className="flex items-center justify-between gap-1">
+        <span
+          className="text-xs tracking-wide uppercase"
+          style={{ color: accent }}
+        >
+          run{run.adapter ? ` · ${run.adapter}` : ""}
+        </span>
+        <StateBadge state={run.state} />
+      </div>
+      <div className="mono truncate text-[12px]" title={run.agent ?? run.runId}>
+        {run.agent ?? "—"}
+      </div>
+      <Line dim>
+        <span title={run.runId}>{shortId(run.runId)}</span>
+        {run.attempts > 1 ? ` · attempt ${run.attempts}` : ""}
+        {run.reasonCode ? ` · ${run.reasonCode}` : ""}
+      </Line>
+      <Line dim>
+        <span title={when}>{ago(when, now)}</span>
+        {run.repos.length ? ` · ${run.repos.join(", ")}` : ""}
+      </Line>
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+    </ChainNodeShell>
+  );
+}
+
+const chainNodeTypes = { chainEvent: ChainEventNode, chainRun: ChainRunNode };
 
 const TIMELINE_DECISION_HUES: Record<string, string> = {
   ...DECISION_HUES,
@@ -235,6 +364,7 @@ export function Chain({
   const [positioned, setPositioned] = useState<{
     nodes: Node[];
     edges: Edge[];
+    epoch: number;
   } | null>(null);
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
@@ -244,26 +374,30 @@ export function Chain({
     getZoom: () => number;
     fitView: (opts: {
       nodes?: Array<{ id: string }>;
-      padding?: number;
+      padding?: number | `${number}px`;
       duration?: number;
       minZoom?: number;
       maxZoom?: number;
     }) => void;
   } | null>(null);
   const [flowReady, setFlowReady] = useState(0);
-  const didInitialFit = useRef(false);
+  const lastFittedNodeCountRef = useRef(0);
+  const lastFittedLayoutEpochRef = useRef(-1);
 
   // Reset canvas state when the operator moves to another chain.
   useEffect(() => {
     setPositioned(null);
+    flowRef.current = null;
     lastIdentityRef.current = null;
-    didInitialFit.current = false;
+    lastFittedNodeCountRef.current = 0;
+    lastFittedLayoutEpochRef.current = -1;
   }, [correlationId]);
   // The canvas unmounts in timeline mode; fit it again when it comes back.
   useEffect(() => {
     if (timelineOn) {
       flowRef.current = null;
-      didInitialFit.current = false;
+      lastFittedNodeCountRef.current = 0;
+      lastFittedLayoutEpochRef.current = -1;
     }
   }, [timelineOn]);
 
@@ -303,6 +437,7 @@ export function Chain({
                         data: { ...n.data, node: byId.get(n.id) },
                       })),
                       edges: flowEdges(graph),
+                      epoch: prev.epoch,
                     }
                   : prev,
               );
@@ -320,6 +455,7 @@ export function Chain({
                 height: NODE_HEIGHT,
               })),
               edges: flowEdges(graph),
+              epoch: layoutEpoch,
             });
           });
         },
@@ -336,16 +472,31 @@ export function Chain({
     };
   }, [graph, layoutEpoch]);
 
+  const eventOrdinals = useMemo(() => {
+    const groups = new Map<string, ChainNode[]>();
+    for (const node of graph?.nodes ?? []) {
+      if (node.kind !== "chainEvent") continue;
+      const key = `${node.event.type}\u0000${node.event.subject ?? ""}`;
+      groups.set(key, [...(groups.get(key) ?? []), node]);
+    }
+    const ordinals = new Map<string, number>();
+    for (const siblings of groups.values()) {
+      if (siblings.length < 2) continue;
+      siblings.forEach((node, index) => ordinals.set(node.id, index + 1));
+    }
+    return ordinals;
+  }, [graph]);
+
   const nodes = useMemo(
     () =>
       positioned
         ? positioned.nodes.map((n) => ({
             ...n,
             selected: n.id === focusNodeId,
-            data: { ...n.data, now },
+            data: { ...n.data, now, ordinal: eventOrdinals.get(n.id) },
           }))
         : [],
-    [positioned, focusNodeId, now],
+    [positioned, focusNodeId, now, eventOrdinals],
   );
 
   const selected: ChainNode | undefined = graph?.nodes.find(
@@ -380,21 +531,24 @@ export function Chain({
   };
 
   useEffect(() => {
-    if (
-      didInitialFit.current ||
-      !flowRef.current ||
-      !positioned ||
-      !graph ||
-      graph.nodes.length === 0
-    )
+    if (!flowRef.current || !positioned || positioned.nodes.length === 0)
       return;
-    didInitialFit.current = true;
-    flowRef.current.fitView({
-      padding: 0.2,
-      minZoom: INITIAL_FIT_MIN_ZOOM,
-      maxZoom: 1,
+    const addedNodes = positioned.nodes.length > lastFittedNodeCountRef.current;
+    const resetCompleted = positioned.epoch > lastFittedLayoutEpochRef.current;
+    if (!addedNodes && !resetCompleted) return;
+    const flow = flowRef.current;
+    // Selection reveal runs in the same commit. Fit on the next frame so the
+    // whole-chain viewport wins after the pane has taken its final width.
+    const frame = requestAnimationFrame(() => {
+      // React Flow remounts when a route change briefly clears positioned
+      // nodes. Leave the fit pending if this frame still holds the old flow.
+      if (flowRef.current !== flow) return;
+      flow.fitView({ padding: FIT_PADDING });
+      lastFittedNodeCountRef.current = positioned.nodes.length;
+      lastFittedLayoutEpochRef.current = positioned.epoch;
     });
-  }, [graph, positioned, flowReady]);
+    return () => cancelAnimationFrame(frame);
+  }, [positioned, flowReady]);
 
   useEffect(() => {
     revealSelected();
@@ -455,7 +609,6 @@ export function Chain({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onSelectNode, focusNodeId, positioned, timelineOn, timeline]);
 
-  const origin = graph ? chainOriginLabel(graph) : null;
   const eventCount =
     graph?.nodes.filter((n) => n.kind === "chainEvent").length ?? 0;
   const runCount =
@@ -502,26 +655,18 @@ export function Chain({
             }
           >
             <h1 className="display text-h1 font-semibold">Chain</h1>
-            <div
-              className="mono truncate text-[11px] text-(--text-faint)"
-              title={correlationId}
-            >
-              {correlationId}
-            </div>
             {graph && (
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-(--text-dim)">
-                {origin && (
-                  <span>
-                    origin <span className="mono">{origin}</span>
-                  </span>
-                )}
-                <span>
-                  {eventCount} event{eventCount === 1 ? "" : "s"} · {runCount}{" "}
+              <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] text-(--text-dim)">
+                <span className="mono min-w-0 truncate" title={correlationId}>
+                  {correlationId}
+                </span>
+                <span className="shrink-0">
+                  · {eventCount} event{eventCount === 1 ? "" : "s"} · {runCount}{" "}
                   run{runCount === 1 ? "" : "s"} · {graph.maxDepth} hop
                   {graph.maxDepth === 1 ? "" : "s"}
                 </span>
                 {runStates.length > 0 && (
-                  <span className="flex items-center gap-1">
+                  <span className="flex shrink-0 items-center gap-1">
                     {runStates.map(([state, count]) => (
                       <StateBadge
                         key={state}
@@ -600,9 +745,6 @@ export function Chain({
                     </div>
                   );
                 })}
-                <div className="text-[11px] text-(--text-faint)">
-                  left border = event status / run state
-                </div>
               </div>
             )}
           </div>
@@ -684,20 +826,84 @@ export function Chain({
         <DetailPane
           widthClass="w-[420px]"
           title={
-            selected.kind === "chainEvent"
-              ? selected.event.type
-              : (selected.run.agent ?? selected.run.runId)
+            <nav
+              className="flex min-w-0 items-center gap-2"
+              aria-label="Chain detail breadcrumb"
+            >
+              <button
+                type="button"
+                onClick={() => onSelectNode(null)}
+                className="cursor-pointer text-(--text-dim) hover:text-(--accent)"
+                title="Back to chain"
+              >
+                Chain
+              </button>
+              <span className="text-(--text-faint)" aria-hidden="true">
+                /
+              </span>
+              <span
+                className="flex min-w-0 items-center gap-2 truncate font-semibold text-(--text)"
+                aria-current="page"
+              >
+                <StateBadge
+                  state={
+                    selected.kind === "chainEvent"
+                      ? selected.event.status
+                      : selected.run.state
+                  }
+                  hues={
+                    selected.kind === "chainEvent"
+                      ? EVENT_STATUS_HUES
+                      : STATE_HUES
+                  }
+                />
+                <span
+                  className="mono truncate"
+                  title={
+                    selected.kind === "chainEvent"
+                      ? selected.event.eventId
+                      : selected.run.runId
+                  }
+                >
+                  {shortId(
+                    selected.kind === "chainEvent"
+                      ? selected.event.eventId
+                      : selected.run.runId,
+                  )}
+                </span>
+              </span>
+            </nav>
           }
           actions={
-            <Button onClick={revealSelected}>
-              {timelineOn ? "Show in timeline" : "Show on canvas"}{" "}
-              <span
-                className="mono ml-1 text-(--text-faint)"
-                aria-hidden="true"
-              >
-                z
-              </span>
-            </Button>
+            <>
+              <Button onClick={revealSelected}>
+                {timelineOn ? "Show in timeline" : "Show on canvas"}{" "}
+                <span
+                  className="mono ml-1 text-(--text-faint)"
+                  aria-hidden="true"
+                >
+                  z
+                </span>
+              </Button>
+              {selected.kind === "chainEvent" ? (
+                <Button
+                  onClick={() =>
+                    onJumpEvent(selected.event.source, selected.event.eventId)
+                  }
+                >
+                  Open in Events
+                </Button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <Button onClick={() => onOpenRunFull(selected.run.runId)}>
+                    Open run
+                  </Button>
+                  <Button onClick={() => onJumpRun(selected.run.runId)}>
+                    Show in Runs
+                  </Button>
+                </div>
+              )}
+            </>
           }
           utility={
             <CopyActions
@@ -792,13 +998,6 @@ export function Chain({
                   <KV k="repos" v={selected.event.repos.join(", ")} />
                 )}
               </Section>
-              <Button
-                onClick={() =>
-                  onJumpEvent(selected.event.source, selected.event.eventId)
-                }
-              >
-                Open in Events
-              </Button>
             </>
           )}
           {selected.kind === "chainRun" && (
@@ -871,14 +1070,6 @@ export function Chain({
                   <KV k="repos" v={selected.run.repos.join(", ")} />
                 )}
               </Section>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => onOpenRunFull(selected.run.runId)}>
-                  Open run
-                </Button>
-                <Button onClick={() => onJumpRun(selected.run.runId)}>
-                  Show in Runs
-                </Button>
-              </div>
             </>
           )}
         </DetailPane>

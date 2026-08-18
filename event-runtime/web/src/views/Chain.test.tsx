@@ -1,14 +1,109 @@
 import "../test-dom";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { useEffect } from "react";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test";
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { Chain } from "./Chain";
 import { CHAIN_VIEW_STORAGE_KEY } from "../chainTimeline";
 import {
   createRunDetailFixture,
   renderWithClient,
   restoreApi,
+  withApi,
 } from "../test-render";
-import type { ChainView, LifecycleEvent, Proposal } from "../types";
+import type { ChainEvent, ChainView, LifecycleEvent, Proposal } from "../types";
+
+const fitView = mock((_options: unknown) => {});
+
+// `mock.module` persists for the whole `bun test` process, so this overrides
+// only the one export Chain's own tests actually need faked — the real
+// `<ReactFlow>` needs full viewport/DOM measurement this environment can't
+// give it. Everything else (Handle, Background, Position, ReactFlowProvider,
+// applyNodeChanges, …) stays the genuine module, so files that happen to run
+// in the same process (graph/nodes.test.tsx, graph/layout.test.ts) still see
+// real behavior. The fake `<ReactFlow>` renders node components straight
+// into a real `<ReactFlowProvider>` so `Handle` still has the store context
+// it needs.
+const actualXyflow = (await import("@xyflow/react")) as Record<
+  string,
+  unknown
+> & {
+  ReactFlowProvider: React.ComponentType<{ children?: React.ReactNode }>;
+};
+mock.module("@xyflow/react", () => ({
+  ...actualXyflow,
+  ReactFlow: ({ nodes, nodeTypes, onInit }: any) => {
+    useEffect(() => {
+      onInit({ fitView, getZoom: () => 1 });
+    }, []);
+    return (
+      <actualXyflow.ReactFlowProvider>
+        <div data-testid="chain-flow">
+          {nodes.map((node: any) => {
+            const NodeComponent = nodeTypes[node.type];
+            return <NodeComponent key={node.id} {...node} />;
+          })}
+        </div>
+      </actualXyflow.ReactFlowProvider>
+    );
+  },
+}));
+
+const { Chain } = await import("./Chain");
+
+// Belt-and-braces: put the real `ReactFlow` back once this file's own tests
+// are done, in case any later-running file in the same process renders it.
+afterAll(() => {
+  mock.module("@xyflow/react", () => actualXyflow);
+});
+
+const noop = () => {};
+const NOW = new Date().toISOString();
+
+function chainEvent(
+  eventId: string,
+  overrides: Partial<ChainEvent> = {},
+): ChainEvent {
+  return {
+    source: "factory",
+    eventId,
+    type: "factory.dispatch.requested",
+    subject: "WM-273",
+    status: "noop",
+    occurredAt: NOW,
+    receivedAt: NOW,
+    admittedAt: NOW,
+    correlationId: "operator:dispatch:WM-518",
+    causationId: null,
+    proposalId: null,
+    proposalStatus: null,
+    proposalDecision: null,
+    runId: null,
+    repos: [],
+    ...overrides,
+  };
+}
+
+function renderChainGraph() {
+  return renderWithClient(
+    <Chain
+      correlationId="operator:dispatch:WM-518"
+      focusNodeId={null}
+      onSelectNode={noop}
+      onJumpEvent={noop}
+      onJumpRun={noop}
+      onOpenRunFull={noop}
+      onJumpProposal={noop}
+      onJumpAgent={noop}
+    />,
+  );
+}
 
 const CORR = "clock:merge-factory:2026-08-17T18:45:00.000Z";
 const FIX_RUN = "run_643c2c35-838d-47fd-ae37-4051214269ba";
@@ -209,19 +304,71 @@ function renderChain(props: Partial<React.ComponentProps<typeof Chain>> = {}) {
   return { ...view, selected };
 }
 
-beforeEach(() => {
-  localStorage.clear();
-  window.location.hash = `#/chain/${encodeURIComponent(CORR)}`;
-});
-
 afterEach(() => {
   cleanup();
   restoreApi();
-  localStorage.clear();
-  window.location.hash = "";
+  fitView.mockClear();
+});
+
+describe("Chain", () => {
+  test("fits the graph on mount with the chain padding", async () => {
+    const view: ChainView = {
+      correlationId: "operator:dispatch:WM-518",
+      events: [chainEvent("chain-run_5b20cfd4")],
+      runs: [],
+    };
+
+    await withApi({ chain: async () => view }, async () => {
+      renderChainGraph();
+      await waitFor(() => expect(fitView).toHaveBeenCalled());
+      expect(fitView.mock.calls[0]?.[0]).toEqual({ padding: "24px" });
+    });
+  });
+
+  test("orders event labels by subject, type, then age and numbers identical siblings", async () => {
+    const view: ChainView = {
+      correlationId: "operator:dispatch:WM-518",
+      events: [
+        chainEvent("chain-run_5b20cfd4"),
+        chainEvent("chain-run_8c91aa20"),
+      ],
+      runs: [],
+    };
+
+    await withApi({ chain: async () => view }, async () => {
+      const rendered = renderChainGraph();
+      await waitFor(() => expect(rendered.getByText("WM-273 #1")).toBeTruthy());
+      expect(rendered.getByText("WM-273 #2")).toBeTruthy();
+
+      const card = rendered
+        .getAllByRole("button", {
+          name: /event factory\.dispatch\.requested, noop/i,
+        })
+        .find(
+          (candidate) =>
+            candidate.getAttribute("title") === "chain-run_5b20cfd4",
+        )!;
+      const text = card.textContent ?? "";
+      expect(text.indexOf("WM-273 #1")).toBeLessThan(
+        text.indexOf("factory.dispatch.requested"),
+      );
+      expect(card.getAttribute("title")).toBe("chain-run_5b20cfd4");
+      expect(text).not.toContain("chain-run_5b20cfd4");
+    });
+  });
 });
 
 describe("Chain view — Timeline mode (WM-639)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    window.location.hash = `#/chain/${encodeURIComponent(CORR)}`;
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    window.location.hash = "";
+  });
+
   test("Graph | Timeline toggle persists and renders the narrative rows", async () => {
     const view = renderChain();
     const timelineTab = await view.findByRole("tab", { name: "Timeline" });
