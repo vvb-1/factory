@@ -291,6 +291,96 @@ describe("repoNamesFromInput (OPS-356)", () => {
   });
 });
 
+describe("metrics run drill-down filters (WM-282)", () => {
+  const now = Date.parse("2026-08-18T10:00:00.000Z");
+  const from = "2026-08-18T08:00:00.000Z";
+  const to = "2026-08-18T09:00:00.000Z";
+
+  function insertRun(db, runId, agent) {
+    db.query(
+      `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+       VALUES (?, ?, ?, 'hash', 'COMPLETED', 0, '2026-08-18T07:00:00.000Z', '2026-08-18T09:30:00.000Z')`,
+    ).run(
+      runId,
+      `idem-${runId}`,
+      JSON.stringify({
+        agent,
+        adapter: "fake",
+        input: {},
+        maxAttempts: 2,
+        timeoutSeconds: 60,
+      }),
+    );
+  }
+
+  test("terminal population uses lifecycle time/state rather than the run's current state", async () => {
+    const s = await makeServer({ now: () => now });
+    try {
+      insertRun(s.db, "run-historical-failure", "dispatch@1");
+      insertRun(s.db, "run-outside", "dispatch@1");
+      s.db
+        .query(
+          `INSERT INTO lifecycle_events (run_id, from_state, to_state, actor, at, record_hash)
+         VALUES (?, 'RUNNING', 'FAILED', 'test', ?, ?)`,
+        )
+        .run(
+          "run-historical-failure",
+          "2026-08-18T08:30:00.000Z",
+          "hash-failed",
+        );
+      s.db
+        .query(
+          `INSERT INTO lifecycle_events (run_id, from_state, to_state, actor, at, record_hash)
+         VALUES (?, 'RUNNING', 'FAILED', 'test', ?, ?)`,
+        )
+        .run("run-outside", "2026-08-18T09:30:00.000Z", "hash-outside");
+
+      const res = await fetch(
+        s.url(`/runs?population=terminal&from=${from}&to=${to}&state=FAILED`),
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()).runs.map((run) => run.runId)).toEqual([
+        "run-historical-failure",
+      ]);
+    } finally {
+      s.close();
+    }
+  });
+
+  test("usage population composes exact time and agent dimensions; malformed filters are typed", async () => {
+    const s = await makeServer({ now: () => now });
+    try {
+      insertRun(s.db, "run-agent-a", "dispatch@1");
+      insertRun(s.db, "run-agent-b", "merge@1");
+      for (const runId of ["run-agent-a", "run-agent-b"]) {
+        s.db
+          .query(
+            `INSERT INTO run_usage
+             (run_id, attempt, adapter, input_tokens, output_tokens, cache_creation_input_tokens,
+              cache_read_input_tokens, cost_usd, recorded_at)
+           VALUES (?, 1, 'fake', 1, 0, 0, 0, 0.1, '2026-08-18T08:15:00.000Z')`,
+          )
+          .run(runId);
+      }
+      const filtered = await fetch(
+        s.url(
+          `/runs?population=usage&from=${from}&to=${to}&agent=${encodeURIComponent("dispatch@1")}`,
+        ),
+      );
+      expect(filtered.status).toBe(200);
+      expect((await filtered.json()).runs.map((run) => run.runId)).toEqual([
+        "run-agent-a",
+      ]);
+
+      const malformed = await fetch(s.url("/runs?population=usage"));
+      expect(malformed.status).toBe(422);
+      expect((await malformed.json()).error).toBe("incomplete_time_filter");
+    } finally {
+      s.close();
+    }
+  });
+});
+
 describe("list views carry repos[] (OPS-356)", () => {
   test("GET /events exposes repos from payload; unscoped is []", async () => {
     const s = await makeServer();

@@ -9,7 +9,11 @@ import {
   test,
 } from "bun:test";
 import { act, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { filterOpenProposals, Proposals } from "./Proposals";
+import {
+  filterOpenProposals,
+  proposalDrilldownFilters,
+  Proposals,
+} from "./Proposals";
 import { api } from "../api";
 import {
   changeInput,
@@ -32,6 +36,22 @@ afterEach(() => {
 
 const noop = () => {};
 const NOW = new Date().toISOString();
+
+test("reads a reproducible proposal decision drill-down from the hash", () => {
+  expect(
+    proposalDrilldownFilters(
+      "#/proposals?from=2026-08-18T08%3A00%3A00.000Z&to=2026-08-18T09%3A00%3A00.000Z&population=decision&decisionStatus=expired",
+    ),
+  ).toEqual({
+    from: "2026-08-18T08:00:00.000Z",
+    to: "2026-08-18T09:00:00.000Z",
+    population: "decision",
+    decisionStatus: "expired",
+  });
+  expect(
+    proposalDrilldownFilters("#/proposals?population=decision"),
+  ).toBeNull();
+});
 
 function stubStatus(): StatusView {
   return createStatusFixture({

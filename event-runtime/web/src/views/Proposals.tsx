@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, type ProposalListFilters } from "../api";
+import { hashSearch } from "../hash";
 import {
   keyGuard,
   refetchIntervals,
@@ -77,6 +78,21 @@ import { Button as PrimitiveButton } from "../components/ui";
 
 const PROPOSAL_TABS = ["open", "history"] as const;
 type ProposalTab = (typeof PROPOSAL_TABS)[number];
+
+export function proposalDrilldownFilters(
+  hash: string,
+): ProposalListFilters | null {
+  const query = hashSearch(hash);
+  const from = query.get("from");
+  const to = query.get("to");
+  if (!from || !to || query.get("population") !== "decision") return null;
+  return {
+    from,
+    to,
+    population: "decision",
+    decisionStatus: query.get("decisionStatus") ?? undefined,
+  };
+}
 
 function isTypingTarget(target: EventTarget | null): boolean {
   return (
@@ -252,15 +268,19 @@ export function Proposals({
 }) {
   const now = useNow();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<ProposalTab>("open");
+  const drilldown = proposalDrilldownFilters(window.location.hash);
+  const drilldownKey = JSON.stringify(drilldown);
+  const [tab, setTab] = useState<ProposalTab>(() =>
+    drilldown ? "history" : "open",
+  );
   const query = useQuery({
     queryKey: ["proposals"],
     queryFn: () => api.proposals(),
     ...refetchIntervals.primary,
   });
   const history = useQuery({
-    queryKey: ["proposals", "history"],
-    queryFn: () => api.proposalHistory("all"),
+    queryKey: ["proposals", "history", drilldownKey],
+    queryFn: () => api.proposalHistory("all", drilldown ?? {}),
     ...refetchIntervals.primary,
   });
   const [expiredOnly, setExpiredOnly] = useState(false);
@@ -1038,6 +1058,24 @@ export function Proposals({
           chrome={
             <>
               <h1 className="display mb-4 text-h1 font-semibold">Proposals</h1>
+              {drilldown && (
+                <div
+                  role="status"
+                  className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-(--border) bg-(--surface-2) px-3 py-2 text-[11px] text-(--text-dim)"
+                >
+                  <span>
+                    Metrics drill-down · decisions
+                    {drilldown.decisionStatus
+                      ? ` · ${drilldown.decisionStatus}`
+                      : ""}{" "}
+                    · {new Date(drilldown.from!).toLocaleString()} →{" "}
+                    {new Date(drilldown.to!).toLocaleString()}
+                  </span>
+                  <a href="#/proposals" className="font-medium text-(--accent)">
+                    Clear metrics filter
+                  </a>
+                </div>
+              )}
               {context.kind === "inflight" && (
                 <ScopeCaption context={context} surface="fleet" />
               )}

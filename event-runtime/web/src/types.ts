@@ -173,6 +173,39 @@ export interface RunListItem {
   repos: string[];
 }
 
+export type MetricsWindow = "1h" | "24h" | "7d" | "30d";
+
+export interface MetricsPercentiles {
+  p50: Array<number | null>;
+  p95: Array<number | null>;
+}
+
+export interface MetricsView {
+  window: MetricsWindow;
+  bucket: string;
+  buckets: string[];
+  series: {
+    "runs.outcomes": Record<string, number[]>;
+    "runs.started": { total: number[] };
+    "latency.queue_wait": MetricsPercentiles;
+    "latency.execution": MetricsPercentiles;
+    "spend.cost": Record<string, number[]>;
+    "spend.tokens": Record<string, number[]>;
+    "proposals.decisions": Record<string, number[]>;
+    "proposals.time_to_decision": MetricsPercentiles;
+    "events.intake": Record<string, number[]>;
+    "attempts.retries": { total: number[] };
+  };
+}
+
+export interface MetricsBreakdownView {
+  window: MetricsWindow;
+  by: string;
+  metric: string;
+  limit: number | null;
+  rows: Array<{ key: string; value: number }>;
+}
+
 /** One append-only journal row (GET /journal) — the runtime's activity feed. */
 export interface JournalEntry {
   seq: number;

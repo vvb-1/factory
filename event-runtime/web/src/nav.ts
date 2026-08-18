@@ -13,6 +13,7 @@ export type NavGroup = "live" | "work" | "machinery" | "system";
 export const NAV = [
   // Attention / Live Actions (badge-carrying / immediate triage)
   { key: "overview", label: "Overview", go: "o", group: "live" },
+  { key: "metrics", label: "Metrics", go: "m", group: "live" },
   { key: "inbox", label: "Inbox", go: "n", group: "live" },
   { key: "proposals", label: "Proposals", go: "p", group: "live" },
   { key: "runs", label: "Runs", go: "r", group: "live" },

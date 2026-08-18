@@ -95,8 +95,24 @@ function NavCount({ id, badge }: { id: string; badge: NavBadge }) {
   );
 }
 
+export function listSelectionPath(
+  view: "runs" | "proposals",
+  id: string | null,
+  hash: string,
+) {
+  const path = hashPath(view, id);
+  const query = hashSearch(hash);
+  if (!query.has("population") || !query.has("from") || !query.has("to"))
+    return path;
+  query.delete("project");
+  return `${path}?${query.toString()}`;
+}
+
 const Artifacts = lazy(() =>
   import("./views/Artifacts").then((m) => ({ default: m.Artifacts })),
+);
+const Metrics = lazy(() =>
+  import("./views/Metrics").then((m) => ({ default: m.Metrics })),
 );
 const Graph = lazy(() =>
   import("./views/Graph").then((m) => ({ default: m.Graph })),
@@ -455,6 +471,7 @@ export function App() {
   const inboxOpen = status.data?.inbox?.open ?? 0;
   const navBadges: Record<NavKey, NavBadge> = {
     overview: { count: 0, hue: "var(--accent)" },
+    metrics: { count: 0, hue: "var(--accent)" },
     // Open = not even acked yet. Warn hue: every one of these is a human's
     // turn, which is exactly what the amber wash means everywhere else.
     inbox: {
@@ -884,7 +901,11 @@ export function App() {
                   context={context}
                   onRunQueued={jumpToRun}
                   focusProposalId={focusProposalId}
-                  onSelectProposal={(id) => navigate(hashPath("proposals", id))}
+                  onSelectProposal={(id) =>
+                    navigate(
+                      listSelectionPath("proposals", id, window.location.hash),
+                    )
+                  }
                   focusExpired={focusExpired}
                   onFocusExpiredConsumed={() => setFocusExpired(false)}
                   onJumpAgent={jumpToAgent}
@@ -913,7 +934,9 @@ export function App() {
                 connected={connected}
                 context={context}
                 focusRunId={focusRunId}
-                onSelectRun={(id) => navigate(hashPath("runs", id))}
+                onSelectRun={(id) =>
+                  navigate(listSelectionPath("runs", id, window.location.hash))
+                }
                 onOpenFull={openRunFull}
                 focusState={focusRunState}
                 onFocusStateConsumed={() => setFocusRunState(null)}
@@ -1094,6 +1117,16 @@ export function App() {
                   }
                   onJumpRun={jumpToRun}
                 />
+              </Suspense>
+            ) : view === "metrics" ? (
+              <Suspense
+                fallback={
+                  <div className="p-5 text-(--text-faint)">
+                    Loading metrics…
+                  </div>
+                }
+              >
+                <Metrics />
               </Suspense>
             ) : view === "events" ? (
               <Events
