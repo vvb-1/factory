@@ -6,6 +6,7 @@
  * broken, while notify_log continues to provide runtime-notification dedup.
  */
 import { randomUUID } from "node:crypto";
+import { gql } from "../../orchestrator/reaper.mjs";
 import {
   decisionRequestHash,
   validateDecisionRequest,
@@ -707,6 +708,49 @@ export function inboxCounts(db) {
   };
 }
 
+/** Attach an ad-hoc schedule's watched proposal to the open item that spawned it. */
+export function bindInboxProposal(db, { kind, repo, proposalId }) {
+  requiredString(kind, "kind");
+  requiredString(repo, "repo");
+  requiredString(proposalId, "proposalId");
+  const row = db
+    .query(
+      `SELECT id FROM inbox_items
+       WHERE kind = ? AND resolved_at IS NULL
+         AND json_extract(refs_json, '$.repo') = ?
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    )
+    .get(kind, repo);
+  if (!row) return null;
+  return bindProposalToItem(db, row.id, proposalId);
+}
+
+function bindProposalToItem(db, id, proposalId) {
+  db.query(
+    `UPDATE inbox_items
+     SET refs_json = json_set(
+       CASE WHEN json_valid(refs_json) THEN refs_json ELSE '{}' END,
+       '$.proposalId', ?
+     )
+     WHERE id = ? AND resolved_at IS NULL`,
+  ).run(proposalId, id);
+  return getInboxItem(db, id);
+}
+
+function correlatedProposal(db, inboxItemId) {
+  return (
+    db
+      .query(
+        `SELECT p.id FROM events e
+         JOIN proposals p
+           ON p.event_source = e.source AND p.event_id = e.event_id
+         WHERE e.correlation_id = ?
+         ORDER BY p.created_at DESC, p.rowid DESC LIMIT 1`,
+      )
+      .get(inboxItemId)?.id ?? null
+  );
+}
+
 function telegramMessage(item, webUrl) {
   const lines = [item.title];
   if (item.body) lines.push(item.body);
@@ -768,17 +812,106 @@ export async function deliverInboxItem(
   };
 }
 
-/** Resolve runtime-owned asks when their authoritative referent stops waiting. */
-export function reconcileInbox(db, { now = Date.now() } = {}) {
+const LINEAR_POLL_INTERVAL_MS = 60_000;
+const linearPollAt = new WeakMap();
+
+function prNumber(ref) {
+  if (typeof ref !== "string") return null;
+  const match =
+    /^(?:PR\s*)?#?(\d+)$/i.exec(ref.trim()) ??
+    /\/pull\/(\d+)(?:[/?#]|$)/.exec(ref);
+  return match ? Number(match[1]) : null;
+}
+
+function completedShipProposal(db, proposalId) {
+  return Boolean(
+    db
+      .query(
+        `SELECT 1 FROM proposals p
+         JOIN runs r ON r.run_id = p.run_id
+         WHERE p.id = ? AND r.state = 'COMPLETED'`,
+      )
+      .get(proposalId),
+  );
+}
+
+function laterCiSuccess(db, row, refs) {
+  const pr = prNumber(refs.pr);
+  if (!refs.repo || !pr) return false;
+  const events = db
+    .query(
+      `SELECT subject, envelope_json FROM events
+       WHERE source = 'github'
+         AND type = 'factory.merge.requested'
+         AND admitted_at > ?
+       ORDER BY admitted_at, rowid`,
+    )
+    .all(row.created_at);
+  return events.some((event) => {
+    const envelope = parseObject(event.envelope_json);
+    const payload = envelope.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      return false;
+    const repo = payload.repo ?? event.subject;
+    return (
+      repo === refs.repo &&
+      Array.isArray(payload.prNumbers) &&
+      payload.prNumbers.some((number) => Number(number) === pr)
+    );
+  });
+}
+
+/** One bounded GraphQL request for the distinct Linear referents in this poll. */
+export async function fetchLinearInboxIssues(issueIds, { request = gql } = {}) {
+  if (!Array.isArray(issueIds) || issueIds.length === 0) return [];
+  const declarations = issueIds.map((_, index) => `$i${index}:String!`);
+  const fields = issueIds.map(
+    (_, index) =>
+      `i${index}: issue(id:$i${index}) { identifier state { name type } labels { nodes { name } } }`,
+  );
+  const variables = Object.fromEntries(
+    issueIds.map((issue, index) => [`i${index}`, issue]),
+  );
+  const data = await request(
+    `query(${declarations.join(",")}) { ${fields.join("\n")} }`,
+    variables,
+  );
+  return issueIds
+    .map((issue, index) => data?.[`i${index}`] ?? null)
+    .filter(Boolean);
+}
+
+function linearIssueResolved(kind, issue) {
+  const state = issue?.state?.name;
+  if (typeof state !== "string" || state === "") return false;
+  if (kind === "BLOCKED") return state !== "Blocked";
+  if (kind === "ESCALATED") {
+    const labels = (issue?.labels?.nodes ?? []).map((label) => label.name);
+    return (
+      issue?.state?.type === "completed" || !labels.includes("ai:escalated")
+    );
+  }
+  return false;
+}
+
+/** Resolve asks when their runtime-owned or externally polled referent moves on. */
+export function reconcileInbox(
+  db,
+  { now = Date.now(), linearIssues = fetchLinearInboxIssues } = {},
+) {
   const resolved = [];
   const rows = db
     .query(
-      `SELECT id, kind, refs_json, decision_json, response_json FROM inbox_items
+      `SELECT id, kind, refs_json, decision_json, response_json, created_at FROM inbox_items
      WHERE resolved_at IS NULL
-       AND kind IN ('decision_needed', 'proposal_expired', 'human_needed', 'BLOCKED')
+       AND kind IN (
+         'decision_needed', 'proposal_expired', 'human_needed', 'BLOCKED',
+         'ESCALATED', 'CI RED', 'RC READY'
+       )
      ORDER BY created_at, rowid`,
     )
     .all();
+  const linearRows = [];
   for (const row of rows) {
     // Pending decisions are not skipped: once the referent stops waiting the
     // ask is moot and resolveInboxItem records it as superseded (auto:*).
@@ -791,16 +924,54 @@ export function reconcileInbox(db, { now = Date.now() } = {}) {
         .get(refs.proposalId);
       if (proposal && proposal.status !== "open")
         resolvedBy = "auto:proposal_decided";
+    } else if (row.kind === "CI RED") {
+      if (!refs.proposalId) {
+        const proposalId = correlatedProposal(db, row.id);
+        if (proposalId) {
+          bindProposalToItem(db, row.id, proposalId);
+          refs.proposalId = proposalId;
+        }
+      }
+      if (laterCiSuccess(db, row, refs)) resolvedBy = "auto:ci_green";
+    } else if (row.kind === "RC READY") {
+      if (refs.proposalId && completedShipProposal(db, refs.proposalId))
+        resolvedBy = "auto:ship_completed";
     } else if (refs.eventSource && refs.eventId) {
       const event = db
         .query("SELECT status FROM events WHERE source = ? AND event_id = ?")
         .get(refs.eventSource, refs.eventId);
       if (event && event.status !== "human_needed")
         resolvedBy = "auto:event_requeued";
+    } else if (
+      (row.kind === "BLOCKED" || row.kind === "ESCALATED") &&
+      refs.issue
+    ) {
+      linearRows.push({ row, refs });
     }
     if (!resolvedBy) continue;
     resolveInboxItem(db, row.id, { now, resolvedBy });
     resolved.push({ id: row.id, resolvedBy });
   }
-  return resolved;
+
+  if (linearRows.length === 0) return resolved;
+  const lastPoll = linearPollAt.get(db) ?? -Infinity;
+  if (now - lastPoll < LINEAR_POLL_INTERVAL_MS) return resolved;
+  linearPollAt.set(db, now);
+  const issueIds = [...new Set(linearRows.map(({ refs }) => refs.issue))];
+  return Promise.resolve(linearIssues(issueIds))
+    .then((issues) => {
+      const byId = new Map(issues.map((issue) => [issue.identifier, issue]));
+      for (const { row, refs } of linearRows) {
+        const issue = byId.get(refs.issue);
+        if (!issue || !linearIssueResolved(row.kind, issue)) continue;
+        const resolvedBy =
+          row.kind === "BLOCKED"
+            ? "auto:linear_unblocked"
+            : "auto:linear_escalation_cleared";
+        resolveInboxItem(db, row.id, { now, resolvedBy });
+        resolved.push({ id: row.id, resolvedBy });
+      }
+      return resolved;
+    })
+    .catch(() => resolved);
 }

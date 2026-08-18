@@ -16,6 +16,7 @@ import {
   displayTitle,
   groupItems,
   groupOf,
+  inboxActionPrHref,
   inboxAge,
   itemStatus,
   matchesTab,
@@ -217,6 +218,15 @@ describe("inbox pure helpers", () => {
     expect(
       prHref(item({ id: "bare", kind: "CI RED", refs: { pr: "PR#125" } })),
     ).toBeNull();
+    expect(
+      inboxActionPrHref(
+        item({
+          id: "action",
+          kind: "SMOKE RED",
+          refs: { repo: "factory", pr: "607" },
+        }),
+      ),
+    ).toBe("https://github.com/watt-mind/factory/pull/607");
   });
 
   test("Inbox age preserves hour precision after 24 hours", () => {
@@ -501,7 +511,8 @@ describe("Inbox view", () => {
     expect(
       view.getByText("Telegram: not attempted".replace(/^Telegram: /, "")),
     ).toBeTruthy();
-    expect(view.getByRole("button", { name: /Resolve…/ })).toBeTruthy();
+    expect(view.getByText(/inbox deliberately cannot merge/)).toBeTruthy();
+    expect(view.queryByRole("button", { name: /Resolve…/ })).toBeNull();
     expect(view.queryByRole("button", { name: /^Ack/ })).toBeNull();
   });
 
@@ -662,7 +673,7 @@ describe("Inbox view", () => {
     expect(api.ackInbox).not.toHaveBeenCalled();
   });
 
-  test("A acks each selected id sequentially", async () => {
+  test("A acks selected legacy rows without acking per-kind action rows", async () => {
     const calls: string[] = [];
     api.ackInbox = mock(async (id: string) => {
       calls.push(id);
@@ -683,18 +694,15 @@ describe("Inbox view", () => {
       );
     });
 
-    await waitFor(() =>
-      expect(calls).toEqual(["inbox_open_1", "inbox_open_2"]),
-    );
+    await waitFor(() => expect(calls).toEqual(["inbox_open_1"]));
     expect(
-      view.getByRole("button", { name: "Ack: 2 done / 0 failed" }),
+      view.getByRole("button", { name: "Ack: 1 done / 0 failed" }),
     ).toBeTruthy();
   });
 
-  test("bulk ack reports one done / failed summary toast", async () => {
+  test("bulk ack reports a failure for the eligible subset", async () => {
     api.ackInbox = mock(async (id: string) => {
-      if (id === "inbox_open_2") throw new Error("race");
-      return { item: ledger.find((it) => it.id === id)! };
+      throw new Error(`race: ${id}`);
     });
     const { view } = renderInbox();
     await waitFor(() => view.getByLabelText("Select all inbox items"));
@@ -702,9 +710,9 @@ describe("Inbox view", () => {
 
     fireEvent.click(view.getByRole("button", { name: /^Ack$/ }));
 
-    await waitFor(() => expect(api.ackInbox).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.ackInbox).toHaveBeenCalledTimes(1));
     expect(
-      view.getByRole("button", { name: "Ack: 1 done / 1 failed" }),
+      view.getByRole("button", { name: "Ack: 0 done / 1 failed" }),
     ).toBeTruthy();
   });
 
