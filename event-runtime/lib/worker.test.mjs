@@ -3826,7 +3826,10 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     expect(result.verification.checks).toContain("repo_verify_passed");
   });
 
-  test("failing repo verify command triggers contract_violation failure", async () => {
+  // WM-718: at handoff (PR_OPEN) a red repo verify is the handoff gate
+  // refusing — named `handoff_verification_failed` so the ticket returns to
+  // Todo + ai:agent-ready and the PR is held; still FAILED, still no result row.
+  test("failing repo verify command at handoff fails handoff_verification_failed", async () => {
     const db = openDb(":memory:");
     const lockDir = mkdtempSync(path.join(os.tmpdir(), "evrt-fverify-locks-"));
     const leaseDir = mkdtempSync(
@@ -3856,7 +3859,9 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     );
 
     expect(summary.terminalState).toBe("FAILED");
-    expect(summary.reasonCode).toBe("contract_violation");
+    expect(summary.reasonCode).toBe("handoff_verification_failed");
+    expect(summary.detail).toContain("repo_verify_failed");
+    expect(summary.handoff.repoVerify.exitCode).toBe(42);
   });
 
   test("a deliberately red baseline still reaches the agent with failure context, then terminates baseline_red", async () => {
@@ -4855,5 +4860,487 @@ describe("reload watcher (WM-213)", () => {
 
   test("CODE_RELOAD_EXIT is a code no ordinary worker exit uses", () => {
     expect(CODE_RELOAD_EXIT).toBe(75);
+  });
+});
+
+describe("handoff verification gate (WM-718)", () => {
+  let factoryRoot;
+  let repoDir;
+  let wtRoot;
+  let previousReposRoot;
+
+  const OWNED = "## Owned Paths\n- src/feature/**\n- event-runtime/web/**\n\n";
+  const withCommand = (cmd) =>
+    `${OWNED}## Verification Command\n\n\`\`\`\n${cmd}\n\`\`\`\n`;
+
+  beforeAll(() => {
+    factoryRoot = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-factory-"));
+    repoDir = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-repo-"));
+    wtRoot = mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-trees-"));
+    mkdirSync(path.join(repoDir, "bin"), { recursive: true });
+    // A real git worktree with an `origin/develop` ref, so the gate can diff
+    // merge-base..HEAD exactly as it does for a repo-owned worktree_up.
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-up.sh"),
+      [
+        "#!/bin/bash",
+        "set -e",
+        `WT="${wtRoot}/$1"`,
+        'mkdir -p "$WT" && cd "$WT"',
+        "git init -q -b develop",
+        "git config user.email factory@test && git config user.name factory",
+        "mkdir -p src/feature event-runtime/web/src",
+        "echo base > src/feature/base.txt",
+        `printf '%s\\n' '{"name":"web","private":true,"scripts":{"build":"echo web_built:$PWD >> ${repoDir}/web-builds.log"}}' > event-runtime/web/package.json`,
+        "echo 'export const x = 1;' > event-runtime/web/src/index.ts",
+        "git add -A && git commit -qm base",
+        "git update-ref refs/remotes/origin/develop HEAD",
+        'git checkout -qb "feat/$1"',
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(repoDir, "bin", "worktree-down.sh"),
+      `#!/bin/bash\nrm -rf "${wtRoot}/$1"\n`,
+    );
+    mkdirSync(path.join(factoryRoot, "config"), { recursive: true });
+    writeFileSync(path.join(factoryRoot, "config", "policy.yaml"), "{}\n");
+    writeFileSync(
+      path.join(factoryRoot, "config", "repos.yaml"),
+      `repos:\n` +
+        `  - name: wt-handoff\n    path: ${repoDir}\n    github: watt-mind/wt-handoff\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    verify: echo repo_verified\n    escalate_paths: []\n` +
+        `  - name: wt-handoff-noverify\n    path: ${repoDir}\n    github: watt-mind/wt-handoff-noverify\n    base: develop\n` +
+        `    team: WM\n    project: Factory\n    max_in_flight: 2\n` +
+        `    worktree_up: bin/worktree-up.sh\n    worktree_down: bin/worktree-down.sh\n` +
+        `    worktree_root: ${wtRoot}\n    escalate_paths: []\n`,
+    );
+    previousReposRoot = process.env.FACTORY_REPOS_ROOT;
+    process.env.FACTORY_REPOS_ROOT = factoryRoot;
+  });
+
+  afterAll(() => {
+    if (previousReposRoot === undefined) delete process.env.FACTORY_REPOS_ROOT;
+    else process.env.FACTORY_REPOS_ROOT = previousReposRoot;
+  });
+
+  const setPolicy = (yaml) =>
+    writeFileSync(path.join(factoryRoot, "config", "policy.yaml"), yaml);
+
+  function handoffSpec({ repo = "wt-handoff", ticket }) {
+    const runId = `run_handoff_${++seq}_${Math.random().toString(36).slice(2)}`;
+    const input = { repo, ticket };
+    return {
+      schemaVersion: "factory.run-spec/v1",
+      runId,
+      agent: "dispatch@1",
+      input,
+      inputHash: hashJson(input),
+      workspace: {
+        type: "worktree",
+        checkoutDir: "repo",
+        retainOnFailure: true,
+      },
+      adapter: "fake",
+      promptVersion: "git:test",
+      policyVersion: "git:test",
+      outputContract: "factory.dispatch-result/v1",
+      capabilities: ["linear:write", "repo:write", "github:write"],
+      timeoutSeconds: 5,
+      maxAttempts: 1,
+      idempotencyKey: `idem-${runId}`,
+    };
+  }
+
+  /** A fake dispatch agent: writes files, commits, claims whatever it likes. */
+  function agent({ files = {}, claim = {}, prNumber = 77 }) {
+    return {
+      async execute({ spec, workspaceDir }) {
+        writeFileSync(
+          path.join(workspaceDir, ".transcript.json"),
+          `{"fake":"handoff transcript"}\n`,
+        );
+        const repo = path.join(workspaceDir, "repo");
+        for (const [rel, content] of Object.entries(files)) {
+          mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+          writeFileSync(path.join(repo, rel), content);
+        }
+        execFileSync("git", ["add", "-A"], { cwd: repo });
+        execFileSync(
+          "git",
+          ["commit", "-qm", `implement ${spec.input.ticket}`],
+          {
+            cwd: repo,
+          },
+        );
+        writeFileSync(
+          path.join(workspaceDir, "result.json"),
+          `${JSON.stringify({
+            schemaVersion: "factory.agent-result/v1",
+            terminalState: "completed",
+            reasonCode: "ok",
+            artifact: {
+              outcome: "PR_OPEN",
+              repo: spec.input.repo,
+              ticket: spec.input.ticket,
+              prUrl: `https://github.com/watt-mind/${spec.input.repo}/pull/${prNumber}`,
+              prNumber,
+              verification: {
+                command: "bash run-tests.sh",
+                passed: true,
+                output: "all green",
+                ...claim,
+              },
+              summary: `implemented ${spec.input.ticket}`,
+              uxCritique: {
+                status: "skipped",
+                verdict: null,
+                evidence: [],
+                rounds: 0,
+                prReady: true,
+              },
+            },
+            evidence: { commands: ["bash run-tests.sh"] },
+          })}\n`,
+        );
+        return { exitCode: 0, timedOut: false };
+      },
+    };
+  }
+
+  async function dispatch({ spec, adapter, description, hooks = {} }) {
+    const db = openDb(":memory:");
+    queueRun(db, spec);
+    const calls = { unclaim: [], returned: [], held: [], comments: [] };
+    const summary = await runOnce(
+      db,
+      registry,
+      { fake: adapter },
+      opts({
+        dispatch: {
+          locksDir: mkdtempSync(path.join(os.tmpdir(), "evrt-handoff-locks-")),
+          leasesDir: mkdtempSync(
+            path.join(os.tmpdir(), "evrt-handoff-leases-"),
+          ),
+          fetchTicket: () => ({
+            identifier: spec.input.ticket,
+            state: { name: "Todo" },
+            assignee: null,
+            labels: { nodes: [{ name: "ai:agent-ready" }] },
+            description,
+          }),
+          fetchInFlight: () => [],
+          countLeases: () => 0,
+          claimTicket: () => ({ ok: true }),
+          unclaimTicket: (p) => (calls.unclaim.push(p), false),
+          returnHandoffTicket: (p) => (calls.returned.push(p), true),
+          holdPullRequest: (p) => (calls.held.push(p), true),
+          commentTicket: (p) => (calls.comments.push(p), true),
+          ...hooks,
+        },
+      }),
+    );
+    return { db, summary, calls };
+  }
+
+  test("a fake agent that leaves a failing test is refused handoff_verification_failed: no result row, ticket back to Todo + agent-ready, PR held, tail in the receipt", async () => {
+    const spec = handoffSpec({ ticket: "WM-7181" });
+    const { db, summary, calls } = await dispatch({
+      spec,
+      description: withCommand("bash run-tests.sh"),
+      adapter: agent({
+        files: {
+          "src/feature/impl.txt": "done\n",
+          "run-tests.sh":
+            'echo "suite start"\necho "(fail) totals > rejects an invalid total"\necho "1 fail" >&2\nexit 1\n',
+        },
+      }),
+    });
+
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("handoff_verification_failed");
+    expect(summary.detail).toContain("ticket_verify_failed");
+    expect(summary.handoff.verification.command).toBe("bash run-tests.sh");
+    expect(summary.handoff.verification.exitCode).toBe(1);
+    expect(summary.handoff.verification.tail).toContain(
+      "(fail) totals > rejects an invalid total",
+    );
+    // The repo verify passed; the ticket's own command is what caught it.
+    expect(summary.handoff.repoVerify.passed).toBe(true);
+
+    // No PR_OPEN result was published — nothing downstream chains a review.
+    expect(
+      db
+        .query(`SELECT COUNT(*) AS n FROM results WHERE run_id = ?`)
+        .get(spec.runId).n,
+    ).toBe(0);
+    expect(
+      db
+        .query(`SELECT reason_code FROM attempts WHERE run_id = ?`)
+        .get(spec.runId).reason_code,
+    ).toBe("handoff_verification_failed");
+    const journal = lifecycleOf(db, spec.runId)
+      .map((row) => row.reason)
+      .join("\n");
+    expect(journal).toContain("(fail) totals > rejects an invalid total");
+    expect(classifyFailureCause("handoff_verification_failed")).toBe(
+      "agent_error",
+    );
+
+    // Ticket returned (Todo + agent-ready), never Blocked, never the plain unclaim.
+    expect(calls.returned).toHaveLength(1);
+    expect(calls.returned[0].ticket).toBe("WM-7181");
+    expect(calls.returned[0].body).toContain(
+      "## Handoff verification (worker-observed)",
+    );
+    expect(calls.returned[0].body).toContain(
+      "(fail) totals > rejects an invalid total",
+    );
+    expect(calls.returned[0].body).toContain("Todo + ai:agent-ready");
+    expect(calls.unclaim).toHaveLength(0);
+    // The agent's PR is converted to draft with the observed failure quoted.
+    expect(calls.held).toHaveLength(1);
+    expect(calls.held[0]).toMatchObject({
+      prNumber: 77,
+      github: "watt-mind/wt-handoff",
+    });
+    expect(calls.held[0].body).toContain("exit 1 (FAIL)");
+    expect(calls.comments).toHaveLength(0);
+  });
+
+  test("no Verification Command and no repo verify: refused handoff_verification_unspecified (fail-closed)", async () => {
+    const spec = handoffSpec({
+      repo: "wt-handoff-noverify",
+      ticket: "WM-7182",
+    });
+    const { summary, calls } = await dispatch({
+      spec,
+      description: OWNED,
+      adapter: agent({ files: { "src/feature/impl.txt": "done\n" } }),
+    });
+    expect(summary.terminalState).toBe("FAILED");
+    expect(summary.reasonCode).toBe("handoff_verification_unspecified");
+    expect(calls.returned).toHaveLength(1);
+    expect(calls.held).toHaveLength(1);
+    expect(calls.returned[0].body).toContain("Verification: NONE");
+  });
+
+  test("without a Verification Command the repo verify stands in and the run completes with a worker-observed line", async () => {
+    const spec = handoffSpec({ ticket: "WM-7183" });
+    const { db, summary, calls } = await dispatch({
+      spec,
+      description: OWNED,
+      adapter: agent({ files: { "src/feature/impl.txt": "done\n" } }),
+    });
+    expect(summary.terminalState).toBe("COMPLETED");
+    const result = JSON.parse(
+      db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(spec.runId).result_json,
+    );
+    expect(result.verification.checks).toContain("repo_verify_passed");
+    expect(result.verification.checks).not.toContain("ticket_verify_passed");
+    expect(calls.comments).toHaveLength(1);
+    expect(calls.comments[0].body).toContain(
+      "- Verification: `echo repo_verified` — exit 0 (pass)",
+    );
+    expect(calls.comments[0].body).toContain("repo `verify:` command stood in");
+  });
+
+  test("a change under event-runtime/web/src/** runs the web build and a red build refuses the handoff", async () => {
+    const description = withCommand("bash run-tests.sh");
+    const files = {
+      "run-tests.sh": "echo ok\n",
+      "event-runtime/web/src/index.ts": "export const x: number = 2;\n",
+    };
+    // Green build: gate runs it (marker written) and records the check.
+    const green = handoffSpec({ ticket: "WM-7184" });
+    const g = await dispatch({
+      spec: green,
+      description,
+      adapter: agent({ files }),
+    });
+    expect(g.summary.terminalState).toBe("COMPLETED");
+    const builds = () =>
+      existsSync(path.join(repoDir, "web-builds.log"))
+        ? readFileSync(path.join(repoDir, "web-builds.log"), "utf8")
+        : "";
+    expect(builds()).toContain(
+      "web_built:" + path.join(wtRoot, "WM-7184", "event-runtime/web"),
+    );
+    const result = JSON.parse(
+      g.db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(green.runId).result_json,
+    );
+    expect(result.verification.checks).toEqual(
+      expect.arrayContaining(["ticket_verify_passed", "web_build_passed"]),
+    );
+    expect(g.calls.comments[0].body).toContain(
+      "- Web build (event-runtime/web/src/** changed): `cd event-runtime/web && bun run build` — exit 0 (pass)",
+    );
+
+    // Red build (tsc-style error) even though the ticket's command is green.
+    const red = handoffSpec({ ticket: "WM-7185" });
+    const r = await dispatch({
+      spec: red,
+      description,
+      adapter: agent({
+        files: {
+          ...files,
+          "event-runtime/web/package.json":
+            '{"name":"web","private":true,"scripts":{"build":"echo \'src/index.ts(1,14): error TS6133: unused local\' >&2; exit 2"}}\n',
+        },
+      }),
+    });
+    expect(r.summary.terminalState).toBe("FAILED");
+    expect(r.summary.reasonCode).toBe("handoff_verification_failed");
+    expect(r.summary.detail).toContain("web_build_failed");
+    expect(r.summary.detail).toContain("error TS6133");
+    expect(r.summary.handoff.webBuild.exitCode).toBe(2);
+    expect(r.calls.held).toHaveLength(1);
+    expect(r.calls.returned).toHaveLength(1);
+
+    // No web/src change: the build is not run at all.
+    const skip = handoffSpec({ ticket: "WM-7186" });
+    const s = await dispatch({
+      spec: skip,
+      description,
+      adapter: agent({
+        files: { "run-tests.sh": "echo ok\n", "src/feature/x.txt": "x\n" },
+      }),
+    });
+    expect(s.summary.terminalState).toBe("COMPLETED");
+    expect(builds()).not.toContain("WM-7186");
+    expect(s.calls.comments[0].body).toContain("- Web build: skipped");
+  });
+
+  test("the Handoff Verification line is worker-authored: the agent's 'pass' claim cannot override an observed red, and rides below labelled agent-reported", async () => {
+    const description = withCommand("bash run-tests.sh");
+    const failing = handoffSpec({ ticket: "WM-7187" });
+    const f = await dispatch({
+      spec: failing,
+      description,
+      adapter: agent({
+        files: { "run-tests.sh": 'echo "regression in totals"; exit 3\n' },
+        claim: {
+          command: "bash run-tests.sh",
+          passed: true,
+          output: "pass, 2045 tests green",
+        },
+      }),
+    });
+    expect(f.summary.terminalState).toBe("FAILED");
+    const body = f.calls.returned[0].body;
+    const verificationLine = body
+      .split("\n")
+      .find((l) => l.startsWith("- Verification:"));
+    expect(verificationLine).toBe(
+      "- Verification: `bash run-tests.sh` — exit 3 (FAIL)",
+    );
+    expect(body).toContain("regression in totals");
+    expect(body).toContain(
+      "- agent-reported: `bash run-tests.sh` — pass, pass, 2045 tests green",
+    );
+    expect(body).not.toContain("- Verification: `bash run-tests.sh` — pass");
+
+    // Green run: the line still comes from the worker's observation, and a
+    // claim naming a different command is quoted only as agent-reported.
+    const passing = handoffSpec({ ticket: "WM-7188" });
+    const p = await dispatch({
+      spec: passing,
+      description,
+      adapter: agent({
+        files: { "run-tests.sh": 'echo "42 tests, 0 failures"\n' },
+        claim: {
+          command: "bun test --only-my-file",
+          passed: true,
+          output: "green",
+        },
+      }),
+    });
+    expect(p.summary.terminalState).toBe("COMPLETED");
+    const okBody = p.calls.comments[0].body;
+    expect(
+      okBody.split("\n").find((l) => l.startsWith("- Verification:")),
+    ).toBe("- Verification: `bash run-tests.sh` — exit 0 (pass)");
+    expect(okBody).toContain("42 tests, 0 failures");
+    expect(okBody).toContain(
+      "- agent-reported: `bun test --only-my-file` — pass, green",
+    );
+  });
+
+  test("Owned Paths deviations are computed from the diff: listed under advisory (default), refused under strict", async () => {
+    const description = withCommand("bash run-tests.sh");
+    const files = {
+      "run-tests.sh": "echo ok\n",
+      "src/feature/impl.txt": "done\n",
+      "docs/stray.md": "out of scope reflow\n",
+      "orchestrator/tick.mjs": "// out of scope\n",
+    };
+    setPolicy("{}\n"); // key absent → advisory
+    const adv = handoffSpec({ ticket: "WM-7189" });
+    const a = await dispatch({
+      spec: adv,
+      description,
+      adapter: agent({ files }),
+    });
+    expect(a.summary.terminalState).toBe("COMPLETED");
+    expect(a.summary.handoff.ownedPathsDeviations).toEqual([
+      "docs/stray.md",
+      "orchestrator/tick.mjs",
+      "run-tests.sh",
+    ]);
+    const result = JSON.parse(
+      a.db
+        .query(`SELECT result_json FROM results WHERE run_id = ?`)
+        .get(adv.runId).result_json,
+    );
+    expect(result.verification.checks).toContain(
+      "owned_paths_deviations_advisory",
+    );
+    const body = a.calls.comments[0].body;
+    expect(body).toContain("- Files: 4 changed vs origin/develop");
+    expect(body).toContain("- Owned Paths deviations (advisory): 3 file(s)");
+    expect(body).toContain("  - `docs/stray.md`");
+    expect(body).toContain("  - `orchestrator/tick.mjs`");
+    expect(body).toContain("  - `run-tests.sh`");
+    expect(body).not.toContain("  - `src/feature/impl.txt`");
+
+    setPolicy("dispatch:\n  owned_paths_conformance: strict\n");
+    try {
+      const strict = handoffSpec({ ticket: "WM-7190" });
+      const s = await dispatch({
+        spec: strict,
+        description,
+        adapter: agent({ files }),
+      });
+      expect(s.summary.terminalState).toBe("FAILED");
+      expect(s.summary.reasonCode).toBe("handoff_owned_paths_violation");
+      expect(s.summary.detail).toContain("docs/stray.md");
+      expect(s.calls.returned).toHaveLength(1);
+      expect(s.calls.held).toHaveLength(1);
+      expect(s.calls.returned[0].body).toContain(
+        "Owned Paths deviations (strict): 3 file(s)",
+      );
+    } finally {
+      setPolicy("{}\n");
+    }
+
+    // Conformant diff: no deviations, the check is recorded.
+    const clean = handoffSpec({ ticket: "WM-7191" });
+    const c = await dispatch({
+      spec: clean,
+      description: `## Owned Paths\n- src/feature/**\n- run-tests.sh\n\n## Verification Command\n\n\`\`\`\nbash run-tests.sh\n\`\`\`\n`,
+      adapter: agent({
+        files: { "run-tests.sh": "echo ok\n", "src/feature/y.txt": "y\n" },
+      }),
+    });
+    expect(c.summary.terminalState).toBe("COMPLETED");
+    expect(c.calls.comments[0].body).toContain(
+      "- Owned Paths deviations: none",
+    );
   });
 });

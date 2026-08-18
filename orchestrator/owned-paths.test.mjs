@@ -15,6 +15,7 @@ import {
   hardPathConflicts,
   pathOverlaps,
   parseOwnedPaths,
+  parseVerificationCommand,
   effectiveOwnedPaths,
   globsOverlap,
   pathsCollide,
@@ -329,4 +330,53 @@ test("hardPathConflicts: ** on either side — nothing else", () => {
   // `**` on either side is hard against anything it reaches.
   expectTrue(hardPathConflicts(["**"], ["docs/a.md"]).length === 1);
   expectTrue(hardPathConflicts(["docs/a.md"], ["**"]).length === 1);
+});
+
+// WM-718: the worker runs the ticket's own Verification Command at handoff, so
+// it has to read the same section every agent has been reading by eye.
+test("parseVerificationCommand: fenced block under '## Verification Command'", () => {
+  expectEqual(
+    parseVerificationCommand(
+      "## Owned Paths\n- src/**\n\n## Verification Command\n\n```\ncd event-runtime/web && bun run build && bun test\n```\n\nPriority: High\n",
+    ),
+    "cd event-runtime/web && bun run build && bun test",
+  );
+});
+
+test("parseVerificationCommand: '## Verification' heading, backticked single line, prose after it ignored", () => {
+  expectEqual(
+    parseVerificationCommand(
+      "## Verification\n\n`bun test orchestrator/repos-config.test.mjs`\nAlso confirm bun 1.3.14 accepts `bun test event-runtime/lib`.\n",
+    ),
+    "bun test orchestrator/repos-config.test.mjs",
+  );
+});
+
+test("parseVerificationCommand: multi-line fenced block joins with && and drops comments/continuations", () => {
+  expectEqual(
+    parseVerificationCommand(
+      "### Verification Command\n```bash\n# unit slice first\n$ bun test event-runtime/lib \\\n    --timeout 20000\nbun build/emit.mjs --check\n```\n",
+    ),
+    "bun test event-runtime/lib --timeout 20000 && bun build/emit.mjs --check",
+  );
+});
+
+test("parseVerificationCommand: bare command line accepted, prose and missing section rejected", () => {
+  expectEqual(
+    parseVerificationCommand("## Verification Command\nbun test\n"),
+    "bun test",
+  );
+  expectEqual(
+    parseVerificationCommand(
+      "## Verification Command\nRun the usual suite and eyeball the output.\n",
+    ),
+    null,
+  );
+  expectEqual(parseVerificationCommand("## Owned Paths\n- a.mjs\n"), null);
+  expectEqual(parseVerificationCommand("## Verification\n\n```\n```\n"), null);
+  // "Verification Evidence"-style headings are not the command section.
+  expectEqual(
+    parseVerificationCommand("## Verification evidence\n`bun test`\n"),
+    null,
+  );
 });

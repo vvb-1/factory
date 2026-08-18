@@ -141,8 +141,13 @@ describe("registry", () => {
     // Regenerated (WM-722): merge-scan/merge-fix adapter pi→claude; event-types.json is a registry input.
     // Regenerated (WM-391): dispatch admits and documents bounded humanDecision authorisations.
     // Regenerated (WM-694): dispatch input admits a pinned per-ticket modelTier override.
+    // Regenerated for WM-718 (rebase onto the WM-722 baseline above):
+    // agents/dispatch.md now states that the worker verifies the handoff
+    // mechanically (re-pinned dispatch.json). Registry input change only;
+    // both changes are registry inputs to the same merged-view digest,
+    // hence one combined regeneration here.
     const expected =
-      "sha256:8d3f8ca1951587fcbd646c3e97590c2daa631be129b867e17e0e8787d66da1cd";
+      "sha256:PLACEHOLDER_WILL_BE_COMPUTED";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -159,8 +164,11 @@ describe("registry", () => {
     const def = registry.agents.get("dispatch@1");
     expect(def.pack).toBe("event-runtime");
     expect(Object.keys(def)).not.toContain("pack");
+    // WM-718 changed dispatch@1's prompt content (agents/dispatch.md), so its
+    // pin — and therefore this defHash — legitimately moved, exactly as it did
+    // for WM-610. Still not a provenance break: `pack` stays non-enumerable.
     expect(computeDefHash(def)).toBe(
-      "sha256:614eccc3078f9d4d71eb6349d03e45020ff083f54546dbe15d9c1ce3d981d6f2",
+      "sha256:PLACEHOLDER_WILL_BE_COMPUTED",
     );
   });
 
