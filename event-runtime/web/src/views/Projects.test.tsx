@@ -619,3 +619,71 @@ describe("Projects mode tabs and hotkeys (WM-234)", () => {
     });
   });
 });
+describe("Projects mobile layout (WM-169)", () => {
+  test("provides a mobile mode select synchronized with tabs and keyboard shortcuts", async () => {
+    await withApi(
+      {
+        repos: async () => ({
+          repos: [
+            repo({ name: "r-dispatch", reportOnly: false }),
+            repo({ name: "r-report", reportOnly: true }),
+          ],
+        }),
+      },
+      async () => {
+        const r = renderProjects();
+        await r.findByText("r-dispatch");
+
+        const select = r.getByRole("combobox", {
+          name: "Project mode",
+        }) as HTMLSelectElement;
+        const tablist = r.getByRole("tablist", { name: "Project mode" });
+        const tabs = r.getAllByRole("tab");
+
+        expect(select.className).toContain("sm:hidden");
+        expect(tablist.className).toContain("hidden");
+        expect(tablist.className).toContain("sm:flex");
+        expect(select.value).toBe("ALL");
+
+        fireEvent.change(select, { target: { value: "DISPATCHABLE" } });
+        expect(select.value).toBe("DISPATCHABLE");
+        expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+        expect(r.getByText("r-dispatch")).toBeTruthy();
+        expect(r.queryByText("r-report")).toBeNull();
+
+        fireEvent.keyDown(document.body, { key: "]" });
+        expect(select.value).toBe("REPORT_ONLY");
+        expect(tabs[2].getAttribute("aria-selected")).toBe("true");
+
+        fireEvent.keyDown(document.body, { key: "1" });
+        expect(select.value).toBe("ALL");
+        expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+
+        fireEvent.click(tabs[2]);
+        expect(select.value).toBe("REPORT_ONLY");
+      },
+    );
+  });
+
+  test("contains the full table in the existing horizontal scroller", async () => {
+    await withApi({ repos: async () => ({ repos: [repo()] }) }, async () => {
+      const r = renderProjects();
+      const table = await r.findByRole("table", { name: "Projects table" });
+
+      expect(table.className).toContain("min-w-");
+      expect(table.parentElement?.className).toContain("overflow-auto");
+    });
+  });
+
+  test("keeps the selected project detail pane within the mobile viewport", async () => {
+    await withApi({ repos: async () => ({ repos: [repo()] }) }, async () => {
+      const r = renderProjects("factory");
+      await r.findByText("Quick Dispatch (Agent Tasks)");
+
+      const pane = r.container.querySelector("aside");
+      expect(pane?.className).toContain("w-full");
+      expect(pane?.className).toContain("max-w-full");
+      expect(pane?.className).toContain("sm:w-[540px]");
+    });
+  });
+});
