@@ -1194,3 +1194,69 @@ describe("Runs long-list window (WM-563)", () => {
     );
   });
 });
+
+describe("Runs in-flight row height (WM-725)", () => {
+  function cellFor(
+    r: ReturnType<typeof renderRuns>,
+    runId: string,
+    label: string,
+  ): HTMLTableCellElement {
+    const index = [...r.container.querySelectorAll("thead th")].findIndex(
+      (th) => (th.textContent ?? "").startsWith(label),
+    );
+    expect(index).toBeGreaterThanOrEqual(0);
+    const row = r.container
+      .querySelector(`td[title="${runId}"]`)
+      ?.closest("tr");
+    expect(row).toBeTruthy();
+    return row!.querySelectorAll("td")[index] as HTMLTableCellElement;
+  }
+
+  // The State column is one line: the badge plus the optional `proposal` jump
+  // link (WM-505). A second line of clocks stacked under the badge made every
+  // in-flight row taller than the terminal rows around it, and repeated a
+  // countdown the Remaining column already owns.
+  test("in-flight State cell stays one line and Remaining carries the countdown", async () => {
+    const now = Date.now();
+    const hang = stubListItem("run_hang", "RUNNING", {
+      startedAt: new Date(now - 2 * 60_000).toISOString(),
+      deadlineAt: new Date(now + 9 * 60_000).toISOString(),
+      leaseExpiresAt: new Date(now + 60_000).toISOString(),
+      timeoutSeconds: 600,
+    });
+    const done = stubListItem("run_done", "COMPLETED");
+
+    await withApi(
+      {
+        runs: async () => ({ runs: [hang, done] }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const r = renderRuns();
+        await waitFor(() =>
+          expect(
+            r.container.querySelector('td[title="run_hang"]'),
+          ).toBeTruthy(),
+        );
+
+        const state = cellFor(r, "run_hang", "State");
+        expect(state.textContent).not.toContain("timeout in");
+        expect(state.textContent).not.toContain("reaped in");
+        expect(state.textContent).toBe("RUNNING");
+        // Same block count as the terminal row beside it: one line each, so
+        // the two rows are the same height.
+        expect(state.querySelectorAll("div").length).toBe(
+          cellFor(r, "run_done", "State").querySelectorAll("div").length,
+        );
+
+        // The urgency did not disappear with the second line — Remaining shows
+        // the budget and the lease together, still on one line.
+        const remaining = cellFor(r, "run_hang", "Remaining");
+        expect(remaining.textContent).toMatch(/\b9m\b/);
+        expect(remaining.textContent).toContain("lease");
+        expect(remaining.querySelectorAll("div").length).toBe(0);
+        expect(remaining.className).toContain("whitespace-nowrap");
+      },
+    );
+  });
+});

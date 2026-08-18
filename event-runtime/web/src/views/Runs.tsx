@@ -39,14 +39,13 @@ import {
   useProposalAgent,
 } from "../components/ApprovalRisk";
 import {
-  BudgetClock,
   IN_FLIGHT,
-  LeaseClock,
   RunDetailBlocks,
   RunFailureBanner,
   clockTo,
   isCancellable,
   pinnedModelText,
+  type Clock,
 } from "../components/RunDetailBlocks";
 import { readPinnedRuns, savePinnedRuns } from "../components/ContextTabs";
 import type { OperatorContext } from "../context";
@@ -58,7 +57,7 @@ import {
 } from "../filterQuery";
 import { decideRevealFilters, formatRevealNotification } from "../reveal";
 import type { Proposal, RunListItem, RunState } from "../types";
-import { EMPTY, formatRelative } from "../format";
+import { EMPTY, formatDuration, formatRelative } from "../format";
 import {
   Button,
   CopyActions,
@@ -271,43 +270,83 @@ const RUNS_DISPLAY: DisplayConfig<RunListItem> = {
   ],
 };
 
-function RemainingCell({
-  deadlineAt,
-  now,
-}: {
-  deadlineAt?: string | null;
-  now: number;
-}) {
-  if (!deadlineAt) return <span>—</span>;
-  const left = Math.max(0, Date.parse(deadlineAt) - now);
-  if (!Number.isFinite(left)) return <span>—</span>;
-  const minutes = Math.ceil(left / 60_000);
-  return (
-    <span title={deadlineAt}>
-      {minutes >= 60
-        ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-        : `${minutes}m`}
-    </span>
-  );
+/** Minutes, coarse enough that a row-level countdown does not tick every second. */
+const leftLabel = (leftMs: number) => {
+  const minutes = Math.ceil(leftMs / 60_000);
+  return minutes >= 60
+    ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+    : `${minutes}m`;
+};
+
+type RemainingPart = { text: string; title: string; hue?: string };
+
+/**
+ * The compact form of the detail pane's `BudgetClock`, on the same thresholds
+ * so the two never disagree: the full phrasing moves to the cell's title.
+ */
+function budgetPart(c: Clock, timeoutSeconds: number): RemainingPart | null {
+  if (c.kind === "off") return null;
+  if (c.kind === "spent")
+    return { text: "spent", title: "budget spent", hue: "var(--hue-err)" };
+  // The last tenth of the declared budget — long enough to notice on a long run.
+  const hue =
+    timeoutSeconds > 0 && c.leftMs <= timeoutSeconds * 100
+      ? "var(--hue-warn)"
+      : undefined;
+  return {
+    text: leftLabel(c.leftMs),
+    title: `timeout in ${formatDuration(c.leftMs / 1000)}`,
+    hue,
+  };
 }
 
-function RowDeadlines({ r, now }: { r: RunListItem; now: number }) {
+/** The lease only earns row space when it can outrun the budget. */
+function leasePart(c: Clock, budgetSpent: boolean): RemainingPart | null {
+  if (c.kind === "off") return null;
+  if (c.kind === "spent")
+    return { text: "lease due", title: "reap due", hue: "var(--hue-err)" };
+  return {
+    text: `lease ${leftLabel(c.leftMs)}`,
+    title: `reaped in ${formatDuration(c.leftMs / 1000)}`,
+    hue: budgetSpent ? "var(--hue-warn)" : undefined,
+  };
+}
+
+/**
+ * The one place a row says how long an in-flight attempt has left (WM-725).
+ * Budget and lease share this single line: stacking a second line of clocks
+ * under the State badge made every in-flight row taller than the terminal rows
+ * around it, for a number this column already carried.
+ */
+function RemainingCell({ r, now }: { r: RunListItem; now: number }) {
   const { startedAt, leaseExpiresAt, deadlineAt, timeoutSeconds = 0 } = r;
-  const t = deadlineAt
+  const budgetClock = deadlineAt
     ? clockTo(deadlineAt, 0, now)
     : startedAt && timeoutSeconds > 0
       ? clockTo(startedAt, timeoutSeconds * 1000, now)
       : null;
-  const l = leaseExpiresAt ? clockTo(leaseExpiresAt, 0, now) : null;
-  const hasT = t && t.kind !== "off";
-  const hasL = l && l.kind !== "off";
-  if (!hasT && !hasL) return null;
+  const leaseClock = leaseExpiresAt ? clockTo(leaseExpiresAt, 0, now) : null;
+  const budget = budgetClock && budgetPart(budgetClock, timeoutSeconds);
+  const lease =
+    leaseClock && leasePart(leaseClock, budgetClock?.kind === "spent");
+  if (!budget && !lease) return <span>{EMPTY}</span>;
+
   return (
-    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] tabular-nums text-(--text-faint)">
-      {hasT && <BudgetClock c={t} timeoutSeconds={timeoutSeconds} />}
-      {hasT && hasL && <span>·</span>}
-      {hasL && <LeaseClock c={l} urgent={t?.kind === "spent"} />}
-    </div>
+    <span
+      className="inline-flex items-baseline gap-1"
+      title={[budget?.title, lease?.title].filter(Boolean).join(" · ")}
+    >
+      {budget && <span style={{ color: budget.hue }}>{budget.text}</span>}
+      {budget && lease && <span className="text-(--text-faint)">·</span>}
+      {lease && (
+        <span
+          className="text-[11px] text-(--text-faint)"
+          style={{ color: lease.hue }}
+        >
+          {lease.text}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1035,15 +1074,12 @@ export function Runs({
                             return null;
                           })()}
                       </div>
-                      {IN_FLIGHT.includes(r.state) && (
-                        <RowDeadlines r={r} now={now} />
-                      )}
                     </td>
                   )}
                   {show.has("remaining") && (
-                    <td className="max-w-24 whitespace-nowrap border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
+                    <td className="max-w-36 whitespace-nowrap border-b border-(--border) px-3 py-1.5 tabular-nums text-(--text-dim)">
                       {IN_FLIGHT.includes(r.state) ? (
-                        <RemainingCell deadlineAt={r.deadlineAt} now={now} />
+                        <RemainingCell r={r} now={now} />
                       ) : (
                         ""
                       )}
