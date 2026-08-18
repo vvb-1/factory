@@ -289,13 +289,11 @@ describe("health connection chrome (WM-724)", () => {
     });
 
     const chip = utils.sidebar.getByText("connecting");
-    expect(chip.getAttribute("style")).not.toContain("--hue-err");
+    expect(chip.getAttribute("style")).toContain("--text-dim");
     expect(utils.sidebar.queryByText("disconnected")).toBeNull();
     expect(chip.getAttribute("title")).not.toContain("runtime unreachable");
 
-    expect(statusDot(statusBar).getAttribute("style")).not.toContain(
-      "--hue-err",
-    );
+    expect(statusDot(statusBar).getAttribute("style")).toContain("--text-dim");
     expect(statusBar.textContent).not.toContain("runtime unreachable");
     expect(statusBar.textContent).toContain("connecting");
 
