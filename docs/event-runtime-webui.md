@@ -1365,3 +1365,28 @@ layer spacing because chains are long and thin.
 
 It is a drill-in like `#/run/:id`, not a nav item: you arrive from an event
 or a run, never cold.
+
+### 10.16 Settings (read-only) (`#/settings`, `g c`) — WM-704
+
+`GET /config` gathers the factory's file-backed configuration into one
+allow-listed inventory. Settings renders it as a VS Code-shaped section tree
+and key/value pane: Repositories, Policy, Nodes, Schedule, and Registry.
+`#/settings/:section` deep-links to a section, and the single search box
+matches keys and rendered values across every section. Repository rows link
+to Projects; registry summaries link to Agents and Schedules instead of
+copying those views' detailed definitions and runtime state.
+
+Every row names its source file and its effective reload class:
+
+| Reload class | Meaning                                                                                           | Sources                                                                                  |
+| :----------- | :------------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------------- |
+| `hot`        | The running service reads the value again; no `serve` restart is needed.                          | `config/repos.yaml`; the lazily read `config/policy.yaml` blocks                         |
+| `restart`    | The value is captured when the registry/server starts.                                            | policy `models`; `agents/*.json`, `event-types.json`, `edges.json`, and `schedules.json` |
+| `cli-only`   | The running server never consumes the file; rerun the relevant CLI or launchd generation command. | `config/nodes.yaml`; `config/schedule.yaml`                                              |
+
+The allow-lists are source-specific: repositories reuse `reposView()`, policy
+publishes only the named operator blocks, node environment variables publish
+keys but never values, schedule jobs publish only name/cadence/harness, and
+the registry publishes counts, event adapters, and summaries. A newly added
+config key therefore remains private until the API allow-list deliberately
+adds it. Nothing here writes any config file; Settings is visibility only.
