@@ -147,7 +147,7 @@ describe("registry", () => {
     // both changes are registry inputs to the same merged-view digest,
     // hence one combined regeneration here.
     const expected =
-      "sha256:065ec74d0146e2e98a10d9f907e22bd78d4417523c78d6b3d647ba39e6123ca0";
+      "sha256:14b3b1fa08de22a5e949814722b9da1618e9a94dd7717decd5faa3cd718d7579";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -168,7 +168,7 @@ describe("registry", () => {
     // pin — and therefore this defHash — legitimately moved, exactly as it did
     // for WM-610. Still not a provenance break: `pack` stays non-enumerable.
     expect(computeDefHash(def)).toBe(
-      "sha256:PLACEHOLDER_WILL_BE_COMPUTED",
+      "sha256:cf85bb4e0cc3ca02a05ad9f780beed32daf80e86500136d84d19643ef46ae4ed",
     );
   });
 
