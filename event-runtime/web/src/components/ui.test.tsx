@@ -16,6 +16,7 @@ import {
   IconButton,
   KV,
   KVGroup,
+  ListToolbar,
   notify,
   Section,
   shortId,
@@ -307,6 +308,54 @@ describe("Tooltip viewport clamp (WM-589 follow-up)", () => {
     const left = parseFloat(tooltip.style.left);
     expect(left).toBeGreaterThanOrEqual(0);
     expect(left + 260).toBeLessThanOrEqual(1440);
+  });
+});
+
+describe("ListToolbar (WM-543)", () => {
+  test("exposes one tablist and one tools group without allowing either group to wrap internally", () => {
+    const r = render(
+      <ListToolbar
+        tabs={
+          <div
+            role="tablist"
+            aria-label="Run state"
+            className="flex w-max flex-nowrap gap-1"
+          >
+            <button role="tab" aria-selected="true">
+              All
+            </button>
+            <button role="tab" aria-selected="false">
+              Completed
+            </button>
+          </div>
+        }
+        tools={
+          <>
+            <button>Display</button>
+            <FilterInput
+              value=""
+              onChange={() => {}}
+              placeholder="Filter runs"
+              label="Filter runs"
+            />
+          </>
+        }
+      />,
+    );
+
+    expect(r.getAllByRole("tablist")).toHaveLength(1);
+    const tools = r.getByRole("group", { name: "List tools" });
+    expect(classes(tools)).toContain("flex-nowrap");
+    expect(classes(tools)).toContain("flex-[1_1_14rem]");
+    expect(classes(tools)).not.toContain("w-max");
+    expect(classes(tools)).toContain("justify-end");
+    expect(classes(tools.parentElement as HTMLElement)).toContain("flex-wrap");
+
+    const filter = r.getByRole("combobox").parentElement?.parentElement;
+    if (!filter) throw new Error("filter sizing wrapper is missing");
+    expect(classes(filter)).toContain("min-w-36");
+    expect(classes(filter)).toContain("max-w-56");
+    expect(classes(filter)).toContain("flex-[1_1_14rem]");
   });
 });
 

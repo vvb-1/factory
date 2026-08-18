@@ -53,6 +53,7 @@ import {
   Dialog,
   Disclosure,
   FilterInput,
+  ListToolbar,
   ListPane,
   DetailPane,
   JsonBlock,
@@ -1048,93 +1049,97 @@ export function Proposals({
                 </p>
               )}
 
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <div
-                  className="flex gap-1"
-                  role="tablist"
-                  aria-label="Proposal status"
-                >
-                  {PROPOSAL_TABS.map((t, idx) => {
-                    const count =
-                      t === "open"
-                        ? filterOpenProposals(
-                            query.data?.proposals ?? [],
-                            now,
-                          ).filter(
-                            (p) =>
-                              context.kind !== "repo" ||
-                              matchesRepo(p.repos, context),
-                          ).length
-                        : (history.data?.proposals ?? []).filter(
-                            (p) =>
-                              p.status !== "open" &&
-                              matchesRepo(p.repos, context),
-                          ).length;
-                    return (
+              <ListToolbar
+                tabs={
+                  <div
+                    className="flex w-max flex-nowrap gap-1 whitespace-nowrap"
+                    role="tablist"
+                    aria-label="Proposal status"
+                  >
+                    {PROPOSAL_TABS.map((t, idx) => {
+                      const count =
+                        t === "open"
+                          ? filterOpenProposals(
+                              query.data?.proposals ?? [],
+                              now,
+                            ).filter(
+                              (p) =>
+                                context.kind !== "repo" ||
+                                matchesRepo(p.repos, context),
+                            ).length
+                          : (history.data?.proposals ?? []).filter(
+                              (p) =>
+                                p.status !== "open" &&
+                                matchesRepo(p.repos, context),
+                            ).length;
+                      return (
+                        <PrimitiveButton
+                          bare
+                          key={t}
+                          type="button"
+                          role="tab"
+                          aria-selected={tab === t}
+                          onClick={() => selectTab(t)}
+                          title={t}
+                          className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"}`}
+                        >
+                          {t === "open" ? "Open" : "History"}
+                          {count > 0 && (
+                            <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                              {count}
+                            </span>
+                          )}
+                          <span
+                            aria-hidden="true"
+                            className="mono ml-1 text-(--text-faint) text-xs opacity-70"
+                          >
+                            {idx + 1}
+                          </span>
+                        </PrimitiveButton>
+                      );
+                    })}
+                  </div>
+                }
+                tools={
+                  <>
+                    {tab === "open" && expiredCount > 0 && (
                       <PrimitiveButton
                         bare
-                        key={t}
                         type="button"
-                        role="tab"
-                        aria-selected={tab === t}
-                        onClick={() => selectTab(t)}
-                        title={t}
-                        className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${tab === t ? "bg-(--surface-3) text-(--text)" : "text-(--text-faint) hover:bg-(--surface-1)"}`}
+                        aria-pressed={expiredOnly}
+                        onClick={() => setExpiredOnly((v) => !v)}
+                        title="Filter to expired open proposals"
+                        className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
+                          expiredOnly
+                            ? "bg-(--surface-3) text-(--text)"
+                            : "text-(--text-faint) hover:bg-(--surface-1)"
+                        }`}
                       >
-                        {t === "open" ? "Open" : "History"}
-                        {count > 0 && (
-                          <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                            {count}
-                          </span>
-                        )}
-                        <span
-                          aria-hidden="true"
-                          className="mono ml-1 text-(--text-faint) text-xs opacity-70"
-                        >
-                          {idx + 1}
+                        Expired
+                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                          {expiredCount}
                         </span>
                       </PrimitiveButton>
-                    );
-                  })}
-                </div>
-                {tab === "open" && expiredCount > 0 && (
-                  <PrimitiveButton
-                    bare
-                    type="button"
-                    aria-pressed={expiredOnly}
-                    onClick={() => setExpiredOnly((v) => !v)}
-                    title="Filter to expired open proposals"
-                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
-                      expiredOnly
-                        ? "bg-(--surface-3) text-(--text)"
-                        : "text-(--text-faint) hover:bg-(--surface-1)"
-                    }`}
-                  >
-                    Expired
-                    <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                      {expiredCount}
-                    </span>
-                  </PrimitiveButton>
-                )}
-                <span className="ml-auto">
-                  <DisplayOptions
-                    config={displayConfig}
-                    state={display}
-                    onChange={setDisplay}
-                    rows={scoped}
-                  />
-                </span>
-                {/* Last in the row: the token chips are a full-width item, so anything
-              after the filter box would be pushed onto a third line the moment
-              a chip appears. */}
-                <FilterInput
-                  value={filter}
-                  onChange={setFilter}
-                  placeholder="agent:… is:stale is:expired"
-                  label="Filter proposals"
-                  query={parsed}
-                />
-              </div>
+                    )}
+                    <DisplayOptions
+                      config={displayConfig}
+                      state={display}
+                      onChange={setDisplay}
+                      rows={scoped}
+                    />
+                    {/* Last in the row: the token chips are a full-width item, so anything
+                    after the filter box would be pushed onto a third line the moment
+                    a chip appears. */}
+                    <FilterInput
+                      value={filter}
+                      onChange={setFilter}
+                      placeholder="agent:… is:stale is:expired"
+                      label="Filter proposals"
+                      query={parsed}
+                    />
+                  </>
+                }
+              />
             </>
           }
         >

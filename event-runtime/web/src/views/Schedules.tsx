@@ -26,6 +26,7 @@ import {
   KV,
   ListEmpty,
   ListPane,
+  ListToolbar,
   Section,
   Table,
   Th,
@@ -461,43 +462,6 @@ export function Schedules({
               surface="registry"
               subject={{ label: "Schedules", plural: true }}
             />
-            <div
-              className="mb-2 flex gap-1"
-              role="tablist"
-              aria-label="Schedule state"
-            >
-              {SCHEDULE_TABS.map((scheduleTab) => {
-                const count =
-                  scheduleTab === "all"
-                    ? rows.length
-                    : scheduleTab === "enabled"
-                      ? enabledCount
-                      : disabledCount;
-                return (
-                  <PrimitiveButton
-                    bare
-                    key={scheduleTab}
-                    id={`schedule-tab-${scheduleTab}`}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === scheduleTab}
-                    aria-controls="schedule-table-panel"
-                    tabIndex={tab === scheduleTab ? 0 : -1}
-                    onClick={() => setTab(scheduleTab)}
-                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                      tab === scheduleTab
-                        ? "bg-(--surface-3) text-(--text)"
-                        : "text-(--text-faint) hover:bg-(--surface-1)"
-                    }`}
-                  >
-                    {scheduleTab[0]!.toUpperCase() + scheduleTab.slice(1)}
-                    <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                      {count}
-                    </span>
-                  </PrimitiveButton>
-                );
-              })}
-            </div>
             <p
               className="mb-3 text-[11px] text-(--text-faint)"
               aria-label="Schedule summary"
@@ -506,14 +470,55 @@ export function Schedules({
               {nextFireLabel}
               {nextSchedule && <> ({nextSchedule.loop})</>}
             </p>
-            <div className="mb-3">
-              <FilterInput
-                value={filter}
-                onChange={setFilter}
-                placeholder="Filter loop, cadence, event type, approval…"
-                label="Filter schedules"
-              />
-            </div>
+            <ListToolbar
+              tabs={
+                <div
+                  className="flex w-max flex-nowrap gap-1 whitespace-nowrap"
+                  role="tablist"
+                  aria-label="Schedule state"
+                >
+                  {SCHEDULE_TABS.map((scheduleTab) => {
+                    const count =
+                      scheduleTab === "all"
+                        ? rows.length
+                        : scheduleTab === "enabled"
+                          ? enabledCount
+                          : disabledCount;
+                    return (
+                      <PrimitiveButton
+                        bare
+                        key={scheduleTab}
+                        id={`schedule-tab-${scheduleTab}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === scheduleTab}
+                        aria-controls="schedule-table-panel"
+                        tabIndex={tab === scheduleTab ? 0 : -1}
+                        onClick={() => setTab(scheduleTab)}
+                        className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                          tab === scheduleTab
+                            ? "bg-(--surface-3) text-(--text)"
+                            : "text-(--text-faint) hover:bg-(--surface-1)"
+                        }`}
+                      >
+                        {scheduleTab[0]!.toUpperCase() + scheduleTab.slice(1)}
+                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                          {count}
+                        </span>
+                      </PrimitiveButton>
+                    );
+                  })}
+                </div>
+              }
+              tools={
+                <FilterInput
+                  value={filter}
+                  onChange={setFilter}
+                  placeholder="Filter loop, cadence, event type, approval…"
+                  label="Filter schedules"
+                />
+              }
+            />
           </>
         }
       >

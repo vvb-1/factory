@@ -470,8 +470,8 @@ export function FilterInput<T = unknown, C = unknown>({
   };
 
   return (
-    <>
-      <span className="relative inline-flex w-56 shrink-0">
+    <div className="flex min-w-36 max-w-56 flex-[1_1_14rem] flex-wrap items-start gap-1.5">
+      <span className="relative inline-flex w-full">
         <input
           ref={inputRef}
           data-view-filter
@@ -662,7 +662,36 @@ export function FilterInput<T = unknown, C = unknown>({
           </Button>
         </div>
       )}
-    </>
+    </div>
+  );
+}
+
+/**
+ * Shared responsive layout for the tabs and controls above list tables.
+ * Tabs keep their intrinsic width (and scroll only as a last resort); the
+ * no-wrap tools group shrinks its filter first, then drops to a right-aligned
+ * second row as one unit when the two groups no longer fit side by side.
+ */
+export function ListToolbar({
+  tabs,
+  tools,
+  className = "mb-3",
+}: {
+  tabs: ReactNode;
+  tools: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`${className} flex min-w-0 flex-wrap items-start gap-2`}>
+      <div className="max-w-full shrink-0 overflow-x-auto pb-px">{tabs}</div>
+      <div
+        role="group"
+        aria-label="List tools"
+        className="ml-auto flex max-w-full flex-[1_1_14rem] flex-nowrap items-start justify-end gap-2"
+      >
+        {tools}
+      </div>
+    </div>
   );
 }
 
