@@ -139,8 +139,9 @@ describe("registry", () => {
     // (digest regenerated on top of the #559 baseline).
     // Regenerated after WM-610 prettier reformat of code and markdown files.
     // Regenerated (WM-722): merge-scan/merge-fix adapter pi→claude; event-types.json is a registry input.
+    // Regenerated (WM-391): dispatch admits and documents bounded humanDecision authorisations.
     const expected =
-      "sha256:c9df6589c6a12567263dccbfc737b6a6acbb8132e0ac9216dbb7a35e527f6fbf";
+      "sha256:44e8dce58d2e4efd92f8e8a7b9483aa219ab32840b3aec34b41ee2c8782dc9a6";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -158,7 +159,7 @@ describe("registry", () => {
     expect(def.pack).toBe("event-runtime");
     expect(Object.keys(def)).not.toContain("pack");
     expect(computeDefHash(def)).toBe(
-      "sha256:0314e7e591bb4942e04a86a1211b28469d6ce750b3e9384db82380eaf396ec95",
+      "sha256:93df77f053690c1c2463fea4d497ec9c742fd9200ac369d1682ac575596b4129",
     );
   });
 

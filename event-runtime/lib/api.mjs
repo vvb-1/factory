@@ -43,7 +43,11 @@ import {
 } from "./config.mjs";
 import { githubWebhookSecret } from "./intake.mjs";
 import { decideInboxItem, getInboxItem, retryInboxDecision } from "./inbox.mjs";
-import { applyDecisionEffect } from "./decision-effects.mjs";
+import {
+  applyDecisionEffect,
+  decisionEffectPlanner,
+  linearDecisionTransport,
+} from "./decision-effects.mjs";
 import { janitorArgv, spawnFactoryJanitor } from "./janitor.mjs";
 import { notifyCommand, sendNotification } from "./notify.mjs";
 import { loadRepos, reposRoot } from "./repos.mjs";
@@ -82,6 +86,8 @@ export function createApi({
   inboxCommand = notifyCommand(),
   inboxWebUrl = process.env.FACTORY_WEB_URL,
   inboxApplyEffect = applyDecisionEffect,
+  inboxLinear = linearDecisionTransport,
+  inboxPlanner = null,
   // Config inventory follows the same checkout override as repos/registry.
   configRoot = reposRoot(),
   // Root of the config/policy.yaml the run endpoints consult (tests point it elsewhere).
@@ -90,6 +96,8 @@ export function createApi({
   const actor = "operator";
   const registryLoadedAt = new Date(now()).toISOString();
   const storeStatsTtlMs = 10_000;
+  const composedInboxPlanner =
+    inboxPlanner ?? decisionEffectPlanner(registry, { onEvent, policyVersion });
   let cachedStoreStats = null;
   let cachedStoreStatsAt = 0;
 
@@ -166,6 +174,12 @@ export function createApi({
           const id = decodeURIComponent(decisionMatch[1]);
           try {
             let result;
+            const applyEffect = (effectDb, item, response) =>
+              inboxApplyEffect(effectDb, item, response, {
+                linear: inboxLinear,
+                planner: composedInboxPlanner,
+                now: nowMs,
+              });
             if (decisionMatch[2] === "retry") {
               const raw = await readBody(req);
               if (raw.length > 0) {
@@ -178,7 +192,7 @@ export function createApi({
               }
               result = retryInboxDecision(db, id, {
                 now: nowMs,
-                applyEffect: inboxApplyEffect,
+                applyEffect,
               });
             } else {
               const parsed = parseJson(await readBody(req));
@@ -190,7 +204,7 @@ export function createApi({
               result = decideInboxItem(db, id, parsed.value, {
                 now: nowMs,
                 decidedBy: actor,
-                applyEffect: inboxApplyEffect,
+                applyEffect,
               });
             }
             return send(200, result);
