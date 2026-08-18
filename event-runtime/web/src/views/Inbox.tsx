@@ -32,6 +32,7 @@ import {
 import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { CustomCell } from "../components/CustomCell";
 import { DecisionCard } from "../components/DecisionCard";
+import { hasInboxPlainActions, InboxActions } from "../components/InboxActions";
 import {
   INBOX_FACETS,
   matchesFilterQuery,
@@ -297,6 +298,15 @@ export function prHref(item: InboxItem): string | null {
   if (!ref) return null;
   if (/^https?:\/\/[^\s]+$/i.test(ref)) return ref;
   const number = prNumber(ref);
+  const repo = githubRepo(item);
+  return number && repo ? `https://github.com/${repo}/pull/${number}` : null;
+}
+
+/** Per-kind action chips may trust a digits-only refs.pr once refs.repo resolves. */
+export function inboxActionPrHref(item: InboxItem): string | null {
+  const existing = prHref(item);
+  if (existing) return existing;
+  const number = /^\d+$/.exec(item.refs.pr?.trim() ?? "")?.[0];
   const repo = githubRepo(item);
   return number && repo ? `https://github.com/${repo}/pull/${number}` : null;
 }
@@ -733,10 +743,18 @@ export function Inbox({
     [visible, selectedIds],
   );
   const ackableSelected = selectedRows.filter(
-    (it) => itemStatus(it) === "open" && !it.decision,
+    (it) =>
+      itemStatus(it) === "open" &&
+      !it.decision &&
+      !hasInboxPlainActions(it.kind),
   );
   const resolvableSelected = selectedRows.filter(
-    (it) => itemStatus(it) !== "resolved" && !it.decision,
+    (it) =>
+      itemStatus(it) !== "resolved" &&
+      !it.decision &&
+      (!hasInboxPlainActions(it.kind) ||
+        it.kind === "SMOKE RED" ||
+        it.kind === "CIRCUIT BREAKER"),
   );
 
   useEffect(() => {
@@ -820,12 +838,16 @@ export function Inbox({
   const canAck =
     !!sel &&
     !sel.decision &&
+    !hasInboxPlainActions(sel.kind) &&
     connected &&
     itemStatus(sel) === "open" &&
     !ack.isPending;
   const canResolve =
     !!sel &&
     !sel.decision &&
+    (!hasInboxPlainActions(sel.kind) ||
+      sel.kind === "SMOKE RED" ||
+      sel.kind === "CIRCUIT BREAKER") &&
     connected &&
     itemStatus(sel) !== "resolved" &&
     !resolve.isPending;
@@ -1384,7 +1406,9 @@ export function Inbox({
             </nav>
           }
           actions={
-            !sel.decision && itemStatus(sel) !== "resolved" ? (
+            !sel.decision &&
+            !hasInboxPlainActions(sel.kind) &&
+            itemStatus(sel) !== "resolved" ? (
               <div className="flex items-center gap-1.5">
                 <Button disabled={!canResolve} onClick={openResolve}>
                   Resolve…{" "}
@@ -1413,6 +1437,21 @@ export function Inbox({
           utility={<CopyActions id={sel.id} idLabel="inbox item id" />}
           close={<Button onClick={() => onSelectItem(null)}>Close</Button>}
         >
+          {hasInboxPlainActions(sel.kind) && itemStatus(sel) !== "resolved" && (
+            <Section title="Actions" card={false}>
+              <InboxActions
+                // Per-item state: a failed verb on one item must not follow
+                // the operator to the next.
+                key={sel.id}
+                item={sel}
+                connected={connected}
+                prUrl={inboxActionPrHref(sel)}
+                onResolve={() => setConfirmResolve(true)}
+                onItemChange={invalidate}
+              />
+            </Section>
+          )}
+
           <Section title="Item" icons>
             <KV
               k="kind"

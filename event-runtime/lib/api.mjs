@@ -42,7 +42,12 @@ import {
   webhookSecret,
 } from "./config.mjs";
 import { githubWebhookSecret } from "./intake.mjs";
-import { decideInboxItem, getInboxItem, retryInboxDecision } from "./inbox.mjs";
+import {
+  bindInboxProposal,
+  decideInboxItem,
+  getInboxItem,
+  retryInboxDecision,
+} from "./inbox.mjs";
 import {
   applyDecisionEffect,
   decisionEffectPlanner,
@@ -283,6 +288,18 @@ export function createApi({
           );
           if (!schedule) return send(status, body);
           const repo = registry.schedules?.[loop]?.payload?.repo;
+          if (
+            loop.startsWith("ship-") &&
+            typeof repo === "string" &&
+            repo !== "" &&
+            typeof body?.proposalId === "string"
+          ) {
+            bindInboxProposal(db, {
+              kind: "RC READY",
+              repo,
+              proposalId: body.proposalId,
+            });
+          }
           return send(status, {
             ...body,
             schedule: {

@@ -3,6 +3,7 @@ import { openDb } from "./db.mjs";
 import {
   INBOX_KINDS,
   ackInboxItem,
+  bindInboxProposal,
   createInboxItem,
   decideInboxItem,
   deliverInboxItem,
@@ -12,6 +13,8 @@ import {
   reconcileInbox,
   retryInboxDecision,
   resolveInboxItem,
+  fetchLinearInboxIssues,
+  linearGql,
 } from "./inbox.mjs";
 import { decisionRequestHash } from "./decision.mjs";
 import { templateFor } from "./decision-templates.mjs";
@@ -481,6 +484,216 @@ describe("human inbox ledger (WM-285)", () => {
     expect(getInboxItem(db, "tick-item").resolvedBy).toBe(
       "auto:proposal_decided",
     );
+  });
+
+  test("Linear referents poll distinct open issues at most once per minute and fail open", async () => {
+    const db = openDb(":memory:");
+    for (const [id, kind, issue] of [
+      ["blocked", "BLOCKED", "WM-10"],
+      ["escalated", "ESCALATED", "WM-11"],
+      ["duplicate", "BLOCKED", "WM-10"],
+    ]) {
+      createInboxItem(
+        db,
+        { kind, title: id, refs: { issue } },
+        { id, now: 1000 },
+      );
+    }
+    const calls = [];
+    const linearIssues = async (ids) => {
+      calls.push(ids);
+      return [
+        {
+          identifier: "WM-10",
+          state: { name: "Todo", type: "unstarted" },
+          labels: { nodes: [] },
+        },
+        {
+          identifier: "WM-11",
+          state: { name: "In Progress", type: "started" },
+          labels: { nodes: [{ name: "ai:escalated" }] },
+        },
+      ];
+    };
+
+    expect(await reconcileInbox(db, { now: 60_000, linearIssues })).toEqual([
+      { id: "blocked", resolvedBy: "auto:linear_unblocked" },
+      { id: "duplicate", resolvedBy: "auto:linear_unblocked" },
+    ]);
+    expect(calls).toEqual([["WM-10", "WM-11"]]);
+    expect(await reconcileInbox(db, { now: 100_000, linearIssues })).toEqual(
+      [],
+    );
+    expect(calls).toHaveLength(1);
+
+    // ESCALATED transition: initial poll with ai:escalated registers seenEscalated without resolving
+    expect(getInboxItem(db, "escalated").resolvedAt).toBeNull();
+    expect(getInboxItem(db, "escalated").delivery.seenEscalated).toBe(true);
+
+    // ESCALATED transition: subsequent poll with ai:escalated removed resolves the item
+    const unescalatedIssues = async () => [
+      {
+        identifier: "WM-11",
+        state: { name: "In Progress", type: "started" },
+        labels: { nodes: [] },
+      },
+    ];
+    expect(
+      await reconcileInbox(db, {
+        now: 180_000,
+        linearIssues: unescalatedIssues,
+      }),
+    ).toEqual([
+      { id: "escalated", resolvedBy: "auto:linear_escalation_cleared" },
+    ]);
+    expect(getInboxItem(db, "escalated").resolvedAt).not.toBeNull();
+
+    // ESCALATED without observed transition: mere absence of label on creation does not resolve
+    const unescalatedFromStartDb = openDb(":memory:");
+    createInboxItem(
+      unescalatedFromStartDb,
+      {
+        kind: "ESCALATED",
+        title: "fresh escalation",
+        refs: { issue: "WM-20" },
+      },
+      { id: "fresh-escalated", now: 1000 },
+    );
+    const noLabelIssues = async () => [
+      {
+        identifier: "WM-20",
+        state: { name: "In Progress", type: "started" },
+        labels: { nodes: [] },
+      },
+    ];
+    expect(
+      await reconcileInbox(unescalatedFromStartDb, {
+        now: 60_000,
+        linearIssues: noLabelIssues,
+      }),
+    ).toEqual([]);
+    expect(
+      getInboxItem(unescalatedFromStartDb, "fresh-escalated").resolvedAt,
+    ).toBeNull();
+
+    const failingDb = openDb(":memory:");
+    createInboxItem(
+      failingDb,
+      { kind: "BLOCKED", title: "stay open", refs: { issue: "WM-12" } },
+      { id: "transport-error", now: 1000 },
+    );
+    expect(
+      await reconcileInbox(failingDb, {
+        now: 60_000,
+        linearIssues: async () => {
+          throw new Error("offline");
+        },
+      }),
+    ).toEqual([]);
+    expect(getInboxItem(failingDb, "transport-error").resolvedAt).toBeNull();
+
+    // fetchLinearInboxIssues empty handling and custom safe request function
+    expect(await fetchLinearInboxIssues([])).toEqual([]);
+    const mockGql = async (query, vars) => {
+      expect(query).toContain("query($i0:String!)");
+      expect(vars).toEqual({ i0: "WM-99" });
+      return {
+        i0: {
+          identifier: "WM-99",
+          state: { name: "Done", type: "completed" },
+          labels: { nodes: [] },
+        },
+      };
+    };
+    expect(
+      await fetchLinearInboxIssues(["WM-99"], { request: mockGql }),
+    ).toEqual([
+      {
+        identifier: "WM-99",
+        state: { name: "Done", type: "completed" },
+        labels: { nodes: [] },
+      },
+    ]);
+  });
+
+  test("CI success and the proposal spawned by Ship auto-resolve their matching items", async () => {
+    const db = openDb(":memory:");
+    createInboxItem(
+      db,
+      {
+        kind: "CI RED",
+        title: "red",
+        refs: { repo: "factory", pr: "PR #607" },
+      },
+      { id: "ci-red", now: 1000 },
+    );
+    const successAt = new Date(2000).toISOString();
+    const success = {
+      schemaVersion: "factory.event/v1",
+      eventId: "merge-pr:factory:607:abc",
+      type: "factory.merge.requested",
+      source: "github",
+      subject: "factory",
+      occurredAt: successAt,
+      correlationId: "merge-pr:factory:607:abc",
+      payload: { repo: "factory", prNumbers: [607] },
+    };
+    db.query(
+      `INSERT INTO events
+       (source, event_id, type, subject, occurred_at, received_at,
+        correlation_id, envelope_json, payload_hash, status, admitted_at)
+       VALUES ('github', ?, ?, 'factory', ?, ?, ?, ?, 'sha256:green', 'admitted', ?)`,
+    ).run(
+      success.eventId,
+      success.type,
+      successAt,
+      successAt,
+      success.correlationId,
+      JSON.stringify(success),
+      successAt,
+    );
+    const rerunAt = new Date(1500).toISOString();
+    db.query(
+      `INSERT INTO events
+       (source, event_id, type, subject, occurred_at, received_at,
+        correlation_id, envelope_json, payload_hash, status, admitted_at)
+       VALUES ('inbox', 'rerun-request', 'factory.ci-rerun.requested', 'factory',
+               ?, ?, 'ci-red', '{}', 'sha256:rerun', 'planned', ?)`,
+    ).run(rerunAt, rerunAt, rerunAt);
+    db.query(
+      `INSERT INTO proposals
+       (id, event_source, event_id, decision, status, created_at, ttl_seconds)
+       VALUES ('rerun-proposal', 'inbox', 'rerun-request', 'run', 'open', ?, 1800)`,
+    ).run(rerunAt);
+
+    createInboxItem(
+      db,
+      { kind: "RC READY", title: "ready", refs: { repo: "factory" } },
+      { id: "rc-ready", now: 1000 },
+    );
+    expect(
+      bindInboxProposal(db, {
+        kind: "RC READY",
+        repo: "factory",
+        proposalId: "ship-proposal",
+      })?.refs,
+    ).toMatchObject({ repo: "factory", proposalId: "ship-proposal" });
+    db.query(
+      `INSERT INTO runs
+       (run_id, idempotency_key, spec_json, spec_hash, state, created_at, updated_at)
+       VALUES ('ship-run', 'ship-key', '{}', 'sha256:ship', 'COMPLETED', ?, ?)`,
+    ).run(successAt, successAt);
+    db.query(
+      `INSERT INTO proposals
+       (id, event_source, event_id, decision, run_id, status, created_at, ttl_seconds)
+       VALUES ('ship-proposal', 'operator', 'ship-event', 'run', 'ship-run', 'approved', ?, 1800)`,
+    ).run(successAt);
+
+    expect(await reconcileInbox(db, { now: 3000 })).toEqual([
+      { id: "ci-red", resolvedBy: "auto:ci_green" },
+      { id: "rc-ready", resolvedBy: "auto:ship_completed" },
+    ]);
+    expect(getInboxItem(db, "ci-red").refs.proposalId).toBe("rerun-proposal");
   });
 });
 

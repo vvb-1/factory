@@ -308,6 +308,43 @@ describe("schedule trigger metadata (WM-259)", () => {
       s.close();
     }
   });
+
+  test("Ship uses the existing schedule route and correlates its proposal to RC READY", async () => {
+    const s = await makeServer({
+      now: () => Date.parse("2026-08-18T12:00:00Z"),
+    });
+    try {
+      createInboxItem(
+        s.db,
+        {
+          kind: "RC READY",
+          title: "bj29 is ready to ship",
+          refs: { repo: "bj29" },
+        },
+        { id: "rc-ready-api" },
+      );
+      const response = await fetch(s.url("/schedules/ship-bj29/run"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body).toMatchObject({ loop: "ship-bj29", admitted: true });
+      expect(typeof body.proposalId).toBe("string");
+      expect(
+        JSON.parse(
+          s.db
+            .query(
+              "SELECT refs_json FROM inbox_items WHERE id = 'rc-ready-api'",
+            )
+            .get().refs_json,
+        ),
+      ).toEqual({ repo: "bj29", proposalId: body.proposalId });
+    } finally {
+      s.close();
+    }
+  });
 });
 
 describe("artifact-view sidecar on GET /agents (WM-454)", () => {
