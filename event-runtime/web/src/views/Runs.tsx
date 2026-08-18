@@ -66,6 +66,7 @@ import {
   CopyActions,
   Dialog,
   FilterInput,
+  ListToolbar,
   ListPane,
   DetailPane,
   JumpLink,
@@ -1066,64 +1067,66 @@ export function Runs({
 
             {/* `flex-wrap`: the token chips are a full-width item, so they take
             their own line under the tabs and the box instead of squeezing them. */}
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              {/* Wrap, never scroll or clip: at 1280px the strip used to run out of
-              width at CANCELLED with no scrollbar affordance (WM-96). */}
-              <div
-                className="flex min-w-0 flex-1 flex-wrap gap-1"
-                role="tablist"
-                aria-label="Run state"
-              >
-                {RUN_TABS.map((t, idx) => {
-                  const count = tabCount(t);
-                  return (
-                    <Button
-                      key={t}
-                      size="sm"
-                      variant="ghost"
-                      role="tab"
-                      aria-selected={tab === t}
-                      onClick={() => selectTab(t)}
-                      title={RUN_TAB_TITLES[t]}
-                      className={`rounded-md ${
-                        tab === t
-                          ? "bg-(--surface-3) text-(--text)"
-                          : "text-(--text-faint) hover:bg-(--surface-1)"
-                      }`}
-                    >
-                      {RUN_TAB_LABELS[t]}
-                      {count > 0 && (
-                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                          {count}
-                        </span>
-                      )}
-                      <span
-                        aria-hidden="true"
-                        className="mono ml-1 text-(--text-faint) text-xs opacity-70"
+            <ListToolbar
+              tabs={
+                <div
+                  className="flex w-max flex-nowrap gap-1 whitespace-nowrap"
+                  role="tablist"
+                  aria-label="Run state"
+                >
+                  {RUN_TABS.map((t, idx) => {
+                    const count = tabCount(t);
+                    return (
+                      <Button
+                        key={t}
+                        size="sm"
+                        variant="ghost"
+                        role="tab"
+                        aria-selected={tab === t}
+                        onClick={() => selectTab(t)}
+                        title={RUN_TAB_TITLES[t]}
+                        className={`shrink-0 rounded-md ${
+                          tab === t
+                            ? "bg-(--surface-3) text-(--text)"
+                            : "text-(--text-faint) hover:bg-(--surface-1)"
+                        }`}
                       >
-                        {idx + 1}
-                      </span>
-                    </Button>
-                  );
-                })}
-              </div>
-              <span className="ml-auto">
-                <DisplayOptions
-                  config={displayConfig}
-                  state={display}
-                  onChange={setDisplay}
-                  onExport={visible.length > 0 ? handleExport : undefined}
-                  rows={scoped}
-                />
-              </span>
-              <FilterInput
-                value={filter}
-                onChange={setFilter}
-                placeholder="agent:… state:… is:stale"
-                label="Filter runs"
-                query={parsed}
-              />
-            </div>
+                        {RUN_TAB_LABELS[t]}
+                        {count > 0 && (
+                          <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                            {count}
+                          </span>
+                        )}
+                        <span
+                          aria-hidden="true"
+                          className="mono ml-1 text-(--text-faint) text-xs opacity-70"
+                        >
+                          {idx + 1}
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              }
+              tools={
+                <>
+                  <DisplayOptions
+                    config={displayConfig}
+                    state={display}
+                    onChange={setDisplay}
+                    onExport={visible.length > 0 ? handleExport : undefined}
+                    rows={scoped}
+                  />
+                  <FilterInput
+                    value={filter}
+                    onChange={setFilter}
+                    placeholder="agent:… state:… is:stale"
+                    label="Filter runs"
+                    query={parsed}
+                  />
+                </>
+              }
+            />
           </>
         }
       >

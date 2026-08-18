@@ -4,6 +4,7 @@ import {
   type ButtonHTMLAttributes,
   type ComponentProps,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -470,8 +471,8 @@ export function FilterInput<T = unknown, C = unknown>({
   };
 
   return (
-    <>
-      <span className="relative inline-flex w-56 shrink-0">
+    <div className="flex min-w-36 max-w-56 flex-[1_1_14rem] flex-wrap items-start gap-1.5">
+      <span className="relative inline-flex w-full">
         <input
           ref={inputRef}
           data-view-filter
@@ -662,7 +663,118 @@ export function FilterInput<T = unknown, C = unknown>({
           </Button>
         </div>
       )}
-    </>
+    </div>
+  );
+}
+
+/**
+ * Shared responsive layout for the tabs and controls above list tables.
+ * Tabs keep their intrinsic width (and scroll only as a last resort); the
+ * no-wrap tools group shrinks its filter first, then drops to a right-aligned
+ * second row as one unit when the two groups no longer fit side by side.
+ *
+ * Tabs never wrap (WM-543: wrapping produced a ragged two-row strip) and
+ * never clip silently (WM-96: at ~800-880px — the Events view's longest
+ * labels — the strip used to run out of width with no indication there was
+ * more to see). They scroll horizontally instead, with an edge fade masking
+ * whichever side has more content, on top of the app's always-visible
+ * styled scrollbar (theme.css). The fade is recomputed on resize/scroll via
+ * ResizeObserver so it tracks viewport and content changes, and a focused
+ * tab scrolls itself into view so keyboard users can reach clipped tabs.
+ *
+ * The tools group deliberately isn't given the same overflow-x treatment:
+ * FilterInput's suggestion listbox is plain `position:absolute` (no
+ * portal), and any non-`visible` overflow-x on an ancestor forces the
+ * paired overflow-y to `auto` too (CSS overflow computed-value rule),
+ * which would clip that dropdown to a sliver. Instead it stays
+ * `justify-start` below `sm`, so on the very narrow phones where its
+ * content still doesn't fit at the tools group's 9rem-filter floor,
+ * overflow runs off the trailing edge instead of the leading edge — past
+ * the viewport, not back over the nav sidebar.
+ */
+export function ListToolbar({
+  tabs,
+  tools,
+  className = "mb-3",
+}: {
+  tabs: ReactNode;
+  tools: ReactNode;
+  className?: string;
+}) {
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [tabsOverflow, setTabsOverflow] = useState({
+    start: false,
+    end: false,
+  });
+
+  const updateTabsOverflow = useCallback(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    if (max <= 1) {
+      setTabsOverflow({ start: false, end: false });
+      return;
+    }
+    setTabsOverflow({
+      start: el.scrollLeft > 1,
+      end: el.scrollLeft < max - 1,
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    updateTabsOverflow();
+    const ro = new ResizeObserver(updateTabsOverflow);
+    ro.observe(el);
+    el.addEventListener("scroll", updateTabsOverflow, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", updateTabsOverflow);
+    };
+  }, [tabs, updateTabsOverflow]);
+
+  const tabsMask =
+    tabsOverflow.start && tabsOverflow.end
+      ? "linear-gradient(to right, transparent, black 2rem, black calc(100% - 2rem), transparent)"
+      : tabsOverflow.end
+        ? "linear-gradient(to right, black calc(100% - 2rem), transparent)"
+        : tabsOverflow.start
+          ? "linear-gradient(to left, black calc(100% - 2rem), transparent)"
+          : undefined;
+
+  return (
+    <div className={`${className} flex min-w-0 flex-wrap items-start gap-2`}>
+      <div
+        ref={tabsRef}
+        onFocus={(e) => {
+          (e.target as HTMLElement).scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+          });
+        }}
+        // Below `sm` a caller may swap the tab strip for a full-width mobile
+        // `<select>` (Projects, Workers): `w-full` lets that select's own
+        // `w-full` resolve against something, since a `shrink-0` ancestor
+        // with no explicit width only ever hugs content. At `sm` and up the
+        // desktop strip reverts to hugging its (possibly scrollable) content.
+        className="w-full max-w-full overflow-x-auto pb-px sm:w-auto sm:shrink-0"
+        style={
+          tabsMask
+            ? { maskImage: tabsMask, WebkitMaskImage: tabsMask }
+            : undefined
+        }
+      >
+        {tabs}
+      </div>
+      <div
+        role="group"
+        aria-label="List tools"
+        className="ml-auto flex max-w-full flex-[1_1_14rem] flex-nowrap items-start justify-start gap-2 sm:justify-end"
+      >
+        {tools}
+      </div>
+    </div>
   );
 }
 

@@ -34,6 +34,7 @@ import {
   KV,
   ListEmpty,
   ListPane,
+  ListToolbar,
   Section,
   Table,
   Th,
@@ -485,69 +486,75 @@ export function Projects({
               surface="registry"
               subject={{ label: "Projects", plural: true }}
             />
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <select
-                aria-label="Project mode"
-                value={filterMode}
-                onChange={(event) =>
-                  setFilterMode(event.target.value as ProjectMode)
-                }
-                className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
-              >
-                {PROJECT_MODES.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {mode === "ALL"
-                      ? "All"
-                      : mode === "DISPATCHABLE"
-                        ? "Dispatchable"
-                        : "Report-Only"}{" "}
-                    {modeCounts[mode]}
-                  </option>
-                ))}
-              </select>
-              <div
-                className="hidden min-w-0 flex-1 flex-wrap gap-1 text-[12px] sm:flex"
-                role="tablist"
-                aria-label="Project mode"
-              >
-                {PROJECT_MODES.map((mode, idx) => (
-                  <PrimitiveButton
-                    bare
-                    key={mode}
-                    type="button"
-                    role="tab"
-                    aria-selected={filterMode === mode}
-                    onClick={() => setFilterMode(mode)}
-                    className={`shrink-0 rounded-md px-2.5 py-1 font-medium transition-colors ${
-                      filterMode === mode
-                        ? "bg-(--surface-3) text-(--text)"
-                        : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
-                    }`}
+            <ListToolbar
+              tabs={
+                <>
+                  <select
+                    aria-label="Project mode"
+                    value={filterMode}
+                    onChange={(event) =>
+                      setFilterMode(event.target.value as ProjectMode)
+                    }
+                    className="w-full rounded-md border border-(--border) bg-(--surface-1) px-2 py-1 text-[12px] text-(--text) sm:hidden"
                   >
-                    {mode === "ALL"
-                      ? "All"
-                      : mode === "DISPATCHABLE"
-                        ? "Dispatchable"
-                        : "Report-Only"}
-                    <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                      {modeCounts[mode]}
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className="mono ml-1 text-(--text-faint) text-xs opacity-70"
-                    >
-                      {idx + 1}
-                    </span>
-                  </PrimitiveButton>
-                ))}
-              </div>
-              <FilterInput
-                value={filter}
-                onChange={setFilter}
-                placeholder="Filter repo, project, team, github… (/)"
-                label="Filter repositories"
-              />
-            </div>
+                    {PROJECT_MODES.map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode === "ALL"
+                          ? "All"
+                          : mode === "DISPATCHABLE"
+                            ? "Dispatchable"
+                            : "Report-Only"}{" "}
+                        {modeCounts[mode]}
+                      </option>
+                    ))}
+                  </select>
+                  <div
+                    className="hidden w-max flex-nowrap gap-1 whitespace-nowrap text-[12px] sm:flex"
+                    role="tablist"
+                    aria-label="Project mode"
+                  >
+                    {PROJECT_MODES.map((mode, idx) => (
+                      <PrimitiveButton
+                        bare
+                        key={mode}
+                        type="button"
+                        role="tab"
+                        aria-selected={filterMode === mode}
+                        onClick={() => setFilterMode(mode)}
+                        className={`shrink-0 rounded-md px-2.5 py-1 font-medium transition-colors ${
+                          filterMode === mode
+                            ? "bg-(--surface-3) text-(--text)"
+                            : "text-(--text-faint) hover:bg-(--surface-1) hover:text-(--text)"
+                        }`}
+                      >
+                        {mode === "ALL"
+                          ? "All"
+                          : mode === "DISPATCHABLE"
+                            ? "Dispatchable"
+                            : "Report-Only"}
+                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                          {modeCounts[mode]}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="mono ml-1 text-(--text-faint) text-xs opacity-70"
+                        >
+                          {idx + 1}
+                        </span>
+                      </PrimitiveButton>
+                    ))}
+                  </div>
+                </>
+              }
+              tools={
+                <FilterInput
+                  value={filter}
+                  onChange={setFilter}
+                  placeholder="Filter repo, project, team, github… (/)"
+                  label="Filter repositories"
+                />
+              }
+            />
           </>
         }
       >

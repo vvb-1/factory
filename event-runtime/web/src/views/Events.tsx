@@ -65,6 +65,7 @@ import {
   Disclosure,
   EVENT_STATUS_HUES,
   FilterInput,
+  ListToolbar,
   ListPane,
   DetailPane,
   JsonBlock,
@@ -773,7 +774,6 @@ export function Events({
       tabChangedFor.current = key;
       setTab("all");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     focusEvent?.source,
     focusEvent?.eventId,
@@ -950,45 +950,6 @@ export function Events({
               </p>
             )}
 
-            <div
-              className="mb-3 flex flex-wrap gap-1"
-              role="tablist"
-              aria-label="Event status"
-            >
-              {STATUS_TABS.map((t, idx) => {
-                const count = tabCount(t);
-                return (
-                  <PrimitiveButton
-                    bare
-                    key={t}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === t}
-                    onClick={() => selectTab(t)}
-                    title={t}
-                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                      tab === t
-                        ? "bg-(--surface-3) text-(--text)"
-                        : "text-(--text-faint) hover:bg-(--surface-1)"
-                    }`}
-                  >
-                    {TAB_LABEL[t]}
-                    {count > 0 && (
-                      <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                        {count}
-                      </span>
-                    )}
-                    <span
-                      aria-hidden="true"
-                      className="mono ml-1 text-(--text-faint) text-xs opacity-70"
-                    >
-                      {idx + 1}
-                    </span>
-                  </PrimitiveButton>
-                );
-              })}
-            </div>
-
             {(types.length > 1 || sources.length > 1) && (
               <div className="mb-2 flex min-w-0 items-center gap-x-4 whitespace-nowrap text-[11px]">
                 {types.length > 1 && (
@@ -1088,28 +1049,70 @@ export function Events({
               </div>
             )}
 
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="ml-auto">
-                <DisplayOptions
-                  config={displayConfig}
-                  state={display}
-                  onChange={setDisplay}
-                  onExport={visible.length > 0 ? handleExport : undefined}
-                  rows={scoped}
-                />
-              </span>
-              {/* Last in the row: the token chips are a full-width item, so anything
-              after the filter box would be pushed onto a third line the moment
-              a chip appeared. */}
-              <FilterInput
-                value={filter}
-                onChange={setFilter}
-                placeholder="source:… type:… reason:… is:stale"
-                label="Filter events"
-                query={parsed}
-                facets={facets}
-              />
-            </div>
+            <ListToolbar
+              tabs={
+                <div
+                  className="flex w-max flex-nowrap gap-1 whitespace-nowrap"
+                  role="tablist"
+                  aria-label="Event status"
+                >
+                  {STATUS_TABS.map((t, idx) => {
+                    const count = tabCount(t);
+                    return (
+                      <PrimitiveButton
+                        bare
+                        key={t}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === t}
+                        onClick={() => selectTab(t)}
+                        title={t}
+                        className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                          tab === t
+                            ? "bg-(--surface-3) text-(--text)"
+                            : "text-(--text-faint) hover:bg-(--surface-1)"
+                        }`}
+                      >
+                        {TAB_LABEL[t]}
+                        {count > 0 && (
+                          <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                            {count}
+                          </span>
+                        )}
+                        <span
+                          aria-hidden="true"
+                          className="mono ml-1 text-(--text-faint) text-xs opacity-70"
+                        >
+                          {idx + 1}
+                        </span>
+                      </PrimitiveButton>
+                    );
+                  })}
+                </div>
+              }
+              tools={
+                <>
+                  <DisplayOptions
+                    config={displayConfig}
+                    state={display}
+                    onChange={setDisplay}
+                    onExport={visible.length > 0 ? handleExport : undefined}
+                    rows={scoped}
+                  />
+                  {/* Last in the row: the token chips are a full-width item, so anything
+                  after the filter box would be pushed onto a third line the moment
+                  a chip appeared. */}
+                  <FilterInput
+                    value={filter}
+                    onChange={setFilter}
+                    placeholder="source:… type:… reason:… is:stale"
+                    label="Filter events"
+                    query={parsed}
+                    facets={facets}
+                  />
+                </>
+              }
+            />
           </>
         }
       >

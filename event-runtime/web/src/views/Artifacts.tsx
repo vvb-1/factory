@@ -11,6 +11,7 @@ import {
   JumpLink,
   ListEmpty,
   ListPane,
+  ListToolbar,
   StatCard,
   Table,
   Th,
@@ -477,76 +478,85 @@ export function Artifacts({
               />
             </section>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <div
-                className="flex flex-wrap gap-1"
-                role="tablist"
-                aria-label="Artifact reference state"
-              >
-                {(
-                  [
-                    { label: "All", value: null, count: summary.files },
-                    {
-                      label: "Referenced",
-                      value: false,
-                      count: summary.files - summary.orphans,
-                    },
-                    { label: "Orphans", value: true, count: summary.orphans },
-                  ] as const
-                ).map((facet) => (
-                  <PrimitiveButton
-                    bare
-                    key={facet.label}
-                    type="button"
-                    role="tab"
-                    aria-selected={filters.orphan === facet.value}
-                    onClick={() => set({ orphan: facet.value })}
-                    className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                      filters.orphan === facet.value
-                        ? "bg-(--surface-3) text-(--text)"
-                        : "text-(--text-faint) hover:bg-(--surface-1)"
-                    }`}
-                  >
-                    {facet.label}
-                    <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                      {facet.count.toLocaleString()}
-                    </span>
-                  </PrimitiveButton>
-                ))}
-              </div>
-              <span className="ml-auto">
-                <DisplayOptions
-                  config={ARTIFACTS_DISPLAY}
-                  state={display}
-                  onChange={setDisplay}
-                  rows={artifacts}
-                />
-              </span>
-              <label className="flex items-center gap-1.5 text-[11px] font-medium text-(--text-dim)">
-                <span>Kind:</span>
-                <select
-                  aria-label="Artifact kind"
-                  value={filters.kind ?? ""}
-                  onChange={(event) =>
-                    set({ kind: event.target.value || null })
-                  }
-                  className="cursor-pointer rounded-md border border-(--border) bg-(--surface-0) px-2 py-1 text-[12px] text-(--text) outline-none hover:border-(--border-strong) focus:border-(--accent)"
+            <ListToolbar
+              className="mt-3"
+              tabs={
+                <div
+                  className="flex w-max flex-nowrap gap-1 whitespace-nowrap"
+                  role="tablist"
+                  aria-label="Artifact reference state"
                 >
-                  <option value="">Any kind</option>
-                  {kinds.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
-                    </option>
+                  {(
+                    [
+                      { label: "All", value: null, count: summary.files },
+                      {
+                        label: "Referenced",
+                        value: false,
+                        count: summary.files - summary.orphans,
+                      },
+                      {
+                        label: "Orphans",
+                        value: true,
+                        count: summary.orphans,
+                      },
+                    ] as const
+                  ).map((facet) => (
+                    <PrimitiveButton
+                      bare
+                      key={facet.label}
+                      type="button"
+                      role="tab"
+                      aria-selected={filters.orphan === facet.value}
+                      onClick={() => set({ orphan: facet.value })}
+                      className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                        filters.orphan === facet.value
+                          ? "bg-(--surface-3) text-(--text)"
+                          : "text-(--text-faint) hover:bg-(--surface-1)"
+                      }`}
+                    >
+                      {facet.label}
+                      <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                        {facet.count.toLocaleString()}
+                      </span>
+                    </PrimitiveButton>
                   ))}
-                </select>
-              </label>
-              <FilterInput
-                value={filters.search}
-                onChange={(search) => set({ search })}
-                placeholder="SHA, kind, run, agent…"
-                label="Search artifacts"
-              />
-            </div>
+                </div>
+              }
+              tools={
+                <>
+                  <DisplayOptions
+                    config={ARTIFACTS_DISPLAY}
+                    state={display}
+                    onChange={setDisplay}
+                    rows={artifacts}
+                  />
+                  <label className="flex items-center gap-1.5 text-[11px] font-medium text-(--text-dim)">
+                    <span>Kind:</span>
+                    <select
+                      aria-label="Artifact kind"
+                      value={filters.kind ?? ""}
+                      onChange={(event) =>
+                        set({ kind: event.target.value || null })
+                      }
+                      className="cursor-pointer rounded-md border border-(--border) bg-(--surface-0) px-2 py-1 text-[12px] text-(--text) outline-none hover:border-(--border-strong) focus:border-(--accent)"
+                    >
+                      <option value="">Any kind</option>
+                      {kinds.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {kind}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <FilterInput
+                    value={filters.search}
+                    onChange={(search) => set({ search })}
+                    placeholder="SHA, kind, run, agent…"
+                    label="Search artifacts"
+                  />
+                </>
+              }
+            />
           </>
         }
       >

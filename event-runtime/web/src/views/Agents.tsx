@@ -33,6 +33,7 @@ import {
   KVGroup,
   ListEmpty,
   ListPane,
+  ListToolbar,
   ModelCell,
   Section,
   Table,
@@ -363,55 +364,59 @@ export function Agents({
                 {rows.length} agents · {mutatingCount} mutating ·{" "}
                 {rows.length - mutatingCount} read-only
               </div>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <div
-                  className="flex min-w-0 flex-1 flex-wrap gap-1"
-                  role="tablist"
-                  aria-label="Agent mutation safety"
-                >
-                  {AGENT_TABS.map((item, index) => (
-                    <PrimitiveButton
-                      bare
-                      key={item}
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === item}
-                      onClick={() => selectTab(item)}
-                      className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
-                        tab === item
-                          ? "bg-(--surface-3) text-(--text)"
-                          : "text-(--text-faint) hover:bg-(--surface-1)"
-                      }`}
-                    >
-                      {AGENT_TAB_LABELS[item]}
-                      <span className="ml-1.5 tabular-nums text-(--text-faint)">
-                        {tabCounts[item]}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className="mono ml-1 text-xs text-(--text-faint) opacity-70"
+              <ListToolbar
+                tabs={
+                  <div
+                    className="flex w-max flex-nowrap gap-1 whitespace-nowrap"
+                    role="tablist"
+                    aria-label="Agent mutation safety"
+                  >
+                    {AGENT_TABS.map((item, index) => (
+                      <PrimitiveButton
+                        bare
+                        key={item}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === item}
+                        onClick={() => selectTab(item)}
+                        className={`shrink-0 rounded-md px-2.5 py-1 text-[12px] font-medium ${
+                          tab === item
+                            ? "bg-(--surface-3) text-(--text)"
+                            : "text-(--text-faint) hover:bg-(--surface-1)"
+                        }`}
                       >
-                        {index + 1}
-                      </span>
-                    </PrimitiveButton>
-                  ))}
-                </div>
-                <span className="ml-auto">
-                  <DisplayOptions
-                    config={AGENTS_DISPLAY}
-                    state={display}
-                    onChange={setDisplay}
-                    onExport={visible.length > 0 ? handleExport : undefined}
-                    rows={rows}
-                  />
-                </span>
-                <FilterInput
-                  value={filter}
-                  onChange={setFilter}
-                  placeholder="Filter ref, contract, adapter, model, event type…"
-                  label="Filter agents"
-                />
-              </div>
+                        {AGENT_TAB_LABELS[item]}
+                        <span className="ml-1.5 tabular-nums text-(--text-faint)">
+                          {tabCounts[item]}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="mono ml-1 text-xs text-(--text-faint) opacity-70"
+                        >
+                          {index + 1}
+                        </span>
+                      </PrimitiveButton>
+                    ))}
+                  </div>
+                }
+                tools={
+                  <>
+                    <DisplayOptions
+                      config={AGENTS_DISPLAY}
+                      state={display}
+                      onChange={setDisplay}
+                      onExport={visible.length > 0 ? handleExport : undefined}
+                      rows={rows}
+                    />
+                    <FilterInput
+                      value={filter}
+                      onChange={setFilter}
+                      placeholder="Filter ref, contract, adapter, model, event type…"
+                      label="Filter agents"
+                    />
+                  </>
+                }
+              />
             </>
           }
         >
