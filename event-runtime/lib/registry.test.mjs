@@ -156,8 +156,10 @@ describe("registry", () => {
     // Regenerated (WM-907 follow-up): merge-review.input.json admits the
     // planner-folded memoPin (the memos block made every review
     // input_schema_invalid without it); re-pinned merge-review.json.
+    // Regenerated (WM-907 follow-up): merge-review.md defines
+    // fix.withinOwnedPaths (operational fixes are always true); re-pinned.
     const expected =
-      "sha256:55dff52f524185c364bda22fc39ac4153dbc3e016eed3468249fa6cf12664f1a";
+      "sha256:e25fa469ba29d08dcabf8b3e2288382c10b995a367faf7e11f597bf7da7dde36";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
