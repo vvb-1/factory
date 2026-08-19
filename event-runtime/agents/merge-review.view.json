@@ -1,31 +1,16 @@
 {
   "schemaVersion": "factory.artifact-view/v1",
-  "title": "Merge plan",
+  "title": "Merge review",
   "summary": "/summary",
   "status": {
-    "path": "/recommendation",
+    "path": "/verdict",
     "tone": {
       "MERGE": "ok",
       "FIX": "warn",
-      "ESCALATE": "error",
-      "REVIEW": "warn",
-      "NOOP": "neutral"
+      "ESCALATE": "error"
     }
   },
   "sections": [
-    {
-      "path": "/reviews",
-      "as": "table",
-      "label": "Review",
-      "columns": ["pr", "ticket", "headRef"],
-      "formats": {
-        "pr": "pr",
-        "ticket": "issue",
-        "headSha": "sha",
-        "baseSha": "sha"
-      },
-      "expand": ["headSha", "baseSha"]
-    },
     {
       "path": "/plan",
       "as": "table",
@@ -73,14 +58,24 @@
       "expand": ["headSha"]
     },
     {
+      "path": "/findings",
+      "as": "list",
+      "label": "Findings"
+    },
+    {
       "path": "",
       "as": "keyvalue",
-      "label": "Repo",
-      "keys": ["repo", "github", "base", "deployBranch", "noopReason"],
-      "formats": { "repo": "repo" },
-      "tone": {
-        "noopReason": { "no_open_prs": "muted", "all_prs_held": "warn" }
-      }
+      "label": "PR",
+      "keys": [
+        "repo",
+        "github",
+        "base",
+        "deployBranch",
+        "pr",
+        "ticket",
+        "headRef"
+      ],
+      "formats": { "repo": "repo", "pr": "pr", "ticket": "issue" }
     }
   ]
 }
