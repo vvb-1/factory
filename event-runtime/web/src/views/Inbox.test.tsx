@@ -756,4 +756,85 @@ describe("Inbox view", () => {
         .disabled,
     ).toBe(true);
   });
+
+  test("table checkboxes have hover-only visibility when none selected and full opacity when selected", async () => {
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select all inbox items"));
+
+    const headerCb = view.getByLabelText(
+      "Select all inbox items",
+    ) as HTMLInputElement;
+    const rowCb1 = view.getByLabelText(
+      "Select inbox item inbox_open_1",
+    ) as HTMLInputElement;
+    const rowCb2 = view.getByLabelText(
+      "Select inbox item inbox_open_2",
+    ) as HTMLInputElement;
+
+    expect(headerCb.className).toContain(
+      "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+    );
+    expect(rowCb1.className).toContain(
+      "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+    );
+    expect(rowCb2.className).toContain(
+      "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+    );
+
+    // Table head and rows have group class
+    expect(headerCb.closest("thead")?.className).toContain("group");
+    expect(rowCb1.closest("tr")?.className).toContain("group");
+    expect(rowCb2.closest("tr")?.className).toContain("group");
+
+    // Select row 1 -> checkboxes become opacity-100
+    fireEvent.click(rowCb1);
+    expect(headerCb.className).toContain("opacity-100");
+    expect(rowCb1.className).toContain("opacity-100");
+    expect(rowCb2.className).toContain("opacity-100");
+  });
+
+  test("Shift+Click selects and deselects contiguous range of items", async () => {
+    ledger = [
+      item({ id: "inbox_1", kind: "BLOCKED", title: "Item 1", createdAt: T0 }),
+      item({ id: "inbox_2", kind: "BLOCKED", title: "Item 2", createdAt: T1 }),
+      item({ id: "inbox_3", kind: "BLOCKED", title: "Item 3", createdAt: T2 }),
+      item({ id: "inbox_4", kind: "BLOCKED", title: "Item 4", createdAt: T2 }),
+    ];
+    const { view } = renderInbox();
+    await waitFor(() => view.getByLabelText("Select inbox item inbox_1"));
+
+    const cb1 = view.getByLabelText(
+      "Select inbox item inbox_1",
+    ) as HTMLInputElement;
+    const cb2 = view.getByLabelText(
+      "Select inbox item inbox_2",
+    ) as HTMLInputElement;
+    const cb3 = view.getByLabelText(
+      "Select inbox item inbox_3",
+    ) as HTMLInputElement;
+    const cb4 = view.getByLabelText(
+      "Select inbox item inbox_4",
+    ) as HTMLInputElement;
+
+    // Click item 1
+    fireEvent.click(cb1);
+    expect(cb1.checked).toBe(true);
+    expect(cb2.checked).toBe(false);
+    expect(cb3.checked).toBe(false);
+    expect(cb4.checked).toBe(false);
+
+    // Shift+Click item 3 -> items 1, 2, 3 selected
+    fireEvent.click(cb3, { shiftKey: true });
+    expect(cb1.checked).toBe(true);
+    expect(cb2.checked).toBe(true);
+    expect(cb3.checked).toBe(true);
+    expect(cb4.checked).toBe(false);
+
+    // Shift+Click checked item 2 -> deselects range between anchor (item 3) and target (item 2), leaving item 1
+    fireEvent.click(cb2, { shiftKey: true });
+    expect(cb1.checked).toBe(true);
+    expect(cb2.checked).toBe(false);
+    expect(cb3.checked).toBe(false);
+    expect(cb4.checked).toBe(false);
+  });
 });

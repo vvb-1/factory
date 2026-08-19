@@ -772,20 +772,50 @@ export function Inbox({
     });
   }, [actionableVisible]);
 
-  const toggleSelect = (id: string) => {
+  const lastInteractedId = useRef<string | null>(null);
+
+  const toggleSelect = (id: string, shiftKey = false) => {
+    const anchorId = lastInteractedId.current;
+    lastInteractedId.current = id;
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
+      const isSelected = next.has(id);
+      const targetIndex = actionableVisible.findIndex((it) => it.id === id);
+      const anchorIndex =
+        anchorId !== null
+          ? actionableVisible.findIndex((it) => it.id === anchorId)
+          : -1;
+
+      if (shiftKey && anchorIndex !== -1 && targetIndex !== -1) {
+        const start = Math.min(anchorIndex, targetIndex);
+        const end = Math.max(anchorIndex, targetIndex);
+        const range = actionableVisible.slice(start, end + 1);
+        if (isSelected) {
+          for (const item of range) {
+            next.delete(item.id);
+          }
+        } else {
+          for (const item of range) {
+            next.add(item.id);
+          }
+        }
       } else {
-        next.add(id);
+        if (isSelected) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
       }
       return next;
     });
   };
-  const selectAllActionable = () =>
+  const selectAllActionable = () => {
+    lastInteractedId.current = null;
     setSelectedIds(new Set(actionableVisible.map((it) => it.id)));
+  };
   const toggleSelectAll = () => {
+    lastInteractedId.current = null;
     if (allActionableSelected) setSelectedIds(new Set());
     else selectAllActionable();
   };
@@ -946,6 +976,7 @@ export function Inbox({
   ]);
 
   const selectTab = (t: InboxTab) => {
+    lastInteractedId.current = null;
     setTab(t);
     onSelectItem(null);
     setSelectedIds(new Set());
@@ -1163,7 +1194,7 @@ export function Inbox({
             </div>
           ) : (
             <Table className="w-full border-separate border-spacing-0">
-              <thead>
+              <thead className="group">
                 <tr className="text-left">
                   {selectionEnabled && (
                     <th className="sticky top-0 z-10 h-7 w-8 bg-(--surface-0) px-3 shadow-[inset_0_-1px_0_var(--border)]">
@@ -1174,7 +1205,11 @@ export function Inbox({
                         checked={allActionableSelected}
                         disabled={actionableVisible.length === 0}
                         onChange={toggleSelectAll}
-                        className="cursor-pointer"
+                        className={`cursor-pointer transition-opacity ${
+                          selectedIds.size > 0
+                            ? "opacity-100"
+                            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                        }`}
                       />
                     </th>
                   )}
@@ -1233,7 +1268,7 @@ export function Inbox({
                         key={item.id}
                         onClick={() => onSelectItem(item.id)}
                         aria-selected={item.id === sel?.id}
-                        className={`cursor-pointer hover:bg-(--surface-1) ${item.id === sel?.id ? "row-selected" : ""}`}
+                        className={`group cursor-pointer hover:bg-(--surface-1) ${item.id === sel?.id ? "row-selected" : ""}`}
                       >
                         {selectionEnabled && (
                           <td
@@ -1244,8 +1279,16 @@ export function Inbox({
                               type="checkbox"
                               aria-label={`Select inbox item ${item.id}`}
                               checked={selectedIds.has(item.id)}
-                              onChange={() => toggleSelect(item.id)}
-                              className="cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelect(item.id, e.shiftKey);
+                              }}
+                              onChange={() => {}}
+                              className={`cursor-pointer transition-opacity ${
+                                selectedIds.size > 0 || selectedIds.has(item.id)
+                                  ? "opacity-100"
+                                  : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                              }`}
                             />
                           </td>
                         )}
