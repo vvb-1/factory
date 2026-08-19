@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { keyGuard } from "../hooks";
+import { keyGuard, modal } from "../hooks";
 import { goPrefixActive } from "../goSequence";
 import {
   ApiError,
@@ -192,16 +192,43 @@ export function DecisionCard({
   const update = (id: string, value: unknown) =>
     setValues((previous) => ({ ...previous, [id]: value }));
 
-  // While an undecided card is on screen the number keys 1–6 pick its options
-  // from anywhere in the view — the operator arrives via the list row, not by
-  // focusing the card. Capture phase on window so the Inbox status-tab
-  // binding (bubble phase on window) never sees them; text fields, modifiers
-  // and the `g` prefix still win.
+  // While an undecided card is on screen:
+  // - Number keys 1–6 pick options from anywhere in the view (when not editing an input).
+  // - Enter (outside multiline textarea) or Cmd+Enter / Ctrl+Enter submits the decision when valid.
+  // Capture phase on window so the Inbox status-tab binding (bubble phase on window) never sees them;
+  // text fields, modifiers and the `g` prefix still win for single-key number shortcuts.
   const undecided = !currentResponse;
   useEffect(() => {
     if (!undecided) return;
     function onKey(event: KeyboardEvent) {
-      if (keyGuard(event) || goPrefixActive()) return;
+      if (modal.depth > 0 || goPrefixActive()) return;
+
+      const isModEnter =
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        event.key === "Enter";
+      const isPlainEnter =
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key === "Enter";
+
+      if (isModEnter || isPlainEnter) {
+        const target = event.target as HTMLElement | null;
+        const isTextarea = Boolean(
+          target?.closest("textarea, [contenteditable='true']"),
+        );
+        if (isPlainEnter && isTextarea) return;
+        if (!selected || invalidReason !== null || pending || !connected)
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        void submit();
+        return;
+      }
+
+      if (keyGuard(event)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const number = Number(event.key);
       if (number < 1 || number > 6 || !options[number - 1]) return;
@@ -213,7 +240,16 @@ export function DecisionCard({
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, [undecided, options]);
+  }, [
+    undecided,
+    options,
+    selected,
+    invalidReason,
+    pending,
+    connected,
+    currentRequest,
+    values,
+  ]);
 
   if (currentResponse) {
     if ("superseded" in currentResponse) {
@@ -409,12 +445,21 @@ export function DecisionCard({
           disabled={!connected || pending || invalidReason !== null}
           onClick={() => void submit()}
         >
-          {pending
-            ? "Submitting…"
-            : selected
-              ? currentRequest.options.find((option) => option.id === selected)
+          {pending ? (
+            "Submitting…"
+          ) : selected ? (
+            <>
+              {
+                currentRequest.options.find((option) => option.id === selected)
                   ?.label
-              : "Choose an option"}
+              }
+              <span className="mono ml-1 text-xs opacity-75" aria-hidden="true">
+                ↵
+              </span>
+            </>
+          ) : (
+            "Choose an option"
+          )}
         </Button>
         {invalidReason && (
           <span className="text-[11px] text-(--text-faint)" role="status">

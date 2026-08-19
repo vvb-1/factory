@@ -347,4 +347,126 @@ describe("DecisionCard", () => {
     expect(view.getByText("auto:proposal_closed")).toBeTruthy();
     expect(view.queryByRole("button", { name: "Retry" })).toBeNull();
   });
+
+  test("submits with Enter when valid, ignores plain Enter in textarea, and submits with Cmd+Enter/Ctrl+Enter from anywhere", async () => {
+    const view = render(
+      <DecisionCard
+        itemId="inbox_decision"
+        request={request}
+        apiCalls={apiCalls}
+      />,
+    );
+
+    // Negative test: Enter with no option selected does nothing
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(apiCalls.decide).not.toHaveBeenCalled();
+
+    // Select option 1 (Authorise, which requires paths + confirm)
+    fireEvent.keyDown(document.body, { key: "1" });
+
+    // Negative test: Enter with invalid form does nothing
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(apiCalls.decide).not.toHaveBeenCalled();
+
+    // Fill required fields
+    fireEvent.click(view.getByLabelText("event-runtime/lib/adapters/pi.mjs"));
+    fireEvent.click(
+      view.getByLabelText(/I understand this changes secret handling/),
+    );
+
+    // Focus textarea and press plain Enter - should NOT submit (multiline entry)
+    const textarea = view.getByLabelText(
+      "Anything I should know before I start",
+    );
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(apiCalls.decide).not.toHaveBeenCalled();
+
+    // Press Cmd+Enter inside textarea - SHOULD submit
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(apiCalls.decide).toHaveBeenCalledTimes(1));
+    expect(apiCalls.decide).toHaveBeenCalledWith("inbox_decision", {
+      schemaVersion: "factory.decision-response/v1",
+      requestHash: decisionRequestHash(request),
+      optionId: "authorise",
+      fields: { paths: ["pi"], confirm: true },
+    });
+  });
+
+  test("submits with plain Enter from anywhere when option has no extra required fields", async () => {
+    render(
+      <DecisionCard
+        itemId="inbox_decision"
+        request={request}
+        apiCalls={apiCalls}
+      />,
+    );
+
+    // Select option 2 (Send back to Triage, which has no required fields)
+    fireEvent.keyDown(document.body, { key: "2" });
+
+    // Plain Enter submits
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    await waitFor(() => expect(apiCalls.decide).toHaveBeenCalledTimes(1));
+    expect(apiCalls.decide).toHaveBeenCalledWith("inbox_decision", {
+      schemaVersion: "factory.decision-response/v1",
+      requestHash: decisionRequestHash(request),
+      optionId: "triage",
+      fields: {},
+    });
+  });
+
+  test("Ctrl+Enter submits when connected, and ignores shortcuts when disconnected", async () => {
+    const disconnectedView = render(
+      <DecisionCard
+        itemId="inbox_decision"
+        request={request}
+        connected={false}
+        apiCalls={apiCalls}
+      />,
+    );
+
+    fireEvent.keyDown(document.body, { key: "2" });
+    fireEvent.keyDown(document.body, { key: "Enter", ctrlKey: true });
+    expect(apiCalls.decide).not.toHaveBeenCalled();
+
+    disconnectedView.unmount();
+
+    render(
+      <DecisionCard
+        itemId="inbox_decision"
+        request={request}
+        connected={true}
+        apiCalls={apiCalls}
+      />,
+    );
+
+    fireEvent.keyDown(document.body, { key: "2" });
+    fireEvent.keyDown(document.body, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(apiCalls.decide).toHaveBeenCalledTimes(1));
+  });
+
+  test("displays shortcut hint on submit button when an option is selected", () => {
+    const view = render(
+      <DecisionCard
+        itemId="inbox_decision"
+        request={request}
+        apiCalls={apiCalls}
+      />,
+    );
+
+    const submitBtnBefore = view.getByRole("button", {
+      name: "Choose an option",
+    });
+    expect(submitBtnBefore.querySelector(".mono")).toBeNull();
+
+    // Select option 2
+    fireEvent.keyDown(document.body, { key: "2" });
+
+    const submitBtnAfter = view.getByRole("button", {
+      name: "Send back to Triage",
+    });
+    const hint = submitBtnAfter.querySelector(".mono");
+    expect(hint).toBeTruthy();
+    expect(hint?.textContent).toBe("↵");
+  });
 });
