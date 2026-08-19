@@ -322,6 +322,32 @@ describe("HoverCard", () => {
     });
   });
 
+  test("ArrowDown on an already-open trigger re-enters the first tabbable stop", async () => {
+    const r = render(<Fixture secondAction />);
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    await waitFor(() => {
+      expect(r.getByRole("dialog")).toBeTruthy();
+      expect(document.activeElement).toBe(
+        r.getByRole("button", { name: /Open in Agents/ }),
+      );
+    });
+
+    const last = r.getByRole("button", { name: "Copy id" });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    expect(document.activeElement).toBe(
+      r.getByRole("button", { name: /Open in Agents/ }),
+    );
+  });
+
   test("ArrowDown on an inner trigger button does not reach a window list-keys listener", async () => {
     const listKeys = mock((_e: KeyboardEvent) => {});
     window.addEventListener("keydown", listKeys);
@@ -355,12 +381,50 @@ describe("HoverCard", () => {
     const listKeys = mock((_e: KeyboardEvent) => {});
     window.addEventListener("keydown", listKeys);
     try {
-      fireEvent.keyDown(action, { key: "ArrowDown" });
-      fireEvent.keyDown(action, { key: "ArrowUp" });
+      expect(fireEvent.keyDown(action, { key: "ArrowDown" })).toBe(true);
+      expect(fireEvent.keyDown(action, { key: "ArrowUp" })).toBe(true);
       expect(listKeys).not.toHaveBeenCalled();
     } finally {
       window.removeEventListener("keydown", listKeys);
     }
+  });
+
+  test("j, o and a inside the open panel do not reach a window list-keys listener", async () => {
+    const r = render(<Fixture />);
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const action = await waitFor(() =>
+      r.getByRole("button", { name: /Open in Agents/ }),
+    );
+    expect(document.activeElement).toBe(action);
+
+    const listKeys = mock((_e: KeyboardEvent) => {});
+    window.addEventListener("keydown", listKeys);
+    try {
+      fireEvent.keyDown(action, { key: "j" });
+      fireEvent.keyDown(action, { key: "o" });
+      fireEvent.keyDown(action, { key: "a" });
+      expect(listKeys).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", listKeys);
+    }
+  });
+
+  test("Enter and Space on an in-panel control keep their default activation", async () => {
+    const r = render(<Fixture />);
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const action = await waitFor(() =>
+      r.getByRole("button", { name: /Open in Agents/ }),
+    );
+    expect(document.activeElement).toBe(action);
+
+    expect(fireEvent.keyDown(action, { key: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(action, { key: " " })).toBe(true);
   });
 
   test("Escape closes the card and restores focus to the trigger", async () => {
@@ -633,6 +697,29 @@ describe("HoverCard", () => {
     expect(document.activeElement).toBe(panel);
 
     fireEvent.keyDown(panel, { key: "Tab" });
+
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  test("Shift+Tab from a card with no controls returns focus to the trigger", async () => {
+    const r = render(
+      <HoverCard
+        label="Agent triage-scan"
+        openDelayMs={0}
+        closeDelayMs={0}
+        trigger="triage-scan"
+      >
+        <span>card body</span>
+      </HoverCard>,
+    );
+    const trigger = triggerOf(r.container);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const panel = await waitFor(() => r.getByRole("dialog"));
+    expect(document.activeElement).toBe(panel);
+
+    fireEvent.keyDown(panel, { key: "Tab", shiftKey: true });
 
     expect(document.activeElement).toBe(trigger);
   });

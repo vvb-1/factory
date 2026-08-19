@@ -381,15 +381,21 @@ export function HoverCard({
     };
   }, [open, close, reposition, restoreFocus]);
 
+  /** Focus the first tabbable in the mounted panel. False if it is not there yet. */
+  const focusPanel = useCallback(() => {
+    const root = panelRef.current;
+    if (!root) return false;
+    const first = getTabbableElements(root)[0];
+    (first ?? root).focus();
+    return true;
+  }, []);
+
   // ArrowDown means "take me into the card", so land focus there once it exists.
   useEffect(() => {
     if (!open || !focusPanelRef.current) return;
     focusPanelRef.current = false;
-    const root = panelRef.current;
-    if (!root) return;
-    const first = getTabbableElements(root)[0];
-    (first ?? root).focus();
-  }, [open]);
+    focusPanel();
+  }, [open, focusPanel]);
 
   const onTriggerFocus = useCallback(
     (e: ReactFocusEvent<HTMLSpanElement>) => {
@@ -408,10 +414,14 @@ export function HoverCard({
       if (e.key !== "ArrowDown" && !ownEnter) return;
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === "ArrowDown") focusPanelRef.current = true;
+      if (e.key === "ArrowDown") {
+        // Already open after a Tab-edge return: `open` will not change, so the
+        // effect above would not run. Focus now if the panel is mounted.
+        if (!focusPanel()) focusPanelRef.current = true;
+      }
       openNow();
     },
-    [openNow],
+    [openNow, focusPanel],
   );
 
   /**
@@ -430,6 +440,15 @@ export function HoverCard({
   const onPanelKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.stopPropagation();
+        return;
+      }
+      // Single-character keys (j/k/o, view verbs like a, Space) bind on
+      // window via useListKeys. Stop them here so they do not fire under an
+      // open card. Do not preventDefault: Space still activates the focused
+      // control, and arrows stay scrollable. Tab, Escape, and Enter are not
+      // length 1 — Tab is handled below, Escape by the window capture listener.
+      if (e.key.length === 1) {
         e.stopPropagation();
         return;
       }
