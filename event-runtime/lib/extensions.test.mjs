@@ -1,6 +1,7 @@
 import { tmpDir } from "../test-support/tmp.mjs?file=event-runtime-lib-extensions-test-mjs";
 import { describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   cpSync,
   mkdirSync,
   readFileSync,
@@ -21,11 +22,13 @@ import {
   RESERVED_CONTRIBUTIONS,
   applyConfigDefaults,
   collectHarnessRoots,
+  extensionSecretEnvVar,
   getExtensionConfig,
   harnessPluginName,
   loadExtensionRoots,
   loadExtensions,
   loadedExtensions,
+  resetExtensionSecretsCache,
   validateExtensionManifest,
 } from "./extensions.mjs";
 import { createHookRegistry, hookDecisionsFor } from "./hooks.mjs";
@@ -467,7 +470,6 @@ describe("extension config (contributes.config)", () => {
     const out = await load(
       withValues({
         greeting: "hey",
-        apiToken: "t0k3n",
         limits: { retries: 2 },
       }),
     );
@@ -478,7 +480,6 @@ describe("extension config (contributes.config)", () => {
       values: {
         greeting: "hey",
         maxParallel: 1,
-        apiToken: "t0k3n",
         limits: { retries: 2, timeoutSeconds: 30 },
       },
     });
@@ -489,6 +490,156 @@ describe("extension config (contributes.config)", () => {
     expect(getExtensionConfig("nobody/here")).toBeUndefined();
     expect(loadedExtensions().extensions[0].name).toBe("factory/sample");
     expect(loadedExtensions().disabled).toEqual([]);
+  });
+
+  test("format: secret resolves from env, then secrets.env, and never from policy.yaml", async () => {
+    const dir = tempExtension((m) => {
+      m.name = "factory/secretprobe";
+      m.contributes.config.namespace = "secretprobe";
+    });
+    const envVar = extensionSecretEnvVar("secretprobe", "apiToken");
+    expect(envVar).toBe("FACTORY_EXT_SECRETPROBE_API_TOKEN");
+
+    const prevFile = process.env.FACTORY_EVENT_SECRETS_FILE;
+    const prevEnv = process.env[envVar];
+    const file = path.join(tmpDir("ext-secrets-"), "secrets.env");
+    writeFileSync(file, `${envVar}=from-file\n`);
+    chmodSync(file, 0o600);
+
+    try {
+      process.env.FACTORY_EVENT_SECRETS_FILE = file;
+      delete process.env[envVar];
+      resetExtensionSecretsCache();
+      const fromFile = await load({
+        extensions: [{ path: dir, config: { greeting: "hey" } }],
+      });
+      expect(fromFile.anomalies).toEqual([]);
+      expect(getExtensionConfig("factory/secretprobe").apiToken).toBe(
+        "from-file",
+      );
+      expect(
+        loadedExtensions().extensions[0].config.secretMeta.apiToken,
+      ).toEqual({ set: true, source: "secrets.env" });
+
+      process.env[envVar] = "from-env";
+      resetExtensionSecretsCache();
+      const fromEnv = await load({
+        extensions: [{ path: dir, config: { greeting: "hey" } }],
+      });
+      expect(getExtensionConfig("factory/secretprobe").apiToken).toBe(
+        "from-env",
+      );
+      expect(
+        loadedExtensions().extensions[0].config.secretMeta.apiToken,
+      ).toEqual({ set: true, source: "env" });
+    } finally {
+      if (prevEnv === undefined) delete process.env[envVar];
+      else process.env[envVar] = prevEnv;
+      if (prevFile === undefined) delete process.env.FACTORY_EVENT_SECRETS_FILE;
+      else process.env.FACTORY_EVENT_SECRETS_FILE = prevFile;
+      resetExtensionSecretsCache();
+    }
+
+    const denied = await load(
+      withValues({ greeting: "hey", apiToken: "in-policy" }),
+    );
+    expect(denied.extensions).toEqual([]);
+    expect(denied.anomalies[0]).toMatch(
+      /config\.apiToken must not be set in policy\.yaml — use env FACTORY_EXT_SAMPLE_API_TOKEN/,
+    );
+  });
+
+  test("a group/world-readable secrets.env warns once, is ignored (not read), and does not fail the load", () => {
+    // os.homedir() is fixed at process start (Bun does not re-read $HOME at
+    // runtime), so a temp HOME has to be a real subprocess env, not an
+    // in-process process.env write — the same reason the "cli extensions"
+    // tests below spawn the CLI instead of calling loadExtensions() directly.
+    const dir = tempExtension((m) => {
+      m.name = "factory/secretmode";
+      m.contributes.config.namespace = "secretmode";
+    });
+    const envVar = extensionSecretEnvVar("secretmode", "apiToken");
+    const home = tmpDir("ext-secrets-home-");
+    mkdirSync(path.join(home, ".factory"), { recursive: true });
+    const file = path.join(home, ".factory", "secrets.env");
+    writeFileSync(file, `${envVar}=from-permissive-file\n`);
+    chmodSync(file, 0o644);
+
+    const root = tmpDir("ext-secrets-policyroot-");
+    mkdirSync(path.join(root, "config"));
+    const { models } = Bun.YAML.parse(
+      readFileSync(
+        path.join(path.dirname(RUNTIME_ROOT), "config", "policy.yaml"),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      path.join(root, "config", "policy.yaml"),
+      Bun.YAML.stringify({
+        models,
+        extensions: [{ path: dir, config: { greeting: "hey" } }],
+      }),
+    );
+
+    const out = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "event-runtime/cli.mjs",
+        "extensions",
+        "list",
+        "--json",
+      ],
+      cwd: path.dirname(RUNTIME_ROOT),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        HOME: home,
+        FACTORY_REPOS_ROOT: root,
+        FACTORY_EVENT_SECRETS_FILE: undefined,
+        [envVar]: undefined,
+      },
+    });
+    expect(out.exitCode).toBe(0);
+    const stderr = out.stderr.toString();
+    // Permissive mode means the file is ignored, not read: the extension
+    // still loads (this is a warning, never a fault) with the secret unset.
+    expect(stderr).toContain(file);
+    expect(stderr).toMatch(/group\/world-readable/);
+    expect(stderr).not.toContain("from-permissive-file");
+    const parsed = JSON.parse(out.stdout.toString());
+    expect(parsed.anomalies).toEqual([]);
+    expect(parsed.extensions[0].config.namespace).toBe("secretmode");
+    expect(parsed.extensions[0].config.values.apiToken).toBeUndefined();
+  });
+
+  test("loading an extension with an env-backed secret never prints the raw value (serve logs loadExtensions() output at start)", async () => {
+    const envVar = extensionSecretEnvVar("sample", "apiToken");
+    const SECRET_LITERAL = "raw-secret-should-never-be-logged-77bb1";
+    const prevEnv = process.env[envVar];
+    const logged = [];
+    const spies = ["log", "warn", "error", "info", "debug"].map((method) => {
+      const original = console[method];
+      console[method] = (...args) => logged.push(args.join(" "));
+      return () => {
+        console[method] = original;
+      };
+    });
+    try {
+      process.env[envVar] = SECRET_LITERAL;
+      resetExtensionSecretsCache();
+      const out = await load(withValues({ greeting: "hey" }));
+      expect(out.extensions).toHaveLength(1);
+      expect(getExtensionConfig("factory/sample").apiToken).toBe(
+        SECRET_LITERAL,
+      );
+      expect(logged.some((line) => line.includes(SECRET_LITERAL))).toBe(false);
+    } finally {
+      for (const restore of spies) restore();
+      if (prevEnv === undefined) delete process.env[envVar];
+      else process.env[envVar] = prevEnv;
+      resetExtensionSecretsCache();
+    }
   });
 
   test("an invalid value disables the extension whole and names the failing path", async () => {
