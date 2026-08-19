@@ -1657,3 +1657,46 @@ describe("Proposals approval modal pinned footer (WM-829)", () => {
     );
   });
 });
+
+describe("Proposals navigation shortcuts (WM-875)", () => {
+  test("e triggers onJumpEvent and r triggers onRunQueued", async () => {
+    let jumpedEvent = "";
+    let queuedRun = "";
+    const proposal = stubProposal("prop_nav_test", "open", {
+      eventId: "evt_origin_123",
+      eventSource: "github",
+      runId: "run_target_456",
+    });
+
+    await withApi(
+      {
+        proposals: async () => ({ proposals: [proposal] }),
+        status: async () => stubStatus(),
+        runs: async () => ({ runs: [] }),
+        events: async () => ({ events: [] }),
+      },
+      async () => {
+        const r = renderProposals({
+          focusProposalId: proposal.id,
+          onJumpEvent: (source, eventId) => {
+            jumpedEvent = `${source}:${eventId}`;
+          },
+          onRunQueued: (runId) => {
+            queuedRun = runId;
+          },
+        });
+
+        await r.findByRole("heading", { name: "Proposals" });
+        await waitFor(() => expect(r.getByText("evt_origin_123")).toBeTruthy());
+
+        // Press 'e' to jump to origin event
+        fireEvent.keyDown(document.body, { key: "e" });
+        expect(jumpedEvent).toBe("github:evt_origin_123");
+
+        // Press 'r' to open run
+        fireEvent.keyDown(document.body, { key: "r" });
+        expect(queuedRun).toBe("run_target_456");
+      },
+    );
+  });
+});

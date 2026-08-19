@@ -213,7 +213,7 @@ export function RunFull({
     d?.run?.state === "PROPOSED",
   );
 
-  // Verbs: Esc back to list, x cancel, c copy id, c i / c c copy CLI inspect command, c l copy link.
+  // Verbs: Esc back to list, x cancel, c / l view chain, p open proposal, a approve.
   useEffect(() => {
     let pendingC = 0;
     function onKey(e: KeyboardEvent) {
@@ -225,7 +225,16 @@ export function RunFull({
       }
       if (e.key === "p") {
         e.preventDefault();
-        toggleRunPin(runId);
+        if (selProposal && onJumpProposal) {
+          onJumpProposal(selProposal.id);
+        } else {
+          toggleRunPin(runId);
+        }
+        return;
+      }
+      if ((e.key === "c" || e.key === "l") && onJumpChain && chainKey) {
+        e.preventDefault();
+        onJumpChain(chainKey, `run:${runId}`);
         return;
       }
       if (e.key === "a" && canApprove && connected && !approve.isPending) {
@@ -265,7 +274,18 @@ export function RunFull({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [d, connected, onBack, runId, canApprove, approve.isPending]);
+  }, [
+    d,
+    connected,
+    onBack,
+    runId,
+    canApprove,
+    approve.isPending,
+    selProposal,
+    onJumpProposal,
+    onJumpChain,
+    chainKey,
+  ]);
 
   // Offer this run's verbs in the ⌘K palette (§5), same rules as the panel.
   useEffect(() => {
@@ -305,7 +325,17 @@ export function RunFull({
           ? [
               {
                 label: `Open proposal ${selProposal.id}`,
+                hint: "p",
                 run: () => onJumpProposal(selProposal.id),
+              },
+            ]
+          : []),
+        ...(onJumpChain && chainKey
+          ? [
+              {
+                label: "View chain",
+                hint: "c",
+                run: () => onJumpChain(chainKey, `run:${runId}`),
               },
             ]
           : []),
@@ -483,22 +513,36 @@ export function RunFull({
           <div className="flex items-center gap-1.5">
             {selProposal && onJumpProposal && (
               <Button onClick={() => onJumpProposal(selProposal.id)}>
-                Open proposal
+                <span>Open proposal</span>
+                <span
+                  aria-hidden="true"
+                  className="mono ml-1 text-(--text-faint) text-xs"
+                >
+                  p
+                </span>
               </Button>
             )}
             {onJumpChain && chainKey && (
               <Button onClick={() => onJumpChain(chainKey, `run:${runId}`)}>
-                View chain
+                <span>View chain</span>
+                <span
+                  aria-hidden="true"
+                  className="mono ml-1 text-(--text-faint) text-xs"
+                >
+                  c
+                </span>
               </Button>
             )}
             <Button onClick={() => toggleRunPin(runId)}>
               <span>Open in tab</span>
-              <span
-                aria-hidden="true"
-                className="mono ml-1 text-(--text-faint) text-xs"
-              >
-                p
-              </span>
+              {(!selProposal || !onJumpProposal) && (
+                <span
+                  aria-hidden="true"
+                  className="mono ml-1 text-(--text-faint) text-xs"
+                >
+                  p
+                </span>
+              )}
             </Button>
           </div>
         </div>

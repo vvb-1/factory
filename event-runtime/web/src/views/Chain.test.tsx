@@ -258,14 +258,17 @@ const proposal: Proposal = {
 
 function renderChain(props: Partial<React.ComponentProps<typeof Chain>> = {}) {
   const selected: Array<string | null> = [];
+  const openedRuns: string[] = [];
+  const jumpedRuns: string[] = [];
+  const jumpedEvents: string[] = [];
   const view = renderWithClient(
     <Chain
       correlationId={CORR}
       focusNodeId={null}
       onSelectNode={(id) => selected.push(id)}
-      onJumpEvent={() => {}}
-      onJumpRun={() => {}}
-      onOpenRunFull={() => {}}
+      onJumpEvent={(source, id) => jumpedEvents.push(`${source}:${id}`)}
+      onJumpRun={(id) => jumpedRuns.push(id)}
+      onOpenRunFull={(id) => openedRuns.push(id)}
       onJumpProposal={() => {}}
       onJumpAgent={() => {}}
       {...props}
@@ -301,7 +304,7 @@ function renderChain(props: Partial<React.ComponentProps<typeof Chain>> = {}) {
       },
     },
   );
-  return { ...view, selected };
+  return { ...view, selected, openedRuns, jumpedRuns, jumpedEvents };
 }
 
 afterEach(() => {
@@ -446,14 +449,14 @@ describe("Chain view — Timeline mode (WM-639)", () => {
     for (const li of list.querySelectorAll('[aria-current="true"]')) {
       expect(li.getAttribute("data-node-id")).toBe(nodeId);
     }
-    // Enter re-asserts the selection (opens the pane as in graph mode).
+    // Enter triggers Open run on selected run node (WM-875).
     fireEvent.keyDown(document.body, { key: "Enter" });
-    expect(focused.selected).toContain(nodeId);
+    expect(focused.openedRuns).toContain(FIX_RUN);
     // The detail pane shows the run, with the reveal action renamed for the mode.
     expect(
       await focused.findByRole("button", { name: /Show in timeline/ }),
     ).toBeTruthy();
-    expect(focused.getByRole("button", { name: "Open run" })).toBeTruthy();
+    expect(focused.getByRole("button", { name: /Open run/ })).toBeTruthy();
   });
 
   test("j/k in timeline mode walk the narrative order of nodes", async () => {
@@ -534,5 +537,51 @@ describe("Chain header state bar (WM-832)", () => {
       expect(rendered.queryByText("FAILED ×1")).toBeNull();
       expect(rendered.queryByText("COMPLETED ×2")).toBeNull();
     });
+  });
+});
+
+describe("Chain navigation shortcuts (WM-875)", () => {
+  test("when run node is selected, o / Enter triggers onOpenRunFull and r triggers onJumpRun", async () => {
+    const runNodeId = `run:${FIX_RUN}`;
+    const view = renderChain({ focusNodeId: runNodeId });
+
+    const openRunBtn = await waitFor(() =>
+      view.getByRole("button", { name: /Open run/ }),
+    );
+    expect(openRunBtn.querySelector('[aria-hidden="true"]')?.textContent).toBe(
+      "o",
+    );
+    const showInRunsBtn = view.getByRole("button", { name: /Show in Runs/ });
+    expect(
+      showInRunsBtn.querySelector('[aria-hidden="true"]')?.textContent,
+    ).toBe("r");
+
+    // Open run via 'o'
+    fireEvent.keyDown(document.body, { key: "o" });
+    expect(view.openedRuns).toContain(FIX_RUN);
+
+    // Open run via 'Enter'
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    expect(view.openedRuns.filter((id) => id === FIX_RUN).length).toBe(2);
+
+    // Jump to runs via 'r'
+    fireEvent.keyDown(document.body, { key: "r" });
+    expect(view.jumpedRuns).toContain(FIX_RUN);
+  });
+
+  test("when event node is selected, e triggers onJumpEvent", async () => {
+    const evtNodeId = `event:chain:${FIX_EVENT}`;
+    const view = renderChain({ focusNodeId: evtNodeId });
+
+    const openInEventsBtn = await waitFor(() =>
+      view.getByRole("button", { name: /Open in Events/ }),
+    );
+    expect(
+      openInEventsBtn.querySelector('[aria-hidden="true"]')?.textContent,
+    ).toBe("e");
+
+    // Open in Events via 'e'
+    fireEvent.keyDown(document.body, { key: "e" });
+    expect(view.jumpedEvents).toContain(`chain:${FIX_EVENT}`);
   });
 });
