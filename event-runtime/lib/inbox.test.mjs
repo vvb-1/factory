@@ -165,6 +165,7 @@ describe("human inbox ledger (WM-285)", () => {
       { id: "second" },
     );
     expect(second.id).toBe(first.id);
+    expect(second.title).toBe("second");
     expect(second.body).toBe("new");
     expect(second.refs).toEqual({ issue: "WM-1", runId: "run_2" });
     expect(second.decision).toEqual(replacement);
@@ -1020,9 +1021,84 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
       dedupeKey: `proposal_expired:${FRESH}`,
     });
     expect(again.id).toBe(id);
+    expect(again.title).toBe(
+      `DECISION NEEDED proposal ${FRESH}: expired undecided`,
+    );
+    expect(listInboxItems(db).map((item) => item.title)).toEqual([
+      `DECISION NEEDED proposal ${FRESH}: expired undecided`,
+    ]);
     expect(db.query("SELECT COUNT(*) AS n FROM inbox_items").get().n).toBe(1);
     // Supersession does not lose the retarget the operator already paid for.
     expect(again.responseHistory).toHaveLength(1);
+  });
+
+  test("retarget updates the list title to the fresh proposal", () => {
+    const db = openDb(":memory:");
+    const { id, approve, applyEffect } = replanned(db);
+    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    const listed = listInboxItems(db);
+    expect(listed).toHaveLength(1);
+    expect(listed[0].title).toContain(FRESH);
+    expect(listed[0].title).not.toContain(OLD);
+    expect(getInboxItem(db, id).title).toContain(FRESH);
+  });
+
+  test("applied replanned with no newProposalId is recorded failed and stays retryable", () => {
+    const db = openDb(":memory:");
+    const { id, approve } = replanned(db);
+    const decided = decideInboxItem(db, id, approve, {
+      now: 2000,
+      applyEffect: () => ({
+        outcome: "applied",
+        detail: "replanned_awaiting_approval",
+      }),
+    });
+    expect(decided.effect.outcome).toBe("failed");
+    expect(decided.item.resolvedAt).toBeNull();
+    expect(decided.item.response.effect.outcome).toBe("failed");
+    expect(decided.item.response.effect.detail).toBe(
+      "replanned_awaiting_approval",
+    );
+
+    let invoked = 0;
+    const retried = retryInboxDecision(db, id, {
+      now: 3000,
+      applyEffect: () => {
+        invoked += 1;
+        return {
+          outcome: "applied",
+          detail: "replanned_awaiting_approval",
+          newProposalId: FRESH,
+        };
+      },
+    });
+    expect(invoked).toBe(1);
+    expect(retried.item.refs.proposalId).toBe(FRESH);
+    expect(retried.item.resolvedAt).toBeNull();
+  });
+
+  test("applied replanned with an empty newProposalId is also failed and retryable", () => {
+    const db = openDb(":memory:");
+    const { id, approve } = replanned(db);
+    const decided = decideInboxItem(db, id, approve, {
+      now: 2000,
+      applyEffect: () => ({
+        outcome: "applied",
+        detail: "replanned_awaiting_approval",
+        newProposalId: "   ",
+      }),
+    });
+    expect(decided.effect.outcome).toBe("failed");
+    expect(decided.item.resolvedAt).toBeNull();
+    expect(decided.item.response.effect.outcome).toBe("failed");
+    let invoked = 0;
+    retryInboxDecision(db, id, {
+      applyEffect: () => {
+        invoked += 1;
+        return { outcome: "applied" };
+      },
+    });
+    expect(invoked).toBe(1);
   });
 });
 
