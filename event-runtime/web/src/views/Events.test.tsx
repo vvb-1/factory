@@ -1280,3 +1280,57 @@ describe("Events causation glyphs and hover card (WM-702)", () => {
     );
   });
 });
+
+describe("Events navigation shortcuts (WM-875)", () => {
+  test("c triggers onJumpChain, r triggers onJumpRun, and p triggers onJumpProposal", async () => {
+    let jumpedChain = "";
+    let jumpedRun = "";
+    let jumpedProposal = "";
+
+    const evt = stubEvent("evt_shortcuts_test", "planned", {
+      correlationId: "chain_corr_abc",
+      runId: "run_xyz_123",
+      proposalId: "prop_789",
+    });
+
+    await withApi(
+      {
+        events: async () => ({ events: [evt] }),
+        status: async () => createStatusFixture(),
+      },
+      async () => {
+        const { getByRole } = renderEvents({
+          focusEvent: { source: "github", eventId: "evt_shortcuts_test" },
+          onJumpChain: (corr) => {
+            jumpedChain = corr;
+          },
+          onJumpRun: (runId) => {
+            jumpedRun = runId;
+          },
+          onJumpProposal: (propId) => {
+            jumpedProposal = propId;
+          },
+        });
+
+        const viewChainBtn = await waitFor(() =>
+          getByRole("button", { name: /View chain/ }),
+        );
+        expect(
+          viewChainBtn.querySelector('[aria-hidden="true"]')?.textContent,
+        ).toBe("c");
+
+        // Press 'c' to view chain
+        fireEvent.keyDown(document.body, { key: "c" });
+        expect(jumpedChain).toBe("chain_corr_abc");
+
+        // Press 'r' to jump to run
+        fireEvent.keyDown(document.body, { key: "r" });
+        expect(jumpedRun).toBe("run_xyz_123");
+
+        // Press 'p' to jump to proposal
+        fireEvent.keyDown(document.body, { key: "p" });
+        expect(jumpedProposal).toBe("prop_789");
+      },
+    );
+  });
+});

@@ -26,8 +26,22 @@ const ACTIONS: { keys: string; does: string }[] = [
   { keys: "[ ]", does: "previous / next status tab" },
   { keys: "1–N", does: "switch status tab" },
   { keys: "Enter", does: "open detail" },
-  { keys: "o", does: "open current run (Workers) · full run view (Runs)" },
-  { keys: "r", does: "run schedule now (Schedules)" },
+  {
+    keys: "o / Enter",
+    does: "open run (Chain) · open current run (Workers) · full run view (Runs)",
+  },
+  {
+    keys: "r",
+    does: "show in Runs (Chain, Events, Proposals) · run schedule now (Schedules)",
+  },
+  {
+    keys: "e",
+    does: "open in Events (Chain, Proposals)",
+  },
+  {
+    keys: "c / l",
+    does: "view chain (Run, Events)",
+  },
   { keys: "a", does: "approve proposal (Proposals) · ack item (Inbox)" },
   {
     keys: "x",
@@ -50,7 +64,10 @@ const ACTIONS: { keys: string; does: string }[] = [
     does: "approve / reject selected proposals · ack / resolve selected inbox items",
   },
   { keys: "q", does: "requeue event (Events)" },
-  { keys: "p", does: "pin / unpin selected run (Runs)" },
+  {
+    keys: "p",
+    does: "open proposal (Run, Events) · pin / unpin selected run (Runs)",
+  },
   { keys: "z / Enter", does: "reveal selected node on canvas (Graph)" },
   { keys: "c", does: "copy selected id / name / ref" },
   { keys: "c i / c c", does: "copy CLI inspect command (Runs)" },
