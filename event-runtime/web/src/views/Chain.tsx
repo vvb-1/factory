@@ -573,6 +573,26 @@ export function Chain({
         revealSelected();
         return;
       }
+      if (selected) {
+        if (selected.kind === "chainRun") {
+          if (e.key === "o" || e.key === "Enter") {
+            e.preventDefault();
+            onOpenRunFull(selected.run.runId);
+            return;
+          }
+          if (e.key === "r") {
+            e.preventDefault();
+            onJumpRun(selected.run.runId);
+            return;
+          }
+        } else if (selected.kind === "chainEvent") {
+          if (e.key === "e") {
+            e.preventDefault();
+            onJumpEvent(selected.event.source, selected.event.eventId);
+            return;
+          }
+        }
+      }
       if (e.key === "Enter" && timelineOn && focusNodeId) {
         // The pane already follows the selection; Enter re-asserts it for a
         // row reached by deep link, matching graph mode's click-to-open.
@@ -608,7 +628,17 @@ export function Chain({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onSelectNode, focusNodeId, positioned, timelineOn, timeline]);
+  }, [
+    onSelectNode,
+    focusNodeId,
+    positioned,
+    timelineOn,
+    timeline,
+    selected,
+    onOpenRunFull,
+    onJumpRun,
+    onJumpEvent,
+  ]);
 
   const eventCount =
     graph?.nodes.filter((n) => n.kind === "chainEvent").length ?? 0;
@@ -881,15 +911,33 @@ export function Chain({
                     onJumpEvent(selected.event.source, selected.event.eventId)
                   }
                 >
-                  Open in Events
+                  <span>Open in Events</span>
+                  <span
+                    aria-hidden="true"
+                    className="mono ml-1 text-(--text-faint) text-xs"
+                  >
+                    e
+                  </span>
                 </Button>
               ) : (
                 <div className="flex items-center gap-1.5">
                   <Button onClick={() => onOpenRunFull(selected.run.runId)}>
-                    Open run
+                    <span>Open run</span>
+                    <span
+                      aria-hidden="true"
+                      className="mono ml-1 text-(--text-faint) text-xs"
+                    >
+                      o
+                    </span>
                   </Button>
                   <Button onClick={() => onJumpRun(selected.run.runId)}>
-                    Show in Runs
+                    <span>Show in Runs</span>
+                    <span
+                      aria-hidden="true"
+                      className="mono ml-1 text-(--text-faint) text-xs"
+                    >
+                      r
+                    </span>
                   </Button>
                 </div>
               )}

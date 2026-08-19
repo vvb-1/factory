@@ -645,3 +645,133 @@ describe("RunFull causal follow-up events and chained runs (WM-420)", () => {
     );
   });
 });
+
+describe("RunFull navigation shortcuts (WM-875)", () => {
+  test("c and l trigger onJumpChain and render c badge hint", async () => {
+    const runId = "run_chain_jump_test";
+    const detail = createRunDetailFixture({
+      run: { runId, state: "COMPLETED" } as RunDetail["run"],
+    });
+    const event = createEventFixture({
+      source: "factory",
+      eventId: "evt_chain_1",
+      correlationId: "chain_corr_123",
+      causationId: runId,
+    });
+    let jumpedChain = "";
+
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [
+            createRunListItemFixture({
+              runId,
+              state: "COMPLETED",
+              eventId: "evt_chain_1",
+              eventSource: "factory",
+            }),
+          ],
+        }),
+        events: async () => ({
+          events: [event],
+        }),
+      },
+      async () => {
+        const { getByRole } = renderWithClient(
+          <RunFull
+            runId={runId}
+            connected={true}
+            onBack={noop}
+            onJumpAgent={noop}
+            onJumpEvent={noop}
+            onJumpChain={(corr) => {
+              jumpedChain = corr;
+            }}
+          />,
+        );
+
+        const viewChainBtn = await waitFor(() =>
+          getByRole("button", { name: /View chain/ }),
+        );
+        expect(
+          viewChainBtn.querySelector('[aria-hidden="true"]')?.textContent,
+        ).toBe("c");
+
+        // Press 'c'
+        fireEvent.keyDown(document.body, { key: "c" });
+        expect(jumpedChain).toBe("chain_corr_123");
+
+        jumpedChain = "";
+        // Press 'l'
+        fireEvent.keyDown(document.body, { key: "l" });
+        expect(jumpedChain).toBe("chain_corr_123");
+      },
+    );
+  });
+
+  test("p triggers onJumpProposal and renders p badge hint when proposal exists", async () => {
+    const runId = "run_proposal_jump_test";
+    const detail = createRunDetailFixture({
+      run: { runId, state: "PROPOSED" } as RunDetail["run"],
+    });
+    let jumpedProposal = "";
+
+    await withApi(
+      {
+        run: async () => detail,
+        runs: async () => ({
+          runs: [createRunListItemFixture({ runId, state: "PROPOSED" })],
+        }),
+        proposals: async () => ({
+          proposals: [
+            {
+              id: "prop_jump_999",
+              decision: "run",
+              status: "open",
+              runId,
+              created_at: new Date().toISOString(),
+              ttl_seconds: 3600,
+              expired: false,
+              decided_at: null,
+              decided_by: null,
+              reason: null,
+              eventId: null,
+              eventSource: null,
+              agent: "test-agent",
+              spec: null,
+              repos: [],
+            },
+          ],
+        }),
+      },
+      async () => {
+        const { getAllByRole } = renderWithClient(
+          <RunFull
+            runId={runId}
+            connected={true}
+            onBack={noop}
+            onJumpAgent={noop}
+            onJumpEvent={noop}
+            onJumpProposal={(propId) => {
+              jumpedProposal = propId;
+            }}
+          />,
+        );
+
+        const openProposalBtns = await waitFor(() =>
+          getAllByRole("button", { name: /Open proposal/ }),
+        );
+        expect(openProposalBtns.length).toBeGreaterThan(0);
+        expect(
+          openProposalBtns[0].querySelector('[aria-hidden="true"]')
+            ?.textContent,
+        ).toBe("p");
+
+        // Press 'p'
+        fireEvent.keyDown(document.body, { key: "p" });
+        expect(jumpedProposal).toBe("prop_jump_999");
+      },
+    );
+  });
+});

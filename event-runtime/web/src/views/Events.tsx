@@ -861,8 +861,25 @@ export function Events({
       q: () => canRequeue && connected && sel && requeue.mutate(sel),
       c: () => {
         if (!sel) return;
-        copyText(sel.eventId, "event id");
-        pendingC.current = Date.now();
+        if (onJumpChain) {
+          onJumpChain(
+            sel.correlationId ?? sel.eventId,
+            `event:${sel.source}:${sel.eventId}`,
+          );
+        } else {
+          copyText(sel.eventId, "event id");
+          pendingC.current = Date.now();
+        }
+      },
+      r: () => {
+        if (sel?.runId && onJumpRun) {
+          onJumpRun(sel.runId);
+        }
+      },
+      p: () => {
+        if (sel?.proposalId && onJumpProposal) {
+          onJumpProposal(sel.proposalId);
+        }
       },
       l: () => {
         if (
@@ -892,6 +909,37 @@ export function Events({
               },
             ]
           : []),
+        ...(onJumpChain
+          ? [
+              {
+                label: "View chain",
+                hint: "c",
+                run: () =>
+                  onJumpChain(
+                    sel.correlationId ?? sel.eventId,
+                    `event:${sel.source}:${sel.eventId}`,
+                  ),
+              },
+            ]
+          : []),
+        ...(sel.proposalId && onJumpProposal
+          ? [
+              {
+                label: `Open proposal ${sel.proposalId}`,
+                hint: "p",
+                run: () => onJumpProposal(sel.proposalId!),
+              },
+            ]
+          : []),
+        ...(sel.runId && onJumpRun
+          ? [
+              {
+                label: `Open run ${sel.runId}`,
+                hint: "r",
+                run: () => onJumpRun(sel.runId!),
+              },
+            ]
+          : []),
         {
           label: `Replay ${sel.eventId} through intake…`,
           run: () => setConfirmReplay(true),
@@ -911,7 +959,14 @@ export function Events({
     }
     return () => setContextActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel ? keyOf(sel) : null, canRequeue, connected]);
+  }, [
+    sel ? keyOf(sel) : null,
+    canRequeue,
+    connected,
+    onJumpChain,
+    onJumpRun,
+    onJumpProposal,
+  ]);
 
   const eventCounts = statusQ.data?.events ?? {};
   const allCount = Object.values(eventCounts).reduce((n, v) => n + v, 0);
@@ -1399,7 +1454,13 @@ export function Events({
                       )
                     }
                   >
-                    View chain
+                    <span>View chain</span>
+                    <span
+                      aria-hidden="true"
+                      className="mono ml-1 text-(--text-faint) text-xs"
+                    >
+                      c
+                    </span>
                   </Button>
                 )}
                 <Button

@@ -840,6 +840,16 @@ export function Proposals({
       // When `*` is armed, the proposal-selection listener owns the same `a` key instead.
       a: () => !starPrefixActive() && canApprove && connected && openApprove(),
       x: () => isOpen && connected && openReject(),
+      e: () => {
+        if (sel?.eventId && sel.eventSource && onJumpEvent) {
+          onJumpEvent(sel.eventSource, sel.eventId);
+        }
+      },
+      r: () => {
+        if (sel?.runId && onRunQueued) {
+          onRunQueued(sel.runId);
+        }
+      },
       c: () => {
         if (!sel) return;
         copyText(sel.id, "proposal id");

@@ -180,4 +180,18 @@ describe("ShortcutsDialog", () => {
     expect(content).toContain("⌘↵");
     expect(content).toMatch(/confirm inject/i);
   });
+
+  test("documents chain, run, event, and proposal navigation shortcuts (WM-875)", () => {
+    const r = render(<ShortcutsDialog onClose={() => {}} />);
+    const actionsSection = r.getByRole("region", { name: "Actions" });
+    const content = actionsSection.textContent ?? "";
+
+    expect(content).toContain("o / Enter");
+    expect(content).toContain("open run (Chain)");
+    expect(content).toContain("show in Runs (Chain, Events, Proposals)");
+    expect(content).toContain("open in Events (Chain, Proposals)");
+    expect(content).toContain("c / l");
+    expect(content).toContain("view chain (Run, Events)");
+    expect(content).toContain("open proposal (Run, Events)");
+  });
 });
