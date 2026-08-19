@@ -423,16 +423,47 @@ export function Proposals({
     }
   }, [someActionableSelected]);
 
-  const toggleSelect = (id: string) => {
+  const lastInteractedId = useRef<string | null>(null);
+
+  const toggleSelect = (id: string, shiftKey = false) => {
+    const anchorId = lastInteractedId.current;
+    lastInteractedId.current = id;
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const isSelected = next.has(id);
+      const targetIndex = actionableVisible.findIndex((p) => p.id === id);
+      const anchorIndex =
+        anchorId !== null
+          ? actionableVisible.findIndex((p) => p.id === anchorId)
+          : -1;
+
+      if (shiftKey && anchorIndex !== -1 && targetIndex !== -1) {
+        const start = Math.min(anchorIndex, targetIndex);
+        const end = Math.max(anchorIndex, targetIndex);
+        const range = actionableVisible.slice(start, end + 1);
+        if (isSelected) {
+          for (const item of range) {
+            next.delete(item.id);
+          }
+        } else {
+          for (const item of range) {
+            next.add(item.id);
+          }
+        }
+      } else {
+        if (isSelected) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+      }
       return next;
     });
   };
 
   const toggleSelectAll = () => {
+    lastInteractedId.current = null;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (allActionableSelected) {
@@ -445,6 +476,7 @@ export function Proposals({
   };
 
   const selectAllActionable = () => {
+    lastInteractedId.current = null;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       actionableVisible.forEach((p) => next.add(p.id));
@@ -979,6 +1011,7 @@ export function Proposals({
   }, [sel?.id, canApprove, isOpen, connected]);
 
   const selectTab = (t: ProposalTab) => {
+    lastInteractedId.current = null;
     setTab(t);
     setExpiredOnly(false);
     onSelectProposal(null);
@@ -1182,7 +1215,7 @@ export function Proposals({
           }
         >
           <Table className="w-full table-fixed border-separate border-spacing-0 max-sm:[&_th:nth-child(n+4)]:hidden max-sm:[&_td:nth-child(n+4)]:hidden">
-            <thead>
+            <thead className="group">
               <tr className="text-left">
                 {tab === "open" && (
                   <th className="sticky top-0 z-10 h-7 w-8 bg-(--surface-0) px-3 shadow-[inset_0_-1px_0_var(--border)]">
@@ -1193,7 +1226,11 @@ export function Proposals({
                       checked={allActionableSelected}
                       disabled={actionableVisible.length === 0}
                       onChange={toggleSelectAll}
-                      className="cursor-pointer"
+                      className={`cursor-pointer transition-opacity ${
+                        selectedIds.size > 0
+                          ? "opacity-100"
+                          : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                      }`}
                     />
                   </th>
                 )}
@@ -1243,7 +1280,7 @@ export function Proposals({
                     key={p.id}
                     onClick={() => onSelectProposal(p.id)}
                     aria-selected={p.id === selectedId}
-                    className={`cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : proposalIsExpired(p, now) ? "row-wash-warn" : ""} ${p.id === selectedId ? "row-selected" : ""}`}
+                    className={`group cursor-pointer hover:bg-(--surface-1) ${staleState(p) ? "row-wash-err" : proposalIsExpired(p, now) ? "row-wash-warn" : ""} ${p.id === selectedId ? "row-selected" : ""}`}
                   >
                     {tab === "open" && (
                       <td
@@ -1254,11 +1291,16 @@ export function Proposals({
                           type="checkbox"
                           aria-label={`Select proposal ${p.id}`}
                           checked={selectedIds.has(p.id)}
-                          onChange={(e) => {
+                          onClick={(e) => {
                             e.stopPropagation();
-                            toggleSelect(p.id);
+                            toggleSelect(p.id, e.shiftKey);
                           }}
-                          className="cursor-pointer"
+                          onChange={() => {}}
+                          className={`cursor-pointer transition-opacity ${
+                            selectedIds.size > 0 || selectedIds.has(p.id)
+                              ? "opacity-100"
+                              : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                          }`}
                         />
                       </td>
                     )}

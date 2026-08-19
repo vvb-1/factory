@@ -1657,3 +1657,80 @@ describe("Proposals approval modal pinned footer (WM-829)", () => {
     );
   });
 });
+
+describe("Proposals hover checkboxes and Shift+Click range selection (WM-885)", () => {
+  test("checkboxes have hover-only visibility when none selected and full opacity when selected", async () => {
+    const p1 = stubProposal("prop_1", "open", { agent: "triage-scan" });
+    const p2 = stubProposal("prop_2", "open", { agent: "security-scan" });
+    api.proposals = async () => ({ proposals: [p1, p2] });
+    api.proposalHistory = async () => ({ proposals: [] });
+
+    const r = renderProposals();
+    const headerCb = (await r.findByLabelText(
+      "Select all proposals",
+    )) as HTMLInputElement;
+    const rowCb1 = r.getByLabelText(
+      "Select proposal prop_1",
+    ) as HTMLInputElement;
+    const rowCb2 = r.getByLabelText(
+      "Select proposal prop_2",
+    ) as HTMLInputElement;
+
+    expect(headerCb.className).toContain(
+      "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+    );
+    expect(rowCb1.className).toContain(
+      "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+    );
+    expect(rowCb2.className).toContain(
+      "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+    );
+
+    expect(headerCb.closest("thead")?.className).toContain("group");
+    expect(rowCb1.closest("tr")?.className).toContain("group");
+    expect(rowCb2.closest("tr")?.className).toContain("group");
+
+    fireEvent.click(rowCb1);
+    expect(headerCb.className).toContain("opacity-100");
+    expect(rowCb1.className).toContain("opacity-100");
+    expect(rowCb2.className).toContain("opacity-100");
+  });
+
+  test("Shift+Click selects and deselects contiguous range of proposals", async () => {
+    const p1 = stubProposal("prop_1", "open", { agent: "agent-1" });
+    const p2 = stubProposal("prop_2", "open", { agent: "agent-2" });
+    const p3 = stubProposal("prop_3", "open", { agent: "agent-3" });
+    const p4 = stubProposal("prop_4", "open", { agent: "agent-4" });
+    api.proposals = async () => ({ proposals: [p1, p2, p3, p4] });
+    api.proposalHistory = async () => ({ proposals: [] });
+
+    const r = renderProposals();
+    const cb1 = (await r.findByLabelText(
+      "Select proposal prop_1",
+    )) as HTMLInputElement;
+    const cb2 = r.getByLabelText("Select proposal prop_2") as HTMLInputElement;
+    const cb3 = r.getByLabelText("Select proposal prop_3") as HTMLInputElement;
+    const cb4 = r.getByLabelText("Select proposal prop_4") as HTMLInputElement;
+
+    // Click proposal 1
+    fireEvent.click(cb1);
+    expect(cb1.checked).toBe(true);
+    expect(cb2.checked).toBe(false);
+    expect(cb3.checked).toBe(false);
+    expect(cb4.checked).toBe(false);
+
+    // Shift+Click proposal 3 -> selects prop_1, prop_2, prop_3
+    fireEvent.click(cb3, { shiftKey: true });
+    expect(cb1.checked).toBe(true);
+    expect(cb2.checked).toBe(true);
+    expect(cb3.checked).toBe(true);
+    expect(cb4.checked).toBe(false);
+
+    // Shift+Click checked proposal 2 -> deselects range between anchor (prop_3) and target (prop_2)
+    fireEvent.click(cb2, { shiftKey: true });
+    expect(cb1.checked).toBe(true);
+    expect(cb2.checked).toBe(false);
+    expect(cb3.checked).toBe(false);
+    expect(cb4.checked).toBe(false);
+  });
+});
