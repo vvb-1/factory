@@ -803,7 +803,29 @@ export function RunDetailBlocks({
           v={`${d.run.attempts}/${d.run.spec.maxAttempts}`}
           mono={false}
         />
-        <InputRows input={d.run.spec.input} />
+        {(() => {
+          const inputBody = agentDef?.outputView?.input;
+          const inputView = inputBody
+            ? {
+                schemaVersion: agentDef.outputView!.schemaVersion,
+                ...inputBody,
+                sections: inputBody.sections ?? [],
+              }
+            : null;
+          return inputView ? (
+            <Suspense fallback={<InputRows input={d.run.spec.input} />}>
+              {/* Omit inputSchema so its design-ticket title (e.g. WM-108) is
+                  not the glance caption; the section label is. */}
+              <ArtifactPanel
+                artifact={d.run.spec.input}
+                view={inputView}
+                rawFallback={<InputRows input={d.run.spec.input} />}
+              />
+            </Suspense>
+          ) : (
+            <InputRows input={d.run.spec.input} />
+          );
+        })()}
         {origin?.eventId && (
           <KV
             k="origin event"
