@@ -162,7 +162,7 @@ jobs:
           "$uvx_bin" --version
 
       - name: Semgrep scan
-        run: uvx --from semgrep==1.111.0 semgrep scan --config p/security-audit --error --metrics=off .
+        run: uvx --from semgrep==1.111.0 --with "setuptools<70" semgrep scan --config p/security-audit --error --metrics=off .
 
   actionlint:
     name: Actionlint
@@ -190,6 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v actionlint >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/actionlint" ]; then
+            mkdir -p "$HOME/.local/bin"
             bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.7 "$HOME/.local/bin"
           fi
           # $GITHUB_PATH only takes effect starting the *next* step, not this
