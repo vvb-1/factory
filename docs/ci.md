@@ -13,6 +13,7 @@ Treat self-hosted runner names as parallel executors, not independent machines. 
 ## Fork PR sandboxing & dual routing
 
 In `ci.yml`, a lightweight initial `route` job runs on `ubuntu-latest` to determine the execution lane based on the event context:
+
 - Untrusted fork PRs (`github.event.pull_request.head.repo.full_name != github.repository`), Dependabot PRs, and nightly exercises route dynamically to `ubuntu-latest`.
 - Trusted internal PRs and branch pushes route to `[self-hosted, shadow]` and `[self-hosted, verify-lane]`.
 - Host-specific steps (`shadow-runner-health`, host `/tmp` sweep) execute only when `runner.environment == 'self-hosted'`.
