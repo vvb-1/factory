@@ -1,0 +1,27 @@
+{
+  "id": "pi-smoke",
+  "version": 1,
+  "prompt": "agents/pi-smoke.md",
+  "input_schema": "schemas/pi-smoke.input.json",
+  "output_schema": "schemas/pi-smoke.output.json",
+  "output_contract": "factory.pi-smoke/v1",
+  "model_tier": "light",
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": []
+  },
+  "limits": {
+    "timeout_seconds": 120,
+    "attempts": 1
+  },
+  "mutating": false,
+  "pins": {
+    "agents/pi-smoke.md": "sha256:f193db08badec79fa8c56030b77ab63a1793e2f7549a9444a93afef5ff79f7e2",
+    "schemas/pi-smoke.input.json": "sha256:730df82dac5595b0760bc008597e6e07bc8f7f56364cc0f16a91a8c7836ac897",
+    "schemas/pi-smoke.output.json": "sha256:7958f97d18527e49c12b175ee9ec6b3e04733efcc2e04e0d9ceb0ba25ba63abf"
+  }
+}

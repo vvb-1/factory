@@ -1,0 +1,27 @@
+{
+  "id": "janitor-scan",
+  "version": 1,
+  "prompt": "agents/janitor-scan.md",
+  "input_schema": "schemas/janitor.input.json",
+  "output_schema": "schemas/command-result.output.json",
+  "output_contract": "factory.command-result/v1",
+  "command": ["factory", "janitor", "--repo", "{repo}", "--json"],
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": ["linear:read"]
+  },
+  "limits": {
+    "timeout_seconds": 120,
+    "attempts": 1
+  },
+  "mutating": false,
+  "pins": {
+    "agents/janitor-scan.md": "sha256:b9785a8576f64e1d40c82970377b7d806b26935243c3a459d6b73e30dd776a89",
+    "schemas/janitor.input.json": "sha256:bc78f62fa90f56d78587bf472fba015eda2cd805bdefe19283d618590ecc6969",
+    "schemas/command-result.output.json": "sha256:56ef20577453f0162f1a0a22e8214e8c734fc0fbab4f65d1e1dcae9614acc272"
+  }
+}

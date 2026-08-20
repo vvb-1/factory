@@ -1,0 +1,99 @@
+{
+  "id": "triage-apply",
+  "version": 1,
+  "prompt": "agents/triage-apply.md",
+  "input_schema": "schemas/triage-apply.input.json",
+  "output_schema": "schemas/triage-applied.output.json",
+  "output_contract": "factory.triage-applied/v1",
+  "itemsField": "plan",
+  "itemKey": "issueId",
+  "actionRegistry": {
+    "label-agent-ready": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "state",
+        "{issueId}",
+        "Todo",
+        "--add",
+        "ai:agent-ready"
+      ]
+    },
+    "move-to-todo": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "state",
+        "{issueId}",
+        "Todo"
+      ]
+    },
+    "write-detail": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "detail",
+        "{issueId}",
+        "{detail}"
+      ]
+    },
+    "needs-detail": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "comment",
+        "{issueId}",
+        "triage: {reason}"
+      ]
+    },
+    "mark-duplicate": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "comment",
+        "{issueId}",
+        "triage: possible duplicate — {reason}"
+      ]
+    },
+    "needs-human": {
+      "argv": [
+        "bun",
+        "{factoryRoot}/tools/linear.mjs",
+        "comment",
+        "{issueId}",
+        "triage: needs a human decision — {reason}"
+      ]
+    }
+  },
+  "chainOutcome": {
+    "precedence": [
+      {
+        "action": "label-agent-ready",
+        "outcome": "SUPPLY_CHANGED"
+      },
+      {
+        "action": "write-detail",
+        "outcome": "DETAIL_CHANGED"
+      }
+    ],
+    "default": "NO_CHANGE"
+  },
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": ["linear:write"]
+  },
+  "limits": {
+    "timeout_seconds": 600,
+    "attempts": 1
+  },
+  "mutating": true,
+  "pins": {
+    "agents/triage-apply.md": "sha256:bf9ec61ac7bbc39e4fa37123bf64a02fd6f806e392f1d1c747531bd3cfdc4994",
+    "schemas/triage-apply.input.json": "sha256:fd2378637f0f8accb317bf71444f5a63c26d741628b726695b7e769f050c0810",
+    "schemas/triage-applied.output.json": "sha256:5c52b583f055223367bddbcf48e853ff0af9a8e5bf536942ac15f2dc01f217f9"
+  }
+}

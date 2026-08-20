@@ -62,20 +62,20 @@ esac
 
 # Repo facts and budget come from config/, so the runner has no opinions of its
 # own to drift from policy.
-REPO_PATH="$(cd "$ROOT" && bun -e '
-  const c = Bun.YAML.parse(await Bun.file("config/repos.yaml").text());
+REPO_INFO="$(cd "$ROOT" && bun -e '
+  const { loadConfigYaml } = await import("./lib/schedule.mjs");
+  const c = loadConfigYaml("repos");
   const r = (c.repos ?? []).find((x) => x.name === process.argv[1]);
   if (!r) { console.error("no repo in config/repos.yaml: " + process.argv[1]); process.exit(2); }
-  console.log(r.path.replace("~", process.env.HOME));
+  console.log(JSON.stringify({
+    path: r.path.replace(/^~/, process.env.HOME),
+    team: r.team,
+    base: r.base ?? "main",
+  }));
 ' "$REPO")"
-REPO_TEAM="$(cd "$ROOT" && bun -e '
-  const c = Bun.YAML.parse(await Bun.file("config/repos.yaml").text());
-  console.log((c.repos ?? []).find((x) => x.name === process.argv[1]).team);
-' "$REPO")"
-REPO_BASE="$(cd "$ROOT" && bun -e '
-  const c = Bun.YAML.parse(await Bun.file("config/repos.yaml").text());
-  console.log((c.repos ?? []).find((x) => x.name === process.argv[1]).base ?? "main");
-' "$REPO")"
+REPO_PATH="$(bun -e 'console.log(JSON.parse(process.argv[1]).path)' "$REPO_INFO")"
+REPO_TEAM="$(bun -e 'console.log(JSON.parse(process.argv[1]).team)' "$REPO_INFO")"
+REPO_BASE="$(bun -e 'console.log(JSON.parse(process.argv[1]).base)' "$REPO_INFO")"
 [[ -d "$REPO_PATH" ]] || { echo "repo path does not exist: $REPO_PATH" >&2; exit 2; }
 
 # Terminal tab title when run interactively. Headless spawns have stdout piped
@@ -84,20 +84,22 @@ REPO_BASE="$(cd "$ROOT" && bun -e '
 
 # Hard cap, from policy. `timeout` sends TERM at the limit and KILL 30s later,
 # so a wedged harness cannot hold a slot indefinitely.
-MAX_MIN="$(cd "$ROOT" && bun -e '
-  const p = Bun.YAML.parse(await Bun.file("config/policy.yaml").text());
-  console.log(p?.limits?.max_run_minutes ?? 45);
-')"
+POLICY_INFO="$(cd "$ROOT" && bun -e '
+  const { loadConfigYaml } = await import("./lib/schedule.mjs");
+  const p = loadConfigYaml("policy");
+  const key = process.argv[1] === "factory-merge" ? "merge_usd" : "per_ticket_usd";
+  console.log(JSON.stringify({
+    maxMinutes: p?.limits?.max_run_minutes ?? 45,
+    budget: p?.budget?.[key] ?? p?.budget?.per_ticket_usd ?? 15,
+  }));
+' "$COMMAND")"
+MAX_MIN="$(bun -e 'console.log(JSON.parse(process.argv[1]).maxMinutes)' "$POLICY_INFO")"
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 [[ -n "$TIMEOUT_BIN" ]] && RUN_CAP="$TIMEOUT_BIN -k 30s ${MAX_MIN}m" || RUN_CAP=""
 [[ -z "$TIMEOUT_BIN" ]] && echo "  ! no timeout(1) on PATH — a wedged run will not be capped"
 
 if [[ -z "$BUDGET" ]]; then
-  BUDGET="$(cd "$ROOT" && bun -e '
-    const p = Bun.YAML.parse(await Bun.file("config/policy.yaml").text());
-    const key = process.argv[1] === "factory-merge" ? "merge_usd" : "per_ticket_usd";
-    console.log(p?.budget?.[key] ?? p?.budget?.per_ticket_usd ?? 15);
-  ' "$COMMAND")"
+  BUDGET="$(bun -e 'console.log(JSON.parse(process.argv[1]).budget)' "$POLICY_INFO")"
 fi
 
 PROMPT="/${COMMAND}${ARGS:+ $ARGS}"
@@ -144,6 +146,24 @@ UNSET_KEYS=("-u" "ANTHROPIC_API_KEY" "-u" "GEMINI_API_KEY" "-u" "GOOGLE_API_KEY"
 # "$FACTORY_ROOT/tools/linear.mjs"; this is what makes that path real. Without
 # it, --strict-mcp-config removes the Linear MCP and leaves no replacement.
 export FACTORY_ROOT="$ROOT"
+
+# WM-795: point `factory notify` at the policy-configured transport so a clone
+# without a private notify.py still uses whatever `notify.command` the operator
+# set. bin/factory currently reads FACTORY_NOTIFY_SCRIPT as a python path;
+# --export-env sets that when the command is `python3 <script>`, and always
+# sets FACTORY_NOTIFY_CMD. Existing env wins (tests, operators, stubs).
+if [[ -z "${FACTORY_NOTIFY_CMD:-}" && -z "${FACTORY_NOTIFY_SCRIPT:-}" ]]; then
+  eval "$(cd "$ROOT" && bun "$ROOT/lib/notify.mjs" --export-env 2>/dev/null || true)"
+fi
+
+# Runtime workers materialize declared RunSpec.harness content into the run
+# workspace (WM-851, lib/worker.mjs materializeRunHarness) so a headless run
+# does not depend on ~/.claude/agents and ~/.cursor/commands having been
+# populated by `bun build/emit.mjs --link`. This orchestrator path still
+# launches inside a product checkout and reads slash commands from that
+# checkout's `.claude/commands/` (link-repos) plus the operator's home-dir
+# install — it has no RunSpec. Do not treat this script as the runtime
+# materialization path.
 
 if [[ "$USE_API" == "1" ]]; then
   [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "--use-api given but ANTHROPIC_API_KEY is not set" >&2; exit 2; }

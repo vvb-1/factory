@@ -1,0 +1,172 @@
+{
+  "title": "dispatch input — one repo, one already-queued ticket (WM-108)",
+  "type": "object",
+  "required": ["repo", "ticket"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short repo name as configured in config/repos.yaml — not the GitHub owner/name slug"
+    },
+    "ticket": {
+      "type": "string",
+      "pattern": "^[A-Z]+-[0-9]+$",
+      "description": "Linear issue identifier to implement; must be Todo + ai:agent-ready + unassigned at plan time (docs/event-runtime-dispatch.md §2)"
+    },
+    "modelTier": {
+      "type": "string",
+      "enum": ["strong", "standard", "light"],
+      "description": "Optional per-dispatch model tier override; takes precedence over the ticket tier:* label and agent definition"
+    },
+    "humanDecision": {
+      "type": "object",
+      "required": ["schemaVersion", "inboxItemId", "authorisation"],
+      "additionalProperties": false,
+      "description": "Single-use operator authorisation attached by an inbox re-dispatch (docs/event-runtime-inbox.md §3.1 and §5)",
+      "properties": {
+        "schemaVersion": {
+          "const": "factory.human-decision/v1"
+        },
+        "inboxItemId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorisation": {
+          "type": "object",
+          "required": [
+            "ticket",
+            "repo",
+            "descriptionHash",
+            "paths",
+            "summary",
+            "insight",
+            "refusedRunId",
+            "decidedBy",
+            "decidedAt"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "ticket": {
+              "type": "string",
+              "pattern": "^[A-Z]+-[0-9]+$"
+            },
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "descriptionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "insight": {
+              "type": "string"
+            },
+            "refusedRunId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decidedBy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decidedAt": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "repoPin": {
+      "type": "object",
+      "required": ["repo", "sha"],
+      "additionalProperties": false,
+      "description": "Optional provenance pin recording the base-branch SHA the request was made against; the worktree itself branches from the repo's live base via its own worktree_up, so this is a record, not a checkout instruction",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Echo of the pinned short repo name"
+        },
+        "ref": {
+          "type": "string",
+          "description": "Ref the pin was resolved from, when one was requested"
+        },
+        "sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Commit SHA of the repo's base branch at request time"
+        },
+        "github": {
+          "type": ["string", "null"],
+          "description": "GitHub owner/name slug of the repo, or null when it has no GitHub remote"
+        }
+      }
+    },
+    "memoPin": {
+      "type": "object",
+      "required": ["foldedAt", "entries"],
+      "additionalProperties": false,
+      "description": "Planner-resolved live memos for declared subjects at plan time (docs/event-runtime-memos.md §4.2). Empty entries is the normal case when nothing is known yet; never human_needed.",
+      "properties": {
+        "foldedAt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ISO timestamp of the fold; part of inputHash so a new memo re-admits work"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["sha256", "subject", "kind", "createdAt"],
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "Content hash of the memo artifact in the store"
+              },
+              "subject": {
+                "type": "object",
+                "required": ["type", "id"],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "enum": ["repo", "ticket", "pr", "workflow", "run"]
+                  },
+                  "id": { "type": "string", "minLength": 1 }
+                }
+              },
+              "kind": {
+                "enum": [
+                  "repo-note",
+                  "postmortem",
+                  "decision",
+                  "flake",
+                  "handoff"
+                ]
+              },
+              "runId": { "type": ["string", "null"] },
+              "createdAt": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

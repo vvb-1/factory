@@ -16,18 +16,32 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { gql } from "./reaper.mjs";
 import { ROOT } from "../lib/schedule.mjs";
+import { loadControlPlane } from "../lib/control-plane/index.mjs";
 import { AI_BLOCKED, blockedLabelIds, holdInfo } from "./reply-detection.mjs";
 
 const argv = process.argv.slice(2);
-const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
-const only = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
+const val = (f) => {
+  const i = argv.indexOf(f);
+  return i === -1 ? null : argv[i + 1];
+};
+const only = (val("--repo") || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
-const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
-const repos = (cfg.repos ?? []).filter((r) => !only.length || only.includes(r.name));
+const cfg = Bun.YAML.parse(
+  readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"),
+);
+const repos = (cfg.repos ?? []).filter(
+  (r) => !only.length || only.includes(r.name),
+);
 if (!repos.length) {
-  console.error(only.length ? `no repo named "${only}" in config/repos.yaml` : "no repos configured");
+  console.error(
+    only.length
+      ? `no repo named "${only}" in config/repos.yaml`
+      : "no repos configured",
+  );
   process.exit(2);
 }
 
@@ -55,8 +69,8 @@ const DIGEST_QUERY = `
       nodes {
         identifier title url
         state { name }
-        comments(first: 100) { nodes { createdAt body } }
-        history(first: 100) { nodes { createdAt addedLabelIds } }
+        comments(last: 100) { nodes { createdAt body } }
+        history(last: 50) { nodes { createdAt addedLabelIds } }
       }
     }
   }`;
@@ -70,7 +84,9 @@ const age = (ms) => {
   return `${Math.max(1, Math.floor(d / 60_000))}m`;
 };
 const excerpt = (body, n = 110) => {
-  const s = String(body ?? "").replace(/\s+/g, " ").trim();
+  const s = String(body ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 };
 
@@ -79,32 +95,64 @@ let totalHeld = 0;
 let totalAnswered = 0;
 
 for (const repo of repos) {
-  const nodes = (await gql(DIGEST_QUERY, { team: repo.team, project: repo.project, label: AI_BLOCKED }))?.issues?.nodes ?? [];
+  const nodes =
+    (
+      await loadControlPlane().raw(DIGEST_QUERY, {
+        team: repo.team,
+        project: repo.project,
+        label: AI_BLOCKED,
+      })
+    )?.issues?.nodes ?? [];
   const held = nodes
     .map((n) => ({ node: n, info: holdInfo(n, ids) }))
     .filter((h) => h.info)
     // Oldest hold first; unknown hold times sink to the bottom rather than
     // masquerading as the most urgent.
-    .sort((a, b) => (a.info.heldAtMs ?? Infinity) - (b.info.heldAtMs ?? Infinity));
+    .sort(
+      (a, b) => (a.info.heldAtMs ?? Infinity) - (b.info.heldAtMs ?? Infinity),
+    );
 
-  console.log(c.bold(`\n${repo.name}`) + c.dim(`  ${repo.team} / ${repo.project} — ${held.length} held`));
-  if (!held.length) { console.log(c.dim("  nothing held — no ai:blocked tickets")); continue; }
+  console.log(
+    c.bold(`\n${repo.name}`) +
+      c.dim(`  ${repo.team} / ${repo.project} — ${held.length} held`),
+  );
+  if (!held.length) {
+    console.log(c.dim("  nothing held — no ai:blocked tickets"));
+    continue;
+  }
 
   for (const { node, info } of held) {
     totalHeld++;
     const answered = Boolean(info.reply);
     if (answered) totalAnswered++;
     const marker = answered
-      ? c.green(`  ANSWERED ${age(info.reply.atMs)} ago — triage will re-examine`)
+      ? c.green(
+          `  ANSWERED ${age(info.reply.atMs)} ago — triage will re-examine`,
+        )
       : "";
-    console.log(`  ${c.red(node.identifier.padEnd(10))} held ${age(info.heldAtMs)}${marker}`);
+    console.log(
+      `  ${c.red(node.identifier.padEnd(10))} held ${age(info.heldAtMs)}${marker}`,
+    );
     console.log(c.dim(`    ${excerpt(node.title, 100)}`));
-    if (info.question?.body) console.log(`    Q: ${excerpt(info.question.body)}`);
-    else console.log(c.dim(`    (no blocking comment found — the hold never said what it needs)`));
+    if (info.question?.body)
+      console.log(`    Q: ${excerpt(info.question.body)}`);
+    else
+      console.log(
+        c.dim(
+          `    (no blocking comment found — the hold never said what it needs)`,
+        ),
+      );
   }
 }
 
-console.log(c.bold(`\n${totalHeld} held ticket(s)`) + (totalAnswered
-  ? c.green(`, ${totalAnswered} answered and waiting for the next triage tick`)
-  : c.dim(", none answered — every hold above is waiting on a human reply")));
+console.log(
+  c.bold(`\n${totalHeld} held ticket(s)`) +
+    (totalAnswered
+      ? c.green(
+          `, ${totalAnswered} answered and waiting for the next triage tick`,
+        )
+      : c.dim(
+          ", none answered — every hold above is waiting on a human reply",
+        )),
+);
 console.log();

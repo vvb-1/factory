@@ -1,0 +1,22 @@
+{
+  "title": "ci-notify input — the diagnosis to escalate",
+  "type": "object",
+  "required": ["repo", "runId", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "description": "GitHub repository slug (owner/name) the failed run belongs to — not the config/repos.yaml short name"
+    },
+    "runId": {
+      "type": ["string", "integer"],
+      "description": "GitHub Actions run id the diagnosis is about (number, or numeric string as gh prints it)"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-paragraph diagnosis to push to the operator"
+    }
+  }
+}

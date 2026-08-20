@@ -1,0 +1,16 @@
+# Watt Mind shared pre-commit hooks (OPS-165, docs/guides/code-security.md §4 tier 4)
+# Fast by design (<1s target): staged-file secret scan.
+# Heavier checks (Semgrep, Actionlint, full test suite) belong in
+# `factory security` and CI, never in a hook.
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks git --pre-commit --staged --no-banner --redact
+
+# WM-609: enforce `type(scope): summary (ISSUE-ID)` locally (dependency-free
+# bash regex, same tier-4 rule as pre-commit above).
+commit-msg:
+  commands:
+    check-commit-msg:
+      run: bin/check-commit-msg.sh {1}

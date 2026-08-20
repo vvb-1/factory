@@ -1,0 +1,129 @@
+{
+  "title": "factory-extension.json — the manifest of one factory extension (docs/extensions.md)",
+  "description": "One extension declares everything it contributes in a single manifest. Paths under `contributes` are relative to the manifest's directory. `views` is reserved: the loader accepts it and records a \"not supported yet\" configuration anomaly instead of rejecting the manifest, so a manifest written for a later runtime still loads its packs, adapters and connectors here. Adapter and connector names are additionally checked against the adapter registry's name pattern by lib/extensions.mjs, because lib/schema.mjs has no patternProperties.",
+  "type": "object",
+  "required": ["name", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+/[a-z0-9-]+$",
+      "description": "publisher/extension, lower-case; the `source` recorded on every adapter it registers"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+      "description": "semver"
+    },
+    "description": { "type": "string", "maxLength": 200 },
+    "factory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "type": "string",
+          "minLength": 1,
+          "description": "minimum factory version the extension was written for; informational until the runtime carries a version"
+        }
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "packs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "relative directory containing pack.json (docs/kernel-and-packs.md)"
+          }
+        },
+        "adapters": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "\\.mjs$",
+            "description": "relative path to an ES module satisfying the adapter contract (docs/event-runtime-workers.md §2c)"
+          }
+        },
+        "connectors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "\\.mjs$",
+            "description": "relative path to an ES module satisfying the connector contract (docs/extensions.md § Connectors): export const id and export default async function start(ctx) → { stop(), health() }"
+          }
+        },
+        "views": {
+          "description": "reserved — web views; not supported yet"
+        },
+        "panels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "relative directory of factory.panel-view/v1 `*.panel.json` files (docs/extensions.md § Panels)"
+          }
+        },
+        "config": {
+          "type": "object",
+          "required": ["namespace", "schema"],
+          "additionalProperties": false,
+          "description": "the extension's operator config (docs/extensions.md § Config): a JSON-schema file for the values policy.yaml `extensions[].config` supplies; validated at load, defaults applied, surfaced read-only in GET /config and Settings",
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$",
+              "description": "the name the values are published under; unique across loaded extensions"
+            },
+            "schema": {
+              "type": "string",
+              "pattern": "\\.json$",
+              "description": "relative path to a JSON-schema (the lib/schema.mjs subset plus `default`) describing the config object"
+            }
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "lifecycle hooks (docs/extensions.md § Hooks): hook point → relative path to an ES module exporting `id` and a default `(ctx) => { decision, reason? }`; run as a fail-closed waterfall after the built-in hooks, every decision persisted to hook_decisions",
+          "properties": {
+            "approve.before": {
+              "type": "string",
+              "pattern": "\\.mjs$",
+              "description": "evaluated immediately before each chain auto-approval (lib/auto-approval.mjs); a deny keeps the proposal open with reason dispatch_ineligible:<reason> (dispatch) or hook_denied:<reason>"
+            }
+          }
+        },
+        "harness": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "harness pack content (docs/extensions.md § Harness): floor markdown, slash-command directory, skill directory, subagent directory; relative to the manifest. `shared/` is the built-in `factory/core` pack; emit writes it to plugins/core and dist/ and every other contributing root under its publisher-extension namespace (WM-849)",
+          "properties": {
+            "floor": {
+              "type": "string",
+              "minLength": 1,
+              "description": "relative path to the AGENTS.md floor markdown file"
+            },
+            "commands": {
+              "type": "string",
+              "minLength": 1,
+              "description": "relative directory of slash-command markdown files"
+            },
+            "skills": {
+              "type": "string",
+              "minLength": 1,
+              "description": "relative directory of skill folders (each containing SKILL.md)"
+            },
+            "subagents": {
+              "type": "string",
+              "minLength": 1,
+              "description": "relative directory of custom-agent markdown files"
+            }
+          }
+        }
+      }
+    }
+  }
+}

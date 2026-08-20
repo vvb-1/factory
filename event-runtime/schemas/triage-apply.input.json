@@ -1,0 +1,84 @@
+{
+  "title": "triage-apply input — the approved per-issue action list",
+  "type": "object",
+  "required": ["repo", "plan"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short repo name as configured in config/repos.yaml — not the GitHub owner/name slug"
+    },
+    "plan": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Approved per-issue actions from the triage-scan proposal, applied in order",
+      "items": {
+        "type": "object",
+        "required": ["issueId", "action"],
+        "additionalProperties": false,
+        "properties": {
+          "issueId": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]+$",
+            "description": "Linear issue identifier (e.g. WM-76)"
+          },
+          "action": {
+            "enum": [
+              "label-agent-ready",
+              "move-to-todo",
+              "write-detail",
+              "needs-detail",
+              "mark-duplicate",
+              "needs-human"
+            ],
+            "description": "Triage action to apply to the issue"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One-line justification for the action, kept for the audit trail"
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\s*## (Acceptance [Cc]riteria|Owned Paths|Verification)",
+            "description": "For write-detail only: approved additive Markdown containing only missing template sections"
+          },
+          "ownedPaths": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Concrete existing files authored into Owned Paths; glob metacharacters are refused by schema",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^*?\\[\\]{}\\r\\n]+$"
+            }
+          },
+          "verificationCommand": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact authored command whose referenced paths, targets, and package scripts exist in the pinned checkout"
+          },
+          "acceptanceCriteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["text", "ownedPaths"],
+              "additionalProperties": false,
+              "properties": {
+                "text": { "type": "string", "minLength": 1 },
+                "ownedPaths": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "description": "Each repository-derived acceptance criterion and the Owned Paths entries that evidence it"
+          }
+        }
+      }
+    }
+  }
+}

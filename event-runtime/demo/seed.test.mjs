@@ -1,0 +1,322 @@
+import { tmpDir } from "../test-support/tmp.mjs?file=event-runtime-demo-seed-test-mjs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { loadAdjustedTimeout } from "../cli/test-helpers.mjs";
+import { validate } from "../lib/schema.mjs";
+import { spawnTracked } from "../lib/test-helpers-process.mjs";
+
+const CLI = fileURLToPath(new URL("../cli.mjs", import.meta.url));
+const SEED = fileURLToPath(new URL("./seed.mjs", import.meta.url));
+const VERIFY = fileURLToPath(new URL("./verify.mjs", import.meta.url));
+const TRIAGE_SCAN_OUTPUT_SCHEMA = JSON.parse(
+  readFileSync(
+    fileURLToPath(
+      new URL("../schemas/triage-scan.output.json", import.meta.url),
+    ),
+    "utf8",
+  ),
+);
+// A liveness bound, not a performance target (WM-503). The two assertions that
+// use it exist to catch a seed that waits on the WRONG causal edge — reusing a
+// prior terminal triage-apply proposal instead of following the new scan's edge
+// — which blocks indefinitely rather than merely running slow.
+//
+// At 10s it was baseline-red on every run: the seed measures 10.1-10.5s on a
+// developer workstation, so the bound sat ~2% under the real cost and failed
+// 3/3 sampled runs (10164ms, 10130ms, 10545ms). That single failure failed the
+// whole-suite verification gate for EVERY dispatched ticket, since the gate is
+// all-or-nothing — the factory could not complete a ticket cleanly, and at
+// least one agent discarded a correct fix because of it.
+//
+// 20s is ~2x the observed cost. CI stretches this liveness ceiling with its
+// measured load factor, while a genuine wrong-edge hang still fails here (and,
+// failing that, at the load-adjusted test timeout). Rediscovered as WM-487,
+// WM-492, WM-499 and WM-90 before WM-503.
+const SEED_TIMEOUT_MS = loadAdjustedTimeout(20_000);
+
+const redact = (text) =>
+  String(text ?? "")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/g, "[REDACTED]")
+    .replace(/(authorization\s*[:=]\s*)\S+/gi, "$1[REDACTED]");
+
+function expectSuccess(label, result) {
+  const diagnostic = [
+    `${label} exited ${result.status ?? "null"}${result.signal ? ` (signal ${result.signal})` : ""}`,
+    `stdout:\n${redact(result.stdout)}`,
+    `stderr:\n${redact(result.stderr)}`,
+  ].join("\n");
+  expect(result.status, diagnostic).toBe(0);
+}
+
+async function waitForPublishedOutbox(port) {
+  const timeoutMs = loadAdjustedTimeout(5_000);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/status`);
+      const status = await response.json();
+      if (response.ok && status.anomalies?.unpublishedOutbox === 0) return;
+    } catch {
+      /* intentionally ignored */
+    }
+    await Bun.sleep(50);
+  }
+  expect.fail(
+    `seeded runtime did not publish its outbox within ${timeoutMs}ms`,
+  );
+}
+
+describe("triage-scan write-detail contract (WM-352)", () => {
+  const artifactWithDetail = (detail) => ({
+    recommendation: "TRIAGE",
+    repo: "factory",
+    plan: [
+      { issueId: "WM-352", action: "write-detail", reason: "fixture", detail },
+    ],
+    summary: "fixture",
+  });
+
+  test("accepts canonical multi-section detail and rejects unrelated headings", () => {
+    const canonical = [
+      "## Acceptance Criteria",
+      "",
+      "- The behavior is covered.",
+      "",
+      "## Owned Paths",
+      "",
+      "- `event-runtime/demo/seed.test.mjs`",
+      "",
+      "## Verification",
+      "",
+      "```",
+      "bun test event-runtime/demo/seed.test.mjs",
+      "```",
+    ].join("\n");
+
+    expect(
+      validate(TRIAGE_SCAN_OUTPUT_SCHEMA, artifactWithDetail(canonical)),
+    ).toEqual({ valid: true, errors: [] });
+    expect(
+      validate(
+        TRIAGE_SCAN_OUTPUT_SCHEMA,
+        artifactWithDetail("## Rollout\n\n- Deploy globally."),
+      ),
+    ).toEqual({
+      valid: false,
+      errors: [
+        "$.plan[0].detail: does not match pattern ^\\s*## (Acceptance Criteria|Owned Paths|Verification)",
+      ],
+    });
+  });
+
+  test("continues to accept Owned Paths and Verification as the first section", () => {
+    expect(
+      validate(
+        TRIAGE_SCAN_OUTPUT_SCHEMA,
+        artifactWithDetail("## Owned Paths\n\n- `README.md`"),
+      ),
+    ).toEqual({
+      valid: true,
+      errors: [],
+    });
+    expect(
+      validate(
+        TRIAGE_SCAN_OUTPUT_SCHEMA,
+        artifactWithDetail("## Verification\n\n```\nbun test\n```"),
+      ),
+    ).toEqual({
+      valid: true,
+      errors: [],
+    });
+  });
+});
+
+describe("seed & re-seed deduplication (OPS-464)", () => {
+  let home;
+  let port;
+  let serveChild;
+  let workerChild;
+  let initialTriageApplyRun;
+
+  beforeAll(async () => {
+    home = tmpDir("evrt-seed-test-");
+    // Ask the OS for a genuinely free port instead of pid-modulo arithmetic:
+    // on a shared self-hosted runner a leftover server from an earlier
+    // (aborted) job can squat any precomputed port, and the seed then fails
+    // in milliseconds against a stranger's already-seeded state (WM-89).
+    const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
+    port = String(probe.port);
+    probe.stop(true);
+
+    serveChild = spawnTracked(
+      "bun",
+      [CLI, "serve", "--adapter-override", "fake", "--port", port],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+      { scope: "suite" },
+    );
+
+    // Wait for health
+    let up = false;
+    const deadline = Date.now() + loadAdjustedTimeout(8000);
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`);
+        if (res.ok) {
+          up = true;
+          break;
+        }
+      } catch {
+        /* intentionally ignored */
+      }
+      await Bun.sleep(100);
+    }
+    expect(up).toBe(true);
+
+    workerChild = spawnTracked(
+      "bun",
+      [
+        CLI,
+        "work",
+        "--adapter-override",
+        "fake",
+        "--port",
+        port,
+        "--poll-ms",
+        "40",
+      ],
+      {
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+      { scope: "suite" },
+    );
+
+    // Health only proves the control API is listening. Seed drives approvals
+    // immediately, so wait for the separate worker process to register first.
+    let workerReady = false;
+    const workerDeadline = Date.now() + loadAdjustedTimeout(8_000);
+    while (Date.now() < workerDeadline) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/workers`);
+        const body = await res.json();
+        if (res.ok && Array.isArray(body.workers) && body.workers.length > 0) {
+          workerReady = true;
+          break;
+        }
+      } catch {
+        /* intentionally ignored */
+      }
+      await Bun.sleep(50);
+    }
+    expect(workerReady).toBe(true);
+  });
+
+  afterAll(async () => {
+    if (serveChild) {
+      try {
+        serveChild.kill("SIGKILL");
+      } catch {
+        /* intentionally ignored */
+      }
+    }
+    if (workerChild) {
+      try {
+        workerChild.kill("SIGKILL");
+      } catch {
+        /* intentionally ignored */
+      }
+    }
+  });
+
+  test(
+    "initial seed succeeds and verify passes",
+    async () => {
+      const t0 = Date.now();
+      const seedRes = spawnSync(
+        "bun",
+        [SEED, "--port", port, "--prefix", "t1", "--poll-ms", "40"],
+        {
+          encoding: "utf8",
+          env: { ...process.env, FACTORY_EVENT_HOME: home },
+        },
+      );
+      expectSuccess("initial seed", seedRes);
+      expect(seedRes.stdout).toContain("merge-apply@2 watched");
+      expect(seedRes.stdout).not.toContain(
+        "merge-verify@1 exact landed lifecycle",
+      );
+      // The triage chain now waits for its auto-approved apply run to finish.
+      expect(Date.now() - t0).toBeLessThan(SEED_TIMEOUT_MS);
+      initialTriageApplyRun = seedRes.stdout.match(
+        /^seed: (\S+) → COMPLETED \(triage-apply@1 chain auto-approved/m,
+      )?.[1];
+      expect(initialTriageApplyRun).toBeTruthy();
+      await waitForPublishedOutbox(port);
+
+      const verifyRes = spawnSync("bun", [VERIFY, "--port", port], {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+      });
+      expectSuccess("initial verify", verifyRes);
+    },
+    loadAdjustedTimeout(30_000),
+  );
+
+  test(
+    "re-running seed with the SAME prefix fails immediately (<1s) on duplicate intake",
+    () => {
+      const t0 = Date.now();
+      const res = spawnSync("bun", [SEED, "--port", port, "--prefix", "t1"], {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+      });
+      const elapsedMs = Date.now() - t0;
+      expect(res.status).not.toBe(0);
+      expect(elapsedMs).toBeLessThan(2000);
+      const output = `${res.stdout}${res.stderr}`;
+      expect(output).toContain('duplicate prefix "t1"');
+    },
+    loadAdjustedTimeout(10_000),
+  );
+
+  test(
+    "re-seeding with a NEW prefix cleans up hang runs and allows verify to pass",
+    async () => {
+      const t0 = Date.now();
+      const seedRes = spawnSync(
+        "bun",
+        [SEED, "--port", port, "--prefix", "t2", "--poll-ms", "40"],
+        {
+          encoding: "utf8",
+          env: { ...process.env, FACTORY_EVENT_HOME: home },
+        },
+      );
+      expectSuccess("re-seed", seedRes);
+      expect(seedRes.stdout).toContain("merge-apply@2 watched");
+      expect(seedRes.stdout).not.toContain(
+        "merge-verify@1 exact landed lifecycle",
+      );
+      // A fresh prefix must follow the new scan's causal edge, never reuse the
+      // prior terminal triage-apply proposal while waiting for that edge.
+      expect(Date.now() - t0).toBeLessThan(SEED_TIMEOUT_MS);
+      const reseedTriageApplyRun = seedRes.stdout.match(
+        /^seed: (\S+) → COMPLETED \(triage-apply@1 chain auto-approved/m,
+      )?.[1];
+      expect(reseedTriageApplyRun).toBeTruthy();
+      expect(reseedTriageApplyRun).not.toBe(initialTriageApplyRun);
+      await waitForPublishedOutbox(port);
+
+      const verifyRes = spawnSync("bun", [VERIFY, "--port", port], {
+        encoding: "utf8",
+        env: { ...process.env, FACTORY_EVENT_HOME: home },
+      });
+      expectSuccess("re-seed verify", verifyRes);
+    },
+    loadAdjustedTimeout(30_000),
+  );
+});

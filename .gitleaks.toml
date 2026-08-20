@@ -1,0 +1,30 @@
+# Gitleaks config (WM-620). Auto-loaded by `gitleaks git` from the repo root
+# and by the Security workflow (.github/workflows/security.yml).
+#
+# Keep the default ruleset; only allowlist known false positives so a
+# full-tree scan (e.g. a depth-1 clone where `-1` emits every file as added)
+# stays clean. Add new entries with a comment saying what the match is.
+
+title = "factory"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives"
+# Match against the full rule match (context included), not just the
+# extracted secret group — the metrics.mjs entry needs the surrounding text.
+regexTarget = "match"
+regexes = [
+  # docs/eval-gondolin-sandbox.md: truncated illustrative Linear key in a
+  # JSON example (`lin_api_<12 chars>...`) — not a real credential.
+  '''lin_api_[A-Za-z0-9]{12}\.\.\.''',
+  # event-runtime/lib/metrics.mjs: VALID_BREAKDOWN_METRICS list — the string
+  # literal "tokens" adjacent to "p95_execution" trips the generic-api-key
+  # rule keyed on the word "token".
+  '''tokens",\s*"p95_execution"''',
+  # extensions/buzz/test/nostr.test.mjs: NIP-01/NIP-OA deterministic test
+  # vectors (WM-905/WM-921) — a published Schnorr signature hex for the
+  # secret key 0x…01, not a credential.
+  '''8b7df2575caf0a108374f8471722b233c53f9ff827a8b0f91861966c3b9dd5cb''',
+]

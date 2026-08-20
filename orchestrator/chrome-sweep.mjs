@@ -22,26 +22,68 @@
  *      agent's Chrome still has its MCP server as parent and is left alone.
  */
 import { execSync } from "node:child_process";
-import { existsSync, lstatSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 const APPLY = process.argv.includes("--apply");
-const SHARED_PROFILE = path.join(homedir(), ".cache/chrome-devtools-mcp/chrome-profile");
+const SHARED_PROFILE = path.join(
+  homedir(),
+  ".cache/chrome-devtools-mcp/chrome-profile",
+);
 
 /** Does this ps line look like an agent-launched Chrome profile? */
-const AGENT_PROFILE = /--user-data-dir=[^ ]*(chrome-devtools-mcp|puppeteer_dev_(chrome|firefox)_profile)/;
+const AGENT_PROFILE =
+  /--user-data-dir=[^ ]*(chrome-devtools-mcp|pi-chrome-devtools|puppeteer_dev_(chrome|firefox)_profile)/;
+
+export const TMP_PREFIXES = [
+  "evrt-",
+  "wm334-real-",
+  "pi-chrome-devtools-",
+  "puppeteer_dev_chrome_profile-",
+  "factory-wt-",
+];
+const TMP_MIN_AGE_MS = 30 * 60 * 1000;
+
+/** Find stale factory-owned temp directories without following symlinks. */
+export function staleTmpDirectories({
+  root = tmpdir(),
+  nowMs = Date.now(),
+  inUsePaths = [],
+} = {}) {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory()) return [];
+    if (!TMP_PREFIXES.some((prefix) => entry.name.startsWith(prefix)))
+      return [];
+    const candidate = path.join(root, entry.name);
+    if (inUsePaths.includes(candidate)) return [];
+    try {
+      return nowMs - lstatSync(candidate).mtimeMs > TMP_MIN_AGE_MS
+        ? [candidate]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
 
 /**
  * Pure classifier over `ps -axo pid=,ppid=,command=` rows so the kill logic is
  * testable without killing anything. Returns { orphans, live }.
  */
 export function classify(rows) {
-  const orphans = [], live = [];
+  const orphans = [],
+    live = [];
   for (const r of rows) {
-    if (!AGENT_PROFILE.test(r.command)) continue;     // fence 1: agent profile only
-    if (/--type=/.test(r.command)) continue;          // fence 2: main process only
-    (r.ppid === 1 ? orphans : live).push(r);          // fence 3: dead parent = orphan
+    if (!AGENT_PROFILE.test(r.command)) continue; // fence 1: agent profile only
+    if (/--type=/.test(r.command)) continue; // fence 2: main process only
+    (r.ppid === 1 ? orphans : live).push(r); // fence 3: dead parent = orphan
   }
   return { orphans, live };
 }
@@ -54,26 +96,50 @@ export function parsePs(text) {
 }
 
 if (import.meta.main) {
-  const rows = parsePs(execSync("ps -axo pid=,ppid=,command=", { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
+  const rows = parsePs(
+    execSync("ps -axo pid=,ppid=,command=", {
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    }),
+  );
   const { orphans, live } = classify(rows);
+  const inUsePaths = rows.flatMap((row) => {
+    const profile = row.command.match(/--user-data-dir=([^ ]+)/)?.[1];
+    return profile ? [profile] : [];
+  });
 
-  if (live.length) console.log(`${live.length} agent Chrome(s) with a living MCP server — left alone`);
+  if (live.length)
+    console.log(
+      `${live.length} agent Chrome(s) with a living MCP server — left alone`,
+    );
 
   if (!orphans.length) {
     console.log("no orphaned agent Chromes");
   } else {
     for (const o of orphans) {
-      const profile = (o.command.match(/--user-data-dir=([^ ]+)/) ?? [])[1] ?? "?";
-      console.log(`  ${APPLY ? "killing" : "would kill"} pid ${o.pid}  ${profile}`);
+      const profile =
+        (o.command.match(/--user-data-dir=([^ ]+)/) ?? [])[1] ?? "?";
+      console.log(
+        `  ${APPLY ? "killing" : "would kill"} pid ${o.pid}  ${profile}`,
+      );
       if (!APPLY) continue;
-      try { process.kill(o.pid, "SIGTERM"); } catch {}
+      try {
+        process.kill(o.pid, "SIGTERM");
+      } catch {
+        /* intentionally ignored */
+      }
     }
     if (APPLY) {
       // TERM first so Chrome flushes its profile; KILL whatever ignores it.
       await Bun.sleep(5000);
       for (const o of orphans) {
-        try { process.kill(o.pid, 0); process.kill(o.pid, "SIGKILL"); console.log(`  SIGKILL pid ${o.pid} (survived TERM)`); }
-        catch { /* already gone — the normal case */ }
+        try {
+          process.kill(o.pid, 0);
+          process.kill(o.pid, "SIGKILL");
+          console.log(`  SIGKILL pid ${o.pid} (survived TERM)`);
+        } catch {
+          /* already gone — the normal case */
+        }
       }
     }
   }
@@ -89,9 +155,17 @@ if (import.meta.main) {
         lstatSync(p); // throws when absent — symlinks to dead sockets need lstat
         console.log(`  ${APPLY ? "removing" : "would remove"} stale ${f}`);
         if (APPLY) unlinkSync(p);
-      } catch { /* not present */ }
+      } catch {
+        /* not present */
+      }
     }
   }
 
-  if (!APPLY && orphans.length) console.log("\ndry run — re-run with --apply to kill them");
+  for (const dir of staleTmpDirectories({ inUsePaths })) {
+    console.log(`  ${APPLY ? "removing" : "would remove"} stale ${dir}`);
+    if (APPLY) rmSync(dir, { recursive: true, force: true });
+  }
+
+  if (!APPLY && orphans.length)
+    console.log("\ndry run — re-run with --apply to kill them");
 }

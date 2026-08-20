@@ -48,7 +48,7 @@ When the fix is obvious ("restart the api service", "redeploy with the corrected
 Work like a diagnostician, not a log collector:
 
 - Narrow before you read: `ps` before `logs`, `--tail 50` before anything larger, `grep` on the server side rather than pulling logs over to filter.
-- Redact secrets: when an env var's *value* is the answer (a wrong `DATABASE_URL` host), quote the relevant fragment; never paste tokens, keys, or passwords into your report — describe them (`set`, `empty`, `points at <host>`).
+- Redact secrets: when an env var's _value_ is the answer (a wrong `DATABASE_URL` host), quote the relevant fragment; never paste tokens, keys, or passwords into your report — describe them (`set`, `empty`, `points at <host>`).
 - Stop when the question is answered. "Healthy" needs container states and one green health check, not a tour of every service.
 
 ## Report format (your final message)

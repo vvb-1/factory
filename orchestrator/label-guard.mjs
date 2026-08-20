@@ -23,18 +23,21 @@
  *     bun orchestrator/label-guard.mjs --repo legalease
  *     bun orchestrator/label-guard.mjs --repo legalease --apply
  */
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { gql, fetchTeams } from "./reaper.mjs";
-import { ROOT } from "../lib/schedule.mjs";
-import { parseOwnedPaths } from "./owned-paths.mjs";
+import { loadControlPlane } from "../lib/control-plane/index.mjs";
+import { loadRepos } from "../event-runtime/lib/repos.mjs";
+import {
+  parseOwnedPaths,
+  ownedPathsClosureGaps,
+  readPinManifestRequirements,
+  formatOwnedPathClosureGaps,
+} from "./owned-paths.mjs";
 
 const AI_AGENT_READY = "ai:agent-ready";
 
-/** Split `## Heading` sections, keyed by heading text and trimmed body. */
+/** Split markdown heading sections (levels 2-4), keyed by heading text and trimmed body. */
 function sections(description = "") {
   return description
-    .split(/^##\s+/m)
+    .split(/^#{2,4}\s+/m)
     .slice(1)
     .map((s) => {
       const nl = s.indexOf("\n");
@@ -56,7 +59,8 @@ function sections(description = "") {
  */
 // "None", "N/A", or "no ... path(s)" within a short span -- covers "None in
 // this repo", "No repository paths", "None — infra/deploy verification only".
-const NOT_APPLICABLE = /\b(none|n\/a|not applicable)\b|\bno\b[^.]{0,30}\bpaths?\b/i;
+const NOT_APPLICABLE =
+  /\b(none|n\/a|not applicable)\b|\bno\b[^.]{0,30}\bpaths?\b/i;
 
 /**
  * Which of the two *mechanically load-bearing* §5 sections a description is
@@ -83,9 +87,10 @@ export function templateGaps(description = "") {
   // A non-code ticket (deploy/env-var/business change) legitimately has no
   // repo paths -- linear.md's non-code exception applies here too. Accept an
   // explicit "not applicable" declaration in the section body.
-  const owned = secs.find((s) => s.heading.toLowerCase().includes("owned paths"));
+  const owned = secs.find((s) => /\bowned\s+paths\b/i.test(s.heading));
   const ownedNA = owned && NOT_APPLICABLE.test(owned.body);
-  if (!parseOwnedPaths(description).length && !ownedNA) gaps.push("Owned Paths");
+  if (!parseOwnedPaths(description).length && !ownedNA)
+    gaps.push("Owned Paths");
 
   // "Evidence Required" / "Evidence line" is the accepted non-code substitute
   // for a Verification Command (linear.md §5's non-code-work exception).
@@ -93,46 +98,55 @@ export function templateGaps(description = "") {
   // "## Production evidence" (proof the bug is real) is not a verification
   // method and must not satisfy this.
   const verified = secs.some((s) => {
-    const h = s.heading.toLowerCase();
-    return (h.includes("verification command") || /\bevidence\b.*\b(required|line)\b/.test(h)) && s.body.length > 0;
+    return (
+      (/\bverification\s+command\b/i.test(s.heading) ||
+        /\bevidence\b.*\b(required|line)\b/i.test(s.heading)) &&
+      s.body.length > 0
+    );
   });
   if (!verified) gaps.push("Verification Command");
 
   return gaps;
 }
 
-const QUERY = `
-  query($team: String!, $project: String!) {
-    issues(first: 250, filter: {
-      team: { key: { eq: $team } },
-      project: { name: { eq: $project } },
-      state: { name: { eq: "Todo" } },
-      labels: { name: { eq: "${AI_AGENT_READY}" } },
-      assignee: { null: true }
-    }) {
-      nodes {
-        id identifier title description url
-        labels(first: 20) { nodes { id name } }
-      }
-    }
-  }`;
+function ownedPathsClosureCheck(description = "", repo, manifestCache) {
+  const owned = parseOwnedPaths(description);
+  const ownedPolicy = repo?.ownedPathsPolicy;
+  if (!ownedPolicy) return { messages: [], gaps: [] };
 
-export async function fetchReadyIssues(repo) {
-  const data = await gql(QUERY, { team: repo.team, project: repo.project });
-  return data?.issues?.nodes ?? [];
+  let cached = manifestCache.get(repo.name);
+  if (!cached) {
+    const requirements = ownedPolicy.pinManifests?.length
+      ? readPinManifestRequirements(repo.path, ownedPolicy.pinManifests)
+      : [];
+    cached = { requirements, messagesByOwned: new Map() };
+    manifestCache.set(repo.name, cached);
+  }
+
+  const key = JSON.stringify(owned.sort());
+  if (cached.messagesByOwned.has(key))
+    return { messages: cached.messagesByOwned.get(key), gaps: [] };
+
+  const gaps = ownedPathsClosureGaps({
+    ownedPaths: owned,
+    ownedPathsPolicy: ownedPolicy,
+    pinManifestRequirements: cached.requirements,
+  });
+
+  const messages = formatOwnedPathClosureGaps(gaps);
+  cached.messagesByOwned.set(key, messages);
+  return { messages, gaps };
 }
 
-export async function demote(issue, triageStateId, gaps, apply) {
+export async function fetchReadyIssues(repo) {
+  return loadControlPlane().listDispatchable({
+    team: repo.team,
+    project: repo.project,
+  });
+}
+
+export async function demote(issue, _triageStateId, gaps, apply) {
   if (!apply) return;
-
-  const keepLabelIds = (issue.labels?.nodes ?? [])
-    .filter((l) => (l.name || "").toLowerCase() !== AI_AGENT_READY)
-    .map((l) => l.id);
-
-  await gql(
-    `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`,
-    { id: issue.id, input: { stateId: triageStateId, labelIds: keepLabelIds } }
-  );
 
   const body =
     `**Demoted by the \`ai:agent-ready\` template guard.**\n\n` +
@@ -142,56 +156,91 @@ export async function demote(issue, triageStateId, gaps, apply) {
     `\n\nMoved back to \`Triage\` and the label was removed so it isn't picked up for dispatch. ` +
     `A triage pass needs to add the missing section(s) before re-labeling \`ai:agent-ready\`.`;
 
-  await gql(
-    `mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }`,
-    { input: { issueId: issue.id, body } }
-  );
+  const cp = loadControlPlane();
+  await cp.transition(issue.identifier, "Triage", {
+    remove: [AI_AGENT_READY],
+  });
+  await cp.comment(issue.identifier, body);
 }
 
 export function parseArgs(argv = process.argv.slice(2)) {
   const apply = argv.includes("--apply");
-  const val = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
-  const repos = (val("--repo") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const val = (f) => {
+    const i = argv.indexOf(f);
+    return i === -1 ? null : argv[i + 1];
+  };
+  const repos = (val("--repo") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return { apply, repos };
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const cfg = Bun.YAML.parse(readFileSync(path.join(ROOT, "config/repos.yaml"), "utf8"));
-  const repos = (cfg.repos ?? []).filter((r) => !args.repos.length || args.repos.includes(r.name));
+  const allRepos = [...loadRepos().values()].filter(
+    (r) => !args.repos.length || args.repos.includes(r.name),
+  );
+  const repos = allRepos.map((r) => ({
+    name: r.name,
+    team: r.team,
+    project: r.project,
+    ownedPathsPolicy: r.ownedPathsPolicy,
+    path: r.path,
+  }));
 
   if (!repos.length) {
-    console.error(args.repos.length ? `no repo named "${args.repos.join(",")}" in config/repos.yaml` : "no repos configured");
+    console.error(
+      args.repos.length
+        ? `no repo named "${args.repos.join(",")}" in config/repos.yaml`
+        : "no repos configured",
+    );
     process.exit(2);
   }
 
-  console.log(`=== ai:agent-ready template guard [${args.apply ? "APPLY" : "DRY RUN"}] ===\n`);
+  console.log(
+    `=== ai:agent-ready template guard [${args.apply ? "APPLY" : "DRY RUN"}] ===\n`,
+  );
 
-  let teams = null;
   let violations = 0;
 
   for (const repo of repos) {
     const issues = await fetchReadyIssues(repo);
-    const bad = issues.map((issue) => ({ issue, gaps: templateGaps(issue.description ?? "") })).filter((r) => r.gaps.length);
+    const closureRequirements = new Map();
+    const bad = issues
+      .map((issue) => {
+        const gapNames = [...templateGaps(issue.description ?? "")];
+        try {
+          const closure = ownedPathsClosureCheck(
+            issue.description ?? "",
+            repo,
+            closureRequirements,
+          );
+          gapNames.push(...closure.messages);
+          return { issue, gaps: gapNames };
+        } catch (err) {
+          gapNames.push(`Owned Paths Closure: ${err.message || String(err)}`);
+          return { issue, gaps: gapNames };
+        }
+      })
+      .filter((r) => r.gaps.length);
 
-    console.log(`${repo.name}  ${repo.team} / ${repo.project}  --  ${issues.length} ai:agent-ready ticket(s), ${bad.length} failing §5`);
+    console.log(
+      `${repo.name}  ${repo.team} / ${repo.project}  --  ${issues.length} ai:agent-ready ticket(s), ${bad.length} failing §5`,
+    );
 
     if (!bad.length) continue;
     violations += bad.length;
 
-    if (args.apply && !teams) teams = await fetchTeams();
-    const triageStateId = args.apply ? teams?.[repo.team]?.states?.["triage"] : null;
-    if (args.apply && !triageStateId) {
-      console.log(`  ! no 'Triage' state on team ${repo.team}, skipping demotion for this repo`);
-    }
-
     for (const { issue, gaps } of bad) {
-      console.log(`  ${issue.identifier.padEnd(10)} ${issue.title.slice(0, 60)}`);
+      console.log(
+        `  ${issue.identifier.padEnd(10)} ${issue.title.slice(0, 60)}`,
+      );
       for (const g of gaps) console.log(`      missing: ${g}`);
 
-      if (args.apply && triageStateId) {
+      if (args.apply) {
         try {
-          await demote(issue, triageStateId, gaps, true);
+          await demote(issue, null, gaps, true);
           console.log(`      -> demoted to Triage, ai:agent-ready removed`);
         } catch (err) {
           console.log(`      ! failed: ${err.message || err}`);
@@ -200,8 +249,11 @@ export async function main(argv = process.argv.slice(2)) {
     }
   }
 
-  console.log(`\n=== ${args.apply ? "Demoted" : "Would demote"}: ${violations} ===`);
-  if (!args.apply && violations) console.log("Run again with --apply to demote these.");
+  console.log(
+    `\n=== ${args.apply ? "Demoted" : "Would demote"}: ${violations} ===`,
+  );
+  if (!args.apply && violations)
+    console.log("Run again with --apply to demote these.");
 }
 
 if (import.meta.main || process.argv[1]?.endsWith("label-guard.mjs")) {

@@ -1,0 +1,28 @@
+{
+  "title": "reaper input — a clock tick (docs/event-runtime-schedules.md §3)",
+  "type": "object",
+  "required": ["loop", "slot"],
+  "additionalProperties": false,
+  "properties": {
+    "loop": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the standing schedule loop this tick belongs to"
+    },
+    "slot": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Interval slot identity (floor of the moment over the cadence since epoch); the tick's event id is clock:<loop>:<slot>"
+    },
+    "cadenceSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The loop's cadence in seconds"
+    },
+    "skippedSlots": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many missed slots this catch-up tick stands for (0 for an on-time tick)"
+    }
+  }
+}

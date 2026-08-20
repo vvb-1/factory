@@ -1,3 +1,9 @@
+## Commands
+
+- `bun run lint` — ESLint over root JS and `event-runtime/web` TSX (`bun run lint:fix` to autofix). CI runs it with a `--max-warnings` ratchet (WM-607); see `docs/ci.md`.
+- `bun test --timeout 20000 --max-concurrency=4 event-runtime/lib` — fast unit tests.
+- `bun run check` — generated-tree drift check (`shared/` vs. emitted output).
+
 <!-- FACTORY:FLOOR:BEGIN -->
 <!-- Generated from watt-mind/factory shared/floor.md. Do not edit here — edit
      the source and re-run `node build/emit.mjs`, or your change is lost on the
@@ -8,11 +14,13 @@
 
 ## Agent operating floor
 
-Non-negotiable for every agent in this repo, in any harness. Full protocol: `~/Develop/hdkiller/docs/orgs/linear.md`. If that path doesn't exist where you're running (a cloud sandbox, someone else's machine), this block is the whole contract — follow it as written and don't infer the rest.
+Non-negotiable for every agent in this repo, in any harness. Full protocol: `$FACTORY_ROOT/docs/protocol.md`. If that path doesn't exist where you're running (a cloud sandbox, someone else's machine), this block is the whole contract — follow it as written and don't infer the rest.
 
 **Work comes from Linear, and only when it's ready.** A ticket is dispatchable only if it is `Todo` + `ai:agent-ready` + unassigned. `Triage` and `Backlog` are not queues to pull from.
 
 **An ad-hoc request gets a ticket too — file it, don't wait to be asked.** A request typed into a chat session is not exempt from the control plane; if it isn't tracked, it is invisible to every other agent and to tomorrow. **The trip wire is your first file edit:** before it, either find the issue that already covers this or create one, and say in one line which it is ("Tracking as OPS-91"). Commits still carry their `(ISSUE-ID)`. Skip the ticket only for ordinary questions, read-only lookups with no actionable finding, and inconsequential edits — and the human can always say "no ticket", which settles it. Sessions drift: one that began as a question and turned into a change trips the wire at that moment, not at the end.
+
+**A local `commit-msg` hook enforces `type(scope): summary (ISSUE-ID)` (WM-609)** — `FACTORY_NO_TICKET=1 git commit …` is the deliberate escape hatch for a commit that genuinely has no ticket.
 
 **Retroactive capture is the backstop, not the plan.** If you notice partway through, or while wrapping up, that work already done has no issue, file it _then_ — with the commits or PR linked and the state set to where the work actually is (`Done` if it is already merged and green), never dressed up as queued work. Before reporting a session finished, check that everything you changed is on a ticket. A late ticket beats an invisible change; both are worse than filing up front.
 
@@ -22,11 +30,34 @@ Non-negotiable for every agent in this repo, in any harness. Full protocol: `~/D
 
 **Bundling several tickets into one worktree is the human's call, never yours.** When the human explicitly asks for a set of tickets to be done together, they share one worktree, one branch (named after the lead ticket) and one PR: claim _every_ ticket in the bundle and heartbeat all of them, keep one commit per ticket, scope the work to the union of their `Owned Paths`, and give the PR body a `Fixes <ISSUE-ID>` line per ticket. If one of them turns out to be bigger than it looked or gets blocked, unassign it back to `Todo` and ship the rest — never stall the others behind it. Absent that explicit instruction it is one ticket, one worktree; noticing that two tickets are related is a reason to say so, not to merge them yourself.
 
-**Stay inside `Owned Paths`.** That glob set is what makes parallel work safe; the dispatcher refuses to run two tickets whose sets intersect. Work discovered outside it becomes a new `Triage` issue — it never expands the current ticket.
+**Never use `git stash` or `git rebase --autostash` in worktrees.** The `git stash` stack is repository-global, not isolated per worktree (`.git/refs/stash`). Running `git stash`, `git stash pop`, or `git rebase --autostash` in one worktree will push to or pop from a stack shared across all concurrent agent worktrees. If `git stash push <path>` runs on clean/committed files, it is a no-op that exits 0 without creating a stash entry, and a subsequent `git stash pop` silently pops another agent's stashed uncommitted changes into your worktree, causing silent cross-session data loss and corruption. Strictly avoid `git stash` and `--autostash` in agent worktrees. Use safe alternatives instead:
+
+- Temporarily test pre-fix state: `git show <ref>:<path> > <path>`
+- Restore working state: `git checkout HEAD -- <path>`
+- Save work in progress: save a patch via `git diff > /tmp/<ISSUE-ID>.patch` (restore with `git apply /tmp/<ISSUE-ID>.patch`) or create a temporary WIP commit on the branch (`git commit -m "wip"`, undo later with `git reset HEAD~1`).
+
+**Stay inside `Owned Paths`.** That glob set is what makes parallel work safe; the dispatcher refuses to run two tickets whose sets intersect. Work discovered outside it becomes a new `Triage` issue — it never expands the current ticket. Write the section as **one path or glob per bullet** (`- event-runtime/lib/foo.mjs`); the planner's parser (`orchestrator/owned-paths.mjs`) keeps only bullets that look like a path and contain no spaces, so a comma-separated list on one bullet is silently dropped — the ticket then either fails to dispatch (`owned_paths_unknown`) or, worse, dispatches with a narrower scope than you wrote and the agent blocks on "Owned Paths omit …".
 
 **Heartbeat** at each phase change (claimed → implemented → verified → PR open) and at least every 20 minutes, saying what changed. After 45 minutes of silence the ticket is reclaimed.
 
 **Verification is a gate, not a formality.** Run the ticket's exact Verification Command. Never advance state, open a PR, or report success on failing output. Never weaken a test or skip a check to get green — if the test is wrong, that's a finding to report, not to edit around.
+
+**PR base is explicit.** Resolve the repository's `base` from `config/repos.yaml` and always create ticket PRs with `gh pr create --base <configured-base> ...`; GitHub's default branch is not a fallback. Read the opened PR's `baseRefName` back before handoff and stop if it differs from the configured base.
+
+**Negative testing and falsifiability.** New regression tests must be observed failing before applying the fix to prove they test the actual failure mode and are not vacuous. Verify that tests distinguish correct implementations from plausible incorrect ones (without using `git stash`; use safe per-file reverts such as `git show <ref>:<path> > <path>`). A test that passes before the fix is applied tests nothing.
+
+**Mandatory `## Handoff` comment.** Before moving a ticket to `In Review`, post a structured `## Handoff` comment on the Linear ticket with these exact fields:
+
+```
+## Handoff
+- PR: <url>
+- Verification: `<the ticket's exact command>` — pass, <one-line result summary>
+- UX critique: required — SHIP | required — FIX-FIRST resolved in <n> round(s) | skipped — <reason>
+- Files: <n> changed, all within Owned Paths   (or: exceptions listed with why)
+- Risks: <what the reviewer should look at first, or "none known">
+```
+
+Posting this structured comment is a mandatory prerequisite before advancing a ticket to `In Review`. The merge stage reviews directly from this comment; a vague Handoff slows review, and a missing or unformatted one is a protocol violation.
 
 **`Done` means merged and running:** PR merged, base-branch CI green after the merge, and the post-deploy smoke check green where the repo has one.
 
@@ -90,6 +121,12 @@ for i in $(seq 60); do curl -sf localhost:4222 >/dev/null && break; sleep 2; don
 
 **For a background job you started**, wait on the process (`wait`, or the harness's own background-task mechanism) rather than guessing how long it takes.
 
+**Never end your turn while background jobs are running.** Subagents must not park mid-flow or yield prematurely while waiting for slow commands, test suites, or background sub-processes. When an agent yields without active foreground execution, the orchestrator cannot distinguish between an agent legitimately waiting on slow work, an agent stalled needing a nudge, or an agent finished but under-reporting. Block on readiness (e.g. `gh pr checks --watch`, `wait <pid>`, or bounded polling) until the work is complete before completing your turn.
+
+**GitHub Actions secondary rate limits.** Avoid rapid, unthrottled polling of GitHub's Actions and jobs APIs (e.g. tight loops calling `gh run view` or `gh api`). Aggressive polling triggers GitHub's secondary rate limits and blocks the harness. Use `gh pr checks <PR> --watch --fail-fast` or bounded polling intervals with backoff.
+
+**Session scratchpad isolation.** Never use generic shared filenames (such as `pr-body.md` or `scratch/critique.json`) across concurrent tasks. Reviewer, implementer, and critic agents operating in shared session scratchpads must namespace all temporary files by ticket ID or session identifier (e.g. `pr-body-<TICKET-ID>.md`, `<TICKET-ID>-critique.json`) to prevent cross-agent collisions and silent overwrites.
+
 Measured on real runs: single `sleep 180` and `sleep 75` calls, plus a `sleep 60` after starting a dev server that was ready in a fraction of that. Each one is a per-ticket process sitting idle while holding a concurrency slot.
 
 ### Checkout freshness
@@ -132,7 +169,7 @@ A tool result is not paid for once. It stays in the context window and is re-sen
 
 **Don't re-read what you have already read.** 285 duplicate reads of an identical path inside a single run were measured. If you read a file, it is still in your context — scroll back rather than re-reading. For a large file, `offset`/`limit` the part you need instead of pulling all of it.
 
-**This floor is the protocol.** Do not `cat` `~/Develop/hdkiller/docs/orgs/linear.md` for something answered above — it is 645 lines, and it was re-read 156 times across 96 runs for rules already written here. Go to it only for the reference tables (project/area labels, saved views, GraphQL recipes), and read the specific section, not the file.
+**This floor is the protocol.** Do not `cat` `$FACTORY_ROOT/docs/protocol.md` for something answered above — it was re-read 156 times across 96 runs for rules already written here. Go to it only for the reference tables (routing, labels, the five-section template, adapter verbs), and read the specific section, not the file.
 
 **Batch tool loading.** When tools must be loaded before use, request every tool the task needs in **one** call (`select:a,b,c`). Each extra call is a full round trip that re-sends the whole context.
 
@@ -178,9 +215,15 @@ factory linear queue --team CLNT                         # what is dispatchable
 
 **Attribution.** Factory runs set `$FACTORY_RUN_ID`. Linear comments and issues filed through `tools/linear.mjs` are stamped with it automatically; the one surface the tool cannot reach is GitHub, so **end every PR body with a final line `run:$FACTORY_RUN_ID`** (after `Fixes <ISSUE-ID>`). That one line is what joins the PR back to its transcript and metrics row when someone asks "which run produced this?". Unset (interactive session) — omit it.
 
-**Labels are replaced wholesale, never merged.** Always go through `--add` / `--remove`; a hand-written mutation that passes only the labels you want added silently strips every other label on the ticket. `type:*` has exactly eight values: `bug feature ui-ux security performance maintenance docs a11y` — `type:chore` fails. `area:*` is per-team; copy an existing ticket in the project rather than inventing one. Every new issue carries exactly one `source:*`: `source:agent` for work you discover yourself, `source:human` for a direct request, `source:sentry` / `source:client-support` for those intake paths.
+**Labels are replaced wholesale, never merged.** Always go through `--add` / `--remove` via `factory linear state` or `factory linear claim`; a hand-written mutation or `linear issue update -l` that passes only the labels you want added silently replaces the entire label set, stripping `type:*`, `area:*`, `source:*`, and other existing taxonomy labels from the ticket. `type:*` has exactly eight values: `bug feature ui-ux security performance maintenance docs a11y` — `type:chore` fails. `area:*` is per-team; copy an existing ticket in the project rather than inventing one. Every new issue carries exactly one `source:*`: `source:agent` for work you discover yourself, `source:human` for a direct request, `source:sentry` / `source:client-support` for those intake paths.
+
+**Strict order of operations for discovered work.** Discovered work filed during a merge review or ticket session cannot have its ticket ID known prior to creation. Pre-writing cross-references in summary or handoff comments before filing causes fake or broken identifiers. Follow this strict order: file follow-ups first via `factory linear file`, collect the returned issue identifiers, and then author summary and handoff comments referencing those real IDs.
 
 ### Secrets
 
 Never print, echo, commit, or paste an API key, token, or `.env` file — not into a transcript, a PR, a Linear comment, or a log. Scripts read credentials themselves. If a secret appears in a diff, that's an escalation, not a cleanup.
 <!-- FACTORY:FLOOR:END -->
+
+## Repo-specific notes
+
+Run `factory security` (Gitleaks + Semgrep + Actionlint, `lib/security-check.sh`) before pushing — `.github/workflows/security.yml` runs the same three tools in CI on every PR and on pushes to `develop`/`main` (see `docs/ci.md` "Security scans").

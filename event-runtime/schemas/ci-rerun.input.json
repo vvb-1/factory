@@ -1,0 +1,17 @@
+{
+  "title": "ci-rerun input — the run to re-run",
+  "type": "object",
+  "required": ["repo", "runId"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "description": "GitHub repository slug (owner/name) the failed run belongs to — not the config/repos.yaml short name"
+    },
+    "runId": {
+      "type": ["string", "integer"],
+      "description": "GitHub Actions run id to re-run (number, or numeric string as gh prints it)"
+    }
+  }
+}

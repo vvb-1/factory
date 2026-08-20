@@ -24,7 +24,7 @@ Same bar as `docs/friction-log.md` — only two things:
 
 ## 4. Search before filing
 
-Search Linear (`factory linear` or `linear.md` §13) for:
+Search Linear (`factory linear` or `docs/protocol.md` §13) for:
 
 - Existing `FIP:` issues describing the same shape
 - Prior issues whose body contains `## Session friction` with the same **Shape**
@@ -34,11 +34,11 @@ Comment on the existing issue with new evidence instead of filing a duplicate. L
 
 ## 5. Route
 
-| Finding | Destination |
-| :--- | :--- |
-| Factory-wide harness fix (floor, orchestrator, emit, shared commands) | team `OPS`, `Triage`, title prefixed `FIP:` |
-| Repo-specific friction (scripts, AGENTS.md, `.env.example`, CI workflow) | that repo's team from `config/repos.yaml`, `Triage` |
-| Already tracked in `docs/friction-log.md` | comment on the matching `F-*` Linear issue if one exists; otherwise file and cross-reference the log entry |
+| Finding                                                                  | Destination                                                                                                |
+| :----------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| Factory-wide harness fix (floor, orchestrator, emit, shared commands)    | team `OPS`, `Triage`, title prefixed `FIP:`                                                                |
+| Repo-specific friction (scripts, AGENTS.md, `.env.example`, CI workflow) | that repo's team from `config/repos.yaml`, `Triage`                                                        |
+| Already tracked in `docs/friction-log.md`                                | comment on the matching `F-*` Linear issue if one exists; otherwise file and cross-reference the log entry |
 
 Standing in the factory checkout (`config/repos.yaml` → `factory` → team `OPS`). In a product repo, route repo friction to that repo's team, not OPS.
 
@@ -48,6 +48,7 @@ Every filed friction issue includes this block (fill every field):
 
 ```markdown
 ## Session friction
+
 - **Harness:** cursor | pi | claude | codex | agy
 - **Command:** factory-work | factory-merge | factory-ticket | factory-ship | (other)
 - **Shape:** <normalised failure pattern — no paths, ids, or ticket-specific detail>

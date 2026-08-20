@@ -1,0 +1,25 @@
+{
+  "name": "factory/sample",
+  "version": "1.0.0",
+  "description": "Test fixture: one pack (a copy of test-support/packs/sample under the sample-ext namespace), one trivial adapter, a config schema, one approve.before hook, one echo connector and one panel.",
+  "factory": {
+    "min": "0.1.0"
+  },
+  "contributes": {
+    "packs": ["./pack"],
+    "adapters": {
+      "echo": "./adapters/echo.mjs"
+    },
+    "config": {
+      "namespace": "sample",
+      "schema": "./config.schema.json"
+    },
+    "hooks": {
+      "approve.before": "./hooks/approve-before.mjs"
+    },
+    "connectors": {
+      "echo": "./connectors/echo.mjs"
+    },
+    "panels": ["./panels"]
+  }
+}

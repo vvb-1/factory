@@ -2,6 +2,8 @@ Review and land the open PRs for this repository. My invoking this command is th
 
 Interpret $ARGUMENTS as specific PR numbers or Linear issue IDs; default is every open PR in this repo (`gh pr list`, cross-checked against the team's `In Review` tickets so orphaned PRs and ticket-less PRs both surface).
 
+**Merge serialization & per-repo lock**: Merges are strictly serialized per repository. Never run concurrent merge supervisors or merge processes against the same repository; a merge run holds exclusive lock over merge execution for that repo to prevent race conditions where one process merges PRs another process has escalated or modified.
+
 `--include-escalated` is a one-off override used only by the foreground TUI's explicitly confirmed **merge all** action. It means the human has decided that existing `escalated` labels are not a hold for this run: include those PRs in the review and merge them when they otherwise meet the normal MERGE bar. Do not treat it as permission to merge with red CI, unresolved conflicts, a failing base/smoke check, or a blocking review finding. Do not apply this override merely because an escalated PR is visible; it must be present in `$ARGUMENTS`.
 
 ## Per PR, in this order
@@ -26,13 +28,15 @@ Then check CI with `gh pr checks <PR> --watch --fail-fast` — it returns the mo
 
 - **MERGE** — CI green, no blocking findings. Minor/polish findings don't block: file them to Linear `Triage` per §8 and merge anyway.
 - **FIX** — CI red, merge conflicts, or blocking review findings that are mechanical to fix (a real bug, missing error handling, a failing test).
-- **ESCALATE** — never auto-merge, regardless of CI or review outcome: diffs touching auth/authz, payments/money, credentials/secrets handling, destructive DB migrations, prod infra config, or anything in a `CLNT` repo touching security. Also escalate when the fix would require changing the ticket's intent. Report these to me with the findings, add **`ai:escalated`** to the Linear ticket, **notify me** — `python3 ~/Develop/hdkiller/scripts/notify.py "ESCALATED PR#<n> (<TICKET>): <why, in one sentence>"` — rather than only writing it in the final report, and stop there.
+- **ESCALATE** — never auto-merge, regardless of CI or review outcome: diffs touching auth/authz, payments/money, credentials/secrets handling, destructive DB migrations, prod infra config, or anything in a `CLNT` repo touching security. Also escalate when the fix would require changing the ticket's intent. Report these to me with the findings, add **`ai:escalated`** to the Linear ticket, **notify me** — `factory notify "ESCALATED PR#<n> (<TICKET>): <why, in one sentence>"` — rather than only writing it in the final report, and stop there.
 
   Exception: when `$ARGUMENTS` contains `--include-escalated`, the invoking human has explicitly cleared this escalation hold for this run. Review the PR just as thoroughly; if CI is green and there are no other blocking findings, classify it MERGE instead of holding it solely because it is escalated. This exception never overrides the normal MERGE prerequisites.
 
-  Then label the PR `escalated` on GitHub (`gh pr edit <PR> --add-label escalated`, creating the label if the repo lacks it). An escalated PR stays open by design, waiting on me — and the merge gate counts open PRs, so without the label every tick would re-review it and re-escalate it forever. Removing the label is my signal that it is yours again.
+  **Atomic dual-labeling**: Whenever a PR is escalated, apply Linear `ai:escalated` and GitHub `escalated` (`gh pr edit <PR> --add-label escalated`, creating the label if the repo lacks it) together in the same step. Neither label alone is sufficient — Linear surfaces the issue in human decision queues, while GitHub blocks merge tooling. An escalated PR stays open by design, waiting on me — and the merge gate counts open PRs, so without the label every tick would re-review it and re-escalate it forever. Removing the label is my signal that it is yours again.
 
-  Run the mechanical half first: `factory escalate --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. Exit 2 means ESCALATE, no judgment call needed. Exit 0 clears only the path list — the behavior-based judgment below still applies. If `factory` is not on PATH, apply the repo's `escalate_paths` from `config/repos.yaml` by hand against the changed-file list.
+  Run the mechanical half first: `factory escalate --repo <name> --pr <PR>` checks the diff against the repo's `escalate_paths` in `config/repos.yaml`. **Exit 2** means ESCALATE, no judgment call needed. **Exit 0** means the list was checked and no changed file matched — that clears only the path list, the behavior-based judgment below still applies. **Exit 3 means the gate could not be evaluated at all** (unknown repo, unreadable config, `gh pr diff` failed or named no files at all / empty diff, or the repo has no `escalate_paths` key): it is not a pass. Treat the PR as escalated until the check can actually run, and fix the cause — give the repo an `escalate_paths` list, or an explicit `escalate_paths: []` where there is deliberately nothing to check mechanically.
+
+  The command also warns on stderr when the factory checkout it read the config from is behind its upstream or has uncommitted changes to `config/repos.yaml` — either can silently change the answer, which is how a real PR touching `.github/workflows/**` once came back clean (WM-15). On those warnings, `git -C ~/Develop/factory pull --ff-only` (or read `origin/<base>:config/repos.yaml` when the checkout is dirty) and re-run before trusting the result. If `factory` is not on PATH, apply the repo's `escalate_paths` from `config/repos.yaml` by hand against the changed-file list.
 
   The test for "touching" is whether the diff **changes security-relevant behavior**, not whether the file sits near security code — read literally as file-adjacency the list swallows most PRs in an app where auth is everywhere, which trains both of us to rubber-stamp. For grey-zone diffs (near those surfaces but apparently behavior-neutral), run `/security-review` on the branch and attach the output; clean output plus green CI supports merging a behavior-neutral diff, but no tool output ever overrides the list. Genuinely ambiguous → escalate; that costs one message, a wrong merge costs a client incident.
 
@@ -50,7 +54,10 @@ So:
 
 1. Take the PRs you classified MERGE and read each one's changed files (`gh pr diff <PR> --name-only`).
 2. Form a batch of PRs whose file sets are **pairwise disjoint**, up to **8** (matches the repo's dispatch concurrency cap — batching should be able to clear what one dispatch cycle produces). Any PR sharing a file with one already in the batch waits for the next batch.
-3. Merge the batch back to back, without waiting for base CI between them.
+3. Merge the batch back to back, without waiting for base CI between them. Immediately before executing `gh pr merge` on each PR:
+   - Run `factory escalate --repo <name> --pr <PR>` as an authoritative pre-merge gate. Any PR touching `escalate_paths` (exit code 2) is prohibited from merging even if labels are missing or out of sync (unless `$ARGUMENTS` contains `--include-escalated`). Exit 3 (cannot evaluate) also halts the merge.
+   - Re-verify that the PR does not carry the `escalated` label (`gh pr view <PR> --json labels -q '.labels[].name'`). GitHub status checks do not re-run when labels change, so a passing check rollup can mask an escalation applied after CI settled. If the `escalated` label is present (and `$ARGUMENTS` does not contain `--include-escalated`), abort the merge immediately.
+   - Verify that the current PR head SHA matches the reviewed and approved commit SHA (`gh pr view <PR> --json headRefOid -q .headRefOid`). If the head SHA has changed (e.g. from an unreviewed push or review fix added after review approval), stop and re-review the diff before merging.
 4. Then wait **once** for base CI on the batch (`gh run watch <run> --exit-status`), plus the smoke check where the repo has one.
 5. Green: move every ticket in the batch to `Done` and clean up. Red: you have at most 5 suspects and their file sets are disjoint, so the failing job names the culprit. Revert that one merge (`git revert -m 1 <merge-sha>`, push, re-verify), keep the rest, and report what you reverted and why.
 
@@ -62,14 +69,22 @@ Why this matters: a legalease run on 2026-08-04 landed 3 PRs in 15 minutes again
 
 If the repo has GitHub's native merge queue enabled, prefer it over any of this — it tests batches and drops the failures for you.
 
-After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done`. Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
+After each batch: confirm base-branch CI passes **and the post-deploy smoke check is green** where the repo has one (per §7's `Done` condition — merged, base CI green, deployed and responding), then move the Linear ticket to `Done` (`factory linear state <ID> Done --remove ai:needs-review --remove ai:escalated --remove ai:blocked`). Then clean up **in this order**: remove the ticket's worktree first (`bin/worktree-down.sh <ISSUE-ID>` where the repo provides it, so the ticket's database is dropped too), and only then delete the branch. Git refuses to delete a branch checked out in a worktree, so `gh pr merge --delete-branch` fails **every time** a ticket was worked in one — merge without that flag and delete the branch after teardown.
 
-Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch:
+Resolve that branch from the PR you just merged; never from the ticket ID, and never from a name left over from an earlier PR in the batch — and before deleting it, run `factory branch-guard` to mechanically verify that the branch is not protected (`base` / `deploy_branch` / `develop` / `master` / `main`) and that no **other open PR** still has it as its head (WM-17, WM-51):
 
 ```bash
 HEAD_REF="$(gh pr view <PR> --json headRefName -q .headRefName)"
-git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+if factory branch-guard --repo <name> --pr <PR> --head "$HEAD_REF"; then
+  git push origin --delete "$HEAD_REF" && git branch -D "$HEAD_REF"
+else
+  echo "branch-guard refused or held deletion for $HEAD_REF — keeping branch"
+fi
 ```
+
+Deleting a branch that still heads an open PR makes GitHub **auto-close that PR**, and its commits become unreachable. That is not hypothetical: on legalease, PR #261 (a data-corruption fix) was closed at 08:34Z when this cleanup deleted `feat/CLNT-520` after merging PR #253, and the work had to be recovered from a dangling commit and re-opened as PR #263. A second agent branching further work off the same head is normal in a batched run, so treat a non-empty `$HOLDERS` as a stop: leave the branch and its worktree alone, note it in the report, and let the run that lands the holding PR clean it up.
+
+The same hold applies to the worktree teardown — `factory janitor` enforces it mechanically (`orchestrator/janitor.mjs`, `openPrHold`) and will report such a worktree as **held**, naming the PR, rather than reclaiming it. A held worktree is therefore not a WM-16 miss to go and finish by hand: **WM-16 is cleanup skipped** (stale worktrees and branches pile up, chase them down), **WM-17 is cleanup too eager** (it deletes what another agent is still using). Forcing a held one through re-creates the incident above; it clears itself when the holding PR closes.
 
 Per the floor's **Protected branches** rule, if `$HEAD_REF` comes back as the repo's `base` or `deploy_branch` (`develop`, `master`, `main`), stop — you are cleaning up the wrong PR. These repos have no branch protection to catch it for you.
 
@@ -78,6 +93,8 @@ If base CI or the smoke check breaks after a batch, stop merging further batches
 ## File what you find — every PR, every verdict
 
 Reviewing diffs is where follow-up work surfaces. Anything the review reveals that doesn't block this merge — defects elsewhere, missing test coverage, tech debt, refactor opportunities, UX rough edges, improvement ideas — gets a Linear issue in `Triage` **at the moment you spot it**: correct team/project, `type:*` + `area:*` + `source:agent` labels, evidence-based priority, linked to the PR and ticket that surfaced it. A finding mentioned only in this report or a PR comment is a finding lost. Filing is cheap; err on the side of filing. This applies to escalated and left-open PRs too, not just merged ones.
+
+**Order of operations for discovered work:** File follow-ups first via `factory linear file`, collect the returned issue identifiers, and then author summary and handoff comments referencing those real IDs. Ticket IDs cannot be known prior to creation; pre-writing cross-references in comments or reports before filing produces fake or broken identifiers.
 
 ## Capture session friction (interactive runs only)
 

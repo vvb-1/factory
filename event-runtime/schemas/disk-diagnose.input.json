@@ -1,0 +1,28 @@
+{
+  "title": "disk-diagnose input — one Keep HQ disk alert (host allowlist is the enum)",
+  "type": "object",
+  "required": ["host", "mount", "usedPct", "alertId"],
+  "additionalProperties": false,
+  "properties": {
+    "host": {
+      "enum": ["lab", "web"],
+      "description": "Target host short name; the enum is the allowlist of hosts this agent may touch"
+    },
+    "mount": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9/._-]*$",
+      "description": "Absolute mount point the alert fired for (e.g. /)"
+    },
+    "usedPct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Disk usage percentage reported by the alert (0–100)"
+    },
+    "alertId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Keep HQ alert id this diagnosis answers, carried through for dedup and audit"
+    }
+  }
+}

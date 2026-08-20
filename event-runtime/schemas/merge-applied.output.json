@@ -1,0 +1,49 @@
+{
+  "title": "factory.merge-applied/v1 output artifact — what was actually applied",
+  "type": "object",
+  "required": ["repo", "applied"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Echo of the short repo name from the input"
+    },
+    "applied": {
+      "type": "array",
+      "minItems": 0,
+      "description": "Every item that actually merged, in order. Conflicts and stale SHAs are skipped rather than aborting the batch (WM-908).",
+      "items": {
+        "type": "object",
+        "required": ["issueId", "action"],
+        "additionalProperties": false,
+        "properties": {
+          "issueId": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]+$",
+            "description": "The item's Linear ticket — the item-list adapter records the item key under the fixed name issueId (lib/adapters/actions.mjs), and merge-apply's itemKey is the ticket"
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Registered action id that ran for this item"
+          }
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "Plan items that were not merged, with a reason, so the next plan cycle can retry them",
+      "items": {
+        "type": "object",
+        "required": ["pr", "ticket", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "pr": { "type": "integer", "minimum": 1 },
+          "ticket": { "type": "string", "pattern": "^[A-Z]+-[0-9]+$" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

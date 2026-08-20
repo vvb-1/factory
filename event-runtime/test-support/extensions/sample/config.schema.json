@@ -1,0 +1,72 @@
+{
+  "title": "factory/sample config — the fixture's operator settings (docs/extensions.md § Config)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "greeting": {
+      "type": "string",
+      "minLength": 1,
+      "default": "hello",
+      "title": "Greeting",
+      "description": "what the echo adapter says first"
+    },
+    "maxParallel": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "default": 1,
+      "title": "Max parallel",
+      "description": "how many echoes may run at once"
+    },
+    "apiToken": {
+      "type": "string",
+      "format": "secret",
+      "title": "API token",
+      "description": "resolved from FACTORY_EXT_SAMPLE_API_TOKEN, never from policy.yaml"
+    },
+    "webhookUrl": {
+      "type": "string",
+      "format": "uri",
+      "title": "Webhook URL",
+      "description": "callback the adapter posts to"
+    },
+    "notifyChannel": {
+      "type": "string",
+      "format": "channel-id",
+      "title": "Notify channel",
+      "description": "channel id for operator alerts"
+    },
+    "relatedTicket": {
+      "type": "string",
+      "format": "ticket",
+      "title": "Related ticket",
+      "description": "ticket this extension is tracking"
+    },
+    "pollEvery": {
+      "type": "string",
+      "format": "duration",
+      "title": "Poll interval",
+      "description": "how often the adapter polls"
+    },
+    "notes": {
+      "type": "string",
+      "format": "multiline",
+      "title": "Notes",
+      "description": "free-form operator notes"
+    },
+    "contact": {
+      "type": "string",
+      "format": "email",
+      "title": "Contact",
+      "description": "who owns this extension"
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "default": 30 },
+        "retries": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

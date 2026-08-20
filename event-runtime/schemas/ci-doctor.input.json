@@ -1,0 +1,30 @@
+{
+  "title": "ci-doctor input — one failed GitHub Actions run",
+  "type": "object",
+  "required": ["repo", "runId", "logArtifact"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "description": "GitHub repository slug (owner/name) the failed run belongs to — not the config/repos.yaml short name"
+    },
+    "runId": {
+      "type": ["string", "integer"],
+      "description": "GitHub Actions run id to diagnose (number, or numeric string as gh prints it)"
+    },
+    "headSha": {
+      "type": "string",
+      "description": "Optional commit SHA the failed run built, for correlating with the branch history"
+    },
+    "workflowName": {
+      "type": "string",
+      "description": "Optional workflow name of the failed run, used in the report only"
+    },
+    "logArtifact": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the captured failed-run log in the artifact store (produced by ci-log-capture); mounted into the workspace as failed.log"
+    }
+  }
+}

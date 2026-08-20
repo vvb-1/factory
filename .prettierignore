@@ -1,0 +1,9 @@
+# Dependencies and builds
+node_modules/
+dist/
+event-runtime/web/dist/
+graphify-out/
+bun.lock
+event-runtime/web/bun.lock
+deploy/launchd/
+.factory/

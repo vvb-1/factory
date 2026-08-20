@@ -1,0 +1,72 @@
+{
+  "title": "factory.triage-plan/v1 output artifact — typed, per-issue triage decisions",
+  "type": "object",
+  "required": ["recommendation", "repo", "plan", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "recommendation": { "enum": ["TRIAGE", "NOOP"] },
+    "repo": { "type": "string", "minLength": 1 },
+    "plan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["issueId", "action", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "issueId": { "type": "string", "pattern": "^[A-Z]+-[0-9]+$" },
+          "action": {
+            "enum": [
+              "label-agent-ready",
+              "move-to-todo",
+              "write-detail",
+              "needs-detail",
+              "mark-duplicate",
+              "needs-human"
+            ]
+          },
+          "reason": { "type": "string", "minLength": 1 },
+          "detail": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\s*## (Acceptance Criteria|Owned Paths|Verification)",
+            "description": "For write-detail only: additive Markdown containing one or more missing template sections; multiple allowed headings may appear in one detail"
+          },
+          "ownedPaths": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Concrete existing files authored into Owned Paths; glob metacharacters are refused by schema",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^*?\\[\\]{}\\r\\n]+$"
+            }
+          },
+          "verificationCommand": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact authored command after every referenced path, target, and package script was found in the pinned checkout"
+          },
+          "acceptanceCriteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["text", "ownedPaths"],
+              "additionalProperties": false,
+              "properties": {
+                "text": { "type": "string", "minLength": 1 },
+                "ownedPaths": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "description": "Each repository-derived acceptance criterion and the Owned Paths entries that evidence it"
+          }
+        }
+      }
+    },
+    "summary": { "type": "string", "minLength": 1 }
+  }
+}

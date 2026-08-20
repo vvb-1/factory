@@ -1,0 +1,29 @@
+{
+  "id": "reaper",
+  "version": 1,
+  "prompt": "agents/reaper.md",
+  "input_schema": "schemas/reaper.input.json",
+  "output_schema": "schemas/command-result.output.json",
+  "output_contract": "factory.command-result/v1",
+  "command": ["bun", "{factoryRoot}/orchestrator/reaper.mjs", "--apply"],
+  "captureStdout": "reaper.log",
+  "captureKind": "log",
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": ["linear:write"]
+  },
+  "limits": {
+    "timeout_seconds": 600,
+    "attempts": 1
+  },
+  "mutating": true,
+  "pins": {
+    "agents/reaper.md": "sha256:87836b6d71a90d39c0a27639f3bb959c9a8f1919186bfa0bc2fe11697fc557cb",
+    "schemas/reaper.input.json": "sha256:f97328e93b2cbc9b782322d8aebc9373cc29352906b686e817b327b92cf88f2b",
+    "schemas/command-result.output.json": "sha256:56ef20577453f0162f1a0a22e8214e8c734fc0fbab4f65d1e1dcae9614acc272"
+  }
+}

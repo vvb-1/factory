@@ -1,0 +1,29 @@
+{
+  "id": "merge-apply",
+  "version": 2,
+  "prompt": "agents/merge-apply.md",
+  "input_schema": "schemas/merge-apply.input.json",
+  "output_schema": "schemas/merge-applied.output.json",
+  "output_contract": "factory.merge-applied/v2",
+  "chainCommandEdges": ["factory.merge.requested", "factory.merge-landed"],
+  "command": ["bun", "{factoryRoot}/event-runtime/lib/merge-apply.mjs"],
+  "writesResult": true,
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": ["gh:write", "linear:read", "event-runtime:write"]
+  },
+  "limits": {
+    "timeout_seconds": 600,
+    "attempts": 1
+  },
+  "mutating": true,
+  "pins": {
+    "agents/merge-apply.md": "sha256:2dd21b7c8463cca365722baf8ec621c5bfe91a3323f043a2d16e6275967508fa",
+    "schemas/merge-apply.input.json": "sha256:ef60db6175c0cb39a2167231b3979065370b1c7a3c94705bd5d5c7b3cf80c512",
+    "schemas/merge-applied.output.json": "sha256:6ab5c791fb250d37c076c869db7c27010812b56523fc4cd52b0bdfb694851879"
+  }
+}

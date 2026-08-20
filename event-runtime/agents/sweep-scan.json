@@ -1,0 +1,28 @@
+{
+  "id": "sweep-scan",
+  "version": 1,
+  "prompt": "agents/sweep-scan.md",
+  "input_schema": "schemas/sweep-scan.input.json",
+  "output_schema": "schemas/sweep-scan.output.json",
+  "output_contract": "factory.sweep-plan/v1",
+  "model_tier": "standard",
+  "workspace": {
+    "type": "repository",
+    "checkoutDir": "repo",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": ["linear:read", "repo:read"]
+  },
+  "limits": {
+    "timeout_seconds": 900,
+    "attempts": 1
+  },
+  "mutating": false,
+  "pins": {
+    "agents/sweep-scan.md": "sha256:e4fcb3985a5d2e281f129c1bac5cdddfb2044222d0f9c762a8a512039870e7c8",
+    "schemas/sweep-scan.input.json": "sha256:75669ff012e9cc5e2eb334545b041a694fd37335a4d6f9dd0715b5fb66c6c856",
+    "schemas/sweep-scan.output.json": "sha256:fd42580f1d96f318094eedb638aa8adc432ad9464f4d6ad8af23ba49ff1ea8ba"
+  }
+}

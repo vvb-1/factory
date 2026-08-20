@@ -1,0 +1,34 @@
+{
+  "id": "run-postmortem",
+  "version": 1,
+  "prompt": "agents/run-postmortem.md",
+  "input_schema": "schemas/run-postmortem.input.json",
+  "output_schema": "schemas/run-postmortem.output.json",
+  "output_contract": "factory.run-postmortem/v1",
+  "model_tier": "standard",
+  "workspace": {
+    "type": "artifacts",
+    "inputs": [
+      {
+        "from": "$.input.runPin.transcript",
+        "as": "transcript.json"
+      }
+    ],
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": []
+  },
+  "limits": {
+    "timeout_seconds": 600,
+    "attempts": 1
+  },
+  "mutating": false,
+  "emits": { "memos": ["postmortem"] },
+  "pins": {
+    "agents/run-postmortem.md": "sha256:4a72bb5d9e6659a3ffb0717300ef989cc7e04c9eaf18faceb6ae7e206693dad8",
+    "schemas/run-postmortem.input.json": "sha256:a21960e032daf352269d81d2a71e1fa7490cc5c18b6c11c8eef99b70378ded6e",
+    "schemas/run-postmortem.output.json": "sha256:1d11b1bbb2f52b4d67b2949d8aea66fc61102e16cfa82dcc7d1796bb35286a6b"
+  }
+}

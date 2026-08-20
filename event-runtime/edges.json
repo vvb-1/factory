@@ -1,0 +1,300 @@
+{
+  "disk-diagnose@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "REMEDIATE": {
+        "eventType": "keephq.disk-remediate.requested",
+        "input": {
+          "host": "$.input.host",
+          "mount": "$.artifact.mount",
+          "actions": "$.artifact.plan"
+        }
+      }
+    }
+  },
+  "triage-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "TRIAGE": {
+        "eventType": "factory.triage-apply.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "plan": "$.artifact.plan"
+        }
+      }
+    }
+  },
+  "unblock-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "UNBLOCK": {
+        "eventType": "factory.unblock-apply.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "plan": "$.artifact.plan"
+        }
+      }
+    }
+  },
+  "sweep-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "SWEEP": {
+        "eventType": "factory.sweep-apply.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "plan": "$.artifact.plan"
+        }
+      }
+    }
+  },
+  "ship-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "SHIP": {
+        "eventType": "factory.ship-apply.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "base": "$.artifact.base",
+          "deployBranch": "$.artifact.deployBranch",
+          "headSha": "$.artifact.headSha",
+          "deployHeadSha": "$.artifact.deployHeadSha",
+          "changelog": "$.artifact.changelog",
+          "plan": "$.artifact.plan"
+        }
+      }
+    }
+  },
+  "ci-log-capture@1": {
+    "recommendationField": "exitCode",
+    "edges": {
+      "0": {
+        "eventType": "factory.ci-diagnose.requested",
+        "input": {
+          "repo": "$.input.repo",
+          "runId": "$.input.runId",
+          "logArtifact": "$.artifactHash.ci-log"
+        }
+      }
+    }
+  },
+  "work-scan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "DISPATCH": {
+        "eventType": "factory.dispatch.requested",
+        "itemsField": "plan",
+        "itemKey": "ticket",
+        "input": {
+          "repo": "$.artifact.repo"
+        }
+      }
+    }
+  },
+  "triage-apply@1": {
+    "recommendationField": "outcome",
+    "edges": {
+      "SUPPLY_CHANGED": {
+        "eventType": "factory.work.requested",
+        "input": {
+          "repo": "$.artifact.repo"
+        }
+      }
+    }
+  },
+  "dispatch@1": {
+    "recommendationField": "outcome",
+    "edges": {
+      "PR_OPEN": {
+        "eventType": "factory.work.requested",
+        "also": ["PR_OPEN_MERGE"],
+        "input": {
+          "repo": "$.input.repo"
+        }
+      },
+      "PR_OPEN_MERGE": {
+        "eventType": "factory.merge.requested",
+        "mixedEventId": "chain-${runId}-merge",
+        "whenPath": "$.artifact.prNumber",
+        "input": {
+          "repo": "$.artifact.repo",
+          "prNumbers": ["$.artifact.prNumber"]
+        }
+      },
+      "NOT_CLAIMED": {
+        "eventType": "factory.work.requested",
+        "input": {
+          "repo": "$.input.repo"
+        }
+      }
+    }
+  },
+  "ci-doctor@2": {
+    "recommendationField": "verdict",
+    "edges": {
+      "FLAKE": {
+        "eventType": "factory.ci-rerun.requested",
+        "input": {
+          "repo": "$.input.repo",
+          "runId": "$.input.runId"
+        }
+      },
+      "ENV": {
+        "eventType": "factory.ci-rerun.requested",
+        "input": {
+          "repo": "$.input.repo",
+          "runId": "$.input.runId"
+        }
+      },
+      "TICKET": {
+        "eventType": "factory.ci-escalate.requested",
+        "input": {
+          "repo": "$.input.repo",
+          "runId": "$.input.runId",
+          "summary": "$.artifact.summary"
+        }
+      }
+    }
+  },
+  "merge-scan@2": {
+    "recommendationField": "recommendation",
+    "independent": true,
+    "edges": {
+      "REVIEW": {
+        "eventType": "factory.merge-review.requested",
+        "whenItemsField": "reviews",
+        "mixedEventId": "chain-${runId}-review-${item.pr}",
+        "itemsField": "reviews",
+        "itemKey": "pr",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "base": "$.artifact.base"
+        },
+        "perItem": {
+          "pr": "$.item.pr",
+          "headSha": "$.item.headSha",
+          "baseSha": "$.item.baseSha"
+        }
+      },
+      "PLAN": {
+        "eventType": "factory.merge-plan.requested",
+        "whenItemsField": "planRequests",
+        "mixedEventId": "chain-${runId}-plan-${item.repo}",
+        "itemsField": "planRequests",
+        "itemKey": "repo",
+        "input": {
+          "repo": "$.artifact.repo"
+        }
+      },
+      "FIX": {
+        "eventType": "factory.merge-fix.requested",
+        "whenItemsField": "fix",
+        "mixedEventId": "chain-${runId}-fix-${item.pr}-${item.findingHash}",
+        "itemsField": "fix",
+        "itemKey": "ticket",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "base": "$.artifact.base"
+        },
+        "perItem": {
+          "pr": "$.item.pr",
+          "headSha": "$.item.headSha",
+          "baseSha": "$.item.baseSha",
+          "headRef": "$.item.headRef",
+          "ticket": "$.item.ticket",
+          "finding": "$.item.finding",
+          "findingHash": "$.item.findingHash",
+          "round": "$.item.round",
+          "mechanical": "$.item.mechanical",
+          "withinOwnedPaths": "$.item.withinOwnedPaths",
+          "ownedPaths": "$.item.ownedPaths"
+        }
+      },
+      "ESCALATE": {
+        "eventType": "factory.merge-escalate.requested",
+        "whenItemsField": "escalate",
+        "mixedEventId": "chain-${runId}-escalate",
+        "input": {
+          "repo": "$.artifact.repo",
+          "summary": "$.artifact.summary"
+        }
+      }
+    }
+  },
+  "merge-plan@1": {
+    "recommendationField": "recommendation",
+    "edges": {
+      "MERGE": {
+        "eventType": "factory.merge-apply.requested",
+        "eventId": "chain-${runId}-merge",
+        "mixedEventId": "chain-${runId}-merge",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "base": "$.artifact.base",
+          "deployBranch": "$.artifact.deployBranch",
+          "plan": "$.artifact.plan"
+        }
+      }
+    }
+  },
+  "merge-review@1": {
+    "recommendationField": "verdict",
+    "independent": true,
+    "edges": {
+      "FIX": {
+        "eventType": "factory.merge-fix.requested",
+        "whenItemsField": "fix",
+        "mixedEventId": "chain-${runId}-fix-${item.pr}-${item.findingHash}",
+        "itemsField": "fix",
+        "itemKey": "ticket",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.artifact.github",
+          "base": "$.artifact.base"
+        },
+        "perItem": {
+          "pr": "$.item.pr",
+          "headSha": "$.item.headSha",
+          "baseSha": "$.item.baseSha",
+          "headRef": "$.item.headRef",
+          "ticket": "$.item.ticket",
+          "finding": "$.item.finding",
+          "findingHash": "$.item.findingHash",
+          "round": "$.item.round",
+          "mechanical": "$.item.mechanical",
+          "withinOwnedPaths": "$.item.withinOwnedPaths",
+          "ownedPaths": "$.item.ownedPaths"
+        }
+      },
+      "ESCALATE": {
+        "eventType": "factory.merge-escalate.requested",
+        "whenItemsField": "escalate",
+        "mixedEventId": "chain-${runId}-escalate",
+        "input": {
+          "repo": "$.artifact.repo",
+          "summary": "$.artifact.summary"
+        }
+      }
+    }
+  },
+  "merge-fix@1": {
+    "recommendationField": "outcome",
+    "edges": {
+      "UPDATED": {
+        "eventType": "factory.merge-review.requested",
+        "input": {
+          "repo": "$.artifact.repo",
+          "github": "$.input.github",
+          "base": "$.input.base",
+          "pr": "$.artifact.pr",
+          "headSha": "$.artifact.headSha",
+          "baseSha": "$.input.baseSha"
+        }
+      }
+    }
+  }
+}

@@ -16,14 +16,20 @@
  * must not require an install step to work.
  */
 
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+
 /**
- * Extract the `## Owned Paths` bullet list from a Linear issue description.
+ * Extract the Owned Paths bullet list (levels 2-4) from a Linear issue description.
  * Returns [] when the section is missing or fails to parse — for dispatch,
  * use `effectiveOwnedPaths`, which turns that into "collides with
  * everything" rather than "not dispatchable".
  */
 export function parseOwnedPaths(description = "") {
-  const section = description.split(/^##\s+/m).find((s) => /^Owned Paths/i.test(s));
+  const section = description.split(/^#{2,4}\s+/m).find((s) => {
+    const heading = s.split("\n")[0];
+    return /\bOwned Paths\b/i.test(heading);
+  });
   if (!section) return [];
 
   // Real tickets write this section three different ways — bullet lists, fenced
@@ -36,28 +42,43 @@ export function parseOwnedPaths(description = "") {
   let inFence = false;
 
   for (const raw of section.split("\n").slice(1)) {
-    if (/^\s*```/.test(raw)) { inFence = !inFence; continue; }
+    if (/^\s*```/.test(raw)) {
+      inFence = !inFence;
+      continue;
+    }
     const line = raw.trim();
     if (!line) continue;
 
-    if (inFence) { out.push(line); continue; }
-    if (/^[-*]\s+/.test(line)) { out.push(line.replace(/^[-*]\s*/, "")); continue; }
-    if (/^ {4,}\S/.test(raw)) out.push(line);           // indented code block
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      out.push(line.replace(/^[-*]\s*/, ""));
+      continue;
+    }
+    if (/^ {4,}\S/.test(raw)) out.push(line); // indented code block
   }
 
-  return out
-    .map((s) => s.replace(/`/g, "").replace(/[,;]$/, "").trim())
-    // Tickets routinely annotate a path with its change kind — "(new)",
-    // "(modified)", "(deleted)" — right after the backtick. Left in place that
-    // annotation is prose, not part of the path, and used to sink the whole
-    // line: `foo.ts (new)` has a space, so it read as prose and got dropped,
-    // silently downgrading a perfectly good path to "no Owned Paths".
-    .map((s) => s.replace(/\s*\([^()]*\)\s*$/, "").trim())
-    .filter(Boolean)
-    .filter((s) => !s.startsWith("#"))
-    // A path has no spaces and looks like a path: a separator, a wildcard, or an
-    // extension. This drops the prose that legitimately appears in the section.
-    .filter((s) => !/\s/.test(s) && (s.includes("/") || s.includes("*") || /\.[a-z0-9]+$/i.test(s)));
+  return (
+    out
+      .map((s) => s.replace(/`/g, "").replace(/[,;]$/, "").trim())
+      // Tickets routinely annotate a path with its change kind — "(new)",
+      // "(modified)", "(deleted)" — right after the backtick. Left in place that
+      // annotation is prose, not part of the path, and used to sink the whole
+      // line: `foo.ts (new)` has a space, so it read as prose and got dropped,
+      // silently downgrading a perfectly good path to "no Owned Paths".
+      .map((s) => s.replace(/\s*\([^()]*\)\s*$/, "").trim())
+      .filter(Boolean)
+      .filter((s) => !s.startsWith("#"))
+      // A path has no spaces and looks like a path: a separator, a wildcard, or an
+      // extension. This drops the prose that legitimately appears in the section.
+      .filter(
+        (s) =>
+          !/\s/.test(s) &&
+          (s.includes("/") || s.includes("*") || /\.[a-z0-9]+$/i.test(s)),
+      )
+  );
 }
 
 /**
@@ -81,6 +102,80 @@ export function effectiveOwnedPaths(description = "") {
   return own.length ? own : ["**"];
 }
 
+/**
+ * Extract the ticket's Verification Command (WM-718) from a Linear issue
+ * description: the section headed `Verification Command` (or `Verification`,
+ * levels 2-4), read as either a fenced ``` block, a single line wrapped in
+ * backticks, or — failing both — the first bare non-prose line. Multi-line
+ * fenced blocks are joined with ` && ` (comment lines dropped, backslash
+ * continuations rejoined) so "all of these must pass" is what actually runs.
+ * Returns null when the section is missing or holds nothing runnable; the
+ * worker's handoff gate then falls back to the repo's `verify:` command and,
+ * absent both, refuses the handoff (fail-closed).
+ */
+export function parseVerificationCommand(description = "") {
+  const section = String(description ?? "")
+    .split(/^#{2,4}\s+/m)
+    .find((s) => {
+      const heading = s.split("\n")[0];
+      return /^Verification(\s+Command)?\s*:?\s*$/i.test(heading.trim());
+    });
+  if (!section) return null;
+
+  const body = section.split("\n").slice(1);
+  const fenced = [];
+  let inFence = false;
+  let sawFence = false;
+  for (const raw of body) {
+    if (/^\s*```/.test(raw)) {
+      if (inFence) break;
+      inFence = true;
+      sawFence = true;
+      continue;
+    }
+    if (inFence) fenced.push(raw);
+  }
+  if (sawFence) return joinCommandLines(fenced);
+
+  for (const raw of body) {
+    const line = raw.trim();
+    if (!line) continue;
+    const ticked = /^`([^`]+)`\.?$/.exec(line);
+    if (ticked) return normalizeCommandLine(ticked[1]);
+    // A bare line: accept only when it does not read as prose.
+    if (/[.!?]$/.test(line) && !/\)$/.test(line)) return null;
+    return normalizeCommandLine(line) || null;
+  }
+  return null;
+}
+
+function normalizeCommandLine(line) {
+  return String(line ?? "")
+    .trim()
+    .replace(/^\$\s+/, "")
+    .trim();
+}
+
+function joinCommandLines(lines) {
+  const commands = [];
+  let pending = "";
+  for (const raw of lines) {
+    let line = raw.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+    if (!pending && /^\s*#/.test(line)) continue;
+    line = pending ? `${pending} ${line.trim()}` : normalizeCommandLine(line);
+    if (line.endsWith("\\")) {
+      pending = line.slice(0, -1).trimEnd();
+      continue;
+    }
+    pending = "";
+    if (line) commands.push(line);
+  }
+  if (pending) commands.push(pending);
+  if (commands.length === 0) return null;
+  return commands.length === 1 ? commands[0] : commands.join(" && ");
+}
+
 /** Escape regex metacharacters that are not glob syntax. */
 function escapeLiteral(s) {
   return s.replace(/[.+^${}()|[\]\\]/g, "\\$&");
@@ -101,7 +196,8 @@ export function globToRegExp(glob) {
   // common at repo root), so it must match itself too, not just descendants.
   // A path with an explicit trailing slash (`app/services/`) means "contents
   // only" and does not get this treatment.
-  const matchSelf = !g.endsWith("/") && !/[*?{}]/.test(g) && !/\.[a-z0-9]+$/i.test(g);
+  const matchSelf =
+    !g.endsWith("/") && !/[*?{}]/.test(g) && !/\.[a-z0-9]+$/i.test(g);
   if (g.endsWith("/")) g += "**";
   else if (matchSelf) g += "/**";
 
@@ -111,16 +207,27 @@ export function globToRegExp(glob) {
     if (c === "*") {
       if (g[i + 1] === "*") {
         // `**/` should also match zero segments, so `a/**/b.ts` matches `a/b.ts`.
-        if (g[i + 2] === "/") { re += "(?:.*/)?"; i += 2; }
-        else { re += ".*"; i += 1; }
+        if (g[i + 2] === "/") {
+          re += "(?:.*/)?";
+          i += 2;
+        } else {
+          re += ".*";
+          i += 1;
+        }
       } else {
         re += "[^/]*";
       }
     } else if (c === "?") re += "[^/]";
     else if (c === "{") {
       const close = g.indexOf("}", i);
-      if (close === -1) { re += "\\{"; continue; }
-      const alts = g.slice(i + 1, close).split(",").map((a) => escapeLiteral(a.trim()));
+      if (close === -1) {
+        re += "\\{";
+        continue;
+      }
+      const alts = g
+        .slice(i + 1, close)
+        .split(",")
+        .map((a) => escapeLiteral(a.trim()));
       re += `(?:${alts.join("|")})`;
       i = close;
     } else re += escapeLiteral(c);
@@ -170,6 +277,201 @@ export function globsOverlap(a, b) {
 /** Do two tickets' Owned Paths sets intersect? */
 export function pathsCollide(setA = [], setB = []) {
   return setA.some((a) => setB.some((b) => globsOverlap(a, b)));
+}
+
+/**
+ * Every overlapping pair between two Owned Paths sets, for advisory evidence.
+ * Same predicate as pathsCollide, but returns the pairs instead of a boolean so
+ * a proposal can name what it overlaps with rather than just refusing.
+ */
+export function pathOverlaps(setA = [], setB = []) {
+  const out = [];
+  for (const a of setA)
+    for (const b of setB) if (globsOverlap(a, b)) out.push({ a, b });
+  return out;
+}
+
+/**
+ * The set of overlaps that still refuse dispatch under advisory mode (WM-677):
+ * a `**` claim on either side, and nothing else. `**` is the fail-closed
+ * sentinel for "this ticket's scope is unknown, it must run alone" — the one
+ * claim a rebase cannot reason about. Everything else, including two tickets
+ * naming the SAME concrete file, is textual overlap: same file is not same
+ * lines (tickets qualify claims like `App.tsx (interval constants only)` for
+ * exactly this), and rebase/merge-fix resolve it far more often than not. So
+ * it is recorded on the proposal and dispatch proceeds. The identical-file
+ * rule was tried first and refused App.tsx/hooks.ts/api.mjs across four
+ * tickets in one batch on 2026-08-18 — precisely the starvation advisory mode
+ * exists to end.
+ */
+export function hardPathConflicts(setA = [], setB = []) {
+  const norm = (g) =>
+    String(g ?? "")
+      .trim()
+      .replace(/^\.\//, "")
+      .replace(/\/$/, "");
+  return pathOverlaps(setA, setB).filter(
+    ({ a, b }) => norm(a) === "**" || norm(b) === "**",
+  );
+}
+
+function walkFiles(rootDir, baseDir = rootDir, out = []) {
+  for (const dirent of readdirSync(rootDir, { withFileTypes: true })) {
+    const nextPath = path.join(rootDir, dirent.name);
+    const rel = path.relative(baseDir, nextPath).replace(/\\/g, "/");
+    if (dirent.isDirectory()) {
+      walkFiles(nextPath, baseDir, out);
+      continue;
+    }
+    if (dirent.isFile()) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+function matchingManifestPaths(repoPath, manifestGlobs = []) {
+  if (!Array.isArray(manifestGlobs) || manifestGlobs.length === 0) return [];
+  if (!existsSync(repoPath)) {
+    throw new Error(
+      `owned-path closure check failed: repo path does not exist: ${repoPath}`,
+    );
+  }
+  const files = walkFiles(repoPath);
+  const matched = new Set();
+  for (const pattern of manifestGlobs) {
+    const matcher = globToRegExp(pattern);
+    for (const file of files) {
+      if (matcher.test(file)) matched.add(file);
+    }
+  }
+  return [...matched].sort();
+}
+
+function parsePinnedPaths(manifestPath) {
+  let payload;
+  try {
+    payload = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (err) {
+    throw new Error(
+      `owned-path closure check failed: cannot parse pin manifest ${manifestPath}: ${err.message}`,
+      { cause: err },
+    );
+  }
+  const raw = payload?.pins;
+  if (raw == null) return [];
+  if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
+    throw new Error(
+      `owned-path closure check failed: pin manifest ${manifestPath} has invalid "pins" value`,
+    );
+  }
+  return Object.keys(raw)
+    .filter((value) => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Gather every pin manifest and the paths it pins from a repo.
+ *
+ * Throws when a manifest can't be read or parsed; dispatch/state promotion is
+ * fail-closed around those config or content errors.
+ */
+export function readPinManifestRequirements(repoPath, manifestGlobs = []) {
+  const absoluteRepo = path.resolve(repoPath);
+  const manifests = matchingManifestPaths(absoluteRepo, manifestGlobs);
+  const out = [];
+
+  for (const manifest of manifests) {
+    const manifestPath = path.join(absoluteRepo, manifest);
+    const pinnedPaths = parsePinnedPaths(manifestPath);
+    out.push({ manifestPath: manifest, pinnedPaths });
+  }
+
+  return out;
+}
+
+/**
+ * Pure closure check: do the declared Owned Paths satisfy local closure policy?
+ *
+ * A ticket can dispatch only if every required path is also owned, and every
+ * manifest used by those paths is also owned.
+ */
+export function ownedPathsClosureGaps({
+  ownedPaths = [],
+  ownedPathsPolicy = { direct: [], pinManifests: [] },
+  pinManifestRequirements = [],
+} = {}) {
+  const own = Array.isArray(ownedPaths) ? ownedPaths : [];
+  const policy = {
+    direct: Array.isArray(ownedPathsPolicy?.direct)
+      ? ownedPathsPolicy.direct
+      : [],
+    pinManifests: Array.isArray(ownedPathsPolicy?.pinManifests)
+      ? ownedPathsPolicy.pinManifests
+      : [],
+  };
+
+  const gaps = [];
+  const seen = new Set();
+
+  const addGap = (gap) => {
+    const key = `${gap.requiredPath}::${gap.rule}::${gap.requiredBy}::${gap.manifestPath ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    gaps.push(gap);
+  };
+
+  for (const rule of policy.direct) {
+    if (!rule?.source || !Array.isArray(rule?.requires)) continue;
+    if (!own.some((owned) => globsOverlap(owned, rule.source))) continue;
+    for (const requiredPath of rule.requires) {
+      if (!own.some((owned) => globsOverlap(owned, requiredPath))) {
+        addGap({
+          rule: "direct",
+          requiredPath,
+          requiredBy: rule.source,
+        });
+      }
+    }
+  }
+
+  for (const manifestRequirement of pinManifestRequirements) {
+    const pinnedPaths = Array.isArray(manifestRequirement?.pinnedPaths)
+      ? manifestRequirement.pinnedPaths
+      : [];
+    const manifestPath = manifestRequirement?.manifestPath;
+    if (!manifestPath || !Array.isArray(pinnedPaths)) continue;
+    if (
+      !pinnedPaths.some((pinnedPath) =>
+        own.some((owned) => globsOverlap(owned, pinnedPath)),
+      )
+    )
+      continue;
+    if (!own.some((owned) => globsOverlap(owned, manifestPath))) {
+      const requiredBy = pinnedPaths.find((pinnedPath) =>
+        own.some((owned) => globsOverlap(owned, pinnedPath)),
+      );
+      addGap({
+        rule: "pin-manifest",
+        requiredPath: manifestPath,
+        requiredBy: requiredBy ?? pinnedPaths[0],
+        manifestPath,
+      });
+    }
+  }
+
+  return gaps;
+}
+
+/** Render closure gaps as operator-facing one-line hints. */
+export function formatOwnedPathClosureGaps(gaps = []) {
+  return gaps.map((gap) => {
+    if (gap.rule === "direct") {
+      return `Missing required Owned Paths entry: ${gap.requiredPath} (required by ${gap.requiredBy})`;
+    }
+    return `Missing required Owned Paths entry: ${gap.requiredPath} (required by ${gap.requiredBy} from ${gap.manifestPath})`;
+  });
 }
 
 /**

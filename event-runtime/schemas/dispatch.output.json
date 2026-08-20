@@ -1,0 +1,88 @@
+{
+  "title": "factory.dispatch-result/v1 output artifact — one ticket run's terminal outcome (WM-108)",
+  "type": "object",
+  "required": ["outcome", "repo", "ticket", "prUrl", "verification", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "outcome": {
+      "enum": ["PR_OPEN", "BLOCKED", "FAILED", "NOT_CLAIMED"],
+      "description": "Terminal state of the ticket run: PR_OPEN (verified, PR opened, ticket In Review), BLOCKED (typed question posted, ticket Blocked), FAILED (work attempted but no shippable diff), NOT_CLAIMED (claim lost or ticket no longer dispatchable at claim time — the typed NOOP of docs/event-runtime-dispatch.md §2)"
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short repo name the run worked in, echoed from the input"
+    },
+    "ticket": {
+      "type": "string",
+      "pattern": "^[A-Z]+-[0-9]+$",
+      "description": "Linear issue identifier this run implemented, echoed from the input"
+    },
+    "prUrl": {
+      "type": ["string", "null"],
+      "description": "URL of the opened pull request when outcome is PR_OPEN; null for every other outcome"
+    },
+    "prNumber": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Numeric pull request number when outcome is PR_OPEN, used to chain an immediate scoped merge review; null for every other outcome. Optional only for backward compatibility with accepted pre-WM-576 artifacts."
+    },
+    "verification": {
+      "type": "object",
+      "required": ["command", "passed", "output"],
+      "additionalProperties": false,
+      "description": "The ticket's own Verification Command as actually run in the worktree — never a claim without output",
+      "properties": {
+        "command": {
+          "type": ["string", "null"],
+          "description": "Exact verification command executed, or null when the run never reached verification (BLOCKED/NOT_CLAIMED)"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Whether the verification command exited zero; must be true for outcome PR_OPEN"
+        },
+        "output": {
+          "type": "string",
+          "description": "Tail of the verification command's output (last lines, enough for a reviewer to see the pass/fail evidence); empty when no command ran"
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One line an operator can act on: what shipped, what blocked, or why nothing happened"
+    },
+    "uxCritique": {
+      "type": "object",
+      "description": "UX gate result when the run reached post-verification review. Required by the dispatch prompt for PR_OPEN; optional in the schema for backward-compatible terminal outcomes produced before the gate.",
+      "required": ["status", "verdict", "evidence", "rounds", "prReady"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": ["required", "skipped", "blocked"]
+        },
+        "verdict": {
+          "type": ["string", "null"],
+          "enum": ["SHIP", "FIX-FIRST", "NOT-ASSESSED", "BLOCKED", null]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Observed worktree page URLs or screenshot paths supporting a required verdict; empty only when skipped or unavailable"
+        },
+        "rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "prReady": {
+          "type": "boolean",
+          "description": "True only when the PR is non-draft; an evidence-backed SHIP or a skipped gate may be ready"
+        }
+      }
+    }
+  }
+}

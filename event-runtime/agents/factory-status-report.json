@@ -1,0 +1,27 @@
+{
+  "id": "factory-status-report",
+  "version": 1,
+  "prompt": "agents/factory-status-report.md",
+  "input_schema": "schemas/factory-status-report.input.json",
+  "output_schema": "schemas/factory-status-report.output.json",
+  "output_contract": "factory.status-report/v1",
+  "model_tier": "standard",
+  "workspace": {
+    "type": "ephemeral",
+    "retainOnFailure": true
+  },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": ["linear:read"]
+  },
+  "limits": {
+    "timeout_seconds": 600,
+    "attempts": 1
+  },
+  "mutating": false,
+  "pins": {
+    "agents/factory-status-report.md": "sha256:8ed55ad1601b0f83f31724b111de89f9fe9e22aa55cc32712a95d46a18b7b086",
+    "schemas/factory-status-report.input.json": "sha256:44036797807c8b3ead4226e84dc8c0c1c70476fc7a8cbe9250760ccfe41a4435",
+    "schemas/factory-status-report.output.json": "sha256:8f9a9bbaf8527c35de30f599c122e598b24b9ea6708b31324d1c3a5568e084ac"
+  }
+}
