@@ -1,6 +1,6 @@
-# Contributing to Factory
+# Contributing to factory
 
-Thank you for helping improve Factory. Contributions may include bug reports,
+Thank you for helping improve factory. Contributions may include bug reports,
 documentation, tests, fixes, and focused feature proposals.
 
 ## Before you start
@@ -19,7 +19,7 @@ All participation in this project is governed by our
 
 ## Development setup
 
-Factory requires Git and [Bun](https://bun.sh/) 1.3 or newer.
+The factory requires Git and [Bun](https://bun.sh/) 1.3 or newer.
 
 ```bash
 git clone https://github.com/watt-mind/factory.git
