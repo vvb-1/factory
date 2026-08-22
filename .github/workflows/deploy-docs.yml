@@ -1,8 +1,13 @@
 name: Deploy Documentation
 
 on:
-  push:
+  pull_request:
     branches: ["develop", "main"]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy-docs.yml"
+  push:
+    branches: ["main"]
     paths:
       - "site/**"
       - ".github/workflows/deploy-docs.yml"
@@ -10,8 +15,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
@@ -41,6 +44,10 @@ jobs:
           cd site
           bun run build
 
+      - name: Configure GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -48,6 +55,10 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
