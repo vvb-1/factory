@@ -33,9 +33,10 @@ import {
   writeWorkerLease,
 } from "../../lib/worker-leases.mjs";
 import { loadForge } from "../../lib/forge/index.mjs";
+import { releaseLabels } from "../../lib/control-plane/labels.mjs";
 import { storeCollected, storeResultArtifact } from "./artifacts.mjs";
-import { canonicalJson, hashJson, sha256Hex } from "./canonical.mjs";
-import { artifactsRoot, FACTORY_ROOT } from "./config.mjs";
+import { canonicalJson, hashBytes, hashJson, sha256Hex } from "./canonical.mjs";
+import { artifactsRoot, FACTORY_ROOT, resolveConfigPath } from "./config.mjs";
 import { nextCounter, recordRunUsage, tx, txImmediate } from "./db.mjs";
 import { getAgent } from "./registry.mjs";
 import { IllegalTransition, transition } from "./lifecycle.mjs";
@@ -76,6 +77,59 @@ const HARNESS_UNKNOWN_CODES = Object.freeze({
   commands: "harness_unknown_command",
   subagents: "harness_unknown_subagent",
 });
+
+const INSTANCE_LOCAL_CONFIG_FILES = Object.freeze([
+  "repos.yaml",
+  "policy.yaml",
+  "schedule.yaml",
+]);
+
+/**
+ * Bring the operator-owned config files into a delegated checkout. These
+ * files are intentionally untracked, so a fresh worktree otherwise falls
+ * back to examples and cannot use this factory instance's routing or policy.
+ */
+export function provisionInstanceLocalConfigs({
+  checkoutPath,
+  factoryRoot = process.env.FACTORY_ROOT || FACTORY_ROOT,
+} = {}) {
+  if (!checkoutPath) return [];
+  const sourceConfig = path.join(factoryRoot, "config");
+  const destinationConfig = path.join(checkoutPath, "config");
+  const isGitCheckout =
+    spawnSync(
+      "git",
+      ["-C", checkoutPath, "rev-parse", "--is-inside-work-tree"],
+      {
+        encoding: "utf8",
+      },
+    ).status === 0;
+  const copied = [];
+
+  for (const filename of INSTANCE_LOCAL_CONFIG_FILES) {
+    const source = path.join(sourceConfig, filename);
+    const rel = path.posix.join("config", filename);
+    if (!existsSync(source)) continue;
+    const destination = path.join(destinationConfig, filename);
+    if (path.resolve(source) === path.resolve(destination)) continue;
+
+    // Never introduce an instance config into a checkout where an agent could
+    // stage it. Non-factory repository fixtures and repositories without this
+    // local-config contract continue using their tracked examples.
+    if (
+      isGitCheckout &&
+      spawnSync("git", ["-C", checkoutPath, "check-ignore", "-q", "--", rel], {
+        encoding: "utf8",
+      }).status !== 0
+    ) {
+      continue;
+    }
+    mkdirSync(destinationConfig, { recursive: true });
+    cpSync(source, destination);
+    copied.push(rel);
+  }
+  return copied;
+}
 
 export class HarnessMaterializeError extends Error {
   /**
@@ -128,6 +182,32 @@ function harnessRelDest(layout, name) {
     );
   }
   return parts.join("/");
+}
+
+/** Hash every regular file copied for one declared harness component. */
+function harnessFilePins(dest, workspaceDir) {
+  const files = [];
+  const visit = (file) => {
+    const st = statSync(file);
+    if (st.isFile()) {
+      files.push(file);
+      return;
+    }
+    for (const entry of readdirSync(file, { withFileTypes: true }).sort(
+      (a, b) => a.name.localeCompare(b.name),
+    )) {
+      visit(path.join(file, entry.name));
+    }
+  };
+  visit(dest);
+  return Object.fromEntries(
+    files
+      .sort()
+      .map((file) => [
+        path.relative(workspaceDir, file),
+        hashBytes(readFileSync(file)),
+      ]),
+  );
 }
 
 /**
@@ -224,6 +304,7 @@ export function materializeRunHarness({
         kind,
         name,
         dest: path.relative(workspaceDir, dest),
+        pins: harnessFilePins(dest, workspaceDir),
       });
     }
   }
@@ -264,7 +345,7 @@ export const DYNAMIC_DEADLINE_ADAPTERS = new Set([
 export function policyMaxRunMinutes(root = FACTORY_ROOT) {
   try {
     const value = Bun.YAML.parse(
-      readFileSync(path.join(root, "config", "policy.yaml"), "utf8"),
+      readFileSync(resolveConfigPath("policy", { root }), "utf8"),
     )?.limits?.max_run_minutes;
     return Number.isFinite(value) && value > 0 ? Number(value) : null;
   } catch {
@@ -986,8 +1067,9 @@ function defaultIsAlive(pid) {
 
 export function defaultLocksDir() {
   if (process.env.FACTORY_LOCKS_DIR) return process.env.FACTORY_LOCKS_DIR;
-  if (process.env.FACTORY_EVENT_HOME)
-    return path.join(process.env.FACTORY_EVENT_HOME, "locks");
+  // Ticket claims must share the dispatcher lock, not this runtime instance's
+  // private event home. Supervisors use one tracker identity, so an assignee
+  // read-back cannot distinguish two concurrent claims from this machine.
   return path.join(homedir(), ".factory", "locks");
 }
 
@@ -1443,13 +1525,23 @@ function defaultClaimTicket({ repo, ticket, harness = "claude" }) {
   }
 }
 
-function defaultUnclaimTicket({ repo, ticket, why, log = null, fetchTicket }) {
+// `runCli` is the test seam, mirroring the `fetchTicket` injection already
+// here: the interesting behaviour is the exact argv this builds (WM-1024),
+// and asserting "some mutation ran" was already true of the broken version.
+export function defaultUnclaimTicket({
+  repo,
+  ticket,
+  why,
+  log = null,
+  fetchTicket,
+  runCli = runLinearCli,
+}) {
   try {
     let cur = null;
     if (typeof fetchTicket === "function") {
       cur = fetchTicket(ticket);
     } else {
-      const out = runLinearCli(["get", ticket, "--json"]);
+      const out = runCli(["get", ticket, "--json"]);
       cur = JSON.parse(out);
     }
     if (!cur || cur.state?.name !== "In Progress") return false;
@@ -1459,16 +1551,26 @@ function defaultUnclaimTicket({ repo, ticket, why, log = null, fetchTicket }) {
     )
       return false;
 
-    runLinearCli([
+    // WM-1024: `Todo` + unassigned is NOT dispatchable — the predicate in
+    // docs/protocol.md §4 also requires `ai:agent-ready`. This path used to
+    // drop `ai:in-progress` and stop there, which did not re-queue the ticket
+    // but hid it: the board still read `Todo`, and no dispatcher ever picked
+    // it up again. Also strips the stale `agent:*` label, which otherwise
+    // claims a harness still holds work it has given up.
+    const currentNames = (
+      Array.isArray(cur.labels) ? cur.labels : (cur.labels?.nodes ?? [])
+    ).map((l) => l.name);
+    const { add, remove } = releaseLabels(currentNames, { to: "Todo" });
+    runCli([
       "state",
       ticket,
       "Todo",
       "--unassign",
-      "--remove",
-      "ai:in-progress",
+      ...add.flatMap((n) => ["--add", n]),
+      ...remove.flatMap((n) => ["--remove", n]),
     ]);
-    const body = `Dispatch run failed, claim released back to Todo.\n\n**Why:** ${why}${log ? `\n**Log:** \`${log.replace(homedir(), "~")}\`` : ""}`;
-    runLinearCli(["comment", ticket, body]);
+    const body = `Dispatch run failed, claim released back to Todo + ai:agent-ready.\n\n**Why:** ${why}${log ? `\n**Log:** \`${log.replace(homedir(), "~")}\`` : ""}`;
+    runCli(["comment", ticket, body]);
     return true;
   } catch {
     return false;
@@ -1824,6 +1926,7 @@ export async function executeClaimed(
   const mayMutateClaimedTicket = () =>
     ticketClaimed && assertCurrentToken(db, runId, fencingToken);
   let attemptUsage = { adapter: adapterOverride ?? spec.adapter };
+  let materializedHarnessPins = null;
 
   let dispatchOpts = dispatch;
   const explicitDispatchStub =
@@ -2031,6 +2134,7 @@ export async function executeClaimed(
         evidenceSetHash: null,
         journalHead: latestJournalHash(db, runId),
         verificationStatus: "passed",
+        harnessPins: materializedHarnessPins,
       });
       const result = {
         schemaVersion: "factory.run-result/v1",
@@ -2378,6 +2482,7 @@ export async function executeClaimed(
     workspaceDir = created.dir;
     assertSandboxWorkspaceSupported(workspaceDir, def);
     checkoutPath = created.checkout?.path ?? null;
+    provisionInstanceLocalConfigs({ checkoutPath });
     checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
     worktreeRecord = created.worktree
       ? {
@@ -2421,13 +2526,18 @@ export async function executeClaimed(
     }
 
     try {
-      materializeRunHarness({
+      const writtenHarness = materializeRunHarness({
         spec,
         adapter,
         adapterKey,
         workspaceDir,
         registry,
       });
+      const pins = Object.assign(
+        {},
+        ...writtenHarness.map((entry) => entry.pins),
+      );
+      materializedHarnessPins = Object.keys(pins).length > 0 ? pins : null;
     } catch (err) {
       if (err instanceof HarnessMaterializeError) {
         const refusedRes = refuseTerminal(err.code, ["harness_materialize"], {
@@ -2960,6 +3070,7 @@ export async function executeClaimed(
           evidenceSetHash: null,
           journalHead: latestJournalHash(db, runId),
           verificationStatus: "passed",
+          harnessPins: materializedHarnessPins,
         });
         db.query(
           `INSERT INTO results (run_id, attempt, result_json, artifact_hash, evidence_set_hash, verification_json, receipt_json, accepted_at)
@@ -3059,6 +3170,7 @@ export async function executeClaimed(
         journalHead: latestJournalHash(db, runId),
         verificationStatus: "passed",
         extraReceipt: verified.receipt,
+        harnessPins: materializedHarnessPins,
       });
       const { result } = verified;
       db.query(

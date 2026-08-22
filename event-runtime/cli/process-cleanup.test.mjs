@@ -7,9 +7,13 @@ import { fileURLToPath } from "node:url";
 import {
   cleanupTrackedProcesses,
   processOwnerWatchdogSource,
+  registerTestProcessCleanup,
   spawnTracked,
   trackProcessGroupForPid,
 } from "../lib/test-helpers-process.mjs";
+import { loadAdjustedTimeout } from "../lib/test-helpers-timing.mjs";
+
+registerTestProcessCleanup(import.meta.url);
 
 const EVENT_RUNTIME = fileURLToPath(new URL("..", import.meta.url));
 const LIVE_STACK = fileURLToPath(
@@ -26,6 +30,7 @@ function processExists(pid) {
 }
 
 async function waitForFile(file, timeoutMs = 5_000) {
+  timeoutMs = loadAdjustedTimeout(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -39,6 +44,7 @@ async function waitForFile(file, timeoutMs = 5_000) {
 }
 
 async function waitForExit(pid, timeoutMs = 5_000) {
+  timeoutMs = loadAdjustedTimeout(timeoutMs);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!processExists(pid)) return;

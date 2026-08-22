@@ -129,7 +129,34 @@ function toLinearIssue(t) {
     project: t.project,
     labels: { nodes: t.labels ?? [] },
     comments: { nodes: t.comments ?? [] },
+    // WM-1008. The seed writes priority/createdAt flat and blockers as plain
+    // identifiers; this is where they take Linear's wire shape, so the SAME
+    // fixture drives both the memory fake and the Linear adapter.
+    priority: t.priority ?? 0,
+    createdAt: t.createdAt ?? "",
+    inverseRelations: {
+      nodes: (t.blockedBy ?? []).map((id) => ({
+        type: "blocks",
+        issue: {
+          identifier: id,
+          state: { type: stateTypeOfSeed(id) },
+        },
+      })),
+    },
   };
+}
+
+/** Linear state `type` of a seeded blocker, resolved from the shared seed. */
+let SEED_FOR_RELATIONS = null;
+function stateTypeOfSeed(identifier) {
+  const t = SEED_FOR_RELATIONS?.tickets?.find(
+    (x) => x.identifier === identifier,
+  );
+  const name = (t?.state?.name ?? "").toLowerCase();
+  if (!t) return "started"; // unknown blocker: fail closed, stays blocking
+  if (["done"].includes(name)) return "completed";
+  if (["canceled", "duplicate"].includes(name)) return "canceled";
+  return t.state?.type ?? "started";
 }
 
 /**
@@ -137,6 +164,7 @@ function toLinearIssue(t) {
  * implementations can be asserted through the same fixture.
  */
 function fakeGql(seed) {
+  SEED_FOR_RELATIONS = seed;
   const gql = async (query, variables = {}) => {
     gql.calls.push({ query, variables });
     const q = String(query).replace(/\s+/g, " ");
@@ -239,14 +267,21 @@ function fakeGql(seed) {
     }
 
     if (q.includes("issues(")) {
+      // WM-1008: listTickets sends either an explicit state-name list ($s) or
+      // a "not finished" type filter. Assignee is NOT filtered server-side any
+      // more — listDispatchable applies that, so the fake must return claimed
+      // tickets too or the dispatcher can never see In Progress work.
       const team = variables.t;
       const project = variables.p;
+      const wanted = variables.s?.length
+        ? new Set(variables.s.map((n) => String(n).toLowerCase()))
+        : null;
       const nodes = seed.tickets.filter((t) => {
         if ((t.team?.key ?? "") !== team) return false;
         if (project && t.project?.name !== project) return false;
-        if ((t.state?.name ?? "").toLowerCase() !== "todo") return false;
-        if (t.assignee) return false;
-        return true;
+        const name = (t.state?.name ?? "").toLowerCase();
+        if (wanted) return wanted.has(name);
+        return !["done", "canceled", "duplicate"].includes(name);
       });
       return { issues: { nodes: nodes.map(toLinearIssue) } };
     }
@@ -354,6 +389,152 @@ for (const [name, make] of IMPLEMENTATIONS) {
       });
       expect(none).toEqual([]);
       await expect(cp.listDispatchable({})).rejects.toThrow(ControlPlaneError);
+    });
+
+    // ------------------------------------------- WM-1008: order and gating ---
+    // These run against EVERY implementation. Both properties fail silently
+    // if an adapter skips them: a wrong order just dispatches the wrong
+    // ticket first, and a missed blocker runs work whose dependency is not
+    // finished. Neither raises an error, so only a test catches them.
+
+    /** Seed three ready tickets with explicit priorities and creation times. */
+    function withQueue(seed) {
+      const base = seed.tickets[0];
+      const mk = (n, priority, createdAt, extra = {}) => ({
+        ...base,
+        id: `id-q${n}`,
+        identifier: `WM-${n}`,
+        title: `queued ${n}`,
+        priority,
+        createdAt,
+        labels: [{ id: "l-ready", name: AGENT_READY_LABEL }],
+        assignee: null,
+        state: { id: "s-todo", name: "Todo", type: "unstarted" },
+        ...extra,
+      });
+      seed.tickets.push(
+        mk(20, 3, "2026-01-01T00:00:00Z"),
+        mk(21, 1, "2026-01-02T00:00:00Z"),
+        mk(22, null, "2026-01-03T00:00:00Z"),
+        mk(23, 1, "2026-01-01T00:00:00Z"),
+      );
+      return seed;
+    }
+
+    test("listDispatchable is ordered priority asc, then createdAt asc", async () => {
+      const { cp, seed } = make();
+      withQueue(seed);
+      const ready = (await cp.listDispatchable({ team: TEAM })).map(
+        (t) => t.identifier,
+      );
+      // WM-23 and WM-21 are both priority 1; WM-23 was created first.
+      expect(ready.indexOf("WM-23")).toBeLessThan(ready.indexOf("WM-21"));
+      expect(ready.indexOf("WM-21")).toBeLessThan(ready.indexOf("WM-20"));
+    });
+
+    test("a ticket with no priority sorts LAST, never first", async () => {
+      const { cp, seed } = make();
+      withQueue(seed);
+      const ready = (await cp.listDispatchable({ team: TEAM })).map(
+        (t) => t.identifier,
+      );
+      // WM-22 has null priority. Treated as 0 it would lead the queue, which
+      // is exactly backwards — "unset" must never outrank "urgent".
+      expect(ready.at(-1)).toBe("WM-22");
+      expect(ready[0]).not.toBe("WM-22");
+    });
+
+    test("priority is normalized: absent/zero reads as null", async () => {
+      const { cp } = make();
+      const t = await cp.getTicket("WM-1");
+      expect(t.priority ?? null).toBeNull();
+    });
+
+    test("a ticket with an OPEN blocker is excluded from listDispatchable", async () => {
+      const { cp, seed } = make();
+      const base = seed.tickets[0];
+      seed.tickets.push({
+        ...base,
+        id: "id-blocker",
+        identifier: "WM-30",
+        title: "the blocker",
+        state: { id: "s-todo", name: "Todo", type: "unstarted" },
+        labels: [],
+        assignee: null,
+      });
+      seed.tickets.push({
+        ...base,
+        id: "id-blocked",
+        identifier: "WM-31",
+        title: "the dependent",
+        state: { id: "s-todo", name: "Todo", type: "unstarted" },
+        labels: [{ id: "l-ready", name: AGENT_READY_LABEL }],
+        assignee: null,
+        blockedBy: ["WM-30"],
+      });
+      const ready = await cp.listDispatchable({ team: TEAM });
+      expect(ready.map((t) => t.identifier)).not.toContain("WM-31");
+    });
+
+    test("closing the blocker releases the dependent", async () => {
+      const { cp, seed } = make();
+      const base = seed.tickets[0];
+      const blocker = {
+        ...base,
+        id: "id-blocker",
+        identifier: "WM-30",
+        title: "the blocker",
+        state: { id: "s-todo", name: "Todo", type: "unstarted" },
+        labels: [],
+        assignee: null,
+      };
+      seed.tickets.push(blocker, {
+        ...base,
+        id: "id-blocked",
+        identifier: "WM-31",
+        title: "the dependent",
+        state: { id: "s-todo", name: "Todo", type: "unstarted" },
+        labels: [{ id: "l-ready", name: AGENT_READY_LABEL }],
+        assignee: null,
+        blockedBy: ["WM-30"],
+      });
+      expect(
+        (await cp.listDispatchable({ team: TEAM })).map((t) => t.identifier),
+      ).not.toContain("WM-31");
+
+      blocker.state = { id: "s-done", name: "Done", type: "completed" };
+      expect(
+        (await cp.listDispatchable({ team: TEAM })).map((t) => t.identifier),
+      ).toContain("WM-31");
+    });
+
+    test("listTickets returns In Progress work with descriptions", async () => {
+      // The dispatcher needs Owned Paths of RUNNING tickets to test collision.
+      const { cp, seed } = make();
+      const base = seed.tickets[0];
+      seed.tickets.push({
+        ...base,
+        id: "id-running",
+        identifier: "WM-40",
+        title: "running",
+        description: "## Owned Paths\n- lib/running/**\n",
+        state: { id: "s-progress", name: "In Progress", type: "started" },
+        labels: [{ id: "l-prog", name: IN_PROGRESS_LABEL }],
+        assignee: { id: "user-me", name: "Ada" },
+      });
+      const running = await cp.listTickets({
+        team: TEAM,
+        states: ["In Progress"],
+      });
+      expect(running.map((t) => t.identifier)).toContain("WM-40");
+      expect(
+        running.find((t) => t.identifier === "WM-40").description,
+      ).toContain("Owned Paths");
+    });
+
+    test("listTickets requires a team", async () => {
+      const { cp } = make();
+      await expect(cp.listTickets({})).rejects.toThrow(ControlPlaneError);
     });
 
     test("claim moves to In Progress, assigns the viewer, swaps claim labels", async () => {
@@ -487,12 +668,23 @@ describe("loadControlPlane selection", () => {
     return root;
   };
 
-  test("defaults to linear when the stanza or the file is absent", () => {
+  test("defaults to linear when the stanza is absent", () => {
     expect(
       controlPlaneKindFromPolicy(withPolicy("merge:\n  max_fix_rounds: 2\n")),
     ).toBe("linear");
-    expect(controlPlaneKindFromPolicy(withPolicy(null))).toBe("linear");
-    expect(loadControlPlane({ root: withPolicy(null) }).kind).toBe("linear");
+  });
+
+  test("falls back to config/policy.example.yaml, and fails closed when neither exists", () => {
+    const root = tmpDir("control-plane-policy-fallback-");
+    mkdirSync(path.join(root, "config"), { recursive: true });
+    expect(() => controlPlaneKindFromPolicy(root)).toThrow(/policy\.yaml/);
+
+    writeFileSync(
+      path.join(root, "config", "policy.example.yaml"),
+      "controlPlane:\n  kind: memory\n",
+    );
+    expect(controlPlaneKindFromPolicy(root)).toBe("memory");
+    expect(loadControlPlane({ root }).kind).toBe("memory");
   });
 
   test("selects memory from policy and passes the seed through", async () => {
@@ -524,6 +716,108 @@ describe("loadControlPlane selection", () => {
 
   test("the repo's own policy.yaml selects linear", () => {
     expect(loadControlPlane().kind).toBe("linear");
+  });
+
+  // ------------------------------------------------ per-repo selection ---
+  // WM-1007. The point of these is the precedence chain: a repo may pick its
+  // own tracker, and a repo that says nothing must INHERIT rather than
+  // default, so adding the key to one repo never moves another.
+  describe("per-repo control_plane", () => {
+    const withRepos = (policyYaml, reposYaml) => {
+      const root = tmpDir("control-plane-repos-");
+      mkdirSync(path.join(root, "config"), { recursive: true });
+      // null means "no explicit controlPlane stanza", not "no config file at
+      // all" — write the example so the policy reader still resolves.
+      writeFileSync(
+        path.join(
+          root,
+          "config",
+          policyYaml !== null ? "policy.yaml" : "policy.example.yaml",
+        ),
+        policyYaml ?? "",
+      );
+      writeFileSync(path.join(root, "config", "repos.yaml"), reposYaml);
+      return root;
+    };
+    const REPOS = [
+      "repos:",
+      "  - name: onGithub",
+      "    path: /tmp/on-github",
+      "    control_plane: github",
+      "  - name: onMemory",
+      "    path: /tmp/on-memory",
+      "    control_plane: memory",
+      "  - name: inherits",
+      "    path: /tmp/inherits",
+      "",
+    ].join("\n");
+
+    test("a repo's control_plane outranks policy", () => {
+      const root = withRepos("controlPlane:\n  kind: linear\n", REPOS);
+      expect(loadControlPlane({ root, repoName: "onMemory" }).kind).toBe(
+        "memory",
+      );
+    });
+
+    test("a repo without the key inherits policy, not the default", () => {
+      const root = withRepos("controlPlane:\n  kind: memory\n", REPOS);
+      expect(loadControlPlane({ root, repoName: "inherits" }).kind).toBe(
+        "memory",
+      );
+    });
+
+    test("with neither repo key nor policy stanza it is linear", () => {
+      const root = withRepos(null, REPOS);
+      expect(loadControlPlane({ root, repoName: "inherits" }).kind).toBe(
+        "linear",
+      );
+    });
+
+    test("an explicit kind outranks the repo entry", () => {
+      const root = withRepos("controlPlane:\n  kind: linear\n", REPOS);
+      expect(
+        loadControlPlane({ root, repoName: "onMemory", kind: "linear" }).kind,
+      ).toBe("linear");
+    });
+
+    test("one repo choosing github does not move a repo that inherits", () => {
+      const root = withRepos("controlPlane:\n  kind: linear\n", REPOS);
+      expect(loadControlPlane({ root, repoName: "onGithub" }).kind).toBe(
+        "github",
+      );
+      expect(loadControlPlane({ root, repoName: "inherits" }).kind).toBe(
+        "linear",
+      );
+    });
+
+    test("an unknown repo throws rather than falling back to policy", () => {
+      const root = withRepos("controlPlane:\n  kind: linear\n", REPOS);
+      expect(() => loadControlPlane({ root, repoName: "typo" })).toThrow(
+        /unknown repo "typo"/,
+      );
+    });
+
+    test("an invalid control_plane value is a load error naming the repo", () => {
+      const root = withRepos(
+        null,
+        "repos:\n  - name: bad\n    path: /tmp/bad\n    control_plane: jira\n",
+      );
+      expect(() => loadControlPlane({ root, repoName: "bad" })).toThrow(
+        /repo bad control_plane must be one of/,
+      );
+    });
+
+    test("no repoName never reads the repo registry", () => {
+      // repos.yaml is deliberately absent: the global path must not depend on
+      // it, or every existing call site breaks in a checkout without one.
+      const root = tmpDir("control-plane-no-repos-");
+      mkdirSync(path.join(root, "config"), { recursive: true });
+      writeFileSync(
+        path.join(root, "config", "policy.yaml"),
+        "controlPlane:\n  kind: memory\n",
+      );
+      expect(loadControlPlane({ root }).kind).toBe("memory");
+    });
   });
 
   test("re-exports githubControlPlane from the adapter", () => {
@@ -650,6 +944,11 @@ function fakeGithubApi(seed) {
     }
     const list = pathOnly.match(/^repos\/([^/]+\/[^/]+)\/issues$/);
     if (list && method === "GET") return [seed.issue];
+    // WM-1008: this minimal fake has no dependency data. Returning [] here
+    // exercises the "no blockers" path; the 404-tolerance path is covered in
+    // lib/control-plane/github.test.mjs.
+    if (method === "GET" && /\/dependencies\/blocked_by$/.test(pathOnly))
+      return [];
     throw new ControlPlaneError(`unknown github api ${method} ${pathName}`);
   };
   api.calls = [];

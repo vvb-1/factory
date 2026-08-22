@@ -1,17 +1,14 @@
 # Quickstart
 
-Fifteen minutes, one command, no third-party accounts. This is the path that
-proves the factory loop — claim a ticket, implement it, verify, open a PR,
-merge — against a bundled repo and an in-memory control plane.
+Start with the offline demo to prove a fresh clone works, then use the
+GitHub-backed path to send the first real PR from an external repository.
+The demo needs no account; the real path needs GitHub CLI authentication but
+does not need a Linear token.
 
-GitHub Issues as a tracker is the later zero-account production adapter
-([WM-798](https://linear.app/watt-mind/issue/WM-798)); until then the
-quickstart uses the memory plane so a clone works on a fresh machine.
+## Offline demo prerequisites
 
-## Prerequisites
-
-- [bun](https://bun.sh) 1.3+
-- `git`
+- [Bun](https://bun.sh) >= 1.3
+- Git >= 2.40
 
 No Linear token, no GitHub token, no model API key.
 
@@ -50,12 +47,79 @@ repo's own `bin/worktree-up.sh`, applies the patch, runs
 `bun test src/greet.test.mjs`, opens PR #1 on the memory forge, merges it,
 and marks `DEMO-1` Done. Nothing in the factory checkout is modified.
 
-## After the demo
+## First real PR with GitHub Issues
 
-To run the factory against a real repo you will still need a tracker
-(Linear today) and a code host (GitHub). See [SETUP.md](../SETUP.md) for
-operator install, and [architecture.md](architecture.md) for how dispatch,
-Owned Paths, and CI-as-reward-signal fit together.
+Factory supports macOS 13+ (Apple Silicon or Intel) and Linux on x64 or arm64.
+For the GitHub path, install Bun >= 1.3, Git >= 2.40, the current GitHub CLI,
+and one coding-agent harness. Follow [SETUP.md](../SETUP.md) for the complete
+clean-room install, including `gh auth login` and the harness login.
+
+From the Factory clone, scaffold only local configuration and bind the
+GitHub control plane to the external sample repository you want to automate:
+
+```bash
+bun install --frozen-lockfile
+bun build/emit.mjs --link-bin
+export PATH="$HOME/.local/bin:$PATH"
+factory init --root "$PWD"
+factory init --control-plane github --root "$PWD" --repo OWNER/SAMPLE --team SAMPLE
+factory doctor
+```
+
+`factory init --control-plane github` **creates the protocol labels for you**
+(WM-1009). Run it after `gh auth login` — with a real `--repo`, it writes the
+policy file and then creates every `ai:*`, `type:*`, `source:*`, `agent:*` and
+`priority:*` label the protocol names, roughly twenty-five of them. Labels that
+already exist are left untouched, including their colour and description, so
+re-running is safe and reports what it created versus what was already there.
+Add `--dry-run` to see the plan without writing anything.
+
+On a **multi-repo `config/repos.yaml`** (more than one entry), this command
+only binds the `--repo` you named: it sets `control_plane: github` on that
+one repos.yaml entry and writes `controlPlane.github` in `policy.yaml`, but
+leaves `controlPlane.kind` — the workspace-wide default every repo without
+its own `control_plane:` inherits — untouched (WM-1046). A root with 0-1
+repo entries has nothing else to move, so it still sets `kind: github` there,
+same as before. To move the workspace default deliberately, pass `--global`;
+it prints which repos that would move, by name, before writing.
+
+Provisioning is not fatal: if `gh` is unauthenticated or offline, the policy
+file is still written, the command still exits 0, and it prints the exact
+command to re-run once you have credentials. Scaffolding config before
+authenticating is a normal order to work in.
+
+The **Projects v2 board** is still manual. `factory init` checks for a board
+named `Factory` with a `Status` single-select and reports precisely what to
+create; it does not create the board itself, because doing that blind against
+the wrong owner (user vs. organisation) produces a board in the wrong place
+that then has to be found and deleted. If the board exists but its `Status`
+options do not exactly match `Triage, Todo, In Progress, In Review, Done,
+Blocked`, init fails and names the missing ones — a half-configured board
+would otherwise surface much later as a transition error inside an unattended
+loop, reading as a tracker outage rather than a setup mistake.
+
+Then add the external sample repository to the local `config/repos.yaml` with
+its explicit base branch, verification command, `control_plane: github`, and
+its own `worktree_up`/`worktree_down` scripts. That isolation is what lets a
+claimed ticket receive a verified PR without sharing ports or a database with
+another run.
+
+Create one GitHub Issue in the `Todo` project state with `ai:agent-ready`, an
+unassigned owner, a verification command, and a narrow `Owned Paths` section.
+Run the configured dispatch flow for that repository. A successful run claims
+the issue, creates the repository's worktree, asks the selected harness to
+implement it, re-runs the verification command, and opens a PR against the
+configured base branch. The PR remains subject to CI and review; Factory does
+not merge it merely because the agent completed.
+
+If `factory doctor` reports a missing GitHub CLI or authentication, install
+`gh` or run `gh auth login -h github.com` before dispatching. Its remediation
+is intentional: an empty environment should fail with a setup action, never a
+private local path or an unhandled stack trace.
+
+See [SETUP.md](../SETUP.md) for operator installation and
+[architecture.md](architecture.md) for dispatch, Owned Paths, and CI as the
+reward signal.
 
 The isolated event-runtime fixture (`bin/worktree-up.sh --here`, also
 `factory demo --here`) is a different demo: it seeds the control API with

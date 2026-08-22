@@ -331,6 +331,7 @@ export default async function serve(args) {
   const registry = loadRegistry({
     packRoots: extensions.packRoots,
     panelRoots: extensions.panelRoots,
+    harnessRoots: extensions.harnessRoots,
   });
   registry.anomalies.push(...extensions.anomalies);
   const startedConnectors = await startConnectors({ db, registry, log });
@@ -434,6 +435,21 @@ export default async function serve(args) {
       log(`event ${kind} — planning`);
       loopTick();
     },
+  });
+  // Without this the `error` event has no listener, so a busy port kills the
+  // process with no output at all: the caller sees exit 1 and an empty log,
+  // and every waiter downstream reports "never printed control API on" as if
+  // the runtime hung (WM-1037). Say which port and who to blame instead.
+  server.on("error", (err) => {
+    if (err?.code === "EADDRINUSE") {
+      log(
+        `serve: port ${port} is already in use — another runtime or a leftover ` +
+          `process holds http://${API_HOST}:${port}. Stop it, or pass a free --port.`,
+      );
+    } else {
+      log(`serve: control API failed to start: ${err?.message ?? err}`);
+    }
+    process.exit(1);
   });
   server.on("listening", () => {
     log(

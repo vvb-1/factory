@@ -84,7 +84,7 @@ import {
   ADAPTER_NAME_PATTERN,
   validateAdapterContract,
 } from "./adapters/index.mjs";
-import { RUNTIME_ROOT } from "./config.mjs";
+import { RUNTIME_ROOT, environmentName, resolveConfigPath } from "./config.mjs";
 import {
   CONNECTOR_NAME_PATTERN,
   setLoadedConnectors,
@@ -110,6 +110,28 @@ export const CORE_HARNESS_NAME = "factory/core";
 
 const HARNESS_FILE_KEYS = ["floor"];
 const HARNESS_DIR_KEYS = ["commands", "skills", "subagents"];
+
+/**
+ * Preserve a connector's loaded/status entry while only invoking its real
+ * start function in the live runtime. `startConnectors` supplies the qualified
+ * connector prefix, so a gated connector produces one informative serve-log
+ * line while retaining a healthy status row.
+ */
+function environmentGatedConnectorModule(module) {
+  return {
+    ...module,
+    async default(ctx) {
+      if (environmentName() === "live") return module.default(ctx);
+      ctx.log?.("not started: non-live environment");
+      return {
+        async stop() {},
+        health() {
+          return { ok: true, detail: "not started (non-live env)" };
+        },
+      };
+    },
+  };
+}
 
 export const EXTENSION_SCHEMA = JSON.parse(
   readFileSync(
@@ -221,11 +243,15 @@ export function looksLikePackageName(value) {
 }
 
 function existingRealpath(p) {
-  try {
-    return realpathSync(p);
-  } catch {
-    return path.resolve(p);
+  const missing = [];
+  let current = path.resolve(p);
+  while (!existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(p);
+    missing.unshift(path.basename(current));
+    current = parent;
   }
+  return path.join(realpathSync(current), ...missing);
 }
 
 /**
@@ -313,7 +339,7 @@ export function resolveExtensionTarget(spec, { root = reposRoot() } = {}) {
 }
 
 function policyFile(root) {
-  return path.join(root, "config", "policy.yaml");
+  return resolveConfigPath("policy", { root });
 }
 
 function readPolicy(root) {
@@ -1404,7 +1430,7 @@ export async function loadExtensions({
         extension: manifest.name,
         name,
         id,
-        module,
+        module: environmentGatedConnectorModule(module),
         config: connectorConfig,
         secrets: connectorSecrets,
       });

@@ -7,7 +7,13 @@
  * strips every other label on the ticket. That is data loss with no error, on
  * tickets a human curated — so it gets real tests.
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -23,8 +29,9 @@ import {
   formatComments,
   parsePositionalArgs,
   closureCheckMessages,
+  resolveRepoName,
   __resetLinearReposCache,
-} from "./linear.mjs";
+} from "./ticket.mjs";
 
 const LABELS = [
   { id: "l-ready", name: "ai:agent-ready" },
@@ -348,12 +355,15 @@ test("closure check blocks ai:agent-ready when Owned Paths closure policy is inc
 // ---------------------------------------------------------- grep invariant ---
 // Same shape as lib/forge's "nothing outside lib/forge/ spawns gh" check:
 // new Linear GraphQL call sites must go through the adapter, not gql().
+// WM-962 shrank this to the transport itself plus the adapter. Everything
+// else reaches the tracker through `loadControlPlane()` — a typed verb where
+// the contract models the question, `raw()` where it does not. Adding a name
+// back here means a second transport with its own credential path and no
+// shared retry/backoff, which is exactly what this invariant exists to stop.
 const GQL_IMPORT_ALLOWED = new Set([
   "event-runtime/lib/linear.mjs",
   "lib/control-plane/linear.mjs",
   "orchestrator/reaper.mjs",
-  // Remaining call sites sit outside this ticket's Owned Paths (WM-962).
-  "orchestrator/reply-detection.mjs",
 ]);
 
 test("no new call site imports gql outside lib/control-plane and the reaper transport", () => {
@@ -363,7 +373,11 @@ test("no new call site imports gql outside lib/control-plane and the reaper tran
       "git",
       "grep",
       "-nE",
-      String.raw`import \{[^}]*\bgql\b`,
+      // POSIX ERE, NOT PCRE: `git grep -E` does not support `\b`, so the
+      // original pattern here matched nothing and this invariant passed
+      // vacuously from the day it was written (found while shrinking the
+      // allowlist in WM-962). Spell the word boundary explicitly.
+      String.raw`import \{[^}]*(^|[^a-zA-Z])gql([^a-zA-Z]|$)`,
       "--",
       "orchestrator",
       "lib",
@@ -382,4 +396,137 @@ test("no new call site imports gql outside lib/control-plane and the reaper tran
       return !GQL_IMPORT_ALLOWED.has(file) && !file.endsWith(".test.mjs");
     });
   expect(hits).toEqual([]);
+});
+
+test("the gql grep invariant can actually match (it once could not)", () => {
+  // The check above is only worth having if its pattern works. It shipped
+  // with `\b`, which `git grep -E` (POSIX ERE) does not implement, so it
+  // silently matched nothing. Assert the pattern still finds the known
+  // allowlisted importers — if this returns nothing, the invariant above is
+  // vacuous again regardless of what it reports.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const proc = Bun.spawnSync({
+    cmd: [
+      "git",
+      "grep",
+      "-lE",
+      String.raw`import \{[^}]*(^|[^a-zA-Z])gql([^a-zA-Z]|$)`,
+      "--",
+      "orchestrator",
+      "lib",
+      "event-runtime",
+      "tools",
+    ],
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const files = (proc.stdout?.toString() || "").split("\n").filter(Boolean);
+  expect(files).toContain("lib/control-plane/linear.mjs");
+  expect(files.length).toBeGreaterThan(0);
+});
+
+// ------------------------------------------------ repo resolution (WM-1007) ---
+// The CLI must know which repos.yaml entry an invocation is about, because
+// that entry decides which control plane the verb talks to. The worktree case
+// is the one that matters: every dispatched agent runs from
+// <worktree_root>/<TICKET>, never from `path`.
+test("resolveRepoName matches the checkout, the worktree root, and --repo", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "linear-reporesolve-"));
+  const previous = process.env.FACTORY_REPOS_ROOT;
+  try {
+    mkdirSync(path.join(root, "config"), { recursive: true });
+    const alphaPath = path.join(root, "alpha");
+    const alphaWt = path.join(root, "wt", "alpha");
+    const betaPath = path.join(root, "beta");
+    writeFileSync(
+      path.join(root, "config", "repos.yaml"),
+      `repos:\n  - name: alpha\n    path: ${alphaPath}\n    worktree_root: ${alphaWt}\n  - name: beta\n    path: ${betaPath}\n`,
+    );
+    process.env.FACTORY_REPOS_ROOT = root;
+    __resetLinearReposCache();
+
+    // cwd inside the checkout
+    expect(resolveRepoName({ cwd: alphaPath, repoFlag: undefined })).toBe(
+      "alpha",
+    );
+    expect(
+      resolveRepoName({
+        cwd: path.join(alphaPath, "lib"),
+        repoFlag: undefined,
+      }),
+    ).toBe("alpha");
+    // cwd inside a WORKTREE — resolves via worktree_root, not path
+    expect(
+      resolveRepoName({
+        cwd: path.join(alphaWt, "WM-1007"),
+        repoFlag: undefined,
+      }),
+    ).toBe("alpha");
+    // a different repo
+    expect(resolveRepoName({ cwd: betaPath, repoFlag: undefined })).toBe(
+      "beta",
+    );
+    // nothing matches -> null, so the caller falls back to policy
+    expect(
+      resolveRepoName({ cwd: os.tmpdir(), repoFlag: undefined }),
+    ).toBeNull();
+    // an explicit flag wins over cwd
+    expect(resolveRepoName({ cwd: alphaPath, repoFlag: "beta" })).toBe("beta");
+    // a bad flag is the operator's mistake, not a silent fallback
+    expect(() => resolveRepoName({ cwd: alphaPath, repoFlag: "nope" })).toThrow(
+      /unknown --repo "nope"/,
+    );
+    // a prefix that is not a path boundary must not match
+    expect(
+      resolveRepoName({ cwd: `${alphaPath}-other`, repoFlag: undefined }),
+    ).toBeNull();
+  } finally {
+    if (previous === undefined) delete process.env.FACTORY_REPOS_ROOT;
+    else process.env.FACTORY_REPOS_ROOT = previous;
+    __resetLinearReposCache();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------- rename + shim (WM-1026) ---
+// The rename is only safe because the old path keeps working: agent prompts,
+// shared commands and every emitted harness bundle still invoke
+// `tools/linear.mjs`, and they are swept separately.
+test("tools/linear.mjs still runs, delegating to ticket.mjs", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const r = Bun.spawnSync({
+    cmd: ["bun", path.join(root, "tools", "linear.mjs")],
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = r.stdout.toString();
+  const stderr = r.stderr.toString();
+  // Same usage output as the real CLI...
+  expect(stdout).toContain("verbs:");
+  expect(stdout).toContain("claim");
+  // ...and the deprecation notice on STDERR, never stdout: `get --json`,
+  // `queue` and `budget` print machine-readable output that callers parse.
+  expect(stderr).toContain("deprecated");
+  expect(stdout).not.toContain("deprecated");
+});
+
+test("the shim re-exports the module's public surface", async () => {
+  const shim = await import("./linear.mjs");
+  const real = await import("./ticket.mjs");
+  for (const name of Object.keys(real)) {
+    expect(shim[name]).toBe(real[name]);
+  }
+  expect(typeof real.main).toBe("function");
+});
+
+test("factory exposes `ticket`, and `linear` as a deprecated alias", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const script = readFileSync(path.join(root, "bin", "factory"), "utf8");
+  expect(script).toContain("ticket)");
+  expect(script).toContain("tools/ticket.mjs");
+  // The alias must survive until the prompt sweep lands, or dispatch breaks.
+  expect(script).toContain("linear)");
+  expect(script).toMatch(/factory linear is deprecated/);
 });

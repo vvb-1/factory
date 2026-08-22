@@ -1,5 +1,22 @@
 import { tmpDir } from "../test-support/tmp.mjs?file=event-runtime-lib-worker-test-mjs";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { loadAdjustedTimeout } from "./test-helpers-timing.mjs";
+
+/**
+ * Ceiling for the execute-side adapter spawn tests (WM-1025).
+ *
+ * These spawn a real CLI subprocess. 5s is comfortable on a quiet machine and
+ * demonstrably not comfortable on a contended one: on 2026-08-22 four of these
+ * timed out under concurrent runners and took WM-1008, WM-1015 and WM-534 out
+ * of the queue with them — WM-1015 was a documentation-only diff that could
+ * not merge because of it.
+ *
+ * `loadAdjustedTimeout` is the repo's existing answer (CI sets CI_LOAD_FACTOR,
+ * capped at 4x). This file was simply not wired into it. Scaling a liveness
+ * ceiling changes no assertion: every check below still waits on observable
+ * state, so a real hang still fails, just not a slow host.
+ */
+const EXECUTE_SPAWN_TIMEOUT_MS = loadAdjustedTimeout(5_000);
 import { createHash } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
@@ -12,6 +29,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import {
   buildClaudeArgv,
@@ -23,8 +41,8 @@ import { SandboxUnsupportedError } from "./adapters/sandboxed.mjs";
 import { pinRunArtifact } from "./artifacts.mjs";
 import { admitEvent } from "./intake.mjs";
 import { planEvent } from "./planner.mjs";
-import { canonicalJson, hashJson } from "./canonical.mjs";
-import { artifactsRoot } from "./config.mjs";
+import { canonicalJson, hashBytes, hashJson } from "./canonical.mjs";
+import { artifactsRoot, resolveConfigPath } from "./config.mjs";
 import { openDb, runUsage } from "./db.mjs";
 import {
   createRun,
@@ -57,10 +75,12 @@ import {
   extendRunDeadline,
   LEASE_GRACE_SECONDS,
   policyMaxRunMinutes,
+  materializeRunHarness,
   reapExpiredLeases,
   releaseClaimLock,
   repositoryIsClean,
   repositoryStatus,
+  provisionInstanceLocalConfigs,
   resolveLinearApiKey,
   retryRun,
   runLinearCli,
@@ -73,10 +93,13 @@ import {
 import {
   cleanupTrackedProcesses,
   processOwnerWatchdogSource,
+  registerTestProcessCleanup,
   trackMarkedFakeRuntimeGroups,
   trackProcess,
   trackProcessGroupsMatching,
 } from "./test-helpers-process.mjs";
+
+registerTestProcessCleanup(import.meta.url);
 
 const registry = loadRegistry();
 const adapters = { fake };
@@ -99,7 +122,7 @@ function makeSpec(overrides = {}) {
     promptVersion: "git:test",
     policyVersion: "git:test",
     outputContract: "factory.status-report/v1",
-    capabilities: ["linear:read"],
+    capabilities: ["tracker:read"],
     timeoutSeconds: 5,
     maxAttempts: 1,
     idempotencyKey: `idem-${runId}`,
@@ -167,6 +190,163 @@ function opts(extra = {}) {
 }
 
 describe("worker", () => {
+  test("materialized harness entries record hashes for every copied file", () => {
+    const factoryRoot = tmpDir("evrt-harness-source-");
+    const workspaceDir = tmpDir("evrt-harness-workspace-");
+    const catalog = path.join(factoryRoot, "catalog");
+    const source = path.join(factoryRoot, "dist", "fake", "skills", "demo");
+    mkdirSync(path.join(catalog, "skills", "demo"), { recursive: true });
+    mkdirSync(source, { recursive: true });
+    writeFileSync(
+      path.join(catalog, "skills", "demo", "SKILL.md"),
+      "catalog\n",
+    );
+    writeFileSync(path.join(source, "SKILL.md"), "first\n");
+    writeFileSync(path.join(source, "notes.md"), "second\n");
+
+    const written = materializeRunHarness({
+      spec: { harness: { skills: ["demo"] } },
+      adapterKey: "fake",
+      adapter: {
+        HARNESS_LAYOUT: {
+          skills: {
+            source: (name) => ["dist", "fake", "skills", name],
+            dest: (name) => [".fake", "skills", name],
+            type: "dir",
+          },
+        },
+      },
+      workspaceDir,
+      registry: { harnessRoots: [{ skills: path.join(catalog, "skills") }] },
+      factoryRoot,
+    });
+
+    expect(written).toEqual([
+      {
+        kind: "skills",
+        name: "demo",
+        dest: ".fake/skills/demo",
+        pins: {
+          ".fake/skills/demo/SKILL.md": hashBytes("first\n"),
+          ".fake/skills/demo/notes.md": hashBytes("second\n"),
+        },
+      },
+    ]);
+  });
+
+  test("completed receipts attest emitted harness files", async () => {
+    const db = openDb(":memory:");
+    const spec = queueRun(
+      db,
+      makeSpec({ harness: { commands: ["factory-ticket"] } }),
+    );
+    const materializingFake = {
+      ...fake,
+      HARNESS_LAYOUT: {
+        commands: {
+          source: (name) => ["plugins", "core", "commands", `${name}.md`],
+          dest: (name) => [".fake", "commands", `${name}.md`],
+          type: "file",
+        },
+      },
+    };
+
+    const summary = await runOnce(
+      db,
+      registry,
+      { fake: materializingFake },
+      opts(),
+    );
+
+    expect(summary.terminalState).toBe("COMPLETED");
+    expect(summary.receipt.harnessPins).toEqual({
+      ".fake/commands/factory-ticket.md": hashBytes(
+        readFileSync("plugins/core/commands/factory-ticket.md"),
+      ),
+    });
+  });
+
+  test("provisions present instance configs into an ignored checkout and skips absent files", () => {
+    const factoryRoot = tmpDir("evrt-instance-config-source-");
+    const checkout = tmpDir("evrt-instance-config-checkout-");
+    try {
+      mkdirSync(path.join(factoryRoot, "config"), { recursive: true });
+      mkdirSync(path.join(checkout, "config"), { recursive: true });
+      writeFileSync(
+        path.join(checkout, ".gitignore"),
+        "config/repos.yaml\nconfig/policy.yaml\nconfig/schedule.yaml\n",
+      );
+      expect(spawnSync("git", ["init", "-q"], { cwd: checkout }).status).toBe(
+        0,
+      );
+      writeFileSync(
+        path.join(factoryRoot, "config", "repos.yaml"),
+        "repos: []\n",
+      );
+      writeFileSync(
+        path.join(factoryRoot, "config", "policy.yaml"),
+        "limits: {}\n",
+      );
+
+      expect(
+        provisionInstanceLocalConfigs({ factoryRoot, checkoutPath: checkout }),
+      ).toEqual(["config/repos.yaml", "config/policy.yaml"]);
+      expect(
+        readFileSync(path.join(checkout, "config", "repos.yaml"), "utf8"),
+      ).toBe("repos: []\n");
+      expect(existsSync(path.join(checkout, "config", "schedule.yaml"))).toBe(
+        false,
+      );
+      for (const file of ["config/repos.yaml", "config/policy.yaml"]) {
+        expect(
+          spawnSync("git", ["check-ignore", "-q", file], { cwd: checkout })
+            .status,
+        ).toBe(0);
+      }
+    } finally {
+      rmSync(factoryRoot, { recursive: true, force: true });
+      rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
+  test("silently skips instance config provisioning when no local files exist", () => {
+    const factoryRoot = tmpDir("evrt-instance-config-empty-source-");
+    const checkout = tmpDir("evrt-instance-config-empty-checkout-");
+    try {
+      expect(
+        provisionInstanceLocalConfigs({ factoryRoot, checkoutPath: checkout }),
+      ).toEqual([]);
+    } finally {
+      rmSync(factoryRoot, { recursive: true, force: true });
+      rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
+  test("does not provision instance config into a checkout that could stage it", () => {
+    const factoryRoot = tmpDir("evrt-instance-config-protected-source-");
+    const checkout = tmpDir("evrt-instance-config-protected-checkout-");
+    try {
+      mkdirSync(path.join(factoryRoot, "config"), { recursive: true });
+      writeFileSync(
+        path.join(factoryRoot, "config", "repos.yaml"),
+        "repos: []\n",
+      );
+      expect(spawnSync("git", ["init", "-q"], { cwd: checkout }).status).toBe(
+        0,
+      );
+
+      expect(
+        provisionInstanceLocalConfigs({ factoryRoot, checkoutPath: checkout }),
+      ).toEqual([]);
+      expect(existsSync(path.join(checkout, "config", "repos.yaml"))).toBe(
+        false,
+      );
+    } finally {
+      rmSync(factoryRoot, { recursive: true, force: true });
+      rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
   test("repository integrity gate rejects any checkout dirt before output acceptance", () => {
     const repo = tmpDir("evrt-clean-repo-");
     const git = (args) =>
@@ -1386,7 +1566,7 @@ describe("worker", () => {
       spec,
       def,
       workspaceDir: claudeWorkspace,
-      timeoutMs: 5_000,
+      timeoutMs: EXECUTE_SPAWN_TIMEOUT_MS,
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
         FACTORY_TEST_ARGV: claudeArgv,
@@ -1409,7 +1589,7 @@ describe("worker", () => {
       spec,
       def,
       workspaceDir: piWorkspace,
-      timeoutMs: 5_000,
+      timeoutMs: EXECUTE_SPAWN_TIMEOUT_MS,
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH}`,
         FACTORY_TEST_ARGV: piArgv,
@@ -2682,7 +2862,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       promptVersion: "git:test",
       policyVersion: "git:test",
       outputContract: "factory.dispatch-result/v1",
-      capabilities: ["linear:write", "repo:write", "github:write"],
+      capabilities: ["tracker:write", "repo:write", "github:write"],
       timeoutSeconds: 5,
       maxAttempts: 1,
       idempotencyKey: `idem-${runId}`,
@@ -2725,7 +2905,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       promptVersion: "git:test",
       policyVersion: "git:test",
       outputContract: "factory.merge-fix-result/v1",
-      capabilities: ["linear:write", "repo:write", "github:write"],
+      capabilities: ["tracker:write", "repo:write", "github:write"],
       timeoutSeconds: 5,
       maxAttempts: 1,
       idempotencyKey: `idem-${runId}`,
@@ -2991,6 +3171,58 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       }),
     ).toBe(true);
     releaseClaimLock(lockFile);
+  });
+
+  test("same-identity dispatch claims share the supervisor lock when event home is isolated", async () => {
+    const previousEventHome = process.env.FACTORY_EVENT_HOME;
+    const previousLocksDir = process.env.FACTORY_LOCKS_DIR;
+    const repoName = "wt-worker";
+    const supervisorLock = dispatchLockPath(
+      repoName,
+      path.join(homedir(), ".factory", "locks"),
+    );
+    process.env.FACTORY_EVENT_HOME = tmpDir("evrt-isolated-event-home-");
+    delete process.env.FACTORY_LOCKS_DIR;
+    let claimCalls = 0;
+
+    try {
+      expect(acquireClaimLock(supervisorLock)).toBe(true);
+      const db = openDb(":memory:");
+      queueRun(
+        db,
+        makeDispatchSpec({
+          input: { repo: repoName, ticket: "WM-877" },
+        }),
+      );
+
+      const summary = await runOnce(
+        db,
+        registry,
+        { fake: dispatchFakeAdapter },
+        opts({
+          dispatch: {
+            random: () => 0,
+            fetchTicket: () => readyDispatchTicket("WM-877"),
+            fetchInFlight: () => [],
+            countLeases: () => 0,
+            claimTicket: () => {
+              claimCalls += 1;
+              return { ok: true, assignee: "shared-bot" };
+            },
+          },
+        }),
+      );
+
+      expect(summary.reasonCode).toBe("claim_lock_contention");
+      expect(claimCalls).toBe(0);
+    } finally {
+      releaseClaimLock(supervisorLock);
+      if (previousEventHome === undefined)
+        delete process.env.FACTORY_EVENT_HOME;
+      else process.env.FACTORY_EVENT_HOME = previousEventHome;
+      if (previousLocksDir === undefined) delete process.env.FACTORY_LOCKS_DIR;
+      else process.env.FACTORY_LOCKS_DIR = previousLocksDir;
+    }
   });
 
   test("contended claim lock requeues with jittered backoff without consuming an attempt, then runs", async () => {
@@ -4067,7 +4299,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
         '  fs.writeFileSync(commentsPath(ticket), JSON.stringify(rows), "utf8");',
         "}",
         "",
-        'if (args[0]?.endsWith("tools/linear.mjs")) {',
+        'if (args[0]?.endsWith("tools/ticket.mjs")) {',
         "  const verb = args[1];",
         '  if (verb === "comments") {',
         "    const ticket = args[2];",
@@ -4142,7 +4374,7 @@ describe("execute-side dispatch hardening (WM-115)", () => {
           `    escalate_paths: []\n`,
       );
       const basePolicy = readFileSync(
-        path.join(repoRoot, "config", "policy.yaml"),
+        resolveConfigPath("policy", { root: repoRoot, warn: false }),
         "utf8",
       );
       const testPolicy = basePolicy.includes("  fake:")
@@ -4926,7 +5158,7 @@ describe("handoff verification gate (WM-718)", () => {
       promptVersion: "git:test",
       policyVersion: "git:test",
       outputContract: "factory.dispatch-result/v1",
-      capabilities: ["linear:write", "repo:write", "github:write"],
+      capabilities: ["tracker:write", "repo:write", "github:write"],
       timeoutSeconds: 5,
       maxAttempts: 1,
       idempotencyKey: `idem-${runId}`,
@@ -5455,5 +5687,64 @@ describe("defaultReturnHandoffTicket (WM-718 F2)", () => {
     });
     expect(result).toBe(false);
     expect(calls).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------ liveness-ceiling invariant ---
+// WM-1025. Same shape as the GQL_IMPORT_ALLOWED grep invariant in
+// tools/linear.test.mjs: the bug was not that 5s is the wrong number, it was
+// that these call sites bypassed the load-adjustment mechanism the repo
+// already had. A number typed inline cannot scale, and the next one typed
+// inline will not either — so guard the pattern, not the value.
+describe("subprocess liveness ceilings scale with host load (WM-1025)", () => {
+  const SOURCES = [
+    "event-runtime/lib/worker.test.mjs",
+    "event-runtime/work.test.mjs",
+    "event-runtime/cli/process-cleanup.test.mjs",
+  ];
+
+  test("no raw sub-30s timeoutMs literal bypasses loadAdjustedTimeout", () => {
+    const root = path.resolve(import.meta.dir, "..", "..");
+    const offenders = [];
+    for (const rel of SOURCES) {
+      const file = path.join(root, rel);
+      if (!existsSync(file)) continue;
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          // `timeoutMs: 25` style intentional-hang probes are far below the
+          // range that host contention affects; only flag plausible liveness
+          // ceilings (1s..30s) written as bare literals.
+          const m = line.match(/timeoutMs:\s*([0-9][0-9_]*)\s*,/);
+          if (!m) return;
+          const ms = Number(m[1].replace(/_/g, ""));
+          if (ms < 1_000 || ms > 30_000) return;
+          if (line.includes("loadAdjustedTimeout")) return;
+          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test("the execute-side ceiling actually scales", () => {
+    // Guards the wiring itself: a constant that ignores CI_LOAD_FACTOR would
+    // satisfy the grep above while still pinning the timeout at 5s.
+    expect(EXECUTE_SPAWN_TIMEOUT_MS).toBe(loadAdjustedTimeout(5_000));
+    expect(EXECUTE_SPAWN_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
+  });
+
+  test("process-cleanup polling waits scale their caller-provided ceilings", () => {
+    const root = path.resolve(import.meta.dir, "..", "..");
+    const source = readFileSync(
+      path.join(root, "event-runtime/cli/process-cleanup.test.mjs"),
+      "utf8",
+    );
+    for (const name of ["waitForFile", "waitForExit"]) {
+      expect(source).toMatch(
+        new RegExp(
+          `async function ${name}\\([^)]*timeoutMs[^)]*\\)\\s*\\{\\s*timeoutMs = loadAdjustedTimeout\\(timeoutMs\\);`,
+        ),
+      );
+    }
   });
 });

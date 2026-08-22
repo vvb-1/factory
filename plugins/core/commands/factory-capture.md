@@ -22,7 +22,7 @@ Repo → team/project mapping, and the full `ai:*`/`source:*`/`type:*`/`area:*` 
 
 If the current working directory matches a repo in `config/repos.yaml`, use its `team`/`project`. Otherwise infer team/project from what the conversation was actually about — ask if it's genuinely ambiguous rather than guessing.
 
-**Search for duplicates first** (`factory linear`, per `docs/protocol.md` §13) — don't file a second issue for something already tracked; comment on the existing one with the new evidence instead and report that back, not a new issue.
+**Search for duplicates first** (`factory ticket`, per `docs/protocol.md` §13) — don't file a second issue for something already tracked; comment on the existing one with the new evidence instead and report that back, not a new issue.
 
 ## 3. Label and specify
 
@@ -32,6 +32,8 @@ Decide **Triage vs. `Todo` + `ai:agent-ready`**:
 
 - Write the full §5 template (Problem & Context, Acceptance Criteria, Source File Pointers, Owned Paths, Verification Command) only if the conversation actually gave enough to fill all five sections for real. A plausible-sounding guess at `Owned Paths` or a Verification Command that hasn't actually been confirmed to run is worse than leaving the ticket in `Triage` — it will pass a template check and still fail at execution time.
 - Otherwise file to **`Triage`** with whatever context exists (Problem & Context at minimum), and say explicitly what's missing before it can be promoted.
+
+When promoting to `Todo` + `ai:agent-ready`, also set a `tier:*` label (closed vocabulary: `tier:light`, `tier:standard`, `tier:strong`) per the sizing rule — `light` for a one-or-two-file change outside `escalate_paths` (`config/repos.yaml`), `type:docs`/copy/config-value, or a reproduced bug with a one-line fix; `strong` for any `escalate_paths` path, `type:security`, cross-package/architecture work, or acceptance criteria that say "design"/"decide"; `standard` otherwise — and note the tier and why in the same comment where you report the promotion.
 
 Never move an issue to `Todo` without `ai:agent-ready` fully satisfied, and never claim it — filing and working are different steps, and this command only does the first.
 

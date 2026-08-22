@@ -18,7 +18,7 @@ The planner verified the ticket was `Todo` + `ai:agent-ready` + unassigned
 when this run was proposed; the world may have moved since. Claim it now:
 
 ```
-bun "$FACTORY_ROOT/tools/linear.mjs" claim <TICKET>
+bun "$FACTORY_ROOT/tools/ticket.mjs" claim <TICKET>
 ```
 
 The claim verb enforces the read-back — if it reports a lost race, or the
@@ -50,17 +50,20 @@ new ticket.
 
 ## 2. Implement
 
-1. **Read the ticket** (`bun "$FACTORY_ROOT/tools/linear.mjs" get <TICKET>`)
+1. **Read the ticket** (`bun "$FACTORY_ROOT/tools/ticket.mjs" get <TICKET>`)
    and restate your approach as a comment on it.
 2. **Implement in `./repo`**, touching only files matching the ticket's
    `Owned Paths`. Work discovered outside that set becomes a new `Triage`
-   issue (`tools/linear.mjs file`) — never a widening of this one.
-3. **Verify** with the ticket's exact `Verification Command`, run inside
-   `./repo` on the final tree (after your last commit), **and** the full
-   `bun test` (or the repo's full suite) before you return. Never proceed
-   past failing output; never weaken a test to get green. **The worker
-   verifies the handoff mechanically after you return:** it re-runs the
-   repo's declared verify command and the ticket's exact
+   issue (`tools/ticket.mjs file`) — never a widening of this one.
+3. **Verify** with the ticket's exact `Verification Command` and the repo's
+   configured `verify` command, run inside `./repo` on the final tree (after
+   your last commit). Run **only** those two worktree gates: do **not** run
+   `bun test` or the repo's full suite as a PR-opening gate. The full suite is
+   CI's job; duplicating it in concurrent dispatched worktrees causes
+   load-induced flakes and must not prevent a PR. Never proceed past failing
+   output; never weaken a test to get green. **The worker verifies the handoff
+   mechanically after you return:** it re-runs the repo's declared verify
+   command and the ticket's exact
    `Verification Command`, runs `cd event-runtime/web && bun run build` when
    your diff touches `event-runtime/web/src/**`, and diffs
    `origin/<base>..HEAD` against the ticket's Owned Paths. A non-zero exit

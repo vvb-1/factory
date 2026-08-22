@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Factory control-plane CLI — cwd-independent dispatch to orchestrator/tools scripts.
 #
-#   factory linear get CLNT-616
+#   factory ticket get CLNT-616
 #   factory queue --repo bj29
 #   factory next --repo bj29 --apply
 #   factory run --repo bj29 --command factory-triage --read-only
@@ -42,10 +42,10 @@ show_banner() {
   echo '  ║   ██║     ██║  ██║╚██████╗   ██║   ╚██████╔╝██║  ██║   ██║    ║'
   echo '  ║   ╚═╝     ╚═╝  ╚═╝ ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝   ╚═╝    ║'
   echo '  ║                                                               ║'
-  _pad "${_d}Agent control plane · Linear · dispatch · merge${_r}"
+  _pad "${_d}A runtime for self-improving agentic loops${_r}"
   echo '  ║                                                               ║'
-  _pad "${_m}▸ Proprietary software of Watt Mind${_r}"
-  _pad "${_d}Unauthorized use or distribution is prohibited.${_r}"
+  _pad "${_m}▸ Apache-2.0 · github.com/watt-mind/factory${_r}"
+  _pad "${_d}New here? Run: factory demo${_r}"
   echo '  ║                                                               ║'
   echo '  ╚═══════════════════════════════════════════════════════════════╝'
   printf '%s\n' "$_r"
@@ -63,7 +63,14 @@ run_sh() {
 }
 
 case "$cmd" in
-  linear)       run_bun tools/linear.mjs "$@" ;;
+  ticket)       run_bun tools/ticket.mjs "$@" ;;
+  # Deprecated alias (WM-1026). Kept because agent prompts, shared commands and
+  # every emitted harness bundle still say `factory linear`; those are swept
+  # separately, and breaking them here would stop dispatch for one commit.
+  linear)
+    echo "factory linear is deprecated — use 'factory ticket'" >&2
+    run_bun tools/ticket.mjs "$@"
+    ;;
   queue)        run_bun orchestrator/queue.mjs "$@" ;;
   next)         run_bun orchestrator/next.mjs "$@" ;;
   state)        run_bun orchestrator/state.mjs "$@" ;;
@@ -126,9 +133,12 @@ case "$cmd" in
   down)         exec bash "$ROOT/bin/live-stack.sh" down "$@" ;;
   tail)         exec bash "$ROOT/bin/live-stack.sh" tail "$@" ;;
   init)
-    # GitHub Issues control-plane defaults (WM-798). Full config scaffolding
-    # (repos/policy/schedule examples) is WM-794.
-    exec bun "$ROOT/lib/control-plane/github.mjs" "$@"
+    # Preserve the existing GitHub control-plane initializer while making the
+    # no-argument command scaffold all operator-local config from templates.
+    if [[ "${1:-}" == "--control-plane" ]]; then
+      exec bun "$ROOT/lib/control-plane/github.mjs" "$@"
+    fi
+    run_bun event-runtime/cli.mjs init "$@"
     ;;
   demo)
     # Isolated event-runtime env (OPS-217) stays available behind --here /
@@ -263,7 +273,9 @@ case "$cmd" in
     cat <<EOF
 factory — control plane (FACTORY_ROOT=$ROOT)
 
-  linear        tools/linear.mjs
+  init          scaffold config/*.yaml from tracked examples (never overwrites)
+  ticket        tools/ticket.mjs
+  linear        tools/ticket.mjs (deprecated alias for 'ticket')
   queue         orchestrator/queue.mjs
   next          orchestrator/next.mjs
   state         orchestrator/state.mjs
@@ -298,8 +310,8 @@ factory — control plane (FACTORY_ROOT=$ROOT)
   up            start live event-runtime stack (API 7381, live worker, and Web UI 7382)
   down          stop live event-runtime stack
   tail          tail live daemon logs (~/.factory/run/{serve,worker,web}.log)
-  init          scaffold GitHub Issues control-plane defaults
-                (factory init --control-plane github [--root DIR] [--repo owner/name])
+  init --control-plane github [--root DIR] [--repo owner/name]
+                scaffold GitHub Issues control-plane defaults
   demo          run the bundled starter ticket (WM-799); --dry for CI.
                 Isolated event-runtime env: demo --here / demo --down
   run           runners/run-agent.sh

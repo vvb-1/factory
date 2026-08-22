@@ -33,12 +33,13 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { loadConfigYaml, ROOT } from "../lib/schedule.mjs";
 import { loadControlPlane } from "../lib/control-plane/index.mjs";
+import { ticketFileName, ticketSlug } from "../lib/ticket-slug.mjs";
 import {
   parseOwnedPaths,
   effectiveOwnedPaths,
   pathsCollide,
 } from "./owned-paths.mjs";
-import { openBlockers, BLOCKING_RELATIONS_GQL } from "./blockers.mjs";
+import { openBlockers } from "./blockers.mjs";
 import { budgetExhausted } from "../lib/spend.mjs";
 import {
   LEASE_HEARTBEAT_MS,
@@ -175,7 +176,10 @@ export function preserveWip(wt, ticketIdentifier) {
         encoding: "utf8",
       });
       if (diff.stdout) {
-        const patchPath = path.join(tmpdir(), `${ticketIdentifier}-wip.patch`);
+        const patchPath = path.join(
+          tmpdir(),
+          ticketFileName(ticketIdentifier, { suffix: "wip", ext: "patch" }),
+        );
         writeFileSync(patchPath, diff.stdout);
         return { preserved: true, method: "patch", patchPath };
       }
@@ -201,7 +205,10 @@ export function preserveWip(wt, ticketIdentifier) {
       encoding: "utf8",
     });
     if (diff.stdout) {
-      const patchPath = path.join(tmpdir(), `${ticketIdentifier}-wip.patch`);
+      const patchPath = path.join(
+        tmpdir(),
+        ticketFileName(ticketIdentifier, { suffix: "wip", ext: "patch" }),
+      );
       writeFileSync(patchPath, diff.stdout);
       return { preserved: true, method: "patch", patchPath };
     }
@@ -357,30 +364,49 @@ export async function main(argv = process.argv.slice(2)) {
   const COMMAND_BODY = COMMAND_MD.replace(/^---\n[\s\S]*?\n---\n/, "");
   const promptFor = (id) => COMMAND_BODY.replaceAll("$ARGUMENTS", id);
 
-  const Q = `query($t:String!,$p:String!){ issues(first:250, filter:{
-    team:{key:{eq:$t}}, project:{name:{eq:$p}},
-    state:{ type:{ nin:["completed","canceled"] } } }){
-  nodes{ id identifier title description state{name} assignee{id} labels(first:20){nodes{name}} priority ${BLOCKING_RELATIONS_GQL} } } }`;
-
-  /** Current queue straight from Linear — never cached, because it changes under us. */
+  /**
+   * Current queue straight from the control plane — never cached, because it
+   * changes under us.
+   *
+   * WM-1008: this used to build a Linear GraphQL string and push it through
+   * `cp.raw()`, which meant `controlPlane.kind: github` produced an unsorted
+   * queue with blocker gating silently disabled — every verb "worked", so the
+   * factory looked healthy while dispatching in the wrong order. Priority
+   * ordering and blocker exclusion now live in the adapter, where every
+   * implementation is held to them by the shared contract suite.
+   */
   async function fetchState() {
-    const nodes =
-      (await loadControlPlane().raw(Q, { t: repo.team, p: repo.project }))
-        ?.issues?.nodes ?? [];
-    const has = (i, n) => (i.labels?.nodes ?? []).some((l) => l.name === n);
+    const cp = loadControlPlane({ repoName: repo.name });
+    const [running, ready] = await Promise.all([
+      cp.listTickets({
+        team: repo.team,
+        project: repo.project,
+        states: ["In Progress"],
+      }),
+      cp.listDispatchable({ team: repo.team, project: repo.project }),
+    ]);
     return {
-      inProgress: nodes.filter((i) => i.state?.name === "In Progress"),
-      // Assignee is NOT a gate: this workspace hasn't landed per-agent Linear
-      // identities (OPS-40) yet, so every claim -- human or agent -- writes the
-      // same shared account. That makes "has an assignee" indistinguishable
-      // from "was claimed and never cleared," which is exactly the reaper's
-      // job to fix, not dispatch's job to avoid by skipping the ticket forever.
-      // The actual collision guard is claim()'s read-back compare-and-swap
-      // below, which is assignee-based but per-ticket at claim time, not a
-      // blanket "already has anyone" skip.
-      ready: nodes
-        .filter((i) => i.state?.name === "Todo" && has(i, "ai:agent-ready"))
-        .sort((a, b) => (a.priority || 99) - (b.priority || 99)),
+      inProgress: running,
+      // `ready` arrives already filtered (Todo + ai:agent-ready + unassigned +
+      // no open blocker) and already ordered (priority asc, createdAt asc).
+      // Re-sorting or re-filtering here would be a second opinion that can
+      // drift from the adapter's, which is how this broke the first time.
+      ready,
+      // Blocked-but-otherwise-ready tickets. `listDispatchable` correctly
+      // excludes them, but they must stay VISIBLE: a ticket starved by a
+      // wrong or forgotten relation holds no slot and raises no error, so
+      // reporting it on its own line is the only way anyone finds out.
+      held: (
+        await cp.listTickets({
+          team: repo.team,
+          project: repo.project,
+          states: ["Todo"],
+        })
+      ).filter(
+        (t) =>
+          (t.labels ?? []).some((l) => l.name === "ai:agent-ready") &&
+          (t.blockedBy ?? []).length > 0,
+      ),
     };
   }
 
@@ -425,7 +451,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (!APPLY) {
     const picked = selectable(first, new Set(), Math.min(freeNow, MAX));
-    for (const t of first.ready) {
+    for (const t of [...first.held, ...first.ready]) {
       const blockers = openBlockers(t);
       if (blockers.length)
         console.log(
@@ -458,20 +484,20 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   // ----------------------------------------------------------------- claim ----
-  const cp = loadControlPlane();
-  const me = (await cp.raw(`query{ viewer{ id name } }`))?.viewer;
-  const states =
-    (
-      await cp.raw(
-        `query($t:String!){ team(id:$t){ states(first:50){ nodes{ id name } } } }`,
-        { t: repo.team },
-      )
-    )?.team?.states?.nodes ?? [];
-  const todoId = states.find((s) => s.name.toLowerCase() === "todo")?.id;
-  const blockedId = states.find((s) => s.name.toLowerCase() === "blocked")?.id;
-  const allLabels =
-    (await cp.raw(`query{ issueLabels(first:250){ nodes{ id name } } }`))
-      ?.issueLabels?.nodes ?? [];
+  // ONE handle, resolved from the REPO (WM-1006 cutover). This block used to
+  // call a bare `loadControlPlane()`, which resolves to the workspace default
+  // — so the dispatcher read its queue from the repo's plane and then tried to
+  // claim on the default one, passing a GitHub identifier to Linear:
+  //   Entity not found: Issue — Could not find referenced Issue.
+  // It failed safe (no mutation), but no ticket could ever be dispatched.
+  const cp = loadControlPlane({ repoName: repo.name });
+
+  // `unclaim()` works in label NAMES, not tracker-native ids, so it can run on
+  // any plane. `computeUnclaimAction` maps names -> ids through `allLabels`;
+  // giving it an identity table (id === name) makes it return names, which is
+  // exactly what `transition()` takes. Its signature is deliberately left
+  // alone — event-runtime/lib/unclaim.test.mjs pins it against releaseLabels.
+  const identityLabels = (names) => names.map((n) => ({ id: n, name: n }));
 
   async function claim(t) {
     // Adapter claim: In Progress + assignee + claim labels, then read-back.
@@ -492,38 +518,52 @@ export async function main(argv = process.argv.slice(2)) {
    * to Blocked with a question, or to In Review with a PR — keeps that state.
    */
   async function unclaim(t, why, log) {
-    const cur = (
-      await cp.raw(
-        `query($id:String!){ issue(id:$id){ state{name} assignee{id} labels(first:20){nodes{id name}} comments(last:10){nodes{body createdAt}} } }`,
-        { id: t.id },
-      )
-    )?.issue;
-    if (!cur || cur.state?.name !== "In Progress" || cur.assignee?.id !== me.id)
+    let ticket;
+    let comments;
+    try {
+      ticket = await cp.getTicket(t.identifier);
+      comments = await cp.listComments(t.identifier);
+    } catch {
       return false;
-    if (!(cur.labels?.nodes ?? []).some((l) => l.name === "ai:in-progress"))
+    }
+    if (!ticket || ticket.state?.name !== "In Progress") return false;
+    // Assignee identity is NOT checked here. Every agent authenticates as the
+    // same tracker account, so "is it still mine" is unanswerable (WM-1045);
+    // the ai:in-progress label below is the honest guard. An agent that moved
+    // its own ticket to Blocked or In Review no longer matches and is left be.
+    if (!(ticket.labels ?? []).some((l) => l.name === "ai:in-progress"))
       return false;
+    const cur = {
+      state: ticket.state,
+      labels: {
+        nodes: (ticket.labels ?? []).map((l) => ({ id: l.name, name: l.name })),
+      },
+      comments: { nodes: comments ?? [] },
+    };
 
     const action = computeUnclaimAction({
       issue: cur,
       why,
       log,
-      todoStateId: todoId,
-      blockedStateId: blockedId,
-      allLabels,
+      todoStateId: "Todo",
+      blockedStateId: "Blocked",
+      allLabels: identityLabels([
+        ...(ticket.labels ?? []).map((l) => l.name),
+        "ai:agent-ready",
+        "ai:blocked",
+      ]),
       threshold: DISPATCH_FAILURE_THRESHOLD,
     });
 
-    await cp.raw(
-      `mutation($id:String!,$in:IssueUpdateInput!){ issueUpdate(id:$id,input:$in){ success } }`,
-      {
-        id: t.id,
-        in: {
-          stateId: action.stateId ?? undefined,
-          assigneeId: null,
-          labelIds: action.labelIds,
-        },
-      },
-    );
+    // action.labelIds are NAMES here (identity table above). Transition takes
+    // the complete resulting set as add/remove, so compute the delta.
+    const had = new Set((ticket.labels ?? []).map((l) => l.name));
+    const want = new Set(action.labelIds);
+    await cp.transition(t.identifier, action.stateId, {
+      add: [...want].filter((n) => !had.has(n)),
+      remove: [...had].filter((n) => !want.has(n)),
+      unassign: true,
+    });
     await cp.comment(t.identifier, action.commentBody);
 
     if (action.repeated) {
@@ -612,7 +652,13 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   async function runTicket(t) {
-    const wt = path.join(expand(repo.worktree_root), t.identifier);
+    // Slug, not the raw identifier: worktree-up.sh creates `gh-863` for
+    // `watt-mind/factory#863` (#881/#884). Computing the raw path here made
+    // tick report "worktree ready" for a directory that does not exist and
+    // then spawn the agent with that cwd — which surfaces as ENOENT on the
+    // EXECUTABLE, so it read as a missing /usr/bin/timeout rather than a path
+    // bug, and tripped the circuit breaker as an environment failure (#887).
+    const wt = path.join(expand(repo.worktree_root), ticketSlug(t.identifier));
     const up = spawnSync("/bin/bash", [repo.worktree_up, t.identifier], {
       cwd: repoPath,
       encoding: "utf8",
@@ -639,7 +685,11 @@ export async function main(argv = process.argv.slice(2)) {
 
     const log = path.join(
       LOG_DIR,
-      `${repo.name}-${t.identifier}-${stamp}.jsonl`,
+      ticketFileName(t.identifier, {
+        prefix: repo.name,
+        suffix: stamp,
+        ext: "jsonl",
+      }),
     );
     const out = createWriteStream(log);
     const budget = String(
@@ -1039,7 +1089,10 @@ export async function main(argv = process.argv.slice(2)) {
         ticket: t.identifier,
         owner: leaseOwner,
       });
-      const wt = path.join(expand(repo.worktree_root), t.identifier);
+      const wt = path.join(
+        expand(repo.worktree_root),
+        ticketSlug(t.identifier),
+      );
       preserveWip(wt, t.identifier);
       await unclaim(
         t,
@@ -1142,7 +1195,7 @@ export async function main(argv = process.argv.slice(2)) {
       // starts" is invisible in exactly the mode that matters (see F-7). Keyed per
       // reason: a blocked ticket can unblock mid-run and then be worth re-warning
       // about its missing Owned Paths, and vice versa.
-      for (const t of state.ready) {
+      for (const t of [...state.held, ...state.ready]) {
         if (seen.has(t.identifier)) continue;
         const blockers = openBlockers(t);
         if (blockers.length && !warned.has(`${t.identifier}:blocked`)) {

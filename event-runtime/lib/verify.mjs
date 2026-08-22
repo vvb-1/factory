@@ -15,6 +15,7 @@ import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { globToRegExp } from "../../orchestrator/owned-paths.mjs";
 import { canonicalJson, hashBytes, hashJson, sha256Hex } from "./canonical.mjs";
+import { resolveConfigPath } from "./config.mjs";
 import { validateDecisionRequest } from "./decision.mjs";
 import { processResultMemos } from "./memos.mjs";
 import { reposRoot } from "./repos.mjs";
@@ -104,7 +105,7 @@ export const HANDOFF_COMMENT_HEADING =
 
 /** `dispatch.owned_paths_conformance` in config/policy.yaml: advisory (default) | strict. */
 export function policyOwnedPathsConformance(root = reposRoot()) {
-  const file = path.join(root, "config", "policy.yaml");
+  const file = resolveConfigPath("policy", { root });
   if (!existsSync(file)) return DEFAULT_OWNED_PATHS_CONFORMANCE;
   try {
     const value = Bun.YAML.parse(readFileSync(file, "utf8"))?.dispatch
@@ -608,7 +609,10 @@ function checkWorkPlan(candidate) {
         !Array.isArray(entry) &&
         Object.keys(entry).length === 2 &&
         typeof entry.ticket === "string" &&
-        /^[A-Z]+-[0-9]+$/.test(entry.ticket) &&
+        // WM-1006: Linear TEAM-N or GitHub owner/repo#N / #N / N identifiers.
+        /^([A-Z]+-[0-9]+|(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#?[0-9]+)$/.test(
+          entry.ticket,
+        ) &&
         dispositions.has(entry.disposition);
       if (!valid) {
         violations.push(`evidence_candidate_invalid_at_index_${index}`);
