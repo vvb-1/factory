@@ -11,10 +11,15 @@ Modern-minimal, dark-first, technical, and restrained.
 ## Content-page system
 
 - Keep Starlight's documentation information architecture and navigation.
+- Use an asymmetric typographic marquee on the homepage: a large factual
+  statement, compact supporting copy and actions, then one bounded execution
+  rail. Do not repeat the brand mark as a floating hero illustration.
 - Use a long-document rhythm: readable prose measure, quiet dividers, and dense
   reference surfaces.
-- Diagrams may carry the engineering-grid motif; prose pages should use it only
-  as a low-contrast page background.
+- Keep prose and diagram surfaces clean. Do not use background grids: they
+  compete with body text and create seams when diagrams are embedded.
+- The homepage alone may use the subtle 40px grid as an identity surface behind
+  its marketing content.
 
 ## Theme
 

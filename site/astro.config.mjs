@@ -6,6 +6,13 @@ import starlight from "@astrojs/starlight";
 export default defineConfig({
   site: "https://watt-mind.github.io",
   base: "/factory",
+  vite: {
+    // getting-started/quickstart.mdx imports docs/onboarding/connect-repo.md
+    // from the repository root with ?raw. `factory onboard` prints the same
+    // file, so the onboarding prompt has exactly one copy; without this, dev
+    // refuses to serve it (build resolves it either way).
+    server: { fs: { allow: [".."] } },
+  },
   integrations: [
     starlight({
       title: "factory",
@@ -23,6 +30,9 @@ export default defineConfig({
         },
       ],
       customCss: ["./src/styles/tokens.css", "./src/styles/custom.css"],
+      components: {
+        Hero: "./src/components/HomeHero.astro",
+      },
       head: [
         {
           tag: "script",

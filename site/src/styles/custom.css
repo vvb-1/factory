@@ -1,5 +1,5 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Long Document · design-system: design.md · designed-as-app */
-/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4 */
+/* Hallmark · genre: modern-minimal · macrostructure: Long Document + asymmetric typographic marquee · design-system: design.md · designed-as-app */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
 :root {
   --sl-color-accent-low: var(--wm-color-on-primary);
   --sl-color-accent: var(--wm-color-primary);
@@ -54,13 +54,16 @@ body {
 
 body {
   background-color: var(--sl-color-black);
+  font-family: var(--wm-font-body);
+  letter-spacing: -0.006em;
+}
+
+body:has(.hero) {
   background-image:
     linear-gradient(var(--wm-color-grid) 0.5px, transparent 0.5px),
     linear-gradient(90deg, var(--wm-color-grid) 0.5px, transparent 0.5px);
   background-position: center;
   background-size: 40px 40px;
-  font-family: var(--wm-font-body);
-  letter-spacing: -0.006em;
 }
 
 h1,
@@ -101,32 +104,6 @@ header.header {
   background: color-mix(in oklch, var(--sl-color-black) 90%, transparent);
 }
 
-.hero {
-  max-width: 56rem;
-  margin: 0 auto;
-  padding: var(--wm-space-2xl) var(--wm-space-sm) var(--wm-space-xl) !important;
-}
-
-.hero h1 {
-  font-weight: 800;
-  line-height: 1.06;
-}
-
-.hero > img {
-  filter: drop-shadow(
-    0 18px 38px color-mix(in oklch, var(--wm-color-primary) 14%, transparent)
-  );
-}
-
-.hero .tagline {
-  max-width: 46rem;
-  margin-top: var(--wm-space-sm) !important;
-  margin-bottom: var(--wm-space-lg) !important;
-  color: var(--sl-color-gray-2) !important;
-  font-size: 1.125rem !important;
-  line-height: 1.7 !important;
-}
-
 .card {
   border: var(--wm-rule) !important;
   border-radius: var(--wm-radius-lg) !important;
@@ -160,6 +137,79 @@ header.header {
   color: var(--sl-color-gray-2) !important;
   font-size: 0.95rem !important;
   line-height: 1.6 !important;
+}
+
+.tenet-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--wm-space-md);
+  margin-block: var(--wm-space-md);
+}
+
+.tenet-card {
+  min-width: 0;
+  overflow: hidden;
+  border: var(--wm-rule);
+  border-radius: var(--wm-radius-lg);
+  background: var(--wm-color-panel);
+  backdrop-filter: blur(12px);
+  transition:
+    transform var(--wm-duration-short) var(--wm-ease-out),
+    border-color var(--wm-duration-short) var(--wm-ease-out),
+    background-color var(--wm-duration-short) var(--wm-ease-out);
+}
+
+.tenet-card:hover {
+  border-color: color-mix(in oklch, var(--wm-color-primary) 55%, transparent);
+  background: var(--wm-color-panel-hover);
+  transform: translateY(-2px);
+}
+
+.tenet-card__illustration {
+  display: grid;
+  min-height: 10rem;
+  place-items: center;
+  border-bottom: var(--wm-rule);
+  background: color-mix(in oklch, var(--wm-color-surface-low) 74%, transparent);
+}
+
+.tenet-card__illustration svg {
+  display: block;
+  width: 8rem;
+  height: 8rem;
+}
+
+.tenet-card__illustration path[stroke="#dde4e1"] {
+  stroke: var(--sl-color-white);
+}
+
+.tenet-card__illustration path[stroke="#4fdbc8"] {
+  stroke: var(--wm-color-primary);
+}
+
+.tenet-card__copy {
+  padding: var(--wm-space-md);
+}
+
+.sl-markdown-content .tenet-card__copy h3 {
+  margin: 0 0 var(--wm-space-xs);
+  color: var(--sl-color-white);
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.tenet-card__body {
+  color: var(--sl-color-gray-2);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.tenet-card__body > :first-child {
+  margin-top: 0;
+}
+
+.tenet-card__body > :last-child {
+  margin-bottom: 0;
 }
 
 table {
@@ -228,8 +278,8 @@ tr:last-child td {
 }
 
 @media (max-width: 50rem) {
-  .hero {
-    padding-inline: 0 !important;
+  .tenet-card-grid {
+    grid-template-columns: 1fr;
   }
 
   .diagram-embed,
