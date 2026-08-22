@@ -5,26 +5,14 @@ description: Deep architectural breakdown of Factory loops and components
 
 Factory is structured around three foundational subsystems:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Control Plane                          │
-│          (GitHub Issues / Linear / Projects v2)             │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────┐
-│                  Orchestrator & Dispatch                    │
-│      - Ticket Admittance & Owned Paths Graph Matcher        │
-│      - Worktree Manager (Ports, DB, Git Workspaces)         │
-│      - Verification Gate & Falsifiability Runner            │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-┌──────────────────────────────▼──────────────────────────────┐
-│                    Agent Harness Pool                       │
-│       (Claude Code, Gemini/AGY, Codex, Cursor, Pi)          │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ optional requirement
-┌──────────────────────────────▼──────────────────────────────┐
-│                  Gondolin Sandbox Boundary                 │
-│       (workspace mount, egress policy, secret proxy)       │
-└─────────────────────────────────────────────────────────────┘
-```
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/factory-architecture.html"
+  title="Factory architecture layer stack"
+  loading="lazy"
+></iframe>
+
+The control plane admits work and records ownership. The orchestrator makes
+coordination decisions before an isolated harness process begins. Verification
+runs outside the model process, and only accepted evidence reaches the durable
+git, CI, and receipt record.

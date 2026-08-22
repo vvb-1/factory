@@ -17,6 +17,13 @@ For unattended operation, run workers as separate processes (`factory events wor
 
 ## Architecture
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/event-runtime.html"
+  title="Event runtime process"
+  loading="lazy"
+></iframe>
+
 - **SQLite state store:** Transactional records for events, proposals, runs, attempts, leases, traces, and receipts.
 - **Worker pool:** Claims planned runs and supervises a policy-bounded number of worker processes. Scale-down drains workers between claims.
 - **Control API:** Loopback HTTP endpoints consumed by the web UI, connectors, and CLI tools.

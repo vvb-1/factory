@@ -4,6 +4,10 @@ description: The factory that builds software — and itself. A runtime for self
 template: splash
 hero:
   tagline: The factory that builds software — and itself. A runtime for self-improving agentic loops where code is the first product line.
+  image:
+    dark: ../../assets/factory-mark-recursion-dark.svg
+    light: ../../assets/factory-mark-recursion-light.svg
+    alt: A recursive bounded-execution mark crossing a verification gate
   actions:
     - text: Quickstart Demo
       link: /factory/getting-started/quickstart/
@@ -66,30 +70,31 @@ Not a demo benchmark — real dogfooding numbers across 17 days of continuous un
 
 ## The Autonomous Loop
 
-```
-Triage ──①triage──▶ ai:agent-ready ──②dispatch──▶ PR ──③merge──▶ Done
-                                                             │
-                             reaper ◀── crashed claims ◀──────┘
-```
+<iframe
+  class="diagram-embed diagram-embed--loop"
+  src="/factory/diagrams/autonomous-loop.html"
+  title="The autonomous software loop"
+  loading="lazy"
+></iframe>
 
 ---
 
 ## Core Tenets
 
 <CardGrid stagger>
-  <Card title="One Ticket, One Worktree" icon="puzzle">
+  <Card title="One Ticket, One Worktree">
     Complete filesystem, database, and port isolation. Parallel runs are safe
     because Owned Paths are disjoint.
   </Card>
-  <Card title="Verification as a Gate" icon="shield">
+  <Card title="Verification as a Gate">
     An agent's report is commentary; the test exit code is evidence. Nothing
     merges on self-attestation.
   </Card>
-  <Card title="Pluggable Control Plane" icon="setting">
+  <Card title="Pluggable Control Plane">
     Works out-of-the-box with **GitHub Issues** and **Linear**. Truth lives in
     git; tasks live in the tracker.
   </Card>
-  <Card title="Multi-Harness Architecture" icon="laptop">
+  <Card title="Multi-Harness Architecture">
     Drives the coding agents you already use: Claude Code, Gemini / Antigravity,
     OpenAI Codex, Cursor, and Pi.
   </Card>
