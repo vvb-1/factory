@@ -1,132 +1,251 @@
-/* Dark mode palette & accent colors for Factory */
+/* Hallmark · genre: modern-minimal · macrostructure: Long Document · design-system: design.md · designed-as-app */
+/* Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4 */
 :root {
-  --sl-color-accent-low: #042f2e;
-  --sl-color-accent: #0f766e;
-  --sl-color-accent-high: #2dd4bf;
-  --sl-color-white: #f8fafc;
-  --sl-color-gray-1: #e2e8f0;
-  --sl-color-gray-2: #94a3b8;
-  --sl-color-gray-3: #64748b;
-  --sl-color-gray-4: #334155;
-  --sl-color-gray-5: #1e293b;
-  --sl-color-gray-6: #0f172a;
-  --sl-color-black: #080c14;
+  --sl-color-accent-low: var(--wm-color-on-primary);
+  --sl-color-accent: var(--wm-color-primary);
+  --sl-color-accent-high: var(--wm-color-primary);
+  --sl-color-white: var(--wm-color-on-surface);
+  --sl-color-gray-1: var(--wm-color-on-surface-variant);
+  --sl-color-gray-2: var(--wm-color-on-surface-variant);
+  --sl-color-gray-3: var(--wm-color-outline);
+  --sl-color-gray-4: var(--wm-color-outline-variant);
+  --sl-color-gray-5: var(--wm-color-surface-high);
+  --sl-color-gray-6: var(--wm-color-surface-low);
+  --sl-color-black: var(--wm-color-surface);
+  --sl-font: var(--wm-font-body);
+  --sl-font-mono: var(--wm-font-mono);
+  --sl-content-width: 52rem;
 }
 
 :root[data-theme="light"] {
-  --sl-color-accent-low: #ccfbf1;
-  --sl-color-accent: #0f766e;
-  --sl-color-accent-high: #115e59;
-  --sl-color-white: #0f172a;
-  --sl-color-gray-1: #1e293b;
-  --sl-color-gray-2: #334155;
-  --sl-color-gray-3: #64748b;
-  --sl-color-gray-4: #cbd5e1;
-  --sl-color-gray-5: #f1f5f9;
-  --sl-color-gray-6: #f8fafc;
-  --sl-color-black: #ffffff;
+  --wm-color-surface: oklch(98.331% 0.00249 165.08);
+  --wm-color-surface-lowest: oklch(100% 0 0);
+  --wm-color-surface-low: oklch(97% 0.005 178);
+  --wm-color-surface-container: oklch(95% 0.008 178);
+  --wm-color-surface-high: oklch(92% 0.01 178);
+  --wm-color-surface-highest: oklch(88% 0.012 178);
+  --wm-color-on-surface: oklch(18.77% 0.01139 175.67);
+  --wm-color-on-surface-variant: oklch(39.325% 0.01702 185.19);
+  --wm-color-primary: oklch(51.094% 0.08606 186.39);
+  --wm-color-primary-container: oklch(95.265% 0.0498 180.8);
+  --wm-color-on-primary: oklch(100% 0 0);
+  --wm-color-outline: oklch(55% 0.018 178);
+  --wm-color-outline-variant: oklch(84% 0.012 178);
+  --wm-color-grid: oklch(39.325% 0.01702 185.19 / 0.12);
+  --wm-color-panel: oklch(100% 0 0 / 0.82);
+  --wm-color-panel-hover: oklch(97% 0.005 178 / 0.96);
+  --sl-color-accent-low: var(--wm-color-primary-container);
+  --sl-color-accent: var(--wm-color-primary);
+  --sl-color-accent-high: oklch(43.697% 0.07052 188.22);
+  --sl-color-white: var(--wm-color-on-surface);
+  --sl-color-gray-1: oklch(28.281% 0.00867 184.63);
+  --sl-color-gray-2: var(--wm-color-on-surface-variant);
+  --sl-color-gray-3: var(--wm-color-outline);
+  --sl-color-gray-4: var(--wm-color-outline-variant);
+  --sl-color-gray-5: var(--wm-color-surface-high);
+  --sl-color-gray-6: var(--wm-color-surface-low);
+  --sl-color-black: var(--wm-color-surface);
 }
 
-/* Typography & Global polish */
+html,
 body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, sans-serif;
-  letter-spacing: -0.011em;
+  overflow-x: clip;
+}
+
+body {
+  background-color: var(--sl-color-black);
+  background-image:
+    linear-gradient(var(--wm-color-grid) 0.5px, transparent 0.5px),
+    linear-gradient(90deg, var(--wm-color-grid) 0.5px, transparent 0.5px);
+  background-position: center;
+  background-size: 40px 40px;
+  font-family: var(--wm-font-body);
+  letter-spacing: -0.006em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.site-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--wm-font-display);
+  font-style: normal;
+  letter-spacing: -0.028em;
+}
+
+h1,
+h2 {
+  font-weight: 700;
 }
 
 code,
 kbd,
 samp,
 pre {
-  font-family:
-    "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace !important;
+  font-family: var(--wm-font-mono) !important;
   font-size: 0.9em;
 }
 
-/* Hero Section Enhancements */
+header.header {
+  border-bottom: var(--wm-rule);
+  background: color-mix(in oklch, var(--sl-color-black) 84%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.sidebar-pane,
+.right-sidebar-panel {
+  background: color-mix(in oklch, var(--sl-color-black) 90%, transparent);
+}
+
 .hero {
-  padding: 4rem 1rem 3rem !important;
-  max-width: 900px;
+  max-width: 56rem;
   margin: 0 auto;
+  padding: var(--wm-space-2xl) var(--wm-space-sm) var(--wm-space-xl) !important;
+}
+
+.hero h1 {
+  font-weight: 800;
+  line-height: 1.06;
+}
+
+.hero > img {
+  filter: drop-shadow(
+    0 18px 38px color-mix(in oklch, var(--wm-color-primary) 14%, transparent)
+  );
 }
 
 .hero .tagline {
-  font-size: 1.25rem !important;
-  line-height: 1.6 !important;
+  max-width: 46rem;
+  margin-top: var(--wm-space-sm) !important;
+  margin-bottom: var(--wm-space-lg) !important;
   color: var(--sl-color-gray-2) !important;
-  margin-top: 1rem !important;
-  margin-bottom: 2rem !important;
+  font-size: 1.125rem !important;
+  line-height: 1.7 !important;
 }
 
-/* Starlight Card & CardGrid Styling */
 .card {
-  background: rgba(15, 23, 42, 0.65) !important;
+  border: var(--wm-rule) !important;
+  border-radius: var(--wm-radius-lg) !important;
+  background: var(--wm-color-panel) !important;
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 12px !important;
   transition:
-    transform 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease !important;
+    transform var(--wm-duration-short) var(--wm-ease-out),
+    border-color var(--wm-duration-short) var(--wm-ease-out),
+    background-color var(--wm-duration-short) var(--wm-ease-out) !important;
 }
 
 .card:hover {
+  border-color: color-mix(
+    in oklch,
+    var(--wm-color-primary) 55%,
+    transparent
+  ) !important;
+  background: var(--wm-color-panel-hover) !important;
   transform: translateY(-2px);
-  border-color: rgba(45, 212, 191, 0.4) !important;
-  box-shadow: 0 8px 24px rgba(15, 118, 110, 0.15);
 }
 
 .card .title {
-  font-size: 1.15rem !important;
-  font-weight: 600 !important;
   color: var(--sl-color-white) !important;
+  font-family: var(--wm-font-display);
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.018em;
 }
 
 .card .body {
   color: var(--sl-color-gray-2) !important;
   font-size: 0.95rem !important;
-  line-height: 1.55 !important;
+  line-height: 1.6 !important;
 }
 
-/* Tables styling */
 table {
-  border-collapse: separate !important;
-  border-spacing: 0 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 8px !important;
-  overflow: hidden;
-  margin: 1.5rem 0 !important;
   width: 100% !important;
+  margin: var(--wm-space-md) 0 !important;
+  overflow: hidden;
+  border: var(--wm-rule) !important;
+  border-collapse: separate !important;
+  border-radius: var(--wm-radius-md) !important;
+  border-spacing: 0 !important;
+  background: color-mix(in oklch, var(--sl-color-black) 90%, transparent);
 }
 
 th {
-  background-color: rgba(30, 41, 59, 0.5) !important;
-  font-weight: 600 !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-  padding: 0.75rem 1rem !important;
+  padding: var(--wm-space-xs) var(--wm-space-sm) !important;
+  border-bottom: var(--wm-rule) !important;
+  background: var(--wm-color-panel) !important;
+  font-family: var(--wm-font-display);
+  font-weight: 700 !important;
 }
 
 td {
-  padding: 0.75rem 1rem !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+  padding: var(--wm-space-xs) var(--wm-space-sm) !important;
+  border-bottom: 1px solid
+    color-mix(in oklch, var(--wm-color-outline-variant) 45%, transparent) !important;
 }
 
 tr:last-child td {
-  border-bottom: none !important;
+  border-bottom: 0 !important;
 }
 
-/* Interactive callouts / Admonitions */
 .starlight-aside {
-  border-radius: 10px !important;
-  border-left-width: 4px !important;
+  border-radius: var(--wm-radius-md) !important;
+  border-left-width: 3px !important;
+  background: color-mix(
+    in oklch,
+    var(--wm-color-surface-container) 78%,
+    transparent
+  );
 }
 
-/* Terminal / Code blocks */
 .expressive-code {
-  margin: 1.5rem 0 !important;
-  border-radius: 10px !important;
+  margin: var(--wm-space-md) 0 !important;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border: var(--wm-rule) !important;
+  border-radius: var(--wm-radius-md) !important;
+}
+
+.diagram-embed {
+  display: block;
+  width: 100%;
+  margin: 1.75rem 0;
+  aspect-ratio: 16 / 9;
+  border: var(--wm-rule);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-color-surface);
+}
+
+.diagram-embed--loop {
+  aspect-ratio: 26 / 17;
+}
+
+:focus-visible {
+  outline: 2px solid var(--wm-color-focus);
+  outline-offset: 3px;
+}
+
+@media (max-width: 50rem) {
+  .hero {
+    padding-inline: 0 !important;
+  }
+
+  .diagram-embed,
+  .diagram-embed--loop {
+    min-height: 32rem;
+    aspect-ratio: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

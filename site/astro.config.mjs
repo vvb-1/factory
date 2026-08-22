@@ -22,7 +22,16 @@ export default defineConfig({
           href: "https://github.com/watt-mind/factory",
         },
       ],
-      customCss: ["./src/styles/custom.css"],
+      customCss: ["./src/styles/tokens.css", "./src/styles/custom.css"],
+      head: [
+        {
+          tag: "script",
+          attrs: {
+            src: "/factory/diagrams/theme-sync.js",
+            defer: true,
+          },
+        },
+      ],
       sidebar: [
         {
           label: "Getting Started",
