@@ -32,7 +32,7 @@ commit SHA in the report.
 
 ## Autonomous-agent threat model
 
-Factory orchestrates coding agents and gives some processes access to source
+The factory orchestrates coding agents and gives some processes access to source
 trees, command execution, issue trackers, and source-control APIs. Treat model
 output and all text an agent reads—including tickets, repository files, tool
 output, and web content—as untrusted input. An agent's instruction or claim is

@@ -4,7 +4,7 @@
 
 A runtime for self-improving agentic loops. Code is the first product line.
 
-Factory orchestrates coding agents (Claude Code, Codex, Gemini / Antigravity,
+The factory orchestrates coding agents (Claude Code, Codex, Gemini / Antigravity,
 Cursor, Pi). It does not compete with them. The tracker is the control plane,
 GitHub is the source of truth, and CI is the reward signal. Nothing merges
 because an agent said it was done — it merges because the tests passed and a
@@ -127,7 +127,7 @@ agents, the runtime graph, and a ticket journey. Additional stills live in
 
 Fork an instance, not the kernel. The
 [`factory-starter`](templates/starter/) scaffold keeps your repository routing,
-local policy, schedules, and optional packs in a repository that pins Factory
+local policy, schedules, and optional packs in a repository that pins factory
 as a dependency. That lets your organization improve its own factory without
 diverging from the shared runtime.
 
@@ -178,7 +178,7 @@ ee/                               reserved open-core seam (empty of product code
 
 ## Open-core boundary
 
-Factory's orchestration, event runtime, shared agent workflows, harness
+factory's orchestration, event runtime, shared agent workflows, harness
 packaging, and public extension contracts form the open core. The current
 repository is licensed under Apache License 2.0 and is intended to remain
 useful, buildable, and testable without private services or unpublished code.
