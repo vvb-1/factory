@@ -5,13 +5,12 @@ description: The 4 stages of unattended autonomous development
 
 Factory operates as a continuous state machine across four distinct phases:
 
-```text
-Triage ──① specify──▶ Todo + ai:agent-ready ──② dispatch──▶ Worktree
-                                                          │
-Done ◀──④ review + merge── PR ◀──③ verify─────────────────┘
-                         │
-                         └── failed or stale claims ──▶ recovery
-```
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/loop-lifecycle.html"
+  title="The Factory loop lifecycle"
+  loading="lazy"
+></iframe>
 
 ## 1. Triage (`/factory-triage`)
 

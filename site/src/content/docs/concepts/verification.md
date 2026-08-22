@@ -11,6 +11,13 @@ A completion message cannot prove that the declared checks ran in the intended w
 
 Factory workers enforce an independent verification gate:
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#verification-gate"
+  title="Independent verification gate"
+  loading="lazy"
+></iframe>
+
 1. The agent finishes writing code and calls its completion tool.
 2. The orchestrator worker executes the ticket's exact `Verification Command` in the worktree.
 3. If the command exits non-zero:

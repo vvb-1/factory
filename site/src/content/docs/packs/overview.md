@@ -7,6 +7,13 @@ The Factory **kernel** provides planning, approval, execution, artifact, and ver
 
 **Packs** add data-only agent definitions, pinned prompts and schemas, event routes, edges, and schedules. They do not ship executable adapters or hooks; those belong in operator-installed extensions.
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#pack-boundary"
+  title="Kernel, pack, and extension boundary"
+  loading="lazy"
+></iframe>
+
 ```text
 factory/
 ├── event-runtime/         # Kernel, workers, API, and web UI

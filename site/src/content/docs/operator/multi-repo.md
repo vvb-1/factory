@@ -5,6 +5,13 @@ description: Managing multiple client and internal repositories
 
 Factory can supervise multiple repositories concurrently with independent concurrency ceilings:
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#multi-repo-fleet"
+  title="Multi-repository fleet isolation"
+  loading="lazy"
+></iframe>
+
 ```bash
 factory status                         # fleet-wide status overview
 factory queue                          # readiness and capacity for configured repos

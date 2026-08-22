@@ -5,6 +5,13 @@ description: Connecting Factory to GitHub Issues and dispatching real tasks
 
 Once you have verified the offline demo, you can connect Factory to an external GitHub repository.
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#first-real-pr"
+  title="First real pull request"
+  loading="lazy"
+></iframe>
+
 ## Prerequisites
 
 1. Authenticate the GitHub CLI:

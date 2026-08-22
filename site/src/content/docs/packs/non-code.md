@@ -7,6 +7,13 @@ While software development is the initial product line, Factory's primitives app
 
 ## Infrastructure Ops Loops
 
+<iframe
+  class="diagram-embed diagram-embed--loop"
+  src="/factory/diagrams/concept-guides.html#non-code-ops-loop"
+  title="Infrastructure operations loop"
+  loading="lazy"
+></iframe>
+
 1. **Event:** A monitoring connector admits a disk-usage observation.
 2. **Workspace:** The runtime creates an isolated workspace with a versioned input contract.
 3. **Agent:** A data-only pack analyzes the supplied telemetry and proposes bounded remediation.

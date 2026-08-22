@@ -27,6 +27,13 @@ We do not lead with a general agent platform that happens to also write code. We
 
 The same loops that ship product ship the factory. This repository is an ordinary dispatch target. A harness defect becomes a ticket; a ticket becomes a PR; a merge changes the next run. Friction is not a retrospective slide — it is intake.
 
+<iframe
+  class="diagram-embed diagram-embed--loop"
+  src="/factory/diagrams/autonomous-loop.html"
+  title="The self-improving Factory loop"
+  loading="lazy"
+></iframe>
+
 Self-improvement is not a metaphor for "the model gets smarter." It is the factory editing its own skills, adapters, pins, and docs through the same claim → worktree → verify → PR path it uses on every other repo.
 
 ## Generality Beyond Code

@@ -5,14 +5,12 @@ description: Overview of supported coding agents and adapters
 
 Factory connects to multiple coding-agent CLIs without hard-wiring its workflow to one provider. Availability varies by execution path: the classic ticket runner supports all listed harnesses, while the event runtime exposes its installed adapter registry with `factory events adapters`.
 
-```mermaid
-flowchart TD
-    F[Factory Orchestrator] --> C[Claude Code Adapter]
-    F --> G[Gemini / Antigravity Adapter]
-    F --> X[Codex Adapter]
-    F --> U[Cursor Adapter]
-    F --> P[Pi Adapter]
-```
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#harness-routing"
+  title="Pluggable harness routing"
+  loading="lazy"
+></iframe>
 
 ## Supported Agents
 

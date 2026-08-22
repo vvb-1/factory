@@ -17,6 +17,13 @@ The **control plane** is where work is admitted, claimed, and tracked. Pull requ
 
 To prevent race conditions between two concurrent dispatch loops:
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#claim-readback"
+  title="Claim read-back sequence"
+  loading="lazy"
+></iframe>
+
 1. Agent A writes assignee = `Agent A` and state = `In Progress`.
 2. Agent A immediately performs a **read-back query** to verify that the remote record reflects its own assignee ID.
 3. If another agent won the race, Agent A aborts immediately and takes the next available ticket in the queue.

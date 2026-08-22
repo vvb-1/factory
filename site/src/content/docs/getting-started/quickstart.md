@@ -23,22 +23,12 @@ bin/factory demo         # execute: claim → implement → verify → PR → me
 
 ## What Happens Under the Hood
 
-```mermaid
-sequenceDiagram
-    participant O as Factory Orchestrator
-    participant W as Isolated Worktree
-    participant H as Agent Harness
-    participant V as Verification Gate
-    participant F as In-Memory Forge
-
-    O->>W: Create worktree from demo/repo fixture
-    O->>H: Dispatch starter ticket DEMO-1 (Owned Paths: src/greet.js)
-    H->>W: Apply patch implementing greet(name)
-    O->>V: Execute "bun test src/greet.test.mjs"
-    V-->>O: Verification Passed (exit 0)
-    O->>F: Open Pull Request #1 & Merge
-    O->>W: Clean up temporary worktree
-```
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#offline-demo"
+  title="Offline demo execution sequence"
+  loading="lazy"
+></iframe>
 
 1. **Plan validation:** `--dry` inspects the starter ticket (`DEMO-1`), resolves `Owned Paths` and verification commands, and outputs the seven-step plan without executing.
 2. **Worktree creation:** The runner copies `demo/repo/` into a temporary directory and runs that repository's `bin/worktree-up.sh`.

@@ -5,6 +5,13 @@ description: The 5-section specification standard for dispatchable issues
 
 A ticket is dispatchable only when it is in `Todo`, labeled `ai:agent-ready`, unassigned, and specific enough to implement safely. The specification uses five required sections:
 
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#agent-ready"
+  title="Agent-ready ticket structure"
+  loading="lazy"
+></iframe>
+
 ````markdown
 ### Problem & Context
 

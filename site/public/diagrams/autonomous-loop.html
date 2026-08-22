@@ -26,7 +26,6 @@
         --accent: oklch(57% 0.11 182.52);
         --accent-tint: oklch(92% 0.04 182.52);
         --rule: oklch(39.325% 0.01702 185.19 / 0.18);
-        --grid: oklch(39.325% 0.01702 185.19 / 0.14);
         --display: "Plus Jakarta Sans", system-ui, sans-serif;
         --sans: "Inter", system-ui, sans-serif;
         --mono: "JetBrains Mono", ui-monospace, monospace;
@@ -41,7 +40,6 @@
           --accent: oklch(81.137% 0.12259 182.52);
           --accent-tint: oklch(70.375% 0.12302 182.5 / 0.13);
           --rule: oklch(39.325% 0.01702 185.19 / 0.72);
-          --grid: oklch(39.325% 0.01702 185.19 / 0.42);
         }
       }
 
@@ -53,7 +51,6 @@
         --accent: oklch(81.137% 0.12259 182.52);
         --accent-tint: oklch(70.375% 0.12302 182.5 / 0.13);
         --rule: oklch(39.325% 0.01702 185.19 / 0.72);
-        --grid: oklch(39.325% 0.01702 185.19 / 0.42);
       }
 
       body {
@@ -61,11 +58,6 @@
         margin: 0;
         padding: 32px 40px;
         background-color: var(--paper);
-        background-image:
-          linear-gradient(var(--grid) 0.5px, transparent 0.5px),
-          linear-gradient(90deg, var(--grid) 0.5px, transparent 0.5px);
-        background-position: center;
-        background-size: 40px 40px;
         color: var(--ink);
         font-family: var(--sans);
       }

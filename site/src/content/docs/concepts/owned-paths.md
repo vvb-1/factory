@@ -9,14 +9,12 @@ description: Path-scoped concurrency keys for safer parallel agent execution
 
 Under the strict collision policy, two tickets can run concurrently only when their Owned Paths globs are disjoint:
 
-```text
-Ticket A Owned Paths:  ["event-runtime/lib/dispatch.mjs", "event-runtime/lib/dispatch.test.mjs"]
-Ticket B Owned Paths:  ["site/src/content/docs/**"]
-                      ──▶ DISJOINT = SAFE TO RUN IN PARALLEL
-
-Ticket C Owned Paths:  ["event-runtime/lib/**"]
-                      ──▶ OVERLAPS WITH TICKET A = BLOCKED UNTIL TICKET A COMPLETES
-```
+<iframe
+  class="diagram-embed"
+  src="/factory/diagrams/concept-guides.html#owned-paths"
+  title="Owned Paths collision comparison"
+  loading="lazy"
+></iframe>
 
 ## Formatting Requirements
 
