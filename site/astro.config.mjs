@@ -1,0 +1,58 @@
+// @ts-check
+import { defineConfig } from "astro/config";
+import starlight from "@astrojs/starlight";
+
+// https://astro.build/config
+export default defineConfig({
+  site: "https://watt-mind.github.io",
+  base: "/factory",
+  integrations: [
+    starlight({
+      title: "factory",
+      description:
+        "The factory that builds software — and itself. A runtime for self-improving agentic loops.",
+      logo: {
+        src: "./src/assets/watt-mind-logo.svg",
+        alt: "Watt Mind",
+      },
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/watt-mind/factory",
+        },
+      ],
+      customCss: ["./src/styles/custom.css"],
+      sidebar: [
+        {
+          label: "Getting Started",
+          items: [{ autogenerate: { directory: "getting-started" } }],
+        },
+        {
+          label: "Core Concepts",
+          items: [{ autogenerate: { directory: "concepts" } }],
+        },
+        {
+          label: "Harnesses & Models",
+          items: [{ autogenerate: { directory: "harnesses" } }],
+        },
+        {
+          label: "Packs & Extensions",
+          items: [{ autogenerate: { directory: "packs" } }],
+        },
+        {
+          label: "Operator Guide",
+          items: [{ autogenerate: { directory: "operator" } }],
+        },
+        {
+          label: "Contributor Hub",
+          items: [{ autogenerate: { directory: "contributing" } }],
+        },
+        {
+          label: "Reference",
+          items: [{ autogenerate: { directory: "reference" } }],
+        },
+      ],
+    }),
+  ],
+});

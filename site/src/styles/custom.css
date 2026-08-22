@@ -1,0 +1,132 @@
+/* Dark mode palette & accent colors for Factory */
+:root {
+  --sl-color-accent-low: #042f2e;
+  --sl-color-accent: #0f766e;
+  --sl-color-accent-high: #2dd4bf;
+  --sl-color-white: #f8fafc;
+  --sl-color-gray-1: #e2e8f0;
+  --sl-color-gray-2: #94a3b8;
+  --sl-color-gray-3: #64748b;
+  --sl-color-gray-4: #334155;
+  --sl-color-gray-5: #1e293b;
+  --sl-color-gray-6: #0f172a;
+  --sl-color-black: #080c14;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ccfbf1;
+  --sl-color-accent: #0f766e;
+  --sl-color-accent-high: #115e59;
+  --sl-color-white: #0f172a;
+  --sl-color-gray-1: #1e293b;
+  --sl-color-gray-2: #334155;
+  --sl-color-gray-3: #64748b;
+  --sl-color-gray-4: #cbd5e1;
+  --sl-color-gray-5: #f1f5f9;
+  --sl-color-gray-6: #f8fafc;
+  --sl-color-black: #ffffff;
+}
+
+/* Typography & Global polish */
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  letter-spacing: -0.011em;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family:
+    "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace !important;
+  font-size: 0.9em;
+}
+
+/* Hero Section Enhancements */
+.hero {
+  padding: 4rem 1rem 3rem !important;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.hero .tagline {
+  font-size: 1.25rem !important;
+  line-height: 1.6 !important;
+  color: var(--sl-color-gray-2) !important;
+  margin-top: 1rem !important;
+  margin-bottom: 2rem !important;
+}
+
+/* Starlight Card & CardGrid Styling */
+.card {
+  background: rgba(15, 23, 42, 0.65) !important;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease !important;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(45, 212, 191, 0.4) !important;
+  box-shadow: 0 8px 24px rgba(15, 118, 110, 0.15);
+}
+
+.card .title {
+  font-size: 1.15rem !important;
+  font-weight: 600 !important;
+  color: var(--sl-color-white) !important;
+}
+
+.card .body {
+  color: var(--sl-color-gray-2) !important;
+  font-size: 0.95rem !important;
+  line-height: 1.55 !important;
+}
+
+/* Tables styling */
+table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+  margin: 1.5rem 0 !important;
+  width: 100% !important;
+}
+
+th {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+  font-weight: 600 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: 0.75rem 1rem !important;
+}
+
+td {
+  padding: 0.75rem 1rem !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+
+tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* Interactive callouts / Admonitions */
+.starlight-aside {
+  border-radius: 10px !important;
+  border-left-width: 4px !important;
+}
+
+/* Terminal / Code blocks */
+.expressive-code {
+  margin: 1.5rem 0 !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}

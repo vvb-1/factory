@@ -1,0 +1,123 @@
+---
+title: factory
+description: The factory that builds software — and itself. A runtime for self-improving agentic loops.
+template: splash
+hero:
+  tagline: The factory that builds software — and itself. A runtime for self-improving agentic loops where code is the first product line.
+  actions:
+    - text: Quickstart Demo
+      link: /factory/getting-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: The Thesis
+      link: /factory/concepts/thesis/
+      icon: open-book
+      variant: secondary
+    - text: View on GitHub
+      link: https://github.com/watt-mind/factory
+      icon: external
+      variant: minimal
+---
+
+import {
+  Card,
+  CardGrid,
+  LinkCard,
+  Tabs,
+  TabItem,
+} from "@astrojs/starlight/components";
+
+## Try it in 30 Seconds
+
+Run the self-contained offline demo with zero tokens, API keys, or accounts:
+
+```bash
+git clone https://github.com/watt-mind/factory.git
+cd factory && bun install
+bin/factory demo --dry   # prints the 7-step plan
+bin/factory demo         # claim → implement → verify → PR → merge
+```
+
+---
+
+## Measured in Production
+
+Not a demo benchmark — real dogfooding numbers across 17 days of continuous unattended operation:
+
+<CardGrid>
+  <Card title="1,825 Tickets Dispatched" icon="rocket">
+    Dispatched across client repositories, infrastructure ops, and factory
+    self-maintenance.
+  </Card>
+  <Card title="1,620 Merged PRs" icon="approve-check">
+    Merged strictly after tests passed, CI turned green, and reviewer checks
+    succeeded.
+  </Card>
+  <Card title="87% Zero Touch" icon="seti:code-search">
+    Never visited Blocked, required zero human keyboard interaction from claim
+    to merge.
+  </Card>
+  <Card title="38 Min Median Merge" icon="clock">
+    Median wall-clock duration from agent claim to merged pull request.
+  </Card>
+</CardGrid>
+
+---
+
+## The Autonomous Loop
+
+```
+Triage ──①triage──▶ ai:agent-ready ──②dispatch──▶ PR ──③merge──▶ Done
+                                                             │
+                             reaper ◀── crashed claims ◀──────┘
+```
+
+---
+
+## Core Tenets
+
+<CardGrid stagger>
+  <Card title="One Ticket, One Worktree" icon="puzzle">
+    Complete filesystem, database, and port isolation. Parallel runs are safe
+    because Owned Paths are disjoint.
+  </Card>
+  <Card title="Verification as a Gate" icon="shield">
+    An agent's report is commentary; the test exit code is evidence. Nothing
+    merges on self-attestation.
+  </Card>
+  <Card title="Pluggable Control Plane" icon="setting">
+    Works out-of-the-box with **GitHub Issues** and **Linear**. Truth lives in
+    git; tasks live in the tracker.
+  </Card>
+  <Card title="Multi-Harness Architecture" icon="laptop">
+    Drives the coding agents you already use: Claude Code, Gemini / Antigravity,
+    OpenAI Codex, Cursor, and Pi.
+  </Card>
+</CardGrid>
+
+---
+
+## Explore the Documentation
+
+<CardGrid>
+  <LinkCard
+    title="Getting Started Guide"
+    description="Connect your first GitHub repository and dispatch your first ticket."
+    href="/factory/getting-started/first-pr/"
+  />
+  <LinkCard
+    title="Core Architecture"
+    description="Learn how Owned Paths, worktrees, and verification gates work."
+    href="/factory/concepts/thesis/"
+  />
+  <LinkCard
+    title="Contributor Hub"
+    description="How to write Harness Adapters, custom Packs, and contribute to Factory."
+    href="/factory/contributing/guide/"
+  />
+  <LinkCard
+    title="The Public Friction Log"
+    description="Real-world harness edge cases, failure modes, and architectural fixes."
+    href="/factory/contributing/friction-log/"
+  />
+</CardGrid>
