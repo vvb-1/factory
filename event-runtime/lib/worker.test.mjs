@@ -93,10 +93,13 @@ import {
 import {
   cleanupTrackedProcesses,
   processOwnerWatchdogSource,
+  registerTestProcessCleanup,
   trackMarkedFakeRuntimeGroups,
   trackProcess,
   trackProcessGroupsMatching,
 } from "./test-helpers-process.mjs";
+
+registerTestProcessCleanup(import.meta.url);
 
 const registry = loadRegistry();
 const adapters = { fake };
