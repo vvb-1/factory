@@ -914,7 +914,7 @@ function originatingEvent(db, runId) {
   return (
     db
       .query(
-        `SELECT e.type, e.correlation_id, e.causation_id
+        `SELECT e.type, e.correlation_id, e.causation_id, p.event_source AS source
        FROM proposals p
        JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
        WHERE p.run_id = ?
@@ -2362,6 +2362,11 @@ export async function executeClaimed(
           gateResult = worktreeDispatchAutoEligibility(spec.input, {
             ...(dispatchOpts ?? {}),
             claimedRetry: claimedRetryFor(db, runId, attempt),
+            // Match the planner's operator-only bypass from the immutable
+            // proposal that admitted this run. Never trust caller options here:
+            // chain and schedule runs must keep the security/escalation gate.
+            operatorAuthorized:
+              originatingEvent(db, runId)?.source === "operator",
           });
         }
       } catch (err) {
