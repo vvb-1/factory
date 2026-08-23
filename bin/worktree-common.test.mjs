@@ -866,9 +866,7 @@ test("worktree-up pushes a matching local-only ticket branch and resumes it", ()
     expect(result.stdout).toContain(
       `auto-pushed matching ticket branch ${branch} at ${tip}`,
     );
-    expect(git(fixture.remote, "rev-parse", `refs/heads/${branch}`)).toBe(
-      tip,
-    );
+    expect(git(fixture.remote, "rev-parse", `refs/heads/${branch}`)).toBe(tip);
     expect(
       git(path.join(fixture.worktrees, ticket), "branch", "--show-current"),
     ).toBe(branch);
