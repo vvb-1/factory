@@ -151,14 +151,18 @@ function queueRun(db, spec, now = T0) {
 function linkEvent(
   db,
   runId,
-  { type = "factory.status-report.requested", correlationId = "corr-1" } = {},
+  {
+    type = "factory.status-report.requested",
+    correlationId = "corr-1",
+    source = "test",
+  } = {},
 ) {
   const at = new Date(T0).toISOString();
   db.query(
     `INSERT INTO events (source, event_id, type, subject, occurred_at, received_at, correlation_id, causation_id, envelope_json, payload_hash, admitted_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    "test",
+    source,
     `evt-${runId}`,
     type,
     "factory",
@@ -173,7 +177,7 @@ function linkEvent(
   db.query(
     `INSERT INTO proposals (id, event_source, event_id, run_id, decision, created_at, ttl_seconds)
      VALUES (?, ?, ?, ?, 'RUN_SPEC', ?, 1800)`,
-  ).run(`prop-${runId}`, "test", `evt-${runId}`, runId, at);
+  ).run(`prop-${runId}`, source, `evt-${runId}`, runId, at);
 }
 
 function freshRoot() {
@@ -3522,6 +3526,55 @@ describe("execute-side dispatch hardening (WM-115)", () => {
       expect(["ticket_assigned", "ticket_not_todo"]).not.toContain(
         summary.reasonCode,
       );
+    }
+  });
+
+  test("claim-time dispatch gate honors only operator-sourced security runs (GH-1004)", async () => {
+    for (const [source, expectedTerminalState, expectedReasonCode] of [
+      ["operator", "COMPLETED", "ok"],
+      ["chain", "REFUSED", "ticket_security"],
+    ]) {
+      const db = openDb(":memory:");
+      const ticket = source === "operator" ? "WM-701" : "WM-702";
+      const spec = queueRun(
+        db,
+        makeDispatchSpec({
+          runId: `run_security_${source}`,
+          input: { repo: "wt-worker", ticket },
+        }),
+      );
+      linkEvent(db, spec.runId, {
+        type: "factory.dispatch.requested",
+        source,
+      });
+
+      const summary = await runOnce(
+        db,
+        registry,
+        { fake: dispatchFakeAdapter },
+        opts({
+          dispatch: {
+            locksDir: tmpDir(`evrt-security-${source}-locks-`),
+            fetchTicket: () =>
+              readyDispatchTicket(ticket, {
+                labels: {
+                  nodes: [
+                    { name: "ai:agent-ready" },
+                    { name: "type:security" },
+                  ],
+                },
+              }),
+            fetchInFlight: () => [],
+            countLeases: () => 0,
+            claimTicket: () => ({ ok: true }),
+          },
+        }),
+      );
+
+      expect(summary).toMatchObject({
+        terminalState: expectedTerminalState,
+        reasonCode: expectedReasonCode,
+      });
     }
   });
 
