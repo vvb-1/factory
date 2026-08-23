@@ -240,15 +240,20 @@ case "$cmd" in
     fi
 
     # Unreachable runtime (or an unstructured legacy message): preserve the
-    # old argv/stdin transport exactly. WM-795 gave `factory notify`'s callers
-    # (runners/run-agent.sh) a policy-configurable command via lib/notify.mjs,
-    # but this direct fallback still hardcodes the operator's private
-    # notify.py path; WM-879 owns dropping it in favour of the same
-    # config/policy.yaml resolution.
+    # old argv/stdin transport, but resolve the command the same way every
+    # other caller does (lib/notify.mjs — WM-795), rather than hardcoding the
+    # operator's private notify.py path. A clone that has configured no
+    # transport is silent on this channel instead of crashing on a path that
+    # only exists on one machine; the durable record above is unaffected.
+    _notify_argv="$(FACTORY_ROOT="$ROOT" bun "$ROOT/lib/notify.mjs" 2>/dev/null || true)"
+    if [[ -z "$_notify_argv" ]]; then
+      echo "notify: no transport configured — set notify.command in config/policy.yaml or FACTORY_NOTIFY_CMD" >&2
+      exit 0
+    fi
     if [[ "$_notify_stdin" -eq 1 ]]; then
-      printf '%s' "$_notify_message" | exec python3 "${FACTORY_NOTIFY_SCRIPT:-$HOME/Develop/hdkiller/scripts/notify.py}" -
+      printf '%s' "$_notify_message" | exec $_notify_argv -
     else
-      exec python3 "${FACTORY_NOTIFY_SCRIPT:-$HOME/Develop/hdkiller/scripts/notify.py}" "$@"
+      exec $_notify_argv "$@"
     fi
     ;;
   security)

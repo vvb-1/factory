@@ -10,10 +10,11 @@
  * human, or it gets muted.
  *
  * WM-795 gave the rest of the factory (`lib/notify.mjs`, `factory notify`) a
- * policy-configurable transport with no in-tree default; this module's
- * `DEFAULT_NOTIFY_CMD` still hardcodes the operator's private `notify.py`
- * path pending WM-879, which owns dropping that default here (and in
- * `bin/factory`) in favour of the same `config/policy.yaml` resolution.
+ * policy-configurable transport with no in-tree default, and this module now
+ * resolves through the same path (WM-879). `DEFAULT_NOTIFY_CMD` is whatever
+ * `config/policy.yaml` `notify.command` says, or null in a clone that has
+ * configured nothing — silence on an unconfigured channel, never a spawn of a
+ * path that exists on one operator's machine only.
  *
  * Design (ticket WM-65):
  *   - Off by default; FACTORY_EVENT_NOTIFY=1 enables, FACTORY_EVENT_NOTIFY_CMD
@@ -27,14 +28,13 @@
  *     or hang is recorded on the notify_log row and logged, never thrown.
  */
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
-import path from "node:path";
 import { createInboxItem, deliverInboxItem } from "./inbox.mjs";
 import { txImmediate } from "./db.mjs";
 import { templateFor } from "./decision-templates.mjs";
 import { proposalSubject } from "./proposal-subject.mjs";
+import { notifyCommand as resolveNotifyCommand } from "../../lib/notify.mjs";
 
-export const DEFAULT_NOTIFY_CMD = `python3 ${path.join(homedir(), "Develop", "hdkiller", "scripts", "notify.py")}`;
+export const DEFAULT_NOTIFY_CMD = resolveNotifyCommand() ?? null;
 
 /** A notifier that has not exited by then is killed and recorded as failed. */
 export const NOTIFY_TIMEOUT_MS = 30_000;
@@ -315,6 +315,14 @@ export function notifyPending(
     };
     log(`inbox ${n.kind} ${n.target}: ${n.title}`);
     if (!enabled) continue;
+    if (!command) {
+      // Enabled but unconfigured. The inbox row above is the durable record,
+      // so the human can still see this in the UI; only the push leg is off.
+      log(
+        `notify ${n.kind} ${n.target}: no transport configured — set notify.command in config/policy.yaml`,
+      );
+      continue;
+    }
     sent.push(notification);
     log(`notify ${n.kind} ${n.target}: ${pushMessage}`);
     deliveries.push(
