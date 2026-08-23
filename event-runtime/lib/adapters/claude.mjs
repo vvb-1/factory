@@ -23,7 +23,7 @@
  * `SANDBOX_DEFERRAL_REASON` below is the whole rationale, and it names what
  * the pi path did not have to solve.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   createWriteStream,
   mkdirSync,
@@ -150,8 +150,58 @@ export function deriveAllowedTools(def) {
   return [...READ_ONLY_TOOLS];
 }
 
+/**
+ * Can Claude Code's own OS sandbox actually start on this host?
+ *
+ * It is seatbelt on macOS and a nested user namespace on Linux. Hosts that
+ * forbid unprivileged nesting (hardened kernels, some containers, LXC/LXD)
+ * fail *before* the policy matters: every Bash call, `echo hello` included,
+ * dies with `apply-seccomp: write /proc/self/setgroups: permission denied`.
+ * Combined with `allowUnsandboxedCommands: false` that makes a read-only
+ * agent unable to run any command at all, and the honest thing it can then
+ * do is refuse — which is exactly what a work-scan did here, at a cost of
+ * ~$0.70 and a human in the loop, on a host where the harness works fine
+ * outside the sandbox.
+ *
+ * So probe once per process, cheaply, with the same primitive Claude uses.
+ * FACTORY_CLAUDE_OS_SANDBOX=0/1 forces the answer for an operator who knows
+ * better than the probe.
+ *
+ * The write boundary does not depend on this: `permissions.deny` still
+ * refuses Edit under the checkout, and the worker's post-run repository
+ * integrity gate is what actually proves a read-only run changed nothing.
+ * The OS sandbox is defence in depth on top of those, so losing it degrades
+ * isolation rather than correctness — and it is visible in the run log.
+ */
+let _osSandboxUsable = null;
+export function osSandboxUsable(env = {}) {
+  // The run env wins, then the worker's own — a spawn env is a narrow
+  // allowlist, so the operator's export must still reach this decision.
+  const forced =
+    env?.FACTORY_CLAUDE_OS_SANDBOX ?? process.env.FACTORY_CLAUDE_OS_SANDBOX;
+  if (forced === "0" || forced === "false") return false;
+  if (forced === "1" || forced === "true") return true;
+  if (_osSandboxUsable !== null) return _osSandboxUsable;
+  if (process.platform !== "linux") {
+    _osSandboxUsable = true;
+    return _osSandboxUsable;
+  }
+  // Mirror what the sandbox actually does, not merely "can I unshare a user
+  // namespace". Plain `unshare -Ur` succeeds on this host; the step that
+  // fails is denying setgroups inside the new namespace, which is exactly
+  // the `write /proc/self/setgroups` in the observed error. Probing the
+  // weaker capability reports a sandbox that then dies on first use.
+  const probe = spawnSync(
+    "unshare",
+    ["--map-root-user", "--setgroups", "deny", "true"],
+    { stdio: "ignore" },
+  );
+  _osSandboxUsable = probe.status === 0;
+  return _osSandboxUsable;
+}
+
 /** Generate a per-run settings file; absolute paths cannot drift with cwd. */
-export function buildClaudeSettings({ spec, def, workspaceDir }) {
+export function buildClaudeSettings({ spec, def, workspaceDir, env }) {
   if (def?.mutating !== false) return null;
   const checkoutDir =
     spec?.workspace?.type === "repository"
@@ -166,12 +216,17 @@ export function buildClaudeSettings({ spec, def, workspaceDir }) {
         ? [`Edit(//${checkoutDir.replace(/^\/+/, "")}/**)`]
         : [],
     },
-    sandbox: {
-      enabled: true,
-      autoAllowBashIfSandboxed: true,
-      allowUnsandboxedCommands: false,
-      filesystem: checkoutDir ? { denyWrite: [checkoutDir] } : {},
-    },
+    sandbox: osSandboxUsable(env)
+      ? {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: false,
+          filesystem: checkoutDir ? { denyWrite: [checkoutDir] } : {},
+        }
+      : // Unusable here: enabling it would deny every Bash call rather than
+        // confine it. permissions.deny above and the post-run integrity gate
+        // remain the write boundary.
+        { enabled: false },
   };
 }
 
@@ -439,7 +494,7 @@ export async function execute({
   const childEnv = safeChildEnvironment(env, def);
 
   const mcpConfig = path.join(FACTORY_ROOT, "config", "mcp", "claude.json");
-  const settings = buildClaudeSettings({ spec, def, workspaceDir });
+  const settings = buildClaudeSettings({ spec, def, workspaceDir, env });
   const settingsPath = settings
     ? path.join(workspaceDir, ".claude-policy.json")
     : null;

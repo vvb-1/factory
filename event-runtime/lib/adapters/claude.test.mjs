@@ -14,6 +14,7 @@ import {
   BASE_INHERITED_ENV,
   buildClaudeArgv,
   buildClaudeSettings,
+  osSandboxUsable,
   deriveAllowedTools,
   execute,
   isHarnessDenial,
@@ -397,6 +398,7 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
       spec: { workspace: { type: "repository", checkoutDir: "repo" } },
       def: { mutating: false },
       workspaceDir: "/private/tmp/run-a1",
+      env: { FACTORY_CLAUDE_OS_SANDBOX: "1" },
     });
     expect(settings.permissions.allow).toEqual(READ_ONLY_TOOLS);
     expect(settings.permissions.deny).toEqual([
@@ -408,6 +410,33 @@ describe("buildClaudeArgv (OPS-407, WM-62, WM-137)", () => {
       allowUnsandboxedCommands: false,
       filesystem: { denyWrite: ["/private/tmp/run-a1/repo"] },
     });
+  });
+
+  test("a host whose OS sandbox cannot start keeps the deny policy and turns the sandbox off, rather than denying every command", () => {
+    // Nested user namespaces are refused on some hosts. Claude's sandbox then
+    // fails on `apply-seccomp` before its policy applies and, with
+    // allowUnsandboxedCommands: false, a read-only agent cannot run `echo`.
+    const settings = buildClaudeSettings({
+      spec: { workspace: { type: "repository", checkoutDir: "repo" } },
+      def: { mutating: false },
+      workspaceDir: "/private/tmp/run-a1",
+      env: { FACTORY_CLAUDE_OS_SANDBOX: "0" },
+    });
+    expect(settings.sandbox).toEqual({ enabled: false });
+    // The write boundary is unchanged: it never depended on the OS sandbox.
+    expect(settings.permissions.deny).toEqual([
+      "Edit(//private/tmp/run-a1/repo/**)",
+    ]);
+    expect(settings.permissions.allow).toEqual(READ_ONLY_TOOLS);
+  });
+
+  test("osSandboxUsable honours an explicit override in either env, and probes otherwise", () => {
+    expect(osSandboxUsable({ FACTORY_CLAUDE_OS_SANDBOX: "1" })).toBe(true);
+    expect(osSandboxUsable({ FACTORY_CLAUDE_OS_SANDBOX: "true" })).toBe(true);
+    expect(osSandboxUsable({ FACTORY_CLAUDE_OS_SANDBOX: "0" })).toBe(false);
+    expect(osSandboxUsable({ FACTORY_CLAUDE_OS_SANDBOX: "false" })).toBe(false);
+    // No override: a boolean answer for this host, never a throw.
+    expect(typeof osSandboxUsable({})).toBe("boolean");
   });
 
   test("mutating runs include --dangerously-skip-permissions and omit --settings (WM-137)", () => {
@@ -756,6 +785,10 @@ if (behavior === "emit_denial_then_recovery") {
         CUSTOM_VAR: "custom_value",
         FACTORY_TEST_BEHAVIOR: "normal",
         FACTORY_TEST_RECORD_FILE: recordFile,
+        // Assert the sandboxed policy shape regardless of whether this
+        // particular host can start Claude's OS sandbox; the host-dependent
+        // branch has its own test above.
+        FACTORY_CLAUDE_OS_SANDBOX: "1",
       },
       onTrace: (kind, payload) => traceEvents.push({ kind, payload }),
     });
