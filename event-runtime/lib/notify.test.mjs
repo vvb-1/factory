@@ -102,14 +102,18 @@ function insertProposal(
 }
 
 describe("notify (WM-65)", () => {
-  test("config: off by default, FACTORY_EVENT_NOTIFY=1 enables, CMD overrides the notify.py default", () => {
+  test("config: off by default, FACTORY_EVENT_NOTIFY=1 enables, CMD overrides the resolved default", () => {
     expect(notifyEnabled({})).toBe(false);
     expect(notifyEnabled({ FACTORY_EVENT_NOTIFY: "0" })).toBe(false);
     expect(notifyEnabled({ FACTORY_EVENT_NOTIFY: "1" })).toBe(true);
     expect(notifyEnabled({ FACTORY_EVENT_NOTIFY: "true" })).toBe(true);
     expect(notifyCommand({})).toBe(DEFAULT_NOTIFY_CMD);
-    expect(DEFAULT_NOTIFY_CMD).toContain("python3 ");
-    expect(DEFAULT_NOTIFY_CMD).toContain("scripts/notify.py");
+    // WM-879: no in-tree default. Whatever config/policy.yaml resolves to, or
+    // null in a clone that configured nothing — never a hardcoded private path.
+    expect(
+      DEFAULT_NOTIFY_CMD === null || typeof DEFAULT_NOTIFY_CMD === "string",
+    ).toBe(true);
+    expect(String(DEFAULT_NOTIFY_CMD)).not.toContain("hdkiller");
     expect(notifyCommand({ FACTORY_EVENT_NOTIFY_CMD: "/x/stub" })).toBe(
       "/x/stub",
     );
@@ -242,6 +246,7 @@ describe("notify (WM-65)", () => {
       notifyPending(db, {
         now: at,
         enabled: true,
+        command: "/x/stub",
         send: () => Promise.resolve({ ok: true, exitCode: 0, error: null }),
       }).sent;
 
