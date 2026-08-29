@@ -902,19 +902,19 @@ function verifyCompleted({
       throw new ContractViolation(semanticViolations);
   }
 
-  // Execute repo's declared verify command for tier-2 mutating runs (docs/event-runtime-dispatch.md §5, §9, WM-115)
-  const markerPath = path.join(workspaceDir, ".worktree.json");
-  if (!worktreeRecord && existsSync(markerPath)) {
-    try {
-      worktreeRecord = JSON.parse(readFileSync(markerPath, "utf8"));
-    } catch {
-      /* intentionally ignored */
-    }
-  }
-
   // Handoff gate (WM-718): a PR_OPEN result from a real worktree run is
   // verified by the worker, not by the agent's say-so. A bare `{}` record is
   // the worker's timeout preflight asking for form-only checks — no gate.
+  //
+  // The record comes only from the caller, i.e. the worker's own in-memory
+  // result from createWorkspace (#944). It is never re-read from the
+  // workspace's `.worktree.json`: that directory is agent-writable — the agent
+  // authors `result.json` there — so a marker found beside it would let the
+  // agent supply gate activation, the command executed as "repo verification"
+  // and the ticket's Owned Paths, and certify its own PR_OPEN. Absent a
+  // worker-supplied record the gate stays shut and only form checks apply.
+  // The marker file remains workspace.mjs's durable teardown record for the
+  // janitor; it carries no verification authority.
   const handoffChecks = [];
   let handoff = null;
   const isHandoff =

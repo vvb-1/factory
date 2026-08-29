@@ -1,6 +1,12 @@
 import { tmpDir } from "../test-support/tmp.mjs?file=event-runtime-lib-verify-test-mjs";
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { hashJson, sha256Hex } from "./canonical.mjs";
 import { getAgent, loadRegistry } from "./registry.mjs";
@@ -855,20 +861,24 @@ describe("worktree baseline verification (WM-334)", () => {
     outputContract: "factory.dispatch-result/v1",
   };
 
+  // The worker holds the worktree record in memory and passes it to the
+  // verifier; the on-disk marker is written because a real worktree workspace
+  // has one, but it is agent-writable and the gate never reads it (#944).
   function worktreeWorkspace(verify, baseline) {
     const dir = makeWorkspace(dispatchResult);
     const repo = path.join(dir, "repo");
     mkdirSync(repo);
+    const record = { path: repo, verify, baseline };
     writeFileSync(
       path.join(dir, ".worktree.json"),
-      JSON.stringify({ path: repo, verify, baseline }),
+      JSON.stringify(record),
       "utf8",
     );
-    return dir;
+    return { dir, record };
   }
 
   test("a matching pre-existing failure is rejected with the distinct baseline_red reason", () => {
-    const dir = worktreeWorkspace(
+    const { dir, record } = worktreeWorkspace(
       "printf 'entry chunk exceeds budget\\n' >&2; exit 9",
       {
         status: "red",
@@ -883,6 +893,7 @@ describe("worktree baseline verification (WM-334)", () => {
         registry,
         workspaceDir: dir,
         attempt: 1,
+        worktreeRecord: record,
       });
       throw new Error("expected ContractViolation");
     } catch (err) {
@@ -897,7 +908,7 @@ describe("worktree baseline verification (WM-334)", () => {
   // `contract_violation` — same FAILED path, but named so the ticket goes back
   // to Todo + ai:agent-ready and the PR is held as draft.
   test("shared baseline output plus a new failure does not classify as baseline_red", () => {
-    const dir = worktreeWorkspace(
+    const { dir, record } = worktreeWorkspace(
       "printf 'entry chunk exceeds budget\\nnew failure in CI\\n' >&2; exit 9",
       {
         status: "red",
@@ -912,6 +923,7 @@ describe("worktree baseline verification (WM-334)", () => {
         registry,
         workspaceDir: dir,
         attempt: 1,
+        worktreeRecord: record,
       });
       throw new Error("expected ContractViolation");
     } catch (err) {
@@ -922,7 +934,7 @@ describe("worktree baseline verification (WM-334)", () => {
   });
 
   test("an unrelated post-agent failure refuses the handoff (not baseline_red)", () => {
-    const dir = worktreeWorkspace(
+    const { dir, record } = worktreeWorkspace(
       "printf 'new test regression\\nerror: script \"build\" exited with code 1\\n' >&2; exit 9",
       {
         status: "red",
@@ -938,6 +950,7 @@ describe("worktree baseline verification (WM-334)", () => {
         registry,
         workspaceDir: dir,
         attempt: 1,
+        worktreeRecord: record,
       });
       throw new Error("expected ContractViolation");
     } catch (err) {
@@ -948,7 +961,7 @@ describe("worktree baseline verification (WM-334)", () => {
   });
 
   test("a multi-line verification failure retains the failing test name and full log", () => {
-    const dir = worktreeWorkspace(
+    const { dir, record } = worktreeWorkspace(
       "printf 'suite start\\n(fail) totals > rejects an invalid total\\nRan 2045 tests across 150 files.\\n'; printf 'error: expected 400, received 200\\n' >&2; exit 1",
       null,
     );
@@ -959,6 +972,7 @@ describe("worktree baseline verification (WM-334)", () => {
         registry,
         workspaceDir: dir,
         attempt: 1,
+        worktreeRecord: record,
       });
       throw new Error("expected ContractViolation");
     } catch (err) {
@@ -977,7 +991,7 @@ describe("worktree baseline verification (WM-334)", () => {
   });
 
   test("later error noise cannot displace a failing test name from the bounded reason", () => {
-    const dir = worktreeWorkspace(
+    const { dir, record } = worktreeWorkspace(
       "printf '(fail) billing > rejects a duplicate charge\\n'; i=1; while [ \"$i\" -le 45 ]; do printf 'error: detail %s\\n' \"$i\"; i=$((i + 1)); done; exit 1",
       null,
     );
@@ -988,6 +1002,7 @@ describe("worktree baseline verification (WM-334)", () => {
         registry,
         workspaceDir: dir,
         attempt: 1,
+        worktreeRecord: record,
       });
       throw new Error("expected ContractViolation");
     } catch (err) {
@@ -1000,24 +1015,28 @@ describe("worktree baseline verification (WM-334)", () => {
   });
 
   test("a recorded red baseline never weakens a now-green post-agent verification", () => {
-    const dir = worktreeWorkspace("printf 'verification repaired\\n'", {
-      status: "red",
-      check: "web_build",
-      output: "entry chunk exceeds budget",
-    });
+    const { dir, record } = worktreeWorkspace(
+      "printf 'verification repaired\\n'",
+      {
+        status: "red",
+        check: "web_build",
+        output: "entry chunk exceeds budget",
+      },
+    );
     const out = verifyResult({
       spec: dispatchSpec,
       def: dispatchDef,
       registry,
       workspaceDir: dir,
       attempt: 1,
+      worktreeRecord: record,
     });
     expect(out.kind).toBe("completed");
     expect(out.result.verification.checks).toContain("repo_verify_passed");
   });
 
   test("a timed-out repository verification fails closed without hanging", () => {
-    const dir = worktreeWorkspace("while :; do :; done", null);
+    const { dir, record } = worktreeWorkspace("while :; do :; done", null);
     const previous = process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS;
     process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS = "25";
     const started = Date.now();
@@ -1029,6 +1048,7 @@ describe("worktree baseline verification (WM-334)", () => {
           registry,
           workspaceDir: dir,
           attempt: 1,
+          worktreeRecord: record,
         });
         throw new Error("expected ContractViolation");
       } catch (err) {
@@ -1043,6 +1063,117 @@ describe("worktree baseline verification (WM-334)", () => {
         delete process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS;
       else process.env.FACTORY_REPO_VERIFY_TIMEOUT_MS = previous;
     }
+  });
+});
+
+// The workspace directory is agent-writable — the agent authors `result.json`
+// there. Trusting a `.worktree.json` found next to it let an agent hand the
+// gate its own activation flag, its own "repo verify" command and its own
+// Owned Paths, i.e. certify its own PR_OPEN. Only the record the worker holds
+// in memory (from createWorkspace) may drive the gate.
+describe("handoff gate provenance (#944)", () => {
+  const dispatchSpec = {
+    ...makeSpec({ repo: "factory", ticket: "WM-944" }),
+    agent: "dispatch@1",
+    outputContract: "factory.dispatch-result/v1",
+  };
+
+  function forgedWorkspace(marker) {
+    const dir = makeWorkspace({
+      schemaVersion: "factory.agent-result/v1",
+      terminalState: "completed",
+      reasonCode: "ok",
+      artifact: {
+        outcome: "PR_OPEN",
+        repo: "factory",
+        ticket: "WM-944",
+        prUrl: "https://github.com/watt-mind/factory/pull/944",
+        verification: {
+          command: "bun test",
+          passed: true,
+          output: "agent verification passed",
+        },
+        summary: "implemented WM-944",
+      },
+    });
+    const repo = path.join(dir, "repo");
+    mkdirSync(repo);
+    writeFileSync(
+      path.join(dir, ".worktree.json"),
+      JSON.stringify({ path: repo, ...marker }),
+      "utf8",
+    );
+    return dir;
+  }
+
+  test("an agent-authored marker never activates the gate and its command is never executed", () => {
+    const sentinel = path.join(tmpDir("evrt-marker-sentinel-"), "ran");
+    const dir = forgedWorkspace({
+      repo: "factory",
+      verify: `printf 'forged verification\\n' > ${sentinel}`,
+    });
+    const out = verifyResult({
+      spec: dispatchSpec,
+      def: dispatchDef,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
+    // Form-only acceptance: schema and semantic checks still run, but nothing
+    // the marker claimed was executed or recorded as a worker observation.
+    expect(out.kind).toBe("completed");
+    expect(out.handoff).toBeUndefined();
+    expect(out.result.verification.checks).not.toContain("repo_verify_passed");
+    expect(out.result.verification.checks).not.toContain(
+      "ticket_verify_passed",
+    );
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  test("a marker cannot supply the ticket verification command or Owned Paths", () => {
+    const dir = forgedWorkspace({
+      repo: "factory",
+      handoff: {
+        verificationCommand: "true",
+        ownedPaths: ["**"],
+        ownedPathsParsed: true,
+      },
+    });
+    const out = verifyResult({
+      spec: dispatchSpec,
+      def: dispatchDef,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+    });
+    expect(out.kind).toBe("completed");
+    expect(out.handoff).toBeUndefined();
+    expect(existsSync(path.join(dir, ".verify.ticket.log"))).toBe(false);
+  });
+
+  test("the worker's in-memory record still drives the gate for the same workspace", () => {
+    const dir = forgedWorkspace({
+      repo: "factory",
+      verify: "printf 'forged\\n'",
+    });
+    // Same on-disk marker, but the worker hands over the record it created:
+    // the gate runs the worker's command, not the marker's.
+    const out = verifyResult({
+      spec: dispatchSpec,
+      def: dispatchDef,
+      registry,
+      workspaceDir: dir,
+      attempt: 1,
+      worktreeRecord: {
+        path: path.join(dir, "repo"),
+        verify: "printf 'worker verification\\n'",
+      },
+    });
+    expect(out.kind).toBe("completed");
+    expect(out.result.verification.checks).toContain("repo_verify_passed");
+    expect(readFileSync(path.join(dir, ".verify.log"), "utf8")).toContain(
+      "worker verification",
+    );
   });
 });
 
