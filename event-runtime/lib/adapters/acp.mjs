@@ -16,12 +16,7 @@
  * Owned Paths. Tests register the module through `createAdapterRegistry`.
  */
 import { spawn } from "node:child_process";
-import {
-  createWriteStream,
-  existsSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { createWriteStream, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -31,6 +26,7 @@ import {
   PUSH_CREDENTIAL_ENV,
   killProcessGroup,
   safeChildEnvironment,
+  verifiedPrompt,
 } from "./claude.mjs";
 import { refuseSandbox } from "./sandboxed.mjs";
 
@@ -478,8 +474,7 @@ export async function execute({
 }) {
   refuseSandbox("acp", def, SANDBOX_DEFERRAL_REASON);
 
-  const prompt =
-    (def.promptText ?? readFileSync(def.promptPath, "utf8")) + PROMPT_SUFFIX;
+  const prompt = verifiedPrompt(def, "acp");
   const acpConfig = resolveAcpConfig({ spec, def, config });
   const childEnv = safeChildEnvironment({ ...acpConfig.env, ...env }, def);
   const resolved = resolveAcpCommand(acpConfig, {
