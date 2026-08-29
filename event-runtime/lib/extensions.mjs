@@ -1168,6 +1168,80 @@ function packRootFor(extensionRoot, rel) {
 }
 
 /**
+ * Read only the pack descriptors contributed by configured extensions.
+ *
+ * This is deliberately narrower than `loadExtensions`: it validates the
+ * allow-list, manifests, and realpath confinement needed to identify a pack,
+ * but does not validate pins, load a registry, import a module, or register a
+ * contribution. `update-pins --pack` uses it to repair a stale extension
+ * pack, which full loading must reject before it can import extension code.
+ *
+ * Failures are scoped to the request. With no `name`, any rejected root,
+ * invalid manifest, unreadable pack, or duplicate pack name fails closed.
+ * With a `name`, an unrelated broken extension is skipped so it cannot block
+ * re-pinning a different pack; the collected errors are only raised when the
+ * requested pack is itself a duplicate or cannot be found.
+ *
+ * @param {{ root?: string, policy?: object, packRoots?: Array<object>, name?: string }} [options]
+ * @returns {Array<{ kind: "fs", name: string, path: string }>}
+ */
+export function discoverExtensionPackRoots({
+  root = reposRoot(),
+  policy,
+  packRoots = [],
+  name,
+} = {}) {
+  const { roots, anomalies } = loadExtensionRoots({ root, policy });
+  const errors = anomalies.map((anomaly) => `configured roots: ${anomaly}`);
+  const discovered = [];
+  const names = new Set(packRoots.map((pack) => pack.name));
+  for (const { path: dir } of roots) {
+    const checked = validateExtensionManifest(dir, { root });
+    if (!checked.valid) {
+      errors.push(`${dir}: ${checked.errors.join("; ")}`);
+      continue;
+    }
+    for (const rel of checked.manifest.contributes?.packs ?? []) {
+      let pack;
+      try {
+        pack = packRootFor(dir, rel);
+      } catch (err) {
+        errors.push(`${dir}: ${err.message}`);
+        continue;
+      }
+      if (names.has(pack.name)) {
+        const message = `pack name "${pack.name}" is already configured by a policy pack or an earlier extension`;
+        if (pack.name === name) {
+          throw new ExtensionError(
+            `extension metadata discovery: ${message} (${dir})`,
+          );
+        }
+        errors.push(`${dir}: ${message}`);
+        continue;
+      }
+      names.add(pack.name);
+      discovered.push(pack);
+    }
+  }
+  if (name === undefined) {
+    if (errors.length > 0) {
+      throw new ExtensionError(
+        `extension metadata discovery rejected: ${errors.join("; ")}`,
+      );
+    }
+    return discovered;
+  }
+  const match = discovered.find((pack) => pack.name === name);
+  if (match) return [match];
+  if (errors.length > 0) {
+    throw new ExtensionError(
+      `extension metadata discovery: pack "${name}" not found; rejected: ${errors.join("; ")}`,
+    );
+  }
+  return [];
+}
+
+/**
  * Load every allow-listed extension: validate the manifest, prove its packs
  * load alongside everything accepted so far (a dry `loadRegistry`, so the
  * namespace/duplicate/pin/mutating rules of docs/kernel-and-packs.md apply
