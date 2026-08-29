@@ -87,6 +87,10 @@ const BEARER_EXEMPT_ROUTES = new Set([
   "GET /health",
   "POST /events",
   "POST /github",
+  // The production tunnel's /webhooks/github alias is the same GitHub HMAC
+  // intake as POST /github, so it authenticates by signature and must be
+  // exempt too — an external GitHub sender cannot present a bearer (WM-1150).
+  "POST /webhooks/github",
 ]);
 
 /**
@@ -208,6 +212,9 @@ export function createApi({
           "GET /health",
           "POST /events",
           "POST /github",
+          // Production Cloudflare tunnel forwards the literal path
+          // /webhooks/github (no rewrite), so it is an alias of POST /github.
+          "POST /webhooks/github",
           "POST /replay",
         ].includes(route)
       ) {
