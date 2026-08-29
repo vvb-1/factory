@@ -17,6 +17,7 @@ import { loadAdjustedTimeout } from "./test-helpers-timing.mjs";
  * state, so a real hang still fails, just not a slow host.
  */
 const EXECUTE_SPAWN_TIMEOUT_MS = loadAdjustedTimeout(5_000);
+import { insideHandoffSandbox } from "./verify.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
@@ -94,6 +95,7 @@ import {
   retryRun,
   runLinearCli,
   runOnce,
+  ticketHandoffContext,
 } from "./worker.mjs";
 import {
   liveWorkerLeases,
@@ -4879,6 +4881,14 @@ describe("execute-side dispatch hardening (WM-115)", () => {
     // (load ~76 on 32 CPUs), and scales with the shared-runner load factor.
     { timeout: loadAdjustedTimeout(45_000) },
     async () => {
+      // This test provisions a real worktree with bin/worktree-up.sh, which
+      // takes its lifecycle lock inside the repository's shared git directory.
+      // When the suite is itself the command a handoff sandbox is verifying,
+      // that directory is mounted read-only on purpose (GH-967): ticket code
+      // must not be able to write the host repository's refs or objects. The
+      // gate's own worktree provisioning happens outside the sandbox, so this
+      // is the test setup hitting the boundary, not the behaviour under test.
+      if (insideHandoffSandbox()) return;
       const repoRoot = process.cwd();
       const repoName = "wm-baseline-real";
       const ticket = `WM-${732000000 + Math.floor(Math.random() * 1_000_000)}`;
@@ -5792,6 +5802,96 @@ describe("reload watcher (WM-213)", () => {
   });
 });
 
+describe("post-claim ticket command capture (GH-967)", () => {
+  const description =
+    "## Owned Paths\n- event-runtime/lib/worker.mjs\n\n" +
+    "## Verification Command\n\n```bash\nbun test focused.test.mjs\n```\n";
+
+  test("a Linear description hash is pinned from admission through post-claim capture", () => {
+    const captured = ticketHandoffContext(
+      "WM-967",
+      () => ({ description }),
+      "factory",
+      { descriptionHash: hashJson(description) },
+    );
+    expect(captured).toMatchObject({
+      ok: true,
+      handoff: {
+        verificationCommand: "bun test focused.test.mjs",
+        descriptionHash: hashJson(description),
+      },
+    });
+
+    const changed = ticketHandoffContext(
+      "WM-967",
+      () => ({ description: description.replace("focused", "attacker") }),
+      "factory",
+      { descriptionHash: hashJson(description) },
+    );
+    expect(changed.ok).toBe(false);
+    expect(changed.reasonCode).toBe("ticket_body_changed_post_claim");
+    expect(changed.handoff).toBeUndefined();
+  });
+
+  test("GitHub trust and ready pin are revalidated on the same read that captures the command", () => {
+    let reads = 0;
+    const fetchTicket = () => {
+      reads += 1;
+      return {
+        description,
+        controlPlaneKind: "github",
+        authorAssociation: "OWNER",
+        lastEditorAssociation: "MEMBER",
+        readyPinHash: hashJson(description),
+      };
+    };
+    expect(
+      ticketHandoffContext("watt-mind/factory#967", fetchTicket, "factory", {
+        descriptionHash: hashJson(description),
+      }).ok,
+    ).toBe(true);
+    expect(reads).toBe(1);
+
+    for (const override of [
+      { lastEditorAssociation: "NONE" },
+      { readyPinHash: null },
+      { readyPinHash: hashJson("older body") },
+    ]) {
+      const rejected = ticketHandoffContext(
+        "watt-mind/factory#967",
+        () => ({
+          description,
+          controlPlaneKind: "github",
+          authorAssociation: "OWNER",
+          lastEditorAssociation: "MEMBER",
+          readyPinHash: hashJson(description),
+          ...override,
+        }),
+        "factory",
+        { descriptionHash: hashJson(description) },
+      );
+      expect(rejected.ok).toBe(false);
+      expect(rejected.handoff).toBeUndefined();
+    }
+  });
+
+  test("an unavailable post-claim read fails closed without a command", () => {
+    const result = ticketHandoffContext(
+      "WM-967",
+      () => {
+        throw new Error("tracker unavailable");
+      },
+      "factory",
+      { descriptionHash: hashJson(description) },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: "ticket_post_claim_read_failed",
+    });
+    expect(result.handoff).toBeUndefined();
+  });
+});
+
 describe("handoff verification gate (WM-718)", () => {
   let factoryRoot;
   let repoDir;
@@ -5820,7 +5920,7 @@ describe("handoff verification gate (WM-718)", () => {
         "git config user.email factory@test && git config user.name factory",
         "mkdir -p src/feature event-runtime/web/src",
         "echo base > src/feature/base.txt",
-        `printf '%s\\n' '{"name":"web","private":true,"scripts":{"build":"echo web_built:$PWD >> ${repoDir}/web-builds.log"}}' > event-runtime/web/package.json`,
+        `printf '%s\\n' '{"name":"web","private":true,"scripts":{"build":"echo web_built:$PWD"}}' > event-runtime/web/package.json`,
         "echo 'export const x = 1;' > event-runtime/web/src/index.ts",
         "git add -A && git commit -qm base",
         "git update-ref refs/remotes/origin/develop HEAD",
@@ -6111,14 +6211,13 @@ describe("handoff verification gate (WM-718)", () => {
       adapter: agent({ files }),
     });
     expect(g.summary.terminalState).toBe("COMPLETED");
-    const builds = () =>
-      existsSync(path.join(repoDir, "web-builds.log"))
-        ? readFileSync(path.join(repoDir, "web-builds.log"), "utf8")
-        : "";
-    expect(builds()).toContain(
-      "web_built:" +
-        path.join(realpathSync(wtRoot), "WM-7184", "event-runtime/web"),
+    // The chroot maps the worktree at /workspace; when this suite itself runs
+    // inside a handoff sandbox the command is passed through and keeps the
+    // real path. Either way the build ran in the web directory, not the root.
+    expect(g.summary.handoff.webBuild.tail).toContain(
+      `web_built:${insideHandoffSandbox() ? "" : "/workspace"}`,
     );
+    expect(g.summary.handoff.webBuild.tail).toContain("/event-runtime/web");
     const result = JSON.parse(
       g.db
         .query(`SELECT result_json FROM results WHERE run_id = ?`)
@@ -6162,7 +6261,7 @@ describe("handoff verification gate (WM-718)", () => {
       }),
     });
     expect(s.summary.terminalState).toBe("COMPLETED");
-    expect(builds()).not.toContain("WM-7186");
+    expect(s.summary.handoff.webBuild).toBeNull();
     expect(s.calls.comments[0].body).toContain("- Web build: skipped");
   });
 

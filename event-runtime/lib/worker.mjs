@@ -51,6 +51,7 @@ import {
   worktreeDispatchAutoEligibility,
   worktreeMergeFixEligibility,
 } from "./planner.mjs";
+import { isTrustedAssociation } from "./triage.mjs";
 import { closeOpenProposalForRun } from "./proposals.mjs";
 import { computeDefHash, createReceipt, verifyDefHash } from "./receipts.mjs";
 import { traceRecorder } from "./trace.mjs";
@@ -58,6 +59,7 @@ import {
   ContractViolation,
   composeHandoffVerification,
   HANDOFF_REASON_CODES,
+  HANDOFF_SANDBOX_UNAVAILABLE,
   verifyResult,
 } from "./verify.mjs";
 import {
@@ -751,6 +753,10 @@ const ENVIRONMENT_FAILURES = new Set([
   "lease_expired",
   "linear_unconfigured",
   "registry_stale",
+  // GH-967: the host could not build the handoff sandbox. Nothing about the
+  // agent's work is implicated, so this must never burn an agent attempt or
+  // draft the PR — it is the worker host that needs attention.
+  HANDOFF_SANDBOX_UNAVAILABLE,
 ]);
 // The handoff gate (WM-718) catching the agent's own red is an agent error:
 // bounded by maxAttempts like any contract violation, never an environment
@@ -1685,27 +1691,67 @@ function defaultFetchTicket(ticket, repo) {
 /**
  * The claim-time facts the handoff gate (WM-718) needs and the run spec does
  * not carry: the ticket's Verification Command and Owned Paths. Read once
- * here, persisted on the worktree record, so verify.mjs runs exactly what the
- * agent was told to run. A read failure degrades to "no ticket command" (the
- * repo `verify:` still gates) rather than killing a run before it started.
+ * here, revalidate that same read against admission (and GitHub's trust/pin),
+ * then persist it on the worker-owned worktree record. Read, hash, trust and
+ * pin failures all fail closed before an agent or ticket command can run.
  */
-function ticketHandoffContext(ticket, fetchTicket, repo) {
+export function ticketHandoffContext(
+  ticket,
+  fetchTicket,
+  repo,
+  admittedTicket = null,
+) {
   try {
     const cur = fetchTicket(ticket, repo);
     const description = cur?.description ?? "";
+    const descriptionHash = hashJson(description);
+    if (
+      !admittedTicket?.descriptionHash ||
+      admittedTicket.descriptionHash !== descriptionHash
+    ) {
+      return {
+        ok: false,
+        reasonCode: "ticket_body_changed_post_claim",
+        detail:
+          "ticket description changed between dispatch admission and post-claim command capture; review the new body and re-apply ai:agent-ready",
+      };
+    }
+    if (cur?.controlPlaneKind === "github") {
+      const trustedEditor =
+        isTrustedAssociation(cur.authorAssociation) &&
+        isTrustedAssociation(cur.lastEditorAssociation);
+      if (!trustedEditor) {
+        return {
+          ok: false,
+          reasonCode: "ticket_untrusted_post_claim_editor",
+          detail:
+            "GitHub author/editor trust could not be revalidated on the post-claim ticket read",
+        };
+      }
+      if (!cur.readyPinHash || cur.readyPinHash !== descriptionHash) {
+        return {
+          ok: false,
+          reasonCode: "ticket_ready_pin_invalid_post_claim",
+          detail:
+            "GitHub ready-body pin was absent or mismatched on the post-claim ticket read; review the body and re-apply ai:agent-ready",
+        };
+      }
+    }
     const parsed = parseOwnedPaths(description);
     return {
-      verificationCommand: parseVerificationCommand(description),
-      ownedPaths: effectiveOwnedPaths(description),
-      ownedPathsParsed: parsed.length > 0,
-      descriptionHash: hashJson(description),
+      ok: true,
+      handoff: {
+        verificationCommand: parseVerificationCommand(description),
+        ownedPaths: effectiveOwnedPaths(description),
+        ownedPathsParsed: parsed.length > 0,
+        descriptionHash,
+      },
     };
   } catch (err) {
     return {
-      verificationCommand: null,
-      ownedPaths: ["**"],
-      ownedPathsParsed: false,
-      unavailable: String(err?.message ?? err),
+      ok: false,
+      reasonCode: "ticket_post_claim_read_failed",
+      detail: `post-claim ticket read failed closed: ${String(err?.message ?? err)}`,
     };
   }
 }
@@ -2614,11 +2660,47 @@ export async function executeClaimed(
         }
 
         ticketClaimed = true;
-        handoffContext = ticketHandoffContext(
+        const capture = ticketHandoffContext(
           ticketId,
           fetchTicketFn,
           repoName,
+          gateResult.evidence?.ticket,
         );
+        if (!capture.ok) {
+          // Never re-queue and thereby bless a body that changed in the
+          // admission-to-capture window. This needs a fresh human/triage read
+          // and a new ready pin, not an automatic retry of executable text.
+          if (mayMutateClaimedTicket()) {
+            try {
+              blockTicketFn({
+                repo: repoName,
+                ticket: ticketId,
+                why: capture.detail,
+                baseline: {
+                  check: "post_claim_ticket_capture",
+                  exitCode: null,
+                  output: capture.reasonCode,
+                },
+              });
+            } catch {
+              /* intentionally ignored */
+            }
+          }
+          const res = refuseTerminal(
+            capture.reasonCode,
+            ["post_claim_ticket_capture"],
+            { detail: capture.detail },
+          );
+          if (res?.fenced) return { fenced: true };
+          return {
+            runId,
+            attempt,
+            terminalState: "REFUSED",
+            reasonCode: capture.reasonCode,
+            receipt: res?.receipt,
+          };
+        }
+        handoffContext = capture.handoff;
         writeWorkerLease({
           repo: repoName,
           ticket: ticketId,
@@ -3045,6 +3127,7 @@ export async function executeClaimed(
       if (!(err instanceof ContractViolation)) throw err;
       const reasonCode =
         err.reasonCode === "baseline_red" ||
+        err.reasonCode === HANDOFF_SANDBOX_UNAVAILABLE ||
         HANDOFF_REASON_CODES.has(err.reasonCode)
           ? err.reasonCode
           : "contract_violation";
