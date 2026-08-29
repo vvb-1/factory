@@ -44,13 +44,15 @@ import {
   MODEL_BACKED_ADAPTERS,
 } from "./adapters/sandboxed.mjs";
 import { isSandboxGuarded } from "./adapters/index.mjs";
-import { IllegalTransition, transition } from "./lifecycle.mjs";
+import { createRun, IllegalTransition, transition } from "./lifecycle.mjs";
 import {
+  buildEscalatedContinuationSpec,
   HARNESS_KINDS,
   HARNESS_NAME_PATTERN,
   worktreeDispatchAutoEligibility,
   worktreeMergeFixEligibility,
 } from "./planner.mjs";
+import { newRunId } from "./ids.mjs";
 import { isTrustedAssociation } from "./triage.mjs";
 import { closeOpenProposalForRun } from "./proposals.mjs";
 import { computeDefHash, createReceipt, verifyDefHash } from "./receipts.mjs";
@@ -791,6 +793,27 @@ export function classifyFailureCause(reasonCode) {
   return "fatal";
 }
 
+/** Closed eligibility predicate; a continuation can never escalate again. */
+export function tierEscalationEligibility(spec, reasonCode) {
+  const rootRunId = spec?.rootRunId ?? spec?.runId ?? null;
+  // The ticket's acceptance criteria name `verification_failed`; the code the
+  // runtime actually emits for that condition is `handoff_verification_failed`
+  // (verify.mjs HANDOFF_REASON_CODES). Match the emitted codes only — a
+  // reason code no producer writes is dead weight that reads as coverage.
+  const eligibleReason =
+    HANDOFF_REASON_CODES.has(reasonCode) ||
+    reasonCode === "contract_violation" ||
+    String(reasonCode).startsWith("agent_exit_");
+  const eligible = Boolean(
+    spec?.agent === "dispatch@1" &&
+    spec?.workspace?.type === "worktree" &&
+    ["light", "standard"].includes(spec?.modelTier) &&
+    !spec?.escalatedFromRunId &&
+    eligibleReason,
+  );
+  return { eligible, rootRunId };
+}
+
 function maxEnvironmentRetries(spec) {
   return Number.isInteger(spec.maxEnvironmentRetries) &&
     spec.maxEnvironmentRetries >= 0
@@ -1014,7 +1037,7 @@ function originatingEvent(db, runId) {
   return (
     db
       .query(
-        `SELECT e.type, e.correlation_id, e.causation_id, p.event_source AS source
+        `SELECT e.type, e.event_id, e.correlation_id, e.causation_id, p.event_source AS source
        FROM proposals p
        JOIN events e ON e.source = p.event_source AND e.event_id = p.event_id
        WHERE p.run_id = ?
@@ -1022,6 +1045,276 @@ function originatingEvent(db, runId) {
       )
       .get(runId) ?? null
   );
+}
+
+function tierEscalationForContinuation(db, runId) {
+  const row = db
+    .query(
+      `SELECT * FROM tier_escalations WHERE continuation_run_id = ? AND projection_state = 'applied'`,
+    )
+    .get(runId);
+  if (!row) return null;
+  return {
+    rootRunId: row.root_run_id,
+    failedRunId: row.failed_run_id,
+    continuationRunId: row.continuation_run_id,
+    repo: row.repo,
+    ticket: row.ticket,
+    workspacePath: row.workspace_path,
+    sourceWorkspacePath: row.source_workspace_path,
+    projectionState: row.projection_state,
+  };
+}
+
+/** Create exactly one auto-approved continuation and durable workspace transfer. */
+export function scheduleTierEscalation(
+  db,
+  registry,
+  failedSpec,
+  {
+    workspacePath,
+    sourceWorkspacePath,
+    actor = "worker",
+    policyVersion = failedSpec.policyVersion,
+    now = Date.now(),
+    continuationRunId = newRunId(),
+    reasonCode,
+  } = {},
+) {
+  const rootRunId = failedSpec.rootRunId ?? failedSpec.runId;
+  const existing = db
+    .query(`SELECT * FROM tier_escalations WHERE root_run_id = ?`)
+    .get(rootRunId);
+  if (existing) return existing;
+  if (!tierEscalationEligibility(failedSpec, reasonCode).eligible) return null;
+  if (!workspacePath || !sourceWorkspacePath)
+    throw new Error("tier escalation requires the retained workspace paths");
+
+  const origin = originatingEvent(db, failedSpec.runId);
+  const spec = buildEscalatedContinuationSpec(registry, failedSpec, {
+    runId: continuationRunId,
+    operatorAuthorized: origin?.source === "operator",
+  });
+  const at = iso(now);
+  const eventId = `tier-escalation:${rootRunId}`;
+  const envelope = {
+    schemaVersion: "factory.event/v1",
+    eventId,
+    type: origin?.type ?? "factory.dispatch.requested",
+    source: "handoff",
+    subject: failedSpec.agent,
+    occurredAt: at,
+    correlationId: origin?.correlation_id ?? rootRunId,
+    causationId: failedSpec.runId,
+    payload: spec.input,
+  };
+  db.query(
+    `INSERT OR IGNORE INTO events
+       (source, event_id, type, subject, occurred_at, received_at,
+        correlation_id, causation_id, envelope_json, payload_hash, status,
+        admitted_at)
+     VALUES ('handoff', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)`,
+  ).run(
+    eventId,
+    envelope.type,
+    failedSpec.agent,
+    at,
+    at,
+    envelope.correlationId,
+    failedSpec.runId,
+    canonicalJson(envelope),
+    hashJson(spec.input),
+    at,
+  );
+  createRun(db, {
+    runId: continuationRunId,
+    idempotencyKey: spec.idempotencyKey,
+    spec,
+    specJson: canonicalJson(spec),
+    specHash: hashJson(spec),
+    actor,
+    correlationId: envelope.correlationId,
+    causationId: failedSpec.runId,
+    policyVersion,
+    now,
+  });
+  transition(db, {
+    runId: continuationRunId,
+    to: "APPROVED",
+    expectFrom: "PROPOSED",
+    actor,
+    reason: `auto_approved:tier-escalation:${failedSpec.runId}`,
+    correlationId: envelope.correlationId,
+    causationId: failedSpec.runId,
+    policyVersion,
+    now,
+  });
+  db.query(
+    `INSERT INTO proposals
+       (id, event_source, event_id, run_id, decision, spec_json, spec_hash,
+        idempotency_key, status, reason, created_at, ttl_seconds, decided_at,
+        decided_by)
+     VALUES (?, 'handoff', ?, ?, 'run', ?, ?, ?, 'approved', ?, ?, 0, ?, ?)`,
+  ).run(
+    `tier-escalation:${rootRunId}`,
+    eventId,
+    continuationRunId,
+    canonicalJson(spec),
+    hashJson(spec),
+    spec.idempotencyKey,
+    `escalated_from:${failedSpec.runId}`,
+    at,
+    at,
+    actor,
+  );
+  db.query(
+    `INSERT INTO tier_escalations
+       (root_run_id, failed_run_id, continuation_run_id, repo, ticket,
+        workspace_path, source_workspace_path, projection_state, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+  ).run(
+    rootRunId,
+    failedSpec.runId,
+    continuationRunId,
+    failedSpec.input.repo,
+    String(failedSpec.input.ticket),
+    workspacePath,
+    sourceWorkspacePath,
+    at,
+  );
+  return db
+    .query(`SELECT * FROM tier_escalations WHERE root_run_id = ?`)
+    .get(rootRunId);
+}
+
+const TIER_ESCALATION_COMMENT_MARKER = "factory:tier-escalation:";
+
+export function defaultProjectTierEscalation({
+  repo,
+  ticket,
+  failedRunId,
+  continuationRunId,
+  fetchTicket,
+  runCli = runLinearCli,
+}) {
+  const current =
+    typeof fetchTicket === "function"
+      ? fetchTicket(ticket, repo)
+      : JSON.parse(runCli(["get", ticket, "--json"], { repo }));
+  const names = (
+    Array.isArray(current?.labels)
+      ? current.labels
+      : (current?.labels?.nodes ?? [])
+  )
+    .map((label) => label?.name)
+    .filter(Boolean);
+  const tierLabels = names.filter(
+    (name) => name.startsWith("tier:") && name !== "tier:strong",
+  );
+  runCli(
+    [
+      "labels",
+      ticket,
+      "--add",
+      "tier:strong",
+      ...tierLabels.flatMap((name) => ["--remove", name]),
+    ],
+    { repo },
+  );
+  const marker = `${TIER_ESCALATION_COMMENT_MARKER}${failedRunId}:${continuationRunId}`;
+  let alreadyCommented = false;
+  try {
+    const comments = JSON.parse(
+      runCli(["comments", ticket, "--json"], { repo }),
+    );
+    alreadyCommented = comments.some((entry) =>
+      String(entry?.body ?? "").includes(marker),
+    );
+  } catch {
+    // A comment read is an idempotency optimization. Posting remains required.
+  }
+  if (!alreadyCommented) {
+    runCli(
+      [
+        "comment",
+        ticket,
+        `Tier escalation scheduled: failed run \`${failedRunId}\` continues as strong run \`${continuationRunId}\` in the same retained worktree.\n\n<!-- ${marker} -->`,
+      ],
+      { repo },
+    );
+  }
+  return true;
+}
+
+/** Retry pending tracker projections before a continuation can become runnable. */
+export function reconcileTierEscalations(
+  db,
+  {
+    projectTierEscalation = defaultProjectTierEscalation,
+    fetchTicket,
+    now = Date.now(),
+    policyVersion = "unknown",
+  } = {},
+) {
+  const row = db
+    .query(
+      `SELECT * FROM tier_escalations WHERE projection_state = 'pending' ORDER BY created_at LIMIT 1`,
+    )
+    .get();
+  if (!row) return { ok: true, projected: 0 };
+  try {
+    const projected = projectTierEscalation({
+      repo: row.repo,
+      ticket: row.ticket,
+      failedRunId: row.failed_run_id,
+      continuationRunId: row.continuation_run_id,
+      fetchTicket,
+    });
+    if (projected === false)
+      throw new Error("tracker projection returned false");
+  } catch (err) {
+    db.query(
+      `UPDATE tier_escalations
+          SET projection_attempts = projection_attempts + 1,
+              projection_error = ?
+        WHERE root_run_id = ?`,
+    ).run(String(err?.message ?? err), row.root_run_id);
+    return {
+      ok: false,
+      reasonCode: "tier_escalation_writeback_failed",
+      continuationRunId: row.continuation_run_id,
+      error: String(err?.message ?? err),
+    };
+  }
+  txImmediate(db, () => {
+    const at = iso(now);
+    db.query(
+      `UPDATE tier_escalations
+          SET projection_state = 'applied', projection_attempts = projection_attempts + 1,
+              projection_error = NULL, projected_at = ?
+        WHERE root_run_id = ? AND projection_state = 'pending'`,
+    ).run(at, row.root_run_id);
+    const state = db
+      .query(`SELECT state FROM runs WHERE run_id = ?`)
+      .get(row.continuation_run_id)?.state;
+    if (state === "APPROVED") {
+      transition(db, {
+        runId: row.continuation_run_id,
+        to: "QUEUED",
+        expectFrom: "APPROVED",
+        actor: "tier-escalation",
+        reason: `tracker_projection_applied:${row.failed_run_id}`,
+        causationId: row.failed_run_id,
+        policyVersion,
+        now,
+      });
+    }
+  });
+  return {
+    ok: true,
+    projected: 1,
+    continuationRunId: row.continuation_run_id,
+  };
 }
 
 /**
@@ -1041,8 +1334,25 @@ export function claimNext(
     labels = {},
     adapters = null,
     adapterOverride,
+    projectTierEscalation = defaultProjectTierEscalation,
+    fetchTicket,
+    onTierEscalationProjectionError = (entry) =>
+      console.error(
+        `[worker] ${entry.reasonCode} for ${entry.continuationRunId}: ${entry.error}`,
+      ),
   } = {},
 ) {
+  // Production workers call claimNext() directly rather than runOnce(). Do
+  // this before looking for QUEUED work so a restart cannot strand a durable
+  // escalation in APPROVED after the scheduling transaction committed but
+  // before its tracker projection completed.
+  const pendingEscalation = reconcileTierEscalations(db, {
+    projectTierEscalation,
+    fetchTicket,
+    now,
+    policyVersion,
+  });
+  if (!pendingEscalation.ok) onTierEscalationProjectionError(pendingEscalation);
   // BEGIN IMMEDIATE, not the default deferred transaction: two workers must
   // not both read the same QUEUED row before either writes (OPS-233).
   return txImmediate(db, () => {
@@ -2043,6 +2353,7 @@ export async function executeClaimed(
   const retain = spec.workspace?.retainOnFailure === true;
   let workspaceDir = null;
   let checkoutPath = null;
+  let worktreePath = null;
   let checkoutBaseline;
   let worktreeRecord;
   const cleanupWorkspace = ({ retainWorkspace = false } = {}) => {
@@ -2067,6 +2378,7 @@ export async function executeClaimed(
   const repoName = spec.input?.repoPin?.repo ?? spec.input?.repo ?? null;
   const ticketId = spec.input?.ticket ?? null;
   const isWorktree = spec.workspace?.type === "worktree";
+  const worktreeHandoff = tierEscalationForContinuation(db, runId);
 
   let leaseHeartbeat = null;
   let ticketClaimed = false;
@@ -2159,9 +2471,27 @@ export async function executeClaimed(
     dispatchOpts?.holdPullRequest ?? defaultHoldPullRequest;
   const fetchHandoffPullRequestFn =
     dispatchOpts?.fetchHandoffPullRequest ?? defaultFetchHandoffPullRequest;
+  const projectTierEscalationFn =
+    dispatchOpts?.projectTierEscalation ?? defaultProjectTierEscalation;
   let handoffContext = null;
 
   const nowFn = typeof now === "function" ? now : () => now ?? Date.now();
+
+  const tierEscalationDue = (reasonCode) => {
+    const eligibility = tierEscalationEligibility(spec, reasonCode);
+    if (!eligibility.eligible) return false;
+    return failureCount(db, runId, "agent_error") + 1 >= spec.maxAttempts;
+  };
+
+  const projectScheduledEscalation = (scheduled) =>
+    scheduled
+      ? reconcileTierEscalations(db, {
+          projectTierEscalation: projectTierEscalationFn,
+          fetchTicket: fetchTicketFn,
+          now: nowFn,
+          policyVersion,
+        })
+      : null;
 
   const abortController = new AbortController();
   ACTIVE_EXECUTIONS.set(runId, {
@@ -2228,6 +2558,7 @@ export async function executeClaimed(
         currentNow,
         attemptUsage,
       );
+      let escalation = null;
       if (decision.retry) {
         transition(db, {
           runId,
@@ -2239,8 +2570,22 @@ export async function executeClaimed(
           policyVersion,
           now: nowFn(),
         });
+      } else if (tierEscalationEligibility(spec, reasonCode).eligible) {
+        escalation = scheduleTierEscalation(db, registry, spec, {
+          workspacePath: worktreePath ?? checkoutPath,
+          sourceWorkspacePath: workspaceDir,
+          actor: owner,
+          policyVersion,
+          now: currentNow,
+          reasonCode,
+        });
       }
-      return { ok: true, cause: decision.cause, requeued: decision.retry };
+      return {
+        ok: true,
+        cause: decision.cause,
+        requeued: decision.retry,
+        escalation,
+      };
     });
 
   let def = null;
@@ -2592,11 +2937,34 @@ export async function executeClaimed(
           gateResult = worktreeDispatchAutoEligibility(spec.input, {
             ...(dispatchOpts ?? {}),
             claimedRetry: claimedRetryFor(db, runId, attempt),
+            escalatedContinuation: worktreeHandoff,
+            hasTicketLease:
+              dispatchOpts?.hasTicketLease ??
+              ((repo, ticket) =>
+                liveWorkerLeases(repo, { dir: leasesDir }).some(
+                  (lease) => String(lease.ticket) === String(ticket),
+                )),
             // Match the planner's operator-only bypass from the immutable
             // proposal that admitted this run. Never trust caller options here:
             // chain and schedule runs must keep the security/escalation gate.
+            //
+            // A spec field alone can never carry this authorisation: chain and
+            // schedule runs inherit approvalPolicy (dispatchEvidence included,
+            // via stableChainApprovalPolicyForHash) from the dispatch they
+            // descend from, so trusting `dispatchEvidence.checks
+            // .operator_authorized` would hand every descendant of one operator
+            // dispatch a permanent ai:escalated/security bypass. The escalation
+            // claim is only believed when the durable tier_escalations row read
+            // for THIS run authenticates it as the continuation of the exact
+            // failed run the spec names.
             operatorAuthorized:
-              originatingEvent(db, runId)?.source === "operator",
+              originatingEvent(db, runId)?.source === "operator" ||
+              (worktreeHandoff !== null &&
+                spec.approvalPolicy?.escalation?.operatorAuthorized === true &&
+                spec.approvalPolicy.escalation.failedRunId ===
+                  worktreeHandoff.failedRunId &&
+                spec.approvalPolicy.escalation.rootRunId ===
+                  worktreeHandoff.rootRunId),
           });
         }
       } catch (err) {
@@ -2645,7 +3013,8 @@ export async function executeClaimed(
         // redundant, that could steal the ticket if ownership changed in the
         // narrow interval after the gate read.
         const resumedClaim =
-          gateResult.evidence?.checks?.ticket_claim_retry === true;
+          gateResult.evidence?.checks?.ticket_claim_retry === true ||
+          gateResult.evidence?.checks?.ticket_claim_escalation === true;
         if (!resumedClaim) {
           let claimRes;
           try {
@@ -2753,6 +3122,7 @@ export async function executeClaimed(
         adapter: adapterKey,
         ticketLeaseOwner,
         workerLeasesDir: leasesDir,
+        worktreeHandoff,
       });
     } catch (err) {
       // Missing declared inputs are permanent: re-queuing cannot repopulate an
@@ -2766,7 +3136,12 @@ export async function executeClaimed(
     }
     workspaceDir = created.dir;
     assertSandboxWorkspaceSupported(workspaceDir, def);
+    // Repository checkouts receive instance-local config and integrity
+    // baselining. Delegated worktrees already provision their own instance and
+    // must not be mutated by that repository-only setup; retain their path
+    // separately for an escalation ownership transfer.
     checkoutPath = created.checkout?.path ?? null;
+    worktreePath = created.worktree?.path ?? null;
     provisionInstanceLocalConfigs({ checkoutPath });
     checkoutBaseline = checkoutPath ? repositoryStatus(checkoutPath) : null;
     worktreeRecord = created.worktree
@@ -3052,23 +3427,36 @@ export async function executeClaimed(
       return { runId, attempt, terminalState: "FAILED", reasonCode };
     }
     if (!lateCompletion && exitCode !== 0) {
-      if (mayMutateClaimedTicket()) {
+      const reasonCode = `agent_exit_${exitCode}`;
+      const escalating = tierEscalationDue(reasonCode);
+      if (mayMutateClaimedTicket() && !escalating) {
         try {
           unclaimTicketFn({
             repo: repoName,
             ticket: ticketId,
-            why: `agent_exit_${exitCode}`,
+            why: reasonCode,
             log: null,
           });
         } catch {
           /* intentionally ignored */
         }
       }
-      const reasonCode = `agent_exit_${exitCode}`;
       const res = failTerminal("FAILED", reasonCode, reasonCode);
-      cleanupWorkspace({ retainWorkspace: retain });
+      const projection = projectScheduledEscalation(res?.escalation);
+      if (!res?.escalation) cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
-      return { runId, attempt, terminalState: "FAILED", reasonCode };
+      return {
+        runId,
+        attempt,
+        terminalState: "FAILED",
+        reasonCode,
+        ...(res?.escalation
+          ? {
+              escalatedRunId: res.escalation.continuation_run_id,
+              escalationProjection: projection,
+            }
+          : {}),
+      };
     }
 
     // The settings policy is preventative; this is the independent, durable
@@ -3151,6 +3539,7 @@ export async function executeClaimed(
       const handoffBody = handoff
         ? `${composeHandoffVerification(handoff)}\n\n**Result:** run ${runId} FAILED \`${reasonCode}\` — ${err.violations.join("; ")}`
         : null;
+      const escalating = tierEscalationDue(reasonCode);
       // WM-718: the PR is the agent's, already opened; the structural hold is
       // to draft it and quote the observed failure where the reviewer looks.
       if (
@@ -3170,7 +3559,7 @@ export async function executeClaimed(
           /* intentionally ignored */
         }
       }
-      if (mayMutateClaimedTicket()) {
+      if (mayMutateClaimedTicket() && !escalating) {
         if (HANDOFF_REASON_CODES.has(reasonCode)) {
           try {
             const returned = returnHandoffTicketFn({
@@ -3252,6 +3641,7 @@ export async function executeClaimed(
           currentNow,
           attemptUsage,
         );
+        let escalation = null;
         if (decision.retry) {
           transition(db, {
             runId,
@@ -3263,10 +3653,20 @@ export async function executeClaimed(
             policyVersion,
             now: nowFn(),
           });
+        } else if (tierEscalationEligibility(spec, reasonCode).eligible) {
+          escalation = scheduleTierEscalation(db, registry, spec, {
+            workspacePath: worktreePath ?? checkoutPath,
+            sourceWorkspacePath: workspaceDir,
+            actor: owner,
+            policyVersion,
+            now: currentNow,
+            reasonCode,
+          });
         }
-        return { ok: true };
+        return { ok: true, escalation };
       });
-      cleanupWorkspace({ retainWorkspace: retain });
+      const projection = projectScheduledEscalation(res?.escalation);
+      if (!res?.escalation) cleanupWorkspace({ retainWorkspace: retain });
       if (res?.fenced) return { fenced: true };
       return {
         runId,
@@ -3275,6 +3675,12 @@ export async function executeClaimed(
         reasonCode,
         detail: failureReason,
         ...(handoff ? { handoff } : {}),
+        ...(res?.escalation
+          ? {
+              escalatedRunId: res.escalation.continuation_run_id,
+              escalationProjection: projection,
+            }
+          : {}),
       };
     }
 
@@ -3863,7 +4269,18 @@ export function reapExpiredLeases(
 
 /** Claim and execute one run, or return a typed refusal/null without execution. */
 export async function runOnce(db, registry, adapters, opts = {}) {
-  const claim = claimNext(db, opts);
+  // claimNext already reconciles pending escalation projections and logs a
+  // failed one without abandoning the claim: a tracker outage on one
+  // escalation must never stall claiming of every other queued run. Forward
+  // the dispatch-scoped tracker hooks so it uses the same ones this call does.
+  const claim = claimNext(db, {
+    ...opts,
+    projectTierEscalation:
+      opts.projectTierEscalation ??
+      opts.dispatch?.projectTierEscalation ??
+      defaultProjectTierEscalation,
+    fetchTicket: opts.fetchTicket ?? opts.dispatch?.fetchTicket,
+  });
   if (!claim || claim.refused) return claim;
   return executeClaimed(db, registry, adapters, claim, opts);
 }
