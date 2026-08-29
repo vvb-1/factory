@@ -2150,6 +2150,11 @@ export async function executeClaimed(
         policyVersion,
         now: currentNow,
       });
+      closeOpenProposalForRun(db, runId, {
+        actor: owner,
+        reason: "run_refused",
+        now: currentNow,
+      });
       const receipt = receiptWithDeadlineExtensions(db, runId, {
         runId,
         spec,
@@ -3101,6 +3106,11 @@ export async function executeClaimed(
           reason: verified.reasonCode,
           attempt,
           policyVersion,
+          now: currentNow,
+        });
+        closeOpenProposalForRun(db, runId, {
+          actor: owner,
+          reason: "run_refused",
           now: currentNow,
         });
         const receipt = receiptWithDeadlineExtensions(db, runId, {
