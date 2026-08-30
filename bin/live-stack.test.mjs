@@ -39,6 +39,10 @@ info() { printf '==> %s\\n' "$*"; }
 warn() { printf 'warn: %s\\n' "$*" >&2; }
 die() { printf 'error: %s\\n' "$*" >&2; exit 1; }
 pid_alive() {
+  if [[ "\${FAKE_WEB_SUPERVISOR:-0}" == "1" ]]; then
+    [[ "$(basename "$1")" == "serve.pid" ]]
+    return
+  fi
   [[ "\${FAKE_ALIVE:-0}" == "1" ]] || return 1
   [[ -f "$1" ]] || return 1
   [[ -f "$1.terminated" ]] && return 1
@@ -61,6 +65,12 @@ term_daemon() {
   [[ "\${FAKE_IGNORES_TERM:-0}" == "1" ]] || touch "$1.terminated"
 }
 await_daemon() { printf 'AWAIT %s\\n' "$2" >>"$SPAWN_LOG"; }
+rotate_run_logs() {
+  if [[ -n "\${FAKE_ROTATION_LOG:-}" ]]; then
+    printf 'ROTATE bytes=%s keep=%s\\n' "$2" "$3" >>"$FAKE_ROTATION_LOG"
+  fi
+}
+run_log_total_bytes() { printf '%s' "\${FAKE_LOG_BYTES:-0}"; }
 `;
 
 /**
@@ -719,6 +729,167 @@ test("`up --bogus` is still rejected", () => {
     f.cleanup();
   }
 });
+
+test("`logs rotate` reports its total after requesting the configured retention", () => {
+  const f = makeFixture();
+  const rotationLog = path.join(f.root, "rotations.log");
+  try {
+    const r = runStack(f, ["logs", "rotate"], {
+      FACTORY_LOG_ROTATE_BYTES: "1048576",
+      FACTORY_LOG_KEEP: "2",
+      FAKE_ROTATION_LOG: rotationLog,
+      FAKE_LOG_BYTES: "321",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("total log bytes: 321");
+    expect(readFileSync(rotationLog, "utf8")).toBe(
+      "ROTATE bytes=1048576 keep=2\n",
+    );
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("`logs rotate` treats FACTORY_LOG_ROTATE_BYTES=0 as disabled", () => {
+  const f = makeFixture();
+  const rotationLog = path.join(f.root, "rotations.log");
+  try {
+    const r = runStack(f, ["logs", "rotate"], {
+      FACTORY_LOG_ROTATE_BYTES: "0",
+      FAKE_ROTATION_LOG: rotationLog,
+      FAKE_LOG_BYTES: "7",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("log rotation disabled");
+    expect(r.stdout).toContain("total log bytes: 7");
+    expect(existsSync(rotationLog)).toBe(false);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("log knobs below 1 MiB or malformed are rejected before anything rotates", () => {
+  const f = makeFixture();
+  const rotationLog = path.join(f.root, "rotations.log");
+  try {
+    for (const [env, message] of [
+      [{ FACTORY_LOG_ROTATE_BYTES: "42" }, "at least 1048576 bytes"],
+      [{ FACTORY_LOG_ROTATE_BYTES: "lots" }, "non-negative integer"],
+      [
+        { FACTORY_LOG_KEEP: "0" },
+        "FACTORY_LOG_KEEP must be a positive integer",
+      ],
+      [
+        { FACTORY_LOG_ROTATE_INTERVAL: "soon" },
+        "FACTORY_LOG_ROTATE_INTERVAL must be a non-negative integer",
+      ],
+    ]) {
+      const r = runStack(f, ["logs", "rotate"], {
+        ...env,
+        FAKE_ROTATION_LOG: rotationLog,
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(message);
+      expect(existsSync(rotationLog)).toBe(false);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("web supervisor rotates logs on its tick while the stack stays up", async () => {
+  const f = makeFixture();
+  const rotationLog = path.join(f.root, "rotations.log");
+  const counter = path.join(f.root, "sleep-count");
+  const sleep = path.join(f.root, "stubs", "sleep");
+  writeFileSync(
+    sleep,
+    `#!/bin/sh
+n=$(cat "$FAKE_SLEEP_COUNT" 2>/dev/null || printf 0)
+n=$((n + 1))
+printf '%s\n' "$n" > "$FAKE_SLEEP_COUNT"
+if [ "$n" -ge 3 ]; then kill -TERM "$PPID"; fi
+`,
+    "utf8",
+  );
+  chmodSync(sleep, 0o755);
+  mkdirSync(f.runDir, { recursive: true });
+  writeFileSync(path.join(f.runDir, "serve.pid"), "1\n", "utf8");
+  const proc = Bun.spawn({
+    cmd: ["bash", path.join(f.root, "bin", "live-stack.sh"), "__supervise-web"],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: `${path.join(f.root, "stubs")}:${process.env.PATH}`,
+      FAKE_REPO: f.root,
+      FACTORY_RUN_DIR: f.runDir,
+      FACTORY_EVENT_HOME: path.join(f.root, "home"),
+      FAKE_WEB_SUPERVISOR: "1",
+      FAKE_SLEEP_COUNT: counter,
+      FAKE_ROTATION_LOG: rotationLog,
+      FACTORY_LOG_ROTATE_BYTES: "2097152",
+      FACTORY_LOG_KEEP: "4",
+      // Every tick is a rotation check; the real default is 300 s.
+      FACTORY_LOG_ROTATE_INTERVAL: "0",
+    },
+  });
+  try {
+    const status = await proc.exited;
+    expect(status).toBe(0);
+    const rotations = readFileSync(rotationLog, "utf8").trim().split("\n");
+    expect(rotations.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(rotations)).toEqual(
+      new Set(["ROTATE bytes=2097152 keep=4"]),
+    );
+  } finally {
+    f.cleanup();
+  }
+}, 20_000);
+
+test("web supervisor exponentially backs off rapid restarts", async () => {
+  const f = makeFixture();
+  const sleeps = path.join(f.root, "sleeps.log");
+  const counter = path.join(f.root, "sleep-count");
+  const sleep = path.join(f.root, "stubs", "sleep");
+  writeFileSync(
+    sleep,
+    `#!/bin/sh
+n=$(cat "$FAKE_SLEEP_COUNT" 2>/dev/null || printf 0)
+n=$((n + 1))
+printf '%s\\n' "$n" > "$FAKE_SLEEP_COUNT"
+printf '%s\\n' "$1" >> "$FAKE_SLEEP_LOG"
+if [ "$n" -ge 4 ]; then kill -TERM "$PPID"; fi
+`,
+    "utf8",
+  );
+  chmodSync(sleep, 0o755);
+  mkdirSync(f.runDir, { recursive: true });
+  writeFileSync(path.join(f.runDir, "serve.pid"), "1\n", "utf8");
+  const proc = Bun.spawn({
+    cmd: ["bash", path.join(f.root, "bin", "live-stack.sh"), "__supervise-web"],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: `${path.join(f.root, "stubs")}:${process.env.PATH}`,
+      FAKE_REPO: f.root,
+      FACTORY_RUN_DIR: f.runDir,
+      FACTORY_EVENT_HOME: path.join(f.root, "home"),
+      FAKE_WEB_SUPERVISOR: "1",
+      FAKE_SLEEP_LOG: sleeps,
+      FAKE_SLEEP_COUNT: counter,
+    },
+  });
+  try {
+    const status = await proc.exited;
+    expect(status).toBe(0);
+    const delays = readFileSync(sleeps, "utf8").trim().split("\n");
+    expect(delays).toEqual(["1", "1", "1", "2"]);
+  } finally {
+    f.cleanup();
+  }
+}, 20_000);
 
 // --- __supervise-worker ------------------------------------------------------
 
