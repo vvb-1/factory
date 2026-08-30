@@ -92,8 +92,7 @@ export function RunFull({
   const followUpEvents = useMemo(() => {
     const events = eventsQ.data?.events ?? [];
     return events.filter(
-      (e) =>
-        e.causationId === runId || (e.envelope as any)?.causationId === runId,
+      (e) => e.causationId === runId || e.envelope?.causationId === runId,
     );
   }, [eventsQ.data, runId]);
   // The chain this run belongs to: any event it emitted names the same chain.
