@@ -5,7 +5,8 @@
  * a proposal that sat past its TTL is never executed as-is. Approval after
  * expiry re-plans against current state: an identical fresh spec runs, a
  * different one supersedes the stale proposal with a new open one. The
- * re-plan carries the stored approvalPolicy, modelTier, model,
+ * re-plan carries the stored approvalPolicy and modelTier, plus a model pin
+ * only when it belongs to the adapter selected for the fresh spec,
  * configSnapshot (when present), and idempotencyKey, so expiry cannot shed
  * plan-time dispatch authorization, model routing, or a run generation key.
  * Stale intent can therefore never execute silently, which is the §15 exit
@@ -16,7 +17,8 @@ import { DEFAULT_PROPOSAL_TTL_SECONDS } from "./config.mjs";
 import { txImmediate } from "./db.mjs";
 import { newProposalId } from "./ids.mjs";
 import { runState, transition } from "./lifecycle.mjs";
-import { buildRunSpec } from "./planner.mjs";
+import { buildRunSpec, modelAdapterMismatch } from "./planner.mjs";
+import { plannedDef } from "./runtime-overrides.mjs";
 import { getAgent, getEventType } from "./registry.mjs";
 import { computeDefHash } from "./receipts.mjs";
 
@@ -98,17 +100,41 @@ function loadEnvelope(db, proposal) {
  * Plan-time-only values are not recoverable from the event envelope. Keep the
  * values recorded in the approved proposal when a replan rebuilds its spec.
  */
-function ttlReplanOptions(spec) {
+function ttlReplanOptions(spec, adapter) {
   return {
     approvalPolicy: spec.approvalPolicy ?? null,
     ...(Object.hasOwn(spec, "modelTier")
       ? { modelTierOverride: spec.modelTier }
       : {}),
-    ...(Object.hasOwn(spec, "model") ? { modelOverride: spec.model } : {}),
+    // A concrete model is adapter-specific. Retaining a pi pin while the
+    // current registry routes the re-plan to cursor produces a RunSpec that
+    // the cursor CLI cannot execute. The tier is portable intent, so let the
+    // planner resolve it through the fresh adapter's policy map instead.
+    ...(spec.adapter === adapter && Object.hasOwn(spec, "model")
+      ? { modelOverride: spec.model }
+      : {}),
     ...(Object.hasOwn(spec, "configSnapshot")
       ? { configSnapshot: spec.configSnapshot }
       : {}),
   };
+}
+
+/**
+ * Refuse to queue a spec whose concrete model cannot run on its adapter (a
+ * pi model carried onto a cursor route). `explicitPin` is the provenance of
+ * the model when the caller knows it; see `modelAdapterMismatch`.
+ */
+function assertModelMatchesAdapter(spec, registry, adapter, options) {
+  const mismatch = modelAdapterMismatch(
+    spec,
+    registry.modelTiers,
+    adapter,
+    options,
+  );
+  if (!mismatch) return;
+  const err = new Error(mismatch);
+  err.code = "model_adapter_mismatch";
+  throw err;
 }
 
 /**
@@ -233,6 +259,25 @@ export function approveProposal(
       !registryVersionMismatch &&
       !isExpired(proposal, now)
     ) {
+      // The recorded spec queues as-is, so its model is checked against the
+      // adapter it was planned for: the spec's own adapter — not the
+      // mapping's, which an overlay may have set differently at plan time
+      // (overlays live in the db, not in `registry`). The one exception is a
+      // process-wide `--adapter-override`, which substitutes execution only:
+      // the model was still resolved for the registered route. defHash
+      // matched above, so the current definition is the one that planned it:
+      // a definition `model:` is a known explicit pin; an overlay pin at plan
+      // time is unknowable.
+      const plannedFor =
+        adapterOverride != null && recordedSpec?.adapter === adapterOverride
+          ? mapping?.adapter
+          : (recordedSpec?.adapter ?? mapping?.adapter);
+      assertModelMatchesAdapter(recordedSpec, registry, plannedFor, {
+        explicitPin:
+          registry.agents.get(recordedSpec?.agent)?.model !== undefined
+            ? true
+            : undefined,
+      });
       return approveRun(db, proposal, envelope, {
         actor,
         now,
@@ -250,13 +295,14 @@ export function approveProposal(
         `proposal ${id} requires re-planning but event type ${envelope.type} is no longer registered`,
       );
     const storedSpec = recordedSpec ?? JSON.parse(proposal.spec_json);
+    const replanOptions = ttlReplanOptions(storedSpec, mapping.adapter);
     const built = {
       ...buildRunSpec(registry, envelope, mapping, {
         runId: proposal.run_id,
         policyVersion,
         adapterOverride,
         now,
-        ...ttlReplanOptions(storedSpec),
+        ...replanOptions,
       }),
       // configSnapshot can affect planning and is itself part of specs that
       // explicitly pin it. Keep the pin in the rebuilt spec as well as
@@ -279,6 +325,12 @@ export function approveProposal(
         }
       : built;
     const freshHash = hashJson(fresh);
+    assertModelMatchesAdapter(fresh, registry, mapping.adapter, {
+      explicitPin:
+        plannedDef(getAgent(registry, mapping.agent), {
+          modelOverride: replanOptions.modelOverride,
+        }).model !== undefined,
+    });
     // Refresh-and-approve only when the caller named a real current version.
     // Replanning with `"unknown"` must not stamp that sentinel onto the
     // recorded spec and queue it.
