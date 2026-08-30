@@ -2377,6 +2377,63 @@ export function defaultReturnHandoffTicket({
   }
 }
 
+/**
+ * A verified PR_OPEN must not remain dispatchable when its agent omitted the
+ * final ticket projection. This is deliberately a small, best-effort repair:
+ * the caller owns the claim/fencing guard, while this helper re-reads the
+ * ticket so an agent that already put it In Review receives no duplicate
+ * mutation. Like defaultUnclaimTicket / defaultBlockBaselineTicket it only
+ * touches a ticket still in the dispatch states (Todo, In Progress): a human
+ * who moved it to Blocked / Done / Canceled mid-run keeps that decision, and
+ * a closed GitHub issue is never reopened by the worker.
+ */
+const RECONCILABLE_HANDOFF_STATES = new Set(["Todo", "In Progress"]);
+
+export function defaultReconcileVerifiedHandoffTicket({
+  ticket,
+  repo,
+  fetchTicket,
+  runCli = runLinearCli,
+  mayMutate = () => true,
+}) {
+  try {
+    if (!mayMutate()) return false;
+    const cur =
+      typeof fetchTicket === "function"
+        ? fetchTicket(ticket, repo)
+        : defaultFetchTicket(ticket, repo);
+    if (!cur) return false;
+    const stateName = cur.state?.name;
+    if (stateName === "In Review") return false;
+    if (!RECONCILABLE_HANDOFF_STATES.has(stateName)) {
+      console.error(
+        `[worker] not reconciling verified handoff ticket ${ticket}: state is ${JSON.stringify(stateName ?? null)}, left as-is`,
+      );
+      return false;
+    }
+    runCli(
+      [
+        "state",
+        ticket,
+        "In Review",
+        "--add",
+        "ai:needs-review",
+        "--remove",
+        "ai:in-progress",
+        "--remove",
+        "ai:agent-ready",
+      ],
+      { repo },
+    );
+    return true;
+  } catch (err) {
+    console.error(
+      `[worker] failed to reconcile verified handoff ticket ${ticket}: ${String(err?.message ?? err)}`,
+    );
+    return false;
+  }
+}
+
 /** Convert an already-opened PR to draft and say why, so nobody merges a red handoff. */
 function defaultHoldPullRequest({ github, prNumber, body }) {
   if (!github || !Number.isInteger(prNumber)) return false;
@@ -2404,7 +2461,7 @@ function defaultFetchHandoffPullRequest({ github, prNumber }) {
     throw new Error("handoff PR requires github and a numeric PR number");
   }
   return loadForge().prView(github, prNumber, {
-    fields: ["baseRefName"],
+    fields: ["baseRefName", "isDraft"],
     timeout: workerSubprocessTimeoutMs(),
   });
 }
@@ -2445,6 +2502,7 @@ function assertHandoffPullRequestBase({ handoff, base, fetchPullRequest }) {
   const actual =
     typeof pr?.baseRefName === "string" ? pr.baseRefName.trim() : "";
   handoff.prBase = { expected, actual: actual || null };
+  handoff.prDraft = pr?.isDraft === true;
   if (!actual) {
     throw new ContractViolation(
       [`pr_base_unreadable: PR #${prNumber} has no baseRefName`],
@@ -2642,6 +2700,7 @@ export async function executeClaimed(
       // handoff comment, PR hold, and ticket return.
       commentTicket: () => true,
       returnHandoffTicket: () => true,
+      reconcileVerifiedHandoffTicket: () => false,
       holdPullRequest: () => false,
     };
   } else if (dispatchStubSelected) {
@@ -2654,6 +2713,7 @@ export async function executeClaimed(
     dispatchOpts = {
       commentTicket: () => true,
       returnHandoffTicket: () => true,
+      reconcileVerifiedHandoffTicket: () => false,
       holdPullRequest: () => false,
       ...dispatchOpts,
     };
@@ -2690,6 +2750,13 @@ export async function executeClaimed(
     dispatchOpts?.returnHandoffTicket ??
     ((args) =>
       defaultReturnHandoffTicket({
+        ...args,
+        fetchTicket: dispatchOpts?.fetchTicket,
+      }));
+  const reconcileVerifiedHandoffTicketFn =
+    dispatchOpts?.reconcileVerifiedHandoffTicket ??
+    ((args) =>
+      defaultReconcileVerifiedHandoffTicket({
         ...args,
         fetchTicket: dispatchOpts?.fetchTicket,
       }));
@@ -4202,11 +4269,27 @@ export async function executeClaimed(
     // agent-reported. Best effort — a comment failure never fails a verified
     // run.
     if (verified.handoff && mayMutateClaimedTicket()) {
+      let stateReconciled = false;
+      try {
+        stateReconciled =
+          reconcileVerifiedHandoffTicketFn({
+            repo: repoName,
+            ticket: ticketId,
+            mayMutate: mayMutateClaimedTicket,
+          }) === true;
+      } catch (err) {
+        console.error(
+          `[worker] failed to reconcile verified handoff ticket ${ticketId}: ${String(err?.message ?? err)}`,
+        );
+      }
       try {
         commentTicketFn({
           repo: repoName,
           ticket: ticketId,
-          body: composeHandoffVerification(verified.handoff),
+          body: [
+            composeHandoffVerification(verified.handoff),
+            ...(stateReconciled ? ["- state reconciled by worker"] : []),
+          ].join("\n"),
           handoff: verified.handoff,
         });
       } catch {
