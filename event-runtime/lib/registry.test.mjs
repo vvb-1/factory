@@ -393,8 +393,13 @@ describe("registry", () => {
     // Regenerated (#1337): the worker, not the dispatch model, verifies the
     // canonical authorisation description hash and path scope before execution;
     // dispatch.md trusts the worker-authenticated verified flag.
+    // Regenerated (#1700): merge-fix comments now pair human-readable Markdown
+    // with embedded machine markers, and merge-review scans formatted multiline
+    // and HTML comment bodies; both prompt definitions are registry inputs.
+    // Re-pinned (#1700 post-review): merge-fix templates the round cap as
+    // `<max_fix_rounds>` instead of hardcoding 2.
     const expected =
-      "sha256:a3685bcb3f85cb09522de22654860620138003cc5d9fbec8e5fe0dc3349d009c";
+      "sha256:475609349143157c8b659367addb688b17847ea8218af380de5daba2c3b9059a";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
