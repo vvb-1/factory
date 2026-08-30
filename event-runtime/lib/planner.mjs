@@ -2106,7 +2106,94 @@ function coalesceWebhookMergeRequest(
   };
 }
 
-function humanNeeded(db, event, reason, at, ttlSeconds) {
+const HUMAN_NEEDED_BODY_HASH_MARKER = /\[dispatch_ticket_body_hash:([^\]]+)\]/;
+
+function proposalExpiredAt(proposal, at) {
+  return (
+    Date.parse(at) - Date.parse(proposal.created_at) >
+    Number(proposal.ttl_seconds) * 1000
+  );
+}
+
+function humanNeededReasonPrefix(reason) {
+  return String(reason).split(":", 1)[0];
+}
+
+function ticketHumanNeededContext(payload, evidence) {
+  const repo = payload?.repo;
+  const ticket = payload?.ticket;
+  const descriptionHash = evidence?.ticket?.descriptionHash;
+  // A missing ticket has no body to compare. Its synthetic empty-description
+  // hash must not make unrelated failed lookups suppress each other.
+  if (
+    evidence?.checks?.ticket_found !== true ||
+    typeof repo !== "string" ||
+    typeof ticket !== "string" ||
+    typeof descriptionHash !== "string"
+  ) {
+    return null;
+  }
+  return { repo, ticket, descriptionHash };
+}
+
+function humanNeeded(db, event, reason, at, ttlSeconds, ticketContext = null) {
+  const outcomeReason = reason;
+  if (ticketContext) {
+    const reasonPrefix = humanNeededReasonPrefix(reason);
+    const matching = db
+      .query(
+        `SELECT p.*
+         FROM proposals p
+         JOIN events e
+           ON e.source = p.event_source AND e.event_id = p.event_id
+         WHERE p.decision = 'human_needed'
+           AND p.status = 'open'
+           AND json_extract(e.envelope_json, '$.payload.repo') = ?
+           AND json_extract(e.envelope_json, '$.payload.ticket') = ?
+           AND substr(p.reason, 1, ?) = ?
+         ORDER BY p.created_at, p.rowid`,
+      )
+      .all(
+        ticketContext.repo,
+        ticketContext.ticket,
+        reasonPrefix.length,
+        reasonPrefix,
+      );
+    const hashMarker = `[dispatch_ticket_body_hash:${ticketContext.descriptionHash}]`;
+    // Expiry is derived from created_at + ttl_seconds (nothing writes
+    // status='expired'), so an aged-out open row is not current: the unchanged
+    // ticket must be re-proposed once its earlier question has expired.
+    const current = matching.find(
+      (proposal) =>
+        !proposalExpiredAt(proposal, at) &&
+        String(proposal.reason ?? "").includes(hashMarker),
+    );
+    const stale = matching.filter((proposal) => proposal.id !== current?.id);
+    for (const proposal of stale) {
+      const previousMarker = String(proposal.reason ?? "").match(
+        HUMAN_NEEDED_BODY_HASH_MARKER,
+      );
+      const supersedeReason =
+        previousMarker && previousMarker[1] !== ticketContext.descriptionHash
+          ? "superseded_by_ticket_body_change"
+          : "superseded_by_replan";
+      db.query(
+        `UPDATE proposals
+         SET status = 'superseded', decided_at = ?, decided_by = ?,
+             reason = ?
+         WHERE id = ?`,
+      ).run(at, "planner", supersedeReason, proposal.id);
+    }
+    if (current) {
+      const noopReason = `human_needed_already_open:${current.id}`;
+      setEventStatus(db, event, "noop", noopReason);
+      return { decision: "noop", reason: noopReason };
+    }
+    // Proposals do not have an evidence column. Retain the body hash in the
+    // operator-facing reason detail so a later scan can compare the exact
+    // ticket body that produced this question without changing the schema.
+    reason = `${reason}\n${hashMarker}`;
+  }
   const proposal = insertProposal(db, {
     id: newProposalId(),
     event,
@@ -2117,7 +2204,7 @@ function humanNeeded(db, event, reason, at, ttlSeconds) {
     ttlSeconds,
   });
   setEventStatus(db, event, "human_needed");
-  return { decision: "human_needed", proposal, reason };
+  return { decision: "human_needed", proposal, reason: outcomeReason };
 }
 
 /** Idempotent path: the event was already planned — report what was decided. */
@@ -2462,7 +2549,17 @@ export function planEvent(
       worktreeEligibility?.ok === false ? worktreeEligibility.refusal : null;
     if (worktreeGateFor(def) === "dispatch" && worktreeRefusal) {
       if (worktreeRefusal.decision === "human_needed") {
-        return humanNeeded(db, event, worktreeRefusal.reason, at, ttlSeconds);
+        return humanNeeded(
+          db,
+          event,
+          worktreeRefusal.reason,
+          at,
+          ttlSeconds,
+          ticketHumanNeededContext(
+            envelope.payload,
+            worktreeEligibility.evidence,
+          ),
+        );
       }
       const proposal = insertProposal(db, {
         id: newProposalId(),
