@@ -224,7 +224,7 @@ function waiterReferentKey(effectKind, refs) {
   }
 }
 
-function fanOutWaiterEffects(db, item, response, waiters, applyEffect) {
+async function fanOutWaiterEffects(db, item, response, waiters, applyEffect) {
   const option = item.decision?.options?.find(
     (candidate) => candidate.id === response?.optionId,
   );
@@ -254,7 +254,7 @@ function fanOutWaiterEffects(db, item, response, waiters, applyEffect) {
     let effect;
     try {
       effect = normalizeEffect(
-        applyEffect(db, waiterItem, response),
+        await applyEffect(db, waiterItem, response),
         waiterItem,
         response,
       );
@@ -268,12 +268,33 @@ function fanOutWaiterEffects(db, item, response, waiters, applyEffect) {
     waiter.effect = effect;
     outcomes.push({ runId: waiter.runId ?? null, effect });
   }
-  db.query(`UPDATE inbox_items SET waiters_json = ? WHERE id = ?`).run(
-    JSON.stringify(nextWaiters),
-    item.id,
-  );
+  // `waiters` was read in the claim transaction and the effects above awaited
+  // outside the lock. `attachWaiter` only appends, and only to undecided rows
+  // (this item has been decided since the claim), so nothing should have
+  // changed; re-read anyway and keep any entry appended after the snapshot.
+  txImmediate(db, () => {
+    const current = parseWaiters(
+      db.query(`SELECT waiters_json FROM inbox_items WHERE id = ?`).get(item.id)
+        ?.waiters_json,
+    );
+    db.query(`UPDATE inbox_items SET waiters_json = ? WHERE id = ?`).run(
+      JSON.stringify([...nextWaiters, ...current.slice(nextWaiters.length)]),
+      item.id,
+    );
+  });
   return outcomes;
 }
+
+/**
+ * How long a `pending` effect claim may stay unsettled before `/decide/retry`
+ * may take it over. The claim is held while the effect runs outside the write
+ * lock; the CLI transport gives up after 20 s
+ * (`decision-effects.mjs:applyDecisionEffect`), so a claim older than this
+ * belongs to a serve that died mid-effect, not to a slow effect still in
+ * flight. Keep it comfortably above the transport timeout so a late settle
+ * cannot race a takeover.
+ */
+export const PENDING_EFFECT_CLAIM_TIMEOUT_MS = 60_000;
 
 export class InboxDecisionError extends Error {
   constructor(code, message, status = 400, errors = undefined) {
@@ -651,6 +672,20 @@ function settleInboxDecision(
   return { item, effect, memos };
 }
 
+/** The effect record held while the effect runs outside the write lock. */
+function pendingEffect(decision, response, { retryAttempt, claimedAt }) {
+  const kind =
+    decision?.options?.find((option) => option.id === response.optionId)
+      ?.effect ?? "unknown";
+  return { kind, outcome: "pending", retryAttempt, claimedAt };
+}
+
+/** Age of a pending claim in ms; a claim with no readable stamp counts as stale. */
+function pendingClaimAge(effect, now) {
+  const claimedAt = Date.parse(effect?.claimedAt ?? "");
+  return Number.isFinite(claimedAt) ? now - claimedAt : Infinity;
+}
+
 function normalizeEffect(effect, item, response) {
   const kind =
     item.decision.options.find((option) => option.id === response.optionId)
@@ -665,17 +700,12 @@ function normalizeEffect(effect, item, response) {
   return { ...effect, kind };
 }
 
-/** Validate, record, and apply one response to a stored decision request. */
+/** Validate and claim one response in a short write transaction. */
 function decideInboxItemInTransaction(
   db,
   id,
   response,
-  {
-    now = Date.now(),
-    decidedBy = "operator",
-    applyEffect = applyDecisionEffect,
-    artifactStore,
-  } = {},
+  { now = Date.now(), decidedBy = "operator" } = {},
 ) {
   const row = decisionRow(db, id);
   const decision = parseNullableObject(row.decision_json);
@@ -731,13 +761,23 @@ function decideInboxItemInTransaction(
 
   // Persist the answer before invoking the seam. A throwing effect must not
   // lose what the operator entered; retry uses this exact stored response.
+  // The effect runs after this transaction commits, so stamp the claim as
+  // `pending` with its start time: if serve dies before settling, a retry can
+  // take the claim over once it is older than PENDING_EFFECT_CLAIM_TIMEOUT_MS.
+  const pendingResponse = {
+    ...storedResponse,
+    effect: pendingEffect(decision, storedResponse, {
+      retryAttempt: 0,
+      claimedAt: decidedAt,
+    }),
+  };
   const recorded = db
     .query(
       `UPDATE inbox_items
      SET response_json = ?, decided_at = ?, decided_by = ?
      WHERE id = ? AND response_json IS NULL AND decided_at IS NULL`,
     )
-    .run(JSON.stringify(storedResponse), decidedAt, decidedBy, id);
+    .run(JSON.stringify(pendingResponse), decidedAt, decidedBy, id);
   if (recorded.changes !== 1) {
     throw new InboxDecisionError(
       "already_decided",
@@ -746,61 +786,91 @@ function decideInboxItemInTransaction(
     );
   }
 
-  const item = getInboxItem(db, id);
+  return {
+    item: getInboxItem(db, id),
+    response: storedResponse,
+    waiters: parseWaiters(row.waiters_json),
+  };
+}
+
+async function applyInboxEffect(db, item, response, applyEffect) {
   let effect;
   try {
     effect = normalizeEffect(
-      applyEffect(db, item, storedResponse),
+      await applyEffect(db, item, response),
       item,
-      storedResponse,
+      response,
     );
   } catch (err) {
     effect = normalizeEffect(
       { outcome: "failed", error: err?.message ?? String(err) },
       item,
-      storedResponse,
+      response,
     );
   }
-  const settled = settleInboxDecision(db, id, storedResponse, effect, {
-    now,
-    artifactStore,
-  });
-  const waiters = parseWaiters(row.waiters_json);
+  return effect;
+}
+
+async function settleClaimedInboxDecision(
+  db,
+  { item, response, waiters },
+  effect,
+  { now, applyEffect, artifactStore, recordedEffect = effect },
+) {
+  const settled = txImmediate(db, () =>
+    settleInboxDecision(db, item.id, response, effect, {
+      now,
+      artifactStore,
+      recordedEffect,
+    }),
+  );
   if (
     waiters.length > 0 &&
     settled.effect.outcome === "applied" &&
     settled.effect.detail !== REPLANNED_DETAIL
   ) {
-    settled.waiterEffects = fanOutWaiterEffects(
+    settled.waiterEffects = await fanOutWaiterEffects(
       db,
       settled.item,
-      storedResponse,
+      response,
       waiters,
       applyEffect,
     );
-    settled.item = getInboxItem(db, id);
+    settled.item = getInboxItem(db, item.id);
   }
   return settled;
 }
 
-export function decideInboxItem(db, id, response, options = {}) {
-  // Serialize request claim, effect application, and finalization against
-  // concurrent answers and dedupe supersession on other connections.
-  return txImmediate(db, () =>
-    decideInboxItemInTransaction(db, id, response, options),
+export async function decideInboxItem(db, id, response, options = {}) {
+  const {
+    now = Date.now(),
+    applyEffect = applyDecisionEffect,
+    artifactStore,
+  } = options;
+  const claim = txImmediate(db, () =>
+    decideInboxItemInTransaction(db, id, response, {
+      now,
+      decidedBy: options.decidedBy,
+    }),
   );
+  const effect = await applyInboxEffect(
+    db,
+    claim.item,
+    claim.response,
+    applyEffect,
+  );
+  return settleClaimedInboxDecision(db, claim, effect, {
+    now,
+    applyEffect,
+    artifactStore,
+  });
 }
 
 /** Retry the effect for an answer that was already recorded. */
 function retryInboxDecisionInTransaction(
   db,
   id,
-  {
-    now = Date.now(),
-    applyEffect = applyDecisionEffect,
-    expectedResponseJson,
-    artifactStore,
-  } = {},
+  { now = Date.now(), expectedResponseJson } = {},
 ) {
   const row = decisionRow(db, id);
   if (row.response_json !== expectedResponseJson) {
@@ -826,56 +896,81 @@ function retryInboxDecisionInTransaction(
       409,
     );
   }
+  if (!recorded.effect) {
+    throw new InboxDecisionError(
+      "retry_superseded",
+      `inbox item ${id} decision retry was superseded`,
+      409,
+    );
+  }
+  // A pending claim belongs to an effect still running outside the lock, or
+  // to a serve that died mid-effect. Only the latter may be taken over.
+  if (
+    recorded.effect.outcome === "pending" &&
+    pendingClaimAge(recorded.effect, now) < PENDING_EFFECT_CLAIM_TIMEOUT_MS
+  ) {
+    throw new InboxDecisionError(
+      "effect_pending",
+      `inbox item ${id} decision effect is still being applied`,
+      409,
+    );
+  }
   const retryAttempt = Number(recorded.effect?.retryAttempt ?? 0) + 1;
   const { effect: _priorEffect, ...response } = recorded;
-  const item = getInboxItem(db, id);
-  let effect;
-  try {
-    effect = normalizeEffect(applyEffect(db, item, response), item, response);
-  } catch (err) {
-    effect = normalizeEffect(
-      { outcome: "failed", error: err?.message ?? String(err) },
-      item,
-      response,
+  const pendingResponse = {
+    ...response,
+    effect: pendingEffect(decision, response, {
+      retryAttempt,
+      claimedAt: new Date(now).toISOString(),
+    }),
+  };
+  const claimed = db
+    .query(
+      `UPDATE inbox_items SET response_json = ? WHERE id = ? AND response_json = ?`,
+    )
+    .run(JSON.stringify(pendingResponse), id, expectedResponseJson);
+  if (claimed.changes !== 1) {
+    throw new InboxDecisionError(
+      "retry_superseded",
+      `inbox item ${id} decision retry was superseded`,
+      409,
     );
   }
-  const settled = settleInboxDecision(db, id, response, effect, {
-    now,
-    recordedEffect: { ...effect, retryAttempt },
-    artifactStore,
-  });
-  const waiters = parseWaiters(row.waiters_json);
-  if (
-    waiters.length > 0 &&
-    settled.effect.outcome === "applied" &&
-    settled.effect.detail !== REPLANNED_DETAIL
-  ) {
-    settled.waiterEffects = fanOutWaiterEffects(
-      db,
-      settled.item,
-      response,
-      waiters,
-      applyEffect,
-    );
-    settled.item = getInboxItem(db, id);
-  }
-  return settled;
+  return {
+    item: getInboxItem(db, id),
+    response,
+    waiters: parseWaiters(row.waiters_json),
+    retryAttempt,
+  };
 }
 
-export function retryInboxDecision(db, id, options = {}) {
+export async function retryInboxDecision(db, id, options = {}) {
   // Capture the exact failed outcome before waiting for the write lock. A
   // concurrent retry increments retryAttempt, so a waiter cannot replay the
   // same effect after that first retry commits; a later deliberate retry can.
   const expectedResponseJson =
     db.query("SELECT response_json FROM inbox_items WHERE id = ?").get(id)
       ?.response_json ?? null;
-  // The same lock prevents two operators from retrying one effect at once.
-  return txImmediate(db, () =>
-    retryInboxDecisionInTransaction(db, id, {
-      ...options,
-      expectedResponseJson,
-    }),
+  const {
+    now = Date.now(),
+    applyEffect = applyDecisionEffect,
+    artifactStore,
+  } = options;
+  const claim = txImmediate(db, () =>
+    retryInboxDecisionInTransaction(db, id, { now, expectedResponseJson }),
   );
+  const effect = await applyInboxEffect(
+    db,
+    claim.item,
+    claim.response,
+    applyEffect,
+  );
+  return settleClaimedInboxDecision(db, claim, effect, {
+    now,
+    applyEffect,
+    artifactStore,
+    recordedEffect: { ...effect, retryAttempt: claim.retryAttempt },
+  });
 }
 
 export function listInboxItems(db, { status = "open" } = {}) {

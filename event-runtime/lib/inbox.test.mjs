@@ -9,6 +9,7 @@ import {
   bindInboxProposal,
   createInboxItem,
   decideInboxItem,
+  PENDING_EFFECT_CLAIM_TIMEOUT_MS,
   deliverInboxItem,
   getInboxItem,
   inboxCounts,
@@ -50,12 +51,12 @@ function decisionErrorCodesFromSource() {
     between(
       source,
       "function decideInboxItemInTransaction",
-      "export function decideInboxItem",
+      "export async function decideInboxItem",
     ),
     between(
       source,
       "function retryInboxDecisionInTransaction",
-      "export function retryInboxDecision",
+      "export async function retryInboxDecision",
     ),
   ];
   return [
@@ -281,7 +282,7 @@ describe("human inbox ledger (WM-285)", () => {
     expect(second.waiters).toEqual([]);
   });
 
-  test("decideInboxItem fans the effect out across waiters bound to each run", () => {
+  test("decideInboxItem fans the effect out across waiters bound to each run", async () => {
     const db = openDb(":memory:");
     const request = decision();
     createInboxItem(
@@ -307,7 +308,7 @@ describe("human inbox ledger (WM-285)", () => {
       { now: 2000 },
     );
     const appliedRuns = [];
-    const decided = decideInboxItem(
+    const decided = await decideInboxItem(
       db,
       "first",
       {
@@ -367,7 +368,7 @@ describe("human inbox ledger (WM-285)", () => {
     expect(again.ok).toBe(true);
   });
 
-  test("dedupe supersession clears a stored response to avoid binding it to a new request", () => {
+  test("dedupe supersession clears a stored response to avoid binding it to a new request", async () => {
     const db = openDb(":memory:");
     const original = decision([
       { id: "triage", label: "Triage", effect: "send_to_triage" },
@@ -383,7 +384,7 @@ describe("human inbox ledger (WM-285)", () => {
       },
       { id: "first" },
     );
-    const answered = decideInboxItem(db, "first", {
+    const answered = await decideInboxItem(db, "first", {
       schemaVersion: "factory.decision-response/v1",
       requestHash: decisionRequestHash(original),
       optionId: "triage",
@@ -410,7 +411,7 @@ describe("human inbox ledger (WM-285)", () => {
     expect(superseded.delivery.supersededDecisions).toBe(1);
   });
 
-  test("deciding validates freshness, records the effect, and resolves only applied effects", () => {
+  test("deciding validates freshness, records the effect, and resolves only applied effects", async () => {
     const db = openDb(":memory:");
     const request = decision([
       { id: "go", label: "Proceed", effect: "send_to_triage" },
@@ -427,23 +428,23 @@ describe("human inbox ledger (WM-285)", () => {
       { id: "to_decide" },
     );
     expect(() => resolveInboxItem(db, item.id)).toThrow("pending decision");
-    expect(() =>
+    await expect(
       decideInboxItem(db, item.id, {
         schemaVersion: "factory.decision-response/v1",
         requestHash: "sha256:" + "0".repeat(64),
         optionId: "dismiss",
         fields: {},
       }),
-    ).toThrow("has changed");
-    expect(() =>
+    ).rejects.toThrow("has changed");
+    await expect(
       decideInboxItem(db, item.id, {
         requestHash: decisionRequestHash(request),
         optionId: "go",
         fields: {},
       }),
-    ).toThrow("schemaVersion");
+    ).rejects.toThrow("schemaVersion");
 
-    const unsupported = decideInboxItem(
+    const unsupported = await decideInboxItem(
       db,
       item.id,
       {
@@ -461,15 +462,15 @@ describe("human inbox ledger (WM-285)", () => {
     expect(unsupported.item.resolvedAt).toBeNull();
     expect(unsupported.item.response.effect).toEqual(unsupported.effect);
     expect(unsupported.item.decidedAt).toBe(new Date(2000).toISOString());
-    expect(() =>
+    await expect(
       decideInboxItem(db, item.id, {
         requestHash: decisionRequestHash(request),
         optionId: "go",
         fields: {},
       }),
-    ).toThrow("already decided");
+    ).rejects.toThrow("already decided");
 
-    const retried = retryInboxDecision(db, item.id, {
+    const retried = await retryInboxDecision(db, item.id, {
       now: 3000,
       applyEffect: () => ({ kind: "send_to_triage", outcome: "applied" }),
       artifactStore: null,
@@ -477,10 +478,12 @@ describe("human inbox ledger (WM-285)", () => {
     expect(retried.item.resolvedBy).toBe("operator:send_to_triage");
     expect(retried.item.resolvedAt).toBe(new Date(3000).toISOString());
     expect(retried.item.response.effect.retryAttempt).toBe(1);
-    expect(() => retryInboxDecision(db, item.id)).toThrow("already applied");
+    await expect(retryInboxDecision(db, item.id)).rejects.toThrow(
+      "already applied",
+    );
   });
 
-  test("whitespace-only required text is rejected before a response is recorded", () => {
+  test("whitespace-only required text is rejected before a response is recorded", async () => {
     const db = openDb(":memory:");
     const request = decision([
       { id: "answer", label: "Answer", effect: "answer" },
@@ -500,7 +503,7 @@ describe("human inbox ledger (WM-285)", () => {
     );
 
     try {
-      decideInboxItem(db, "whitespace_response", {
+      await decideInboxItem(db, "whitespace_response", {
         schemaVersion: "factory.decision-response/v1",
         requestHash: decisionRequestHash(request),
         optionId: "answer",
@@ -517,7 +520,7 @@ describe("human inbox ledger (WM-285)", () => {
     expect(getInboxItem(db, "whitespace_response").response).toBeNull();
   });
 
-  test("each failed retry advances a durable attempt token", () => {
+  test("each failed retry advances a durable attempt token", async () => {
     const db = openDb(":memory:");
     const request = decision([
       { id: "triage", label: "Triage", effect: "send_to_triage" },
@@ -532,20 +535,218 @@ describe("human inbox ledger (WM-285)", () => {
       },
       { id: "retry_attempts" },
     );
-    decideInboxItem(db, "retry_attempts", {
+    await decideInboxItem(db, "retry_attempts", {
       schemaVersion: "factory.decision-response/v1",
       requestHash: decisionRequestHash(request),
       optionId: "triage",
       fields: {},
     });
     expect(
-      retryInboxDecision(db, "retry_attempts").item.response.effect
+      (await retryInboxDecision(db, "retry_attempts")).item.response.effect
         .retryAttempt,
     ).toBe(1);
     expect(
-      retryInboxDecision(db, "retry_attempts").item.response.effect
+      (await retryInboxDecision(db, "retry_attempts")).item.response.effect
         .retryAttempt,
     ).toBe(2);
+  });
+
+  test("decision effects leave the write lock free while they await transport", async () => {
+    const directory = tmpDir("evrt-inbox-effect-lock-");
+    const filename = path.join(directory, "inbox.sqlite");
+    const db = openDb(filename);
+    const other = openDb(filename);
+    const request = decision([
+      { id: "triage", label: "Triage", effect: "send_to_triage" },
+    ]);
+    createInboxItem(
+      db,
+      {
+        kind: "ESCALATED",
+        title: "slow effect",
+        refs: { issue: "WM-1434" },
+        decision: request,
+      },
+      { id: "slow_effect" },
+    );
+    let effectStarted;
+    const started = new Promise((resolve) => {
+      effectStarted = resolve;
+    });
+    try {
+      const deciding = decideInboxItem(
+        db,
+        "slow_effect",
+        {
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(request),
+          optionId: "triage",
+          fields: {},
+        },
+        {
+          applyEffect: async () => {
+            effectStarted();
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            return { outcome: "applied" };
+          },
+        },
+      );
+      await started;
+
+      const writeStarted = performance.now();
+      expect(() =>
+        createInboxItem(other, { kind: "BLOCKED", title: "other writer" }),
+      ).not.toThrow();
+      expect(performance.now() - writeStarted).toBeLessThan(200);
+      await expect(
+        decideInboxItem(db, "slow_effect", {
+          schemaVersion: "factory.decision-response/v1",
+          requestHash: decisionRequestHash(request),
+          optionId: "triage",
+          fields: {},
+        }),
+      ).rejects.toMatchObject({ code: "already_decided" });
+      await expect(retryInboxDecision(db, "slow_effect")).rejects.toMatchObject(
+        { code: "effect_pending" },
+      );
+      expect(getInboxItem(db, "slow_effect").response.effect).toMatchObject({
+        kind: "send_to_triage",
+        outcome: "pending",
+        retryAttempt: 0,
+        claimedAt: expect.any(String),
+      });
+
+      await deciding;
+      expect(getInboxItem(db, "slow_effect").response.effect).toEqual({
+        kind: "send_to_triage",
+        outcome: "applied",
+      });
+    } finally {
+      other.close();
+      db.close();
+    }
+  });
+
+  test("a retry takes over a pending claim once it is older than the transport timeout", async () => {
+    const db = openDb(":memory:");
+    const request = decision([
+      { id: "triage", label: "Triage", effect: "send_to_triage" },
+    ]);
+    createInboxItem(
+      db,
+      {
+        kind: "ESCALATED",
+        title: "crashed mid-effect",
+        refs: { issue: "WM-1434" },
+        decision: request,
+      },
+      { id: "stale_claim" },
+    );
+    const response = {
+      schemaVersion: "factory.decision-response/v1",
+      requestHash: decisionRequestHash(request),
+      optionId: "triage",
+      fields: {},
+    };
+    // Simulate serve dying between the claim and the settle: the claim commits
+    // and the effect never returns.
+    const crashed = decideInboxItem(db, "stale_claim", response, {
+      now: 1_000,
+      applyEffect: () => new Promise(() => {}),
+    });
+    await Promise.resolve();
+    expect(getInboxItem(db, "stale_claim").response.effect).toMatchObject({
+      outcome: "pending",
+      retryAttempt: 0,
+      claimedAt: new Date(1_000).toISOString(),
+    });
+
+    // Inside the window the claim is still owned.
+    await expect(
+      retryInboxDecision(db, "stale_claim", {
+        now: 1_000 + PENDING_EFFECT_CLAIM_TIMEOUT_MS - 1,
+      }),
+    ).rejects.toMatchObject({ code: "effect_pending", status: 409 });
+    await expect(
+      decideInboxItem(db, "stale_claim", response, { now: 2_000 }),
+    ).rejects.toMatchObject({ code: "already_decided" });
+
+    // Past the window a retry takes the claim over and settles the item.
+    const takeoverAt = 1_000 + PENDING_EFFECT_CLAIM_TIMEOUT_MS;
+    const retried = await retryInboxDecision(db, "stale_claim", {
+      now: takeoverAt,
+      applyEffect: () => ({ outcome: "applied" }),
+    });
+    expect(retried.effect).toEqual({
+      kind: "send_to_triage",
+      outcome: "applied",
+    });
+    expect(retried.item.response.effect).toEqual({
+      kind: "send_to_triage",
+      outcome: "applied",
+      retryAttempt: 1,
+    });
+    expect(retried.item.resolvedAt).toBe(new Date(takeoverAt).toISOString());
+    expect(retried.item.resolvedBy).toBe("operator:send_to_triage");
+    await expect(retryInboxDecision(db, "stale_claim")).rejects.toMatchObject({
+      code: "already_applied",
+    });
+    void crashed;
+  });
+
+  test("a retry claim that dies mid-effect can be taken over as well", async () => {
+    const db = openDb(":memory:");
+    const request = decision([
+      { id: "triage", label: "Triage", effect: "send_to_triage" },
+    ]);
+    createInboxItem(
+      db,
+      {
+        kind: "ESCALATED",
+        title: "crashed mid-retry",
+        refs: { issue: "WM-1434" },
+        decision: request,
+      },
+      { id: "stale_retry_claim" },
+    );
+    await decideInboxItem(
+      db,
+      "stale_retry_claim",
+      {
+        schemaVersion: "factory.decision-response/v1",
+        requestHash: decisionRequestHash(request),
+        optionId: "triage",
+        fields: {},
+      },
+      { now: 1_000, applyEffect: () => ({ outcome: "failed", error: "down" }) },
+    );
+    const crashed = retryInboxDecision(db, "stale_retry_claim", {
+      now: 5_000,
+      applyEffect: () => new Promise(() => {}),
+    });
+    await Promise.resolve();
+    expect(getInboxItem(db, "stale_retry_claim").response.effect).toMatchObject(
+      {
+        outcome: "pending",
+        retryAttempt: 1,
+        claimedAt: new Date(5_000).toISOString(),
+      },
+    );
+    await expect(
+      retryInboxDecision(db, "stale_retry_claim", { now: 6_000 }),
+    ).rejects.toMatchObject({ code: "effect_pending" });
+    const retried = await retryInboxDecision(db, "stale_retry_claim", {
+      now: 5_000 + PENDING_EFFECT_CLAIM_TIMEOUT_MS,
+      applyEffect: () => ({ outcome: "applied" }),
+    });
+    expect(retried.item.response.effect).toMatchObject({
+      outcome: "applied",
+      retryAttempt: 2,
+    });
+    expect(retried.item.resolvedAt).toBe(
+      new Date(5_000 + PENDING_EFFECT_CLAIM_TIMEOUT_MS).toISOString(),
+    );
+    void crashed;
   });
 
   test("kind is closed and rows expose parsed refs/delivery", () => {
@@ -606,7 +807,7 @@ describe("human inbox ledger (WM-285)", () => {
     });
   });
 
-  test("markInboxDelivered merges onto delivery_json without deciding", () => {
+  test("markInboxDelivered merges onto delivery_json without deciding", async () => {
     const db = openDb(":memory:");
     const request = decision();
     const item = createInboxItem(
@@ -643,7 +844,7 @@ describe("human inbox ledger (WM-285)", () => {
     expect(withBuzz.response).toBeNull();
     expect(withBuzz.decidedAt).toBeNull();
 
-    const decided = decideInboxItem(db, "inbox_mark", {
+    const decided = await decideInboxItem(db, "inbox_mark", {
       schemaVersion: "factory.decision-response/v1",
       requestHash: decisionRequestHash(request),
       optionId: "dismiss",
@@ -923,7 +1124,7 @@ describe("human inbox ledger (WM-285)", () => {
     ]);
   });
 
-  test("a pending decision becomes moot when its event leaves human_needed", () => {
+  test("a pending decision becomes moot when its event leaves human_needed", async () => {
     const db = openDb(":memory:");
     insertEvent(db, { eventId: "evt-2" });
     createInboxItem(
@@ -961,9 +1162,9 @@ describe("human inbox ledger (WM-285)", () => {
     });
     expect(item.decidedBy).toBe("auto:event_requeued");
     // A late operator answer is refused rather than applied.
-    expect(() =>
+    await expect(
       decideInboxItem(db, "parked", { optionId: "requeue" }),
-    ).toThrow(/already decided/);
+    ).rejects.toThrow(/already decided/);
     expect(reconcileInbox(db, { now: 6000 })).toEqual([]);
   });
 
@@ -1298,11 +1499,11 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     };
   }
 
-  test("the item is re-opened against the fresh proposal instead of resolving", () => {
+  test("the item is re-opened against the fresh proposal instead of resolving", async () => {
     const db = openDb(":memory:");
     const { id, approve, applyEffect } = replanned(db);
 
-    const decided = decideInboxItem(db, id, approve, {
+    const decided = await decideInboxItem(db, id, approve, {
       now: 2000,
       applyEffect,
     });
@@ -1340,17 +1541,19 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(getInboxItem(db, id).decision).toEqual(item.decision);
   });
 
-  test("retry is refused after a retarget and the fresh decision resolves the item", () => {
+  test("retry is refused after a retarget and the fresh decision resolves the item", async () => {
     const db = openDb(":memory:");
     const { id, applyEffect, approve } = replanned(db);
-    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    await decideInboxItem(db, id, approve, { now: 2000, applyEffect });
 
     // The recorded answer was consumed by the retarget, so there is nothing to
     // replay — the old bug answered `already_applied` on a resolved item.
-    expect(() => retryInboxDecision(db, id)).toThrow(/has not been decided/);
+    await expect(retryInboxDecision(db, id)).rejects.toThrow(
+      /has not been decided/,
+    );
 
     const retargeted = getInboxItem(db, id);
-    const approveFresh = decideInboxItem(
+    const approveFresh = await decideInboxItem(
       db,
       id,
       {
@@ -1369,10 +1572,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(approveFresh.item.responseHistory).toHaveLength(1);
   });
 
-  test("a retargeted item survives reconcile until the fresh proposal is decided", () => {
+  test("a retargeted item survives reconcile until the fresh proposal is decided", async () => {
     const db = openDb(":memory:");
     const { id, applyEffect, approve } = replanned(db);
-    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    await decideInboxItem(db, id, approve, { now: 2000, applyEffect });
 
     // The superseded proposal no longer governs the item; the fresh open one does.
     expect(
@@ -1393,7 +1596,7 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     const { tick } = await import("../cli.mjs");
     const db = openDb(":memory:");
     const { id, applyEffect, approve } = replanned(db);
-    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    await decideInboxItem(db, id, approve, { now: 2000, applyEffect });
     const noop = () => {};
     await tick({
       db,
@@ -1415,10 +1618,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(getInboxItem(db, id).resolvedAt).toBeNull();
   });
 
-  test("the dedupe key follows the retarget so the fresh proposal cannot stack a second item", () => {
+  test("the dedupe key follows the retarget so the fresh proposal cannot stack a second item", async () => {
     const db = openDb(":memory:");
     const { id, applyEffect, approve } = replanned(db);
-    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    await decideInboxItem(db, id, approve, { now: 2000, applyEffect });
     expect(getInboxItem(db, id).dedupeKey).toBe(`proposal_expired:${FRESH}`);
 
     const refs = { proposalId: FRESH, eventSource: "test", eventId: "evt" };
@@ -1445,10 +1648,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(again.responseHistory).toHaveLength(1);
   });
 
-  test("retarget updates the list title to the fresh proposal", () => {
+  test("retarget updates the list title to the fresh proposal", async () => {
     const db = openDb(":memory:");
     const { id, approve, applyEffect } = replanned(db);
-    decideInboxItem(db, id, approve, { now: 2000, applyEffect });
+    await decideInboxItem(db, id, approve, { now: 2000, applyEffect });
     const listed = listInboxItems(db);
     expect(listed).toHaveLength(1);
     expect(listed[0].title).toContain(FRESH);
@@ -1456,10 +1659,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(getInboxItem(db, id).title).toContain(FRESH);
   });
 
-  test("applied replanned with no newProposalId is recorded failed and stays retryable", () => {
+  test("applied replanned with no newProposalId is recorded failed and stays retryable", async () => {
     const db = openDb(":memory:");
     const { id, approve } = replanned(db);
-    const decided = decideInboxItem(db, id, approve, {
+    const decided = await decideInboxItem(db, id, approve, {
       now: 2000,
       applyEffect: () => ({
         outcome: "applied",
@@ -1474,7 +1677,7 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     );
 
     let invoked = 0;
-    const retried = retryInboxDecision(db, id, {
+    const retried = await retryInboxDecision(db, id, {
       now: 3000,
       applyEffect: () => {
         invoked += 1;
@@ -1490,10 +1693,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(retried.item.resolvedAt).toBeNull();
   });
 
-  test("applied replanned with an empty newProposalId is also failed and retryable", () => {
+  test("applied replanned with an empty newProposalId is also failed and retryable", async () => {
     const db = openDb(":memory:");
     const { id, approve } = replanned(db);
-    const decided = decideInboxItem(db, id, approve, {
+    const decided = await decideInboxItem(db, id, approve, {
       now: 2000,
       applyEffect: () => ({
         outcome: "applied",
@@ -1505,7 +1708,7 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     expect(decided.item.resolvedAt).toBeNull();
     expect(decided.item.response.effect.outcome).toBe("failed");
     let invoked = 0;
-    retryInboxDecision(db, id, {
+    await retryInboxDecision(db, id, {
       applyEffect: () => {
         invoked += 1;
         return { outcome: "applied" };
@@ -1518,7 +1721,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
 describe("inbox decisions register precedent memos (WM-812)", () => {
   const NOW = Date.parse("2026-08-16T12:00:00.000Z");
 
-  function decideDismiss(db, { id, refs, now = NOW, artifactStore, fields }) {
+  async function decideDismiss(
+    db,
+    { id, refs, now = NOW, artifactStore, fields },
+  ) {
     const request = decision();
     createInboxItem(
       db,
@@ -1530,7 +1736,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
       },
       { id },
     );
-    return decideInboxItem(
+    return await decideInboxItem(
       db,
       id,
       {
@@ -1543,10 +1749,10 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
     );
   }
 
-  test("applied decisions register a precedentOnly memo per issue/repo/pr subject and store the bytes", () => {
+  test("applied decisions register a precedentOnly memo per issue/repo/pr subject and store the bytes", async () => {
     const db = openDb(":memory:");
     const store = tmpDir("evrt-inbox-decision-store-");
-    const decided = decideDismiss(db, {
+    const decided = await decideDismiss(db, {
       id: "inbox_812",
       refs: { issue: "wm-313", repo: "factory", pr: "612" },
       artifactStore: store,
@@ -1586,7 +1792,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
     db.close();
   });
 
-  test("failed and unsupported effects do not register; a successful retry does", () => {
+  test("failed and unsupported effects do not register; a successful retry does", async () => {
     const db = openDb(":memory:");
     const store = tmpDir("evrt-inbox-decision-retry-store-");
     const request = decision([
@@ -1602,7 +1808,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
       },
       { id: "retry_memo" },
     );
-    const failed = decideInboxItem(
+    const failed = await decideInboxItem(
       db,
       "retry_memo",
       {
@@ -1623,7 +1829,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
       listMemos(db, { type: "ticket", id: "WM-812" }, { now: NOW }),
     ).toEqual([]);
 
-    const retried = retryInboxDecision(db, "retry_memo", {
+    const retried = await retryInboxDecision(db, "retry_memo", {
       now: NOW + 1000,
       artifactStore: store,
       applyEffect: () => ({ kind: "send_to_triage", outcome: "applied" }),
@@ -1636,7 +1842,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
     db.close();
   });
 
-  test("a proposal re-plan does not register a decision memo", () => {
+  test("a proposal re-plan does not register a decision memo", async () => {
     const db = openDb(":memory:");
     insertProposal(db, { id: "prop-old" });
     const refs = {
@@ -1660,7 +1866,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
       },
       { id: "no_memo_replan" },
     );
-    const decided = decideInboxItem(
+    const decided = await decideInboxItem(
       db,
       "no_memo_replan",
       {
@@ -1685,7 +1891,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
     db.close();
   });
 
-  test("authorise descriptionHash binds only the ticket-subject memo", () => {
+  test("authorise descriptionHash binds only the ticket-subject memo", async () => {
     const db = openDb(":memory:");
     const store = tmpDir("evrt-inbox-decision-bind-");
     const request = decision([
@@ -1707,7 +1913,7 @@ describe("inbox decisions register precedent memos (WM-812)", () => {
       { id: "bind_hash" },
     );
     const descriptionHash = `sha256:${"ab".repeat(32)}`;
-    const decided = decideInboxItem(
+    const decided = await decideInboxItem(
       db,
       "bind_hash",
       {
