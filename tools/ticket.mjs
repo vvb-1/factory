@@ -15,7 +15,8 @@
  *   bun tools/ticket.mjs comment CLNT-616 "verified: 42 tests pass"
  *   bun tools/ticket.mjs triage CLNT-616 --comment "Owned Paths need revision"
  *   bun tools/ticket.mjs answer CLNT-616 "Use the existing token cache"
- *   bun tools/ticket.mjs detail CLNT-616 -- "## Acceptance criteria\n- [ ] ..."
+ *   bun tools/ticket.mjs detail CLNT-616 -- "## Acceptance criteria\n- [ ] ..." # append
+ *   bun tools/ticket.mjs detail CLNT-616 --replace -- "## Acceptance criteria\n- [ ] ..."
  *   bun tools/ticket.mjs labels CLNT-616 --add ai:needs-review --remove ai:in-progress
  *   bun tools/ticket.mjs state CLNT-616 "In Review" --add ai:needs-review
  *   bun tools/ticket.mjs file --team CLNT --title "..." --body "..." --type bug --dedupe-key "..."
@@ -574,6 +575,53 @@ export function closureCheckMessages(issue) {
   return formatOwnedPathClosureGaps(gaps);
 }
 
+/** A Linear issue key: team prefix, dash, number (`CLNT-616`, `WM-1007`). */
+const LINEAR_KEY = /^[A-Z][A-Z0-9]*-\d+$/;
+
+/**
+ * Build the tracker-native escape-hatch mutation for `detail --replace`.
+ *
+ * The replacement stays in the ticket CLI's declared surface while adapters
+ * grow a first-class replacement verb (see #1666). The control plane's own
+ * `kind` decides the tracker; without one, a Linear key shape (`CLNT-616`)
+ * selects Linear and everything else — `owner/repo#N`, `#N`, bare `N`, all of
+ * which the GitHub adapter accepts — selects GitHub.
+ */
+export function descriptionReplacementRequest(
+  identifier,
+  id,
+  description,
+  { kind } = {},
+) {
+  const linear =
+    kind === "linear" ||
+    (kind == null && LINEAR_KEY.test(String(identifier).trim()));
+  if (linear) {
+    return {
+      query:
+        "mutation($id:String!,$description:String!){issueUpdate(id:$id,input:{description:$description}){success}}",
+      variables: { id, description },
+      resultAt: ["issueUpdate", "success"],
+    };
+  }
+  return {
+    query:
+      "mutation($id:ID!,$body:String!){updateIssue(input:{id:$id,body:$body}){issue{id}}}",
+    variables: { id, body: description },
+    resultAt: ["updateIssue", "issue", "id"],
+  };
+}
+
+/**
+ * Did the replacement mutation take? The tail of `resultAt` is either a
+ * boolean (`success`) or an id; both must be truthy — `success: false` is a
+ * failure, not "a value came back".
+ */
+export function replacementSucceeded(result, resultAt) {
+  const payload = result?.data ?? result;
+  return Boolean(resultAt.reduce((value, key) => value?.[key], payload));
+}
+
 const teamOf = (key) => String(key).split("-")[0];
 
 // ------------------------------------------------------------------ verbs ---
@@ -730,9 +778,36 @@ const VERBS = {
   async detail() {
     const rawDetail = positional[1];
     if (!positional[0] || !rawDetail)
-      throw new Error(`usage: detail <ISSUE-ID> [--] "<markdown>"`);
+      throw new Error(`usage: detail <ISSUE-ID> [--replace] [--] "<markdown>"`);
     const key = normalizeTicketRef(positional[0]);
-    const { appended } = await controlPlane(key).appendDetail(key, rawDetail);
+    const cp = controlPlane(key);
+    if (has("replace")) {
+      const issue = await cp.getTicket(key);
+      const description = String(rawDetail).trim();
+      const current = String(issue.description ?? "").trim();
+      if (description === current) {
+        out(
+          { ok: true, identifier: key, replaced: false },
+          `${key} detail already matches`,
+        );
+        return;
+      }
+      const request = descriptionReplacementRequest(
+        key,
+        issue.id,
+        description,
+        { kind: cp.kind },
+      );
+      const result = await cp.raw(request.query, request.variables);
+      if (!replacementSucceeded(result, request.resultAt))
+        throw new Error(`detail replacement failed for ${key}`);
+      out(
+        { ok: true, identifier: key, replaced: true },
+        `${key} detail replaced`,
+      );
+      return;
+    }
+    const { appended } = await cp.appendDetail(key, rawDetail);
     if (!appended) {
       out(
         { ok: true, identifier: key, appended: false },

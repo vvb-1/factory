@@ -38,6 +38,35 @@ test("a real §5 spec passes with no gaps", () => {
   expect(templateGaps(FULL_SPEC)).toEqual([]);
 });
 
+test("a Verification Command heading with only blank lines under it is a gap", () => {
+  const desc = `## Owned Paths
+
+- \`app/services/api.ts\`
+
+## Verification Command
+
+`;
+  expect(templateGaps(desc)).toEqual(["Verification Command"]);
+});
+
+test("duplicate §5 headings are unioned, so an appended respec fills the gap", () => {
+  const desc = `## Owned Paths
+
+None — deploy-only change.
+
+## Verification Command
+
+## Owned Paths
+
+None
+
+## Verification Command
+
+    npm test
+`;
+  expect(templateGaps(desc)).toEqual([]);
+});
+
 test("listing and demotion select the control plane configured for the repo", async () => {
   const repo = { name: "factory", team: "WM", project: "Factory" };
   const calls = [];
