@@ -390,8 +390,11 @@ describe("registry", () => {
     // REST (`gh run list --workflow ci.yml --commit` + `gh run watch`) and
     // ship-apply's merge_rc_pr asserts every check-run is green before
     // merging; prompt pins and one argv template only.
+    // Regenerated (#1337): the worker, not the dispatch model, verifies the
+    // canonical authorisation description hash and path scope before execution;
+    // dispatch.md trusts the worker-authenticated verified flag.
     const expected =
-      "sha256:cf57efc93be0d488db8ff55b8c892d8c52d0da52d7a0112da82ac7596b4f4d3f";
+      "sha256:a3685bcb3f85cb09522de22654860620138003cc5d9fbec8e5fe0dc3349d009c";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 
@@ -676,8 +679,10 @@ describe("registry", () => {
     // out-of-scope follow-ups; prompt pin only.
     // Regenerated (#1581): dispatch.md selects the CI run by workflow and
     // waits via REST; prompt pin only, `pack` remains non-enumerable.
+    // Regenerated (#1337): dispatch trusts the worker-verified authorisation;
+    // prompt pin only, `pack` remains non-enumerable.
     expect(computeDefHash(def)).toBe(
-      "sha256:e7c6ec68b91dc1fe02dcbfcbbd5ec662c47ef92e54656ed71b0e44a931621328",
+      "sha256:779fa866b66dd5422699118041cfa88e1545d4269468ad987d93e6db169265b7",
     );
   });
 

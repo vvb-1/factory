@@ -99,6 +99,7 @@ import {
   expireRunDeadline,
   extendRunDeadline,
   forceFailRun,
+  humanDecisionAuthorisationGate,
   LEASE_GRACE_SECONDS,
   policyMaxRunMinutes,
   policyWorkspaceOnlyFallback,
@@ -151,6 +152,234 @@ registerTestProcessCleanup(import.meta.url);
 let seq = 0;
 
 describe("worker", () => {
+  test("canonical authorisation hash is verified before dispatch execution", () => {
+    const description =
+      "## Owned Paths\n- event-runtime/lib/worker.mjs\n- docs/event-runtime-inbox.md\n";
+    const input = {
+      repo: "factory",
+      ticket: "watt-mind/factory#1337",
+      humanDecision: {
+        inboxItemId: "inbox_authorised",
+        authorisation: {
+          ticket: "watt-mind/factory#1337",
+          repo: "factory",
+          descriptionHash: hashBytes(description),
+          paths: [
+            "event-runtime/lib/worker.mjs",
+            "docs/event-runtime-inbox.md",
+          ],
+        },
+      },
+    };
+
+    const result = humanDecisionAuthorisationGate(input, {
+      fetchTicket: () => ({ description }),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      input: {
+        humanDecision: { authorisation: { verified: true } },
+      },
+    });
+    expect(input.humanDecision.authorisation.verified).toBeUndefined();
+  });
+
+  test("trailing-newline authorisation hash is refused before dispatch execution", () => {
+    const description = "## Owned Paths\n- event-runtime/lib/worker.mjs\n";
+    const result = humanDecisionAuthorisationGate(
+      {
+        repo: "factory",
+        ticket: "watt-mind/factory#1337",
+        humanDecision: {
+          authorisation: {
+            ticket: "watt-mind/factory#1337",
+            repo: "factory",
+            descriptionHash: hashBytes(`${description}\n`),
+            paths: ["event-runtime/lib/worker.mjs"],
+          },
+        },
+      },
+      { fetchTicket: () => ({ description }) },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      refusal: { reason: "authorisation_stale:description" },
+    });
+  });
+
+  test("authorisation paths may narrow to a non-empty subset of Owned Paths", () => {
+    const description =
+      "## Owned Paths\n- event-runtime/lib/worker.mjs\n- docs/event-runtime-inbox.md\n";
+    const result = humanDecisionAuthorisationGate(
+      {
+        repo: "factory",
+        ticket: "watt-mind/factory#1337",
+        humanDecision: {
+          authorisation: {
+            ticket: "watt-mind/factory#1337",
+            repo: "factory",
+            descriptionHash: hashBytes(description),
+            paths: ["event-runtime/lib/worker.mjs"],
+          },
+        },
+      },
+      { fetchTicket: () => ({ description }) },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      input: {
+        humanDecision: {
+          authorisation: {
+            verified: true,
+            paths: ["event-runtime/lib/worker.mjs"],
+          },
+        },
+      },
+    });
+  });
+
+  test("authorisation paths outside the ticket's Owned Paths are refused", () => {
+    const description = "## Owned Paths\n- event-runtime/lib/worker.mjs\n";
+    const result = humanDecisionAuthorisationGate(
+      {
+        repo: "factory",
+        ticket: "watt-mind/factory#1337",
+        humanDecision: {
+          authorisation: {
+            ticket: "watt-mind/factory#1337",
+            repo: "factory",
+            descriptionHash: hashBytes(description),
+            paths: [
+              "event-runtime/lib/worker.mjs",
+              "event-runtime/lib/planner.mjs",
+            ],
+          },
+        },
+      },
+      { fetchTicket: () => ({ description }) },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      refusal: { reason: "authorisation_stale:paths" },
+    });
+    expect(result.refusal.detail).toContain("event-runtime/lib/planner.mjs");
+    expect(result.evidence).toEqual({
+      descriptionHash: hashBytes(description),
+      ownedPaths: ["event-runtime/lib/worker.mjs"],
+    });
+  });
+
+  test("an empty authorisation path set is refused", () => {
+    const description = "## Owned Paths\n- event-runtime/lib/worker.mjs\n";
+    for (const paths of [[], undefined]) {
+      const result = humanDecisionAuthorisationGate(
+        {
+          repo: "factory",
+          ticket: "watt-mind/factory#1337",
+          humanDecision: {
+            authorisation: {
+              ticket: "watt-mind/factory#1337",
+              repo: "factory",
+              descriptionHash: hashBytes(description),
+              ...(paths === undefined ? {} : { paths }),
+            },
+          },
+        },
+        { fetchTicket: () => ({ description }) },
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        refusal: { reason: "authorisation_stale:paths" },
+        evidence: { ownedPaths: ["event-runtime/lib/worker.mjs"] },
+      });
+    }
+  });
+
+  test("an authorisation minted for another ticket or repo is refused", () => {
+    const description = "## Owned Paths\n- event-runtime/lib/worker.mjs\n";
+    let fetches = 0;
+    for (const binding of [
+      { ticket: "watt-mind/factory#1338", repo: "factory" },
+      { ticket: "watt-mind/factory#1337", repo: "other-repo" },
+      {},
+    ]) {
+      const result = humanDecisionAuthorisationGate(
+        {
+          repo: "factory",
+          ticket: "watt-mind/factory#1337",
+          humanDecision: {
+            authorisation: {
+              ...binding,
+              descriptionHash: hashBytes(description),
+              paths: ["event-runtime/lib/worker.mjs"],
+            },
+          },
+        },
+        {
+          fetchTicket: () => {
+            fetches += 1;
+            return { description };
+          },
+        },
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        refusal: { reason: "authorisation_stale:ticket" },
+      });
+      expect(result.evidence).toEqual({
+        descriptionHash: null,
+        ownedPaths: [],
+      });
+    }
+    expect(fetches).toBe(0);
+  });
+
+  test("a stale description refusal carries a fingerprint, not the ticket", () => {
+    const description = "## Owned Paths\n- event-runtime/lib/worker.mjs\n";
+    const result = humanDecisionAuthorisationGate(
+      {
+        repo: "factory",
+        ticket: "watt-mind/factory#1337",
+        humanDecision: {
+          authorisation: {
+            ticket: "watt-mind/factory#1337",
+            repo: "factory",
+            descriptionHash: hashBytes("something else"),
+            paths: ["event-runtime/lib/worker.mjs"],
+          },
+        },
+      },
+      { fetchTicket: () => ({ description, title: "secret title" }) },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      refusal: { reason: "authorisation_stale:description" },
+    });
+    expect(result.evidence).toEqual({
+      descriptionHash: hashBytes(description),
+      ownedPaths: ["event-runtime/lib/worker.mjs"],
+    });
+  });
+
+  test("dispatch without an authorisation does not add a ticket read", () => {
+    const input = { repo: "factory", ticket: "watt-mind/factory#1337" };
+    let fetches = 0;
+
+    expect(
+      humanDecisionAuthorisationGate(input, {
+        fetchTicket: () => (fetches += 1),
+      }),
+    ).toEqual({ ok: true, input });
+    expect(fetches).toBe(0);
+  });
+
   test("materialized harness entries record hashes for every copied file", () => {
     const factoryRoot = tmpDir("evrt-harness-source-");
     const workspaceDir = tmpDir("evrt-harness-workspace-");
