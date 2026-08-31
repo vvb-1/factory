@@ -96,6 +96,12 @@ describe("ci-log-capture command (#2076)", () => {
       "gh: Not Found (HTTP 404)",
       "no logs found for this run",
       "run was cancelled",
+      // `gh` prefixes its diagnostics; a prefixed missing-log message must
+      // still be MISSING, not the #2076 agent_exit_1 fault.
+      "gh: run was cancelled",
+      "gh: no logs found for this run",
+      "error: logs expired",
+      "error: no logs found for this run",
     ]) {
       const cwd = tmpDir("evrt-ci-log-capture-miss-");
       const outcome = captureCiLog({
@@ -116,6 +122,44 @@ describe("ci-log-capture command (#2076)", () => {
         registry.edges["ci-log-capture@1"].edges[result.artifact.captured],
       ).toBeUndefined();
     }
+  });
+
+  test("auth and network failures do not masquerade as missing logs", () => {
+    for (const stderr of [
+      "HTTP 401: Bad credentials",
+      "HTTP 403: rate limit exceeded",
+      'Post "https://api.github.com/repos/watt-mind/factory": context canceled',
+      "HTTP 404: Not Found: Resource not accessible by integration (permission denied)",
+    ]) {
+      const cwd = tmpDir("evrt-ci-log-capture-fault-taxonomy-");
+      const outcome = captureCiLog({
+        cwd,
+        input: INPUT,
+        spawn: fakeGh({ stderr, exitCode: 1 }),
+      });
+
+      expect(outcome.ok).toBe(false);
+      expect(outcome.exitCode).toBe(1);
+      expect(existsSync(path.join(cwd, "result.json"))).toBe(false);
+    }
+  });
+
+  test("gh's routine auth hint on a plain 404 stays a missing log", () => {
+    const cwd = tmpDir("evrt-ci-log-capture-404-hint-");
+    const outcome = captureCiLog({
+      cwd,
+      input: { ...INPUT, runAttempt: 2 },
+      spawn: fakeGh({
+        stderr: "HTTP 404: Not Found\nTry authenticating with: gh auth login",
+        exitCode: 1,
+      }),
+    });
+
+    expect(outcome.ok).toBe(true);
+    const result = readResult(cwd);
+    expect(result.artifact.captured).toBe(NO_CAPTURE);
+    expect(result.artifact.exitCode).toBe(0);
+    expect(existsSync(path.join(cwd, LOG_FILE))).toBe(false);
   });
 
   test("an empty log on a clean exit is no_logs, not a zero-byte artifact", () => {
