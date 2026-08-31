@@ -306,3 +306,53 @@ describe("input view (WM-897)", () => {
     expect(r2.getByText("Input")).toBeTruthy();
   });
 });
+
+describe("dispatch UX critique evidence", () => {
+  test("links every durable artifact and preserves legacy text", () => {
+    const sha256a = "a".repeat(64);
+    const sha256b = "b".repeat(64);
+    const r = render(
+      <ArtifactView
+        artifact={{
+          uxCritique: {
+            status: "required",
+            verdict: "SHIP",
+            rounds: 1,
+            prReady: true,
+            evidence: [
+              `sha256:${sha256a}`,
+              `file:///var/lib/factory/artifacts/${sha256b}`,
+              "legacy browser note",
+            ],
+          },
+        }}
+        view={readView("dispatch")}
+      />,
+    );
+
+    expect(
+      (
+        r.getByRole("link", { name: `sha256:${sha256a}` }) as HTMLAnchorElement
+      ).getAttribute("href"),
+    ).toBe(`#/artifacts/${sha256a}`);
+    expect(
+      (
+        r.getByRole("link", {
+          name: `file:///var/lib/factory/artifacts/${sha256b}`,
+        }) as HTMLAnchorElement
+      ).getAttribute("href"),
+    ).toBe(`#/artifacts/${sha256b}`);
+    expect(r.getByText("legacy browser note").tagName).toBe("SPAN");
+  });
+
+  test("empty evidence drops the row, like any other absent key", () => {
+    const r = render(
+      <ArtifactView
+        artifact={{ uxCritique: { status: "skipped", evidence: [] } }}
+        view={readView("dispatch")}
+      />,
+    );
+    expect(r.getByText("status")).toBeTruthy();
+    expect(r.queryByText("evidence")).toBeNull();
+  });
+});
