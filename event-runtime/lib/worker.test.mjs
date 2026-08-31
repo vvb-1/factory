@@ -119,6 +119,7 @@ import {
   resolveLinearApiKey,
   reconcileTierEscalations,
   scheduleTierEscalation,
+  sweepOrphanedLocalNotifyOutbox,
   tierEscalationEligibility,
   retryRun,
   runLinearCli,
@@ -156,6 +157,60 @@ registerTestProcessCleanup(import.meta.url);
 let seq = 0;
 
 describe("worker", () => {
+  test("sweeps orphaned local notify outboxes while preserving active runs", () => {
+    const home = tmpDir("evrt-local-notify-sweep-");
+    const outboxDir = path.join(home, "outbox");
+    const db = openDb(":memory:");
+    const active = queueRun(db, makeSpec({ runId: "run_active_outbox" }));
+    claimNext(db, opts());
+    mkdirSync(outboxDir, { recursive: true });
+    writeFileSync(path.join(outboxDir, `${active.runId}.jsonl`), "active\n");
+    writeFileSync(path.join(outboxDir, "run_orphan_outbox.jsonl"), "orphan\n");
+
+    // Past the grace window: the inactive run's file is eligible, the active
+    // run's file is still protected by its state.
+    expect(
+      sweepOrphanedLocalNotifyOutbox({
+        db,
+        home,
+        now: Date.now() + 2 * 60 * 60 * 1000,
+      }),
+    ).toEqual(["run_orphan_outbox"]);
+    expect(existsSync(path.join(outboxDir, `${active.runId}.jsonl`))).toBe(
+      true,
+    );
+    expect(existsSync(path.join(outboxDir, "run_orphan_outbox.jsonl"))).toBe(
+      false,
+    );
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("leaves an outbox file inside the mtime grace window alone", () => {
+    // Without an age grace the sweep deletes the very file a live drain
+    // retains as its recovery source: the agent writes the outbox before the
+    // worker's run is visible in any active state to this sweep's snapshot.
+    const home = tmpDir("evrt-local-notify-grace-");
+    const outboxDir = path.join(home, "outbox");
+    const db = openDb(":memory:");
+    mkdirSync(outboxDir, { recursive: true });
+    const fresh = path.join(outboxDir, "run_fresh_outbox.jsonl");
+    writeFileSync(fresh, "fresh\n");
+
+    expect(sweepOrphanedLocalNotifyOutbox({ db, home })).toEqual([]);
+    expect(existsSync(fresh)).toBe(true);
+
+    // Only once the file has aged past the window does it become eligible.
+    expect(
+      sweepOrphanedLocalNotifyOutbox({
+        db,
+        home,
+        now: Date.now() + 61 * 60 * 1000,
+      }),
+    ).toEqual(["run_fresh_outbox"]);
+    expect(existsSync(fresh)).toBe(false);
+    rmSync(home, { recursive: true, force: true });
+  });
+
   test("drains an agent local notification outbox with the worker bearer", async () => {
     const home = tmpDir("evrt-local-notify-outbox-");
     const runId = "run_1558";
@@ -198,6 +253,58 @@ describe("worker", () => {
     );
     expect(existsSync(outbox)).toBe(false);
     rmSync(home, { recursive: true, force: true });
+  });
+
+  test("reports one undelivered entry per line for an invalid port", async () => {
+    // The caller only reads `undelivered`; an `error` field alone made a
+    // misconfigured port invisible and the retained lines were then swept.
+    const home = tmpDir("evrt-local-notify-invalid-port-");
+    const runId = "run_invalid_port";
+    const outbox = path.join(home, "outbox", `${runId}.jsonl`);
+    mkdirSync(path.dirname(outbox), { recursive: true });
+    const line = (title) =>
+      JSON.stringify({
+        schemaVersion: "factory.local-notify-outbox/v1",
+        runId,
+        kind: "BLOCKED",
+        title,
+        refs: {},
+        source: `agent:${runId}`,
+      });
+    writeFileSync(
+      outbox,
+      `${line("BLOCKED watt-mind/factory#1964: invalid port")}\n${line(
+        "BLOCKED watt-mind/factory#1964: second escalation",
+      )}\nnot-json\n`,
+    );
+    const expectedError =
+      "FACTORY_EVENT_PORT must be a positive integer between 1 and 65535";
+    const fetchFn = spyOn(globalThis, "fetch");
+    try {
+      const result = await drainLocalNotifyOutbox({
+        home,
+        runId,
+        port: "not-a-port",
+      });
+      expect(result.delivered).toEqual([]);
+      expect(result.undelivered).toEqual([
+        {
+          title: "BLOCKED watt-mind/factory#1964: invalid port",
+          error: expectedError,
+        },
+        {
+          title: "BLOCKED watt-mind/factory#1964: second escalation",
+          error: expectedError,
+        },
+        { title: "invalid local notification record", error: expectedError },
+      ]);
+      expect(fetchFn).not.toHaveBeenCalled();
+      // The outbox stays put as the recovery source.
+      expect(existsSync(outbox)).toBe(true);
+    } finally {
+      fetchFn.mockRestore();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   test("drains the local notify outbox from the adapter finally so a throw cannot strand an escalation", () => {
