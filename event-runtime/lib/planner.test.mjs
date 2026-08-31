@@ -4335,6 +4335,147 @@ describe("Linear rate limit (WM-878)", () => {
     description: "## Owned Paths\n- event-runtime/lib/planner.mjs\n",
   });
 
+  function withLinearCli(source, fn) {
+    const root = tmpDir("evrt-plan-linear-cli-");
+    const cli = path.join(root, "linear.mjs");
+    writeFileSync(cli, source);
+    const previous = process.env.FACTORY_LINEAR_CLI;
+    process.env.FACTORY_LINEAR_CLI = cli;
+    try {
+      return fn();
+    } finally {
+      if (previous === undefined) delete process.env.FACTORY_LINEAR_CLI;
+      else process.env.FACTORY_LINEAR_CLI = previous;
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  function deadlineBudget() {
+    let reads = 0;
+    return {
+      deadline: 10_000,
+      now: () => (reads++ < 2 ? 0 : 10_000),
+    };
+  }
+
+  test("binds the read budget without replacing an omitted viewer config snapshot", () => {
+    withLinearCli(
+      'console.log(JSON.stringify({ viewer: { id: "viewer-1" } }));',
+      () => {
+        const cache = createLinearReadCache();
+        cache.linearReadBudget = { deadline: 10_000, now: () => 0 };
+        const reads = wrapLinearReads({}, cache, NOW, {
+          repos: new Map([
+            ["gated", { name: "gated", controlPlane: "linear" }],
+          ]),
+        });
+
+        expect(reads.fetchViewer("gated")).toEqual({ id: "viewer-1" });
+      },
+    );
+  });
+
+  test("a deadline-boundary CLI 429 retains its resetAt", () => {
+    withLinearCli(
+      [
+        'console.error(JSON.stringify({ resetAt: "2026-08-19T13:00:00.000Z" }));',
+        "process.exit(3);",
+      ].join("\n"),
+      () => {
+        const cache = createLinearReadCache();
+        cache.linearReadBudget = deadlineBudget();
+        const reads = wrapLinearReads({}, cache, NOW, {
+          repos: new Map([
+            ["gated", { name: "gated", controlPlane: "linear" }],
+          ]),
+        });
+
+        let error;
+        try {
+          reads.fetchTicket("WM-429", "gated");
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error).toBeInstanceOf(LinearRateLimitError);
+        expect(error.resetAt).toBe("2026-08-19T13:00:00.000Z");
+        expect(cache.rateLimitedUntil).toBe(
+          Date.parse("2026-08-19T13:00:00.000Z"),
+        );
+      },
+    );
+  });
+
+  test("a deadline-boundary missing ticket still returns null", () => {
+    withLinearCli('console.error("no such issue"); process.exit(1);', () => {
+      const cache = createLinearReadCache();
+      cache.linearReadBudget = deadlineBudget();
+      const reads = wrapLinearReads({}, cache, NOW, {
+        repos: new Map([["gated", { name: "gated", controlPlane: "linear" }]]),
+      });
+
+      expect(reads.fetchTicket("WM-missing", "gated")).toBeNull();
+    });
+  });
+
+  test("an exhausted budget defers every default read on a github plane (#1890)", () => {
+    // wrapLinearReads skips its own pre-check for a github control plane, so
+    // the budget throw surfaces from *inside* each default fetcher's try. It
+    // must stay deferrable rather than being rewrapped as linear_read_failed.
+    withLinearCli("throw new Error('the CLI must never be spawned');", () => {
+      const configSnapshot = {
+        repos: new Map([["gh", { name: "gh", controlPlane: "github" }]]),
+      };
+      for (const read of [
+        (reads) => reads.fetchTicket("watt-mind/factory#534", "gh"),
+        (reads) => reads.fetchViewer("gh"),
+        (reads) =>
+          reads.fetchInFlight({
+            name: "gh",
+            team: "WM",
+            project: "Factory",
+            controlPlane: "github",
+          }),
+      ]) {
+        const cache = createLinearReadCache();
+        cache.linearReadBudget = { deadline: 0, now: () => 5000 };
+        let error;
+        try {
+          read(wrapLinearReads({}, cache, NOW, configSnapshot));
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error?.name).toBe("LinearReadBudgetExceededError");
+        expect(error?.message).toBe("linear_read_budget_exhausted");
+      }
+    });
+  });
+
+  test("a child killed by the read timeout at the deadline defers", () => {
+    // The genuine linearReadTimedOut path: the budget still had room when the
+    // child was spawned, the child was SIGTERMed by that timeout, and the
+    // deadline has passed by the time the failure is classified.
+    withLinearCli("Bun.sleepSync(2000);", () => {
+      const cache = createLinearReadCache();
+      let clockReads = 0;
+      cache.linearReadBudget = {
+        deadline: 100,
+        now: () => (clockReads++ < 2 ? 0 : 100),
+      };
+      const reads = wrapLinearReads({}, cache, NOW, {
+        repos: new Map([["gated", { name: "gated", controlPlane: "linear" }]]),
+      });
+
+      let error;
+      try {
+        reads.fetchTicket("WM-slow", "gated");
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error?.name).toBe("LinearReadBudgetExceededError");
+      expect(error?.message).toBe("linear_read_budget_exhausted");
+    });
+  });
+
   test("a simulated Linear 400 rate-limit refuses linear_rate_limited, leaves the event admitted, and does not dead-letter", () => {
     withReposRoot(gatedYaml, () => {
       const db = openDb(":memory:");
@@ -4644,6 +4785,44 @@ describe("GitHub dispatch candidate parsing (GH-974)", () => {
       expect(logs).toContain(
         "planned noop (ticket_identifier_unresolvable: not a GitHub issue identifier: WM-621 (want owner/repo#N)) — operator-webhook:github-candidate-legacy",
       );
+    });
+  });
+
+  test("an exhausted read budget defers a github candidate rather than failing the plan (#1890)", () => {
+    withGithubRepo(() => {
+      const db = openDb(":memory:");
+      admit(db, {
+        type: "factory.dispatch.requested",
+        eventId: "github-budget-exhausted",
+        correlationId: "github-budget-exhausted",
+        payload: {
+          repo: "github-candidates",
+          ticket: "watt-mind/factory#534",
+        },
+      });
+
+      // Default fetchers, budget already spent: the throw comes from inside
+      // the fetcher's own try, which used to exit as a hard linear_read_failed.
+      expect(
+        planAdmittedEvents(db, registry, {
+          now: NOW,
+          policyVersion: "git:test",
+          linearReadBudget: { deadline: 0, now: () => 5000 },
+          dispatch: { countLeases: () => 0, budgetRefusal: () => null },
+        }),
+      ).toEqual({ planned: 0, failed: 0, deadLettered: 0 });
+
+      expect(
+        db
+          .query(
+            `SELECT status, plan_failures, last_plan_error FROM events WHERE event_id = ?`,
+          )
+          .get("github-budget-exhausted"),
+      ).toMatchObject({
+        status: "admitted",
+        plan_failures: 0,
+        last_plan_error: "linear_read_budget_exhausted",
+      });
     });
   });
 });
