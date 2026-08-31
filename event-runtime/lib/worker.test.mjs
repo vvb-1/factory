@@ -130,6 +130,7 @@ import {
   reconcileTierEscalations,
   scheduleTierEscalation,
   sweepOrphanedLocalNotifyOutbox,
+  tierEscalationContinuationGuard,
   tierEscalationEligibility,
   retryRun,
   runLinearCli,
@@ -3737,6 +3738,350 @@ sh -c 'sleep 5 & wait'
     ).toBe(false);
   });
 
+  test("tier escalation skips work already handed to review but keeps active claims eligible", () => {
+    const spec = makeSpec({
+      agent: "dispatch@1",
+      input: { repo: "factory", ticket: "watt-mind/factory#2006" },
+      workspace: { type: "worktree", checkoutDir: "repo" },
+      modelTier: "light",
+    });
+    const inReview = tierEscalationContinuationGuard(spec, "agent_exit_1", {
+      fetchTicket: () => ({ state: { name: "In Review" } }),
+    });
+    expect(inReview).toMatchObject({
+      eligible: true,
+      skip: true,
+      reason: "ticket_in_review",
+    });
+    const db = openDb(":memory:");
+    queueRun(db, spec);
+    linkEvent(db, spec.runId);
+    expect(
+      scheduleTierEscalation(db, registry, spec, {
+        workspacePath: "/retained/factory-2006",
+        sourceWorkspacePath: "/workspace/run-2006",
+        continuationRunId: "run_tier_in_review",
+        reasonCode: "agent_exit_1",
+        continuationGuard: inReview,
+      }),
+    ).toBeNull();
+    expect(
+      db.query(`SELECT * FROM runs WHERE run_id = 'run_tier_in_review'`).get(),
+    ).toBeNull();
+    db.close();
+    for (const state of ["Todo", "In Progress"]) {
+      expect(
+        tierEscalationContinuationGuard(spec, "agent_exit_1", {
+          fetchTicket: () => ({ state: { name: state } }),
+        }),
+      ).toMatchObject({ eligible: true, skip: false });
+    }
+    expect(
+      tierEscalationContinuationGuard(spec, "agent_exit_1", {
+        fetchTicket: () => ({ state: { name: "In Progress" } }),
+        workspacePath: "/retained/factory-2006",
+        findPullRequest: () => ({ isDraft: false }),
+      }),
+    ).toMatchObject({
+      eligible: true,
+      skip: true,
+      reason: "retained_pr_open",
+    });
+  });
+
+  test("failed dispatch skips an In Review continuation but schedules one for an active ticket", async () => {
+    const executeFailure = async (reviewed) => {
+      const db = openDb(":memory:");
+      let ticketState = "Todo";
+      const ticket = "watt-mind/factory#2006";
+      const comments = [];
+      const spec = queueRun(
+        db,
+        makeSpec({
+          runId: `run_tier_failed_${reviewed ? "reviewed" : "active"}`,
+          agent: "dispatch@1",
+          input: { repo: "factory", ticket },
+          workspace: {
+            type: "worktree",
+            checkoutDir: "repo",
+            retainOnFailure: true,
+          },
+          outputContract: "factory.dispatch-result/v1",
+          modelTier: "light",
+          maxAttempts: 1,
+        }),
+      );
+      linkEvent(db, spec.runId, { type: "factory.dispatch.requested" });
+      const o = opts({
+        dispatch: {
+          locksDir: tmpDir("tier-skip-locks-"),
+          leasesDir: tmpDir("tier-skip-leases-"),
+          fetchTicket: () => ({
+            identifier: ticket,
+            state: { name: ticketState },
+            assignee: ticketState === "Todo" ? null : { name: "hdkiller" },
+            labels: {
+              nodes: [
+                {
+                  name:
+                    ticketState === "Todo"
+                      ? "ai:agent-ready"
+                      : "ai:in-progress",
+                },
+              ],
+            },
+            description:
+              "## Owned Paths\n- event-runtime/lib/worker.mjs\n\n## Verification Command\n`bun test event-runtime/lib/worker.test.mjs`\n",
+          }),
+          fetchInFlight: () => [],
+          countLeases: () => 0,
+          budgetRefusal: () => null,
+          claimTicket: () => ((ticketState = "In Progress"), { ok: true }),
+          commentTicket: (entry) => comments.push(entry),
+          projectTierEscalation: () => true,
+          findWorkspacePullRequest: () => null,
+        },
+        materializeWorktree: () => ({
+          path: tmpDir("tier-skip-checkout-"),
+        }),
+      });
+      const claim = claimNext(db, o);
+      const result = await executeClaimed(
+        db,
+        registry,
+        {
+          fake: {
+            async execute() {
+              if (reviewed) ticketState = "In Review";
+              return { exitCode: 1, timedOut: false };
+            },
+          },
+        },
+        claim,
+        o,
+      );
+      const continuations = db
+        .query(`SELECT * FROM tier_escalations ORDER BY created_at`)
+        .all();
+      db.close();
+      return { result, comments, continuations };
+    };
+
+    const reviewed = await executeFailure(true);
+    expect(reviewed.result).toMatchObject({
+      terminalState: "FAILED",
+      reasonCode: "agent_exit_1",
+      tierEscalationSkip: "ticket_in_review",
+    });
+    expect(reviewed.continuations).toEqual([]);
+    expect(reviewed.comments).toContainEqual(
+      expect.objectContaining({
+        body: expect.stringContaining(
+          "Tier escalation skipped: ticket is already In Review",
+        ),
+      }),
+    );
+
+    const active = await executeFailure(false);
+    expect(active.result).toMatchObject({
+      terminalState: "FAILED",
+      reasonCode: "agent_exit_1",
+      escalatedRunId: expect.any(String),
+    });
+    expect(active.result.tierEscalationSkip).toBeUndefined();
+    expect(active.continuations).toHaveLength(1);
+  });
+
+  test("a retained open PR skips the continuation and still releases the ticket claim", async () => {
+    const db = openDb(":memory:");
+    const ticket = "watt-mind/factory#2006";
+    let ticketState = "Todo";
+    const comments = [];
+    const unclaims = [];
+    const spec = queueRun(
+      db,
+      makeSpec({
+        runId: "run_tier_retained_pr",
+        agent: "dispatch@1",
+        input: { repo: "factory", ticket },
+        workspace: {
+          type: "worktree",
+          checkoutDir: "repo",
+          retainOnFailure: true,
+        },
+        outputContract: "factory.dispatch-result/v1",
+        modelTier: "light",
+        maxAttempts: 1,
+      }),
+    );
+    linkEvent(db, spec.runId, { type: "factory.dispatch.requested" });
+    const o = opts({
+      dispatch: {
+        locksDir: tmpDir("tier-retained-locks-"),
+        leasesDir: tmpDir("tier-retained-leases-"),
+        fetchTicket: () => ({
+          identifier: ticket,
+          state: { name: ticketState },
+          assignee: ticketState === "Todo" ? null : { name: "hdkiller" },
+          labels: {
+            nodes: [
+              {
+                name:
+                  ticketState === "Todo" ? "ai:agent-ready" : "ai:in-progress",
+              },
+            ],
+          },
+          description:
+            "## Owned Paths\n- event-runtime/lib/worker.mjs\n\n## Verification Command\n`bun test event-runtime/lib/worker.test.mjs`\n",
+        }),
+        fetchInFlight: () => [],
+        countLeases: () => 0,
+        budgetRefusal: () => null,
+        claimTicket: () => ((ticketState = "In Progress"), { ok: true }),
+        commentTicket: (entry) => comments.push(entry),
+        unclaimTicket: (entry) => (unclaims.push(entry), true),
+        projectTierEscalation: () => true,
+        // The agent opened a PR and left it out of draft; the ticket never
+        // reached In Review, so only the forge carries the ownership signal.
+        findWorkspacePullRequest: () => ({ number: 4242, isDraft: false }),
+      },
+      materializeWorktree: () => ({ path: tmpDir("tier-retained-checkout-") }),
+    });
+    const claim = claimNext(db, o);
+    const result = await executeClaimed(
+      db,
+      registry,
+      {
+        fake: {
+          async execute() {
+            return { exitCode: 1, timedOut: false };
+          },
+        },
+      },
+      claim,
+      o,
+    );
+
+    expect(result).toMatchObject({
+      terminalState: "FAILED",
+      reasonCode: "agent_exit_1",
+      tierEscalationSkip: "retained_pr_open",
+    });
+    expect(db.query(`SELECT * FROM tier_escalations`).all()).toEqual([]);
+    // No continuation inherits the claim, so the run must hand the ticket back
+    // itself rather than strand it In Progress with nothing scheduled.
+    expect(unclaims).toEqual([
+      { repo: "factory", ticket, why: "agent_exit_1", log: null },
+    ]);
+    expect(comments).toContainEqual(
+      expect.objectContaining({
+        body: expect.stringContaining(
+          "the retained worktree already has an open non-draft PR",
+        ),
+      }),
+    );
+    db.close();
+  });
+
+  test("the PR the failed handoff just opened is drafted before the guard reads it, so escalation still happens", async () => {
+    const db = openDb(":memory:");
+    const ticket = "watt-mind/factory#2006";
+    let ticketState = "Todo";
+    // The agent's own PR: open and NOT draft at the moment the handoff
+    // verification fails. WM-718's hold converts it; the guard must observe
+    // the converted state, not the pre-hold one.
+    let prIsDraft = false;
+    const held = [];
+    const spec = queueRun(
+      db,
+      makeSpec({
+        runId: "run_tier_handoff_pr",
+        agent: "dispatch@1",
+        input: { repo: "factory", ticket },
+        workspace: {
+          type: "worktree",
+          checkoutDir: "repo",
+          retainOnFailure: true,
+        },
+        outputContract: "factory.dispatch-result/v1",
+        modelTier: "light",
+        maxAttempts: 1,
+      }),
+    );
+    linkEvent(db, spec.runId, { type: "factory.dispatch.requested" });
+    const o = opts({
+      verifyResult: () => {
+        throw new ContractViolation(["repo_verify_failed"], {
+          reasonCode: "handoff_verification_failed",
+          handoff: {
+            prNumber: 4242,
+            prUrl: "https://github.com/watt-mind/factory/pull/4242",
+            github: "watt-mind/factory",
+            verification: [],
+          },
+        });
+      },
+      dispatch: {
+        locksDir: tmpDir("tier-handoff-locks-"),
+        leasesDir: tmpDir("tier-handoff-leases-"),
+        fetchTicket: () => ({
+          identifier: ticket,
+          state: { name: ticketState },
+          assignee: ticketState === "Todo" ? null : { name: "hdkiller" },
+          labels: {
+            nodes: [
+              {
+                name:
+                  ticketState === "Todo" ? "ai:agent-ready" : "ai:in-progress",
+              },
+            ],
+          },
+          description:
+            "## Owned Paths\n- event-runtime/lib/worker.mjs\n\n## Verification Command\n`bun test event-runtime/lib/worker.test.mjs`\n",
+        }),
+        fetchInFlight: () => [],
+        countLeases: () => 0,
+        budgetRefusal: () => null,
+        claimTicket: () => ((ticketState = "In Progress"), { ok: true }),
+        commentTicket: () => {},
+        holdPullRequest: (entry) => (
+          held.push(entry),
+          (prIsDraft = true),
+          true
+        ),
+        returnHandoffTicket: () => ({ agentReadyRestored: true }),
+        unclaimTicket: () => true,
+        projectTierEscalation: () => true,
+        findWorkspacePullRequest: () => ({ number: 4242, isDraft: prIsDraft }),
+      },
+      materializeWorktree: () => ({ path: tmpDir("tier-handoff-checkout-") }),
+    });
+    const claim = claimNext(db, o);
+    const result = await executeClaimed(
+      db,
+      registry,
+      {
+        fake: {
+          async execute() {
+            return { exitCode: 0, timedOut: false };
+          },
+        },
+      },
+      claim,
+      o,
+    );
+
+    expect(result).toMatchObject({
+      terminalState: "FAILED",
+      reasonCode: "handoff_verification_failed",
+      escalatedRunId: expect.any(String),
+    });
+    expect(result.tierEscalationSkip).toBeUndefined();
+    expect(held).toHaveLength(1);
+    expect(db.query(`SELECT * FROM tier_escalations`).all()).toHaveLength(1);
+    db.close();
+  });
+
   test("continuation handoff failures are matched per violation, anchored at its start", () => {
     const quoted =
       "repo_verify_failed: (fail) x\nweb_build_failed: quoted inside output";
@@ -4424,6 +4769,76 @@ sh -c 'sleep 5 & wait'
     expect(calls.at(-1)[2]).toContain(
       "https://github.com/watt-mind/factory/pull/1281",
     );
+  });
+
+  test("cancelRun releases an unstarted tier continuation claim and retained worktree ownership", () => {
+    const db = openDb(":memory:");
+    const failed = queueRun(
+      db,
+      makeSpec({
+        runId: "run_cancel_tier_failed",
+        agent: "dispatch@1",
+        input: { repo: "factory", ticket: "watt-mind/factory#2006" },
+        workspace: {
+          type: "worktree",
+          checkoutDir: "repo",
+          retainOnFailure: true,
+        },
+        modelTier: "light",
+        maxAttempts: 1,
+      }),
+    );
+    linkEvent(db, failed.runId);
+    const escalation = scheduleTierEscalation(db, registry, failed, {
+      workspacePath: "/retained/factory-2006",
+      sourceWorkspacePath: "/workspace/run-2006",
+      continuationRunId: "run_cancel_tier_continuation",
+      reasonCode: "agent_exit_1",
+    });
+    const unclaims = [];
+    const cleanups = [];
+
+    const result = cancelRun(db, escalation.continuation_run_id, {
+      actor: "operator",
+      policyVersion: "test",
+      now: T0,
+      unclaimTierEscalation: (entry) => (unclaims.push(entry), true),
+      cleanupTierEscalationWorkspace: (entry) => (cleanups.push(entry), true),
+    });
+
+    expect(runState(db, escalation.continuation_run_id)).toBe("CANCELLED");
+    expect(result.escalationCancellation).toEqual({
+      projectionRefused: true,
+      claimReleased: true,
+      workspaceCleaned: true,
+    });
+    expect(unclaims).toEqual([
+      {
+        repo: "factory",
+        ticket: "watt-mind/factory#2006",
+        why: "operator_cancel",
+        log: null,
+      },
+    ]);
+    expect(cleanups).toEqual([
+      {
+        sourceWorkspacePath: "/workspace/run-2006",
+        workspacePath: "/retained/factory-2006",
+        repo: "factory",
+        ticket: "watt-mind/factory#2006",
+      },
+    ]);
+    expect(
+      db
+        .query(
+          `SELECT projection_state, projection_error FROM tier_escalations WHERE continuation_run_id = ?`,
+        )
+        .get(escalation.continuation_run_id),
+    ).toEqual({
+      projection_state: "refused",
+      projection_error: "operator_cancel",
+    });
+    db.close();
   });
 
   test("adapter_error with maxAttempts 1 requeues and succeeds without consuming the agent budget", async () => {
