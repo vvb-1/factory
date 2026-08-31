@@ -931,11 +931,15 @@ export function changedFilesSince({
 }
 
 /** Files outside every Owned Paths glob (`**` owns everything). */
-export function ownedPathsDeviations(files = [], ownedPaths = []) {
+export function ownedPathsDeviations(
+  files = [],
+  ownedPaths = [],
+  { repoRoot } = {},
+) {
   if (!Array.isArray(files)) return [];
   const globs = (ownedPaths ?? []).map((g) => String(g).trim()).filter(Boolean);
   if (globs.length === 0 || globs.includes("**")) return [];
-  const matchers = globs.map((g) => globToRegExp(g));
+  const matchers = globs.map((g) => globToRegExp(g, { repoRoot }));
   return files.filter((file) => !matchers.some((re) => re.test(file)));
 }
 
@@ -2195,7 +2199,13 @@ function verifyCompleted({
 
     // 5. Owned Paths conformance: listed always; refused under strict.
     if (handoff.diff.ok && ownedPathsKnown) {
-      handoff.ownedPathsDeviations = ownedPathsDeviations(files, ownedPaths);
+      // The handoff deviation gate is the one place root-anchoring applies:
+      // narrowing here only ever removes a false deviation report, and the
+      // worktree root is known on disk. Resolve it so the matcher can never
+      // fall back to the process CWD.
+      handoff.ownedPathsDeviations = ownedPathsDeviations(files, ownedPaths, {
+        repoRoot: path.resolve(worktreePath),
+      });
       if (handoff.ownedPathsDeviations.length === 0) {
         handoffChecks.push("owned_paths_conformant");
       } else if (conformance === "strict") {

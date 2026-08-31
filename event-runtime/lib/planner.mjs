@@ -905,6 +905,10 @@ function pinManifestFreshness(repo) {
   const patterns = Array.isArray(policy.pinManifests)
     ? policy.pinManifests
     : [];
+  // Compiled root-free, matching `matchingManifestPaths`. Both matchers must
+  // agree on which manifests a pattern covers: anchoring only one of them
+  // would let a closure cache be keyed off a manifest set the other never
+  // scanned, and serve a stale closure.
   const matchers = patterns.map(globToRegExp);
   const manifests = [];
 
@@ -1911,6 +1915,9 @@ function ownedPathContains(ownerValue, candidateValue) {
   if (isMatchEverythingGlob(owner) || owner === candidate) return true;
 
   const candidateHasGlob = /[*?{]/.test(candidate);
+  // Merge-fix eligibility is evaluated from the ticket payload before a
+  // checkout is guaranteed to exist, so bare Owned Paths keep their broad
+  // any-depth semantics here; nothing on this path stats the filesystem.
   if (!candidateHasGlob) return globToRegExp(owner).test(candidate);
 
   // A directory (bare or /**) owns narrower globs rooted below it. Other
