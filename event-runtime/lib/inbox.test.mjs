@@ -20,6 +20,7 @@ import {
   resolveInboxItem,
   fetchLinearInboxIssues,
   linearGql,
+  synthesizeInboxItem,
 } from "./inbox.mjs";
 import { decisionRequestHash } from "./decision.mjs";
 import { templateFor } from "./decision-templates.mjs";
@@ -118,6 +119,130 @@ test("the documented decision API errors match decide and retry", () => {
 });
 
 describe("human inbox ledger (WM-285)", () => {
+  test("synthesizes an operator-readable inbox message and explains decision effects", () => {
+    const request = {
+      schemaVersion: "factory.decision-request/v1",
+      question: "How should the factory proceed with watt-mind/factory#1158?",
+      context: "The dispatch run stopped before opening a pull request.",
+      options: [
+        {
+          id: "triage",
+          label: "Send back to Triage",
+          effect: "send_to_triage",
+        },
+        { id: "answer", label: "Answer the agent", effect: "answer" },
+      ],
+    };
+    const item = synthesizeInboxItem({
+      kind: "BLOCKED",
+      title:
+        "BLOCKED factory.dispatch.requested run_123-watt-mind/factory#1158: owned_paths_not_closed",
+      reasonCode: "owned_paths_not_closed",
+      refs: {
+        repo: "factory",
+        issue: "watt-mind/factory#1158",
+        runId: "run_123",
+        pr: "42",
+      },
+      decision: request,
+    });
+
+    expect(item.title).toBe(
+      "Blocked: factory#1158 — its allowed paths do not cover every required file",
+    );
+    expect(item.body).toContain(
+      "What happened: A blocked item needs attention",
+    );
+    expect(item.body).toContain("Why it matters: The ticket's allowed paths");
+    expect(item.body).toContain("Ticket: watt-mind/factory#1158");
+    expect(item.body).toContain("Run: run_123");
+    expect(item.body).toContain("PR: 42");
+    expect(item.body).toContain("Send back to Triage — removes ai:agent-ready");
+    expect(item.body).toContain(
+      "Answer the agent — records the operator's reply",
+    );
+  });
+
+  test("synthesizes titles and bodies for every inbox kind, including unknown reasons", () => {
+    for (const kind of INBOX_KINDS) {
+      const reason =
+        kind === "proposal_expired" ? "proposal_expired" : "novel_reason";
+      const item = synthesizeInboxItem({
+        kind,
+        title: `machine ${kind}: ${reason}`,
+        reasonCode: reason,
+        refs: { issue: "watt-mind/factory#1158", runId: "run_1", pr: "42" },
+      });
+      expect(item.title).toMatch(/^[A-Z]|^Blocked:|^Escalated:|^CI failed:/);
+      expect(item.body).toContain("What happened:");
+      expect(item.body).toContain("Why it matters:");
+      expect(item.body).toContain(`Reason code: ${reason}.`);
+      expect(item.body).toContain("Ticket: watt-mind/factory#1158");
+      expect(item.body).toContain("Run: run_1");
+      expect(item.body).toContain("PR: 42");
+    }
+  });
+
+  test("never invents a reason code out of a producer's free-text title", () => {
+    const item = synthesizeInboxItem({
+      kind: "BLOCKED",
+      // Reads like a reason code, but nothing structured says it is one.
+      title: "BLOCKED factory#1158: owned_paths_not_closed",
+      refs: { issue: "watt-mind/factory#1158" },
+    });
+    expect(item.title).toBe("Blocked: factory#1158");
+    expect(item.body).not.toContain("Reason code:");
+    expect(item.body).not.toContain("allowed paths");
+  });
+
+  test('names the event a parked notice refers to instead of "this item"', () => {
+    const item = synthesizeInboxItem({
+      kind: "BLOCKED",
+      title: "BLOCKED linear.ticket.agent_ready evt-park: repo_report_only",
+      reasonCode: "repo_report_only",
+      eventType: "linear.ticket.agent_ready",
+      refs: { eventSource: "linear", eventId: "evt-park" },
+    });
+    expect(item.body).toContain(
+      "What happened: A blocked item needs attention for linear.ticket.agent_ready evt-park.",
+    );
+    expect(item.body).toContain("Reason code: repo_report_only.");
+    expect(
+      synthesizeInboxItem({
+        kind: "BLOCKED",
+        title: "BLOCKED evt-park",
+        refs: { eventSource: "linear", eventId: "evt-park", repo: "factory" },
+      }).body,
+    ).toContain("for event evt-park (factory).");
+  });
+
+  test("uses cached ticket titles and proposal subjects in human titles", () => {
+    const ticket = synthesizeInboxItem({
+      kind: "BLOCKED",
+      title: "BLOCKED factory#1158: owned_paths_not_closed",
+      reasonCode: "owned_paths_not_closed",
+      ticketTitle: "select Opus only for Claude parent runs",
+      refs: { issue: "watt-mind/factory#1158" },
+    });
+    expect(ticket.title).toBe(
+      'Blocked: factory#1158 "select Opus only for Claude parent runs" — its allowed paths do not cover every required file',
+    );
+
+    const proposal = synthesizeInboxItem({
+      kind: "decision_needed",
+      title: "Reaper",
+      refs: { proposalId: "proposal-1" },
+      decision: {
+        question: "Run reaper@1 for hourly sweep?",
+        options: [{ label: "Approve", effect: "approve_proposal" }],
+      },
+    });
+    expect(proposal.title).toBe("Approve reaper run (hourly sweep)?");
+    expect(proposal.body).toContain(
+      "Approve — approves the proposal and allows its run to proceed.",
+    );
+  });
+
   test("decision requests are validated and exposed with decision metadata", () => {
     const db = openDb(":memory:");
     expect(() =>
@@ -193,7 +318,7 @@ describe("human inbox ledger (WM-285)", () => {
     expect(db.query("SELECT COUNT(*) AS n FROM inbox_items").get().n).toBe(3);
   });
 
-  test("a dispatch proposal item stores the action-first title and why-line (WM-896)", () => {
+  test("a dispatch proposal item stores a human-readable title and decision details", () => {
     const db = openDb(":memory:");
     const refs = {
       proposalId: "prop_2dda1ca8-2469-4aab-8908-79c31a5df55b",
@@ -212,6 +337,7 @@ describe("human inbox ledger (WM-285)", () => {
       {
         kind: "decision_needed",
         title: "Dispatch WM-862 · factory · cursor-grok-4.6-high",
+        ticketTitle: "select Opus only for Claude parent runs",
         refs,
         source: "serve:notify",
         decision: templateFor("decision_needed", {
@@ -225,8 +351,10 @@ describe("human inbox ledger (WM-285)", () => {
       { id: "inbox_dispatch" },
     );
     expect(created.title).toBe(
-      "Dispatch WM-862 · factory · cursor-grok-4.6-high",
+      'Approve dispatch run (WM-862 "select Opus only for Claude parent runs")?',
     );
+    expect(created.body).toContain("Question: Run dispatch@1 for WM-862");
+    expect(created.body).toContain("Approve proposal — approves the proposal");
     expect(created.decision.question).toBe(
       "Run dispatch@1 for WM-862 (factory) on cursor-grok-4.6-high?",
     );
@@ -1212,6 +1340,151 @@ describe("human inbox ledger (WM-285)", () => {
     ]);
   });
 
+  test("a run-progress notice for a finished run and a closed ticket auto-resolve as stale", async () => {
+    const db = openDb(":memory:");
+    const now = new Date(1000).toISOString();
+    db.query(
+      `INSERT INTO runs
+         (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+       VALUES ('run-terminal', 'terminal-key', '{}', 'sha256:test', 'COMPLETED', 1, ?, ?)`,
+    ).run(now, now);
+    createInboxItem(
+      db,
+      {
+        kind: "CI RED",
+        title: "terminal run",
+        refs: { runId: "run-terminal" },
+        source: "serve:notify",
+      },
+      { id: "terminal-run", now: 1000 },
+    );
+    createInboxItem(
+      db,
+      {
+        kind: "RC READY",
+        title: "closed ticket",
+        refs: { issue: "WM-closed" },
+      },
+      { id: "closed-ticket", now: 1000 },
+    );
+
+    expect(
+      await reconcileInbox(db, {
+        now: 60_000,
+        linearIssues: async () => [
+          {
+            identifier: "WM-closed",
+            state: { name: "Done", type: "completed" },
+            labels: { nodes: [] },
+          },
+        ],
+      }),
+    ).toEqual([
+      { id: "terminal-run", resolvedBy: "auto:stale_ref" },
+      { id: "closed-ticket", resolvedBy: "auto:stale_ref" },
+    ]);
+    expect(getInboxItem(db, "terminal-run")).toMatchObject({
+      resolvedReason: "stale_ref",
+    });
+    expect(getInboxItem(db, "closed-ticket")).toMatchObject({
+      resolvedReason: "stale_ref",
+    });
+  });
+
+  test("GitHub ticket lookups are deduped per ticket and fail open per row", async () => {
+    const db = openDb(":memory:");
+    // Two distinct items naming the same ticket — the shape that used to cost
+    // one un-batched GitHub read per open item, every poll.
+    for (const [id, kind, issue] of [
+      ["gh-a", "BLOCKED", "watt-mind/factory#1"],
+      ["gh-b", "RC READY", "watt-mind/factory#1"],
+      ["gh-c", "BLOCKED", "watt-mind/factory#2"],
+    ]) {
+      createInboxItem(
+        db,
+        { kind, title: id, refs: { issue, repo: "factory" } },
+        { id, now: 1000 },
+      );
+    }
+    const looked = [];
+    const resolved = await reconcileInbox(db, {
+      now: 60_000,
+      linearIssues: async () => {
+        throw new Error("GitHub rows must not reach the Linear batch");
+      },
+      controlPlane: () => ({
+        kind: "github",
+        getTicket: async (issue) => {
+          looked.push(issue);
+          // One unreadable ticket must not sink the whole poll.
+          if (issue === "watt-mind/factory#2") throw new Error("rate limited");
+          return { state: { name: "Closed", type: "completed" }, labels: [] };
+        },
+      }),
+    });
+
+    // Two rows share one ticket: one lookup, not one per open item.
+    expect(looked).toEqual(["watt-mind/factory#1", "watt-mind/factory#2"]);
+    expect(resolved).toEqual([
+      { id: "gh-a", resolvedBy: "auto:stale_ref" },
+      { id: "gh-b", resolvedBy: "auto:stale_ref" },
+    ]);
+    expect(getInboxItem(db, "gh-c").resolvedAt).toBeNull();
+  });
+
+  test("an escalation on a REFUSED run survives reconcile — it is born terminal", async () => {
+    const db = openDb(":memory:");
+    const at = new Date(1000).toISOString();
+    db.query(
+      `INSERT INTO runs
+         (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+       VALUES ('run-refused', 'refused-key', '{}', 'sha256:test', 'REFUSED', 1, ?, ?)`,
+    ).run(at, at);
+    const refs = { runId: "run-refused", issue: "WM-901", repo: "factory" };
+    createInboxItem(
+      db,
+      {
+        kind: "ESCALATED",
+        title: "How should the factory proceed with WM-901?",
+        refs,
+        source: "agent:run-refused",
+        decision: templateFor("ESCALATED", { producer: "escalation", refs }),
+      },
+      { id: "live-escalation", now: 1000 },
+    );
+    // A parked ask whose event is still parked must survive the same sweep.
+    db.query(
+      `INSERT INTO runs
+         (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+       VALUES ('run-done', 'done-key', '{}', 'sha256:test', 'COMPLETED', 1, ?, ?)`,
+    ).run(at, at);
+    createInboxItem(
+      db,
+      {
+        kind: "human_needed",
+        title: "an unanswered ask about a finished run",
+        refs: { runId: "run-done" },
+        source: "serve:notify",
+      },
+      { id: "live-ask", now: 1000 },
+    );
+
+    expect(
+      await reconcileInbox(db, {
+        now: 60_000,
+        linearIssues: async () => [
+          {
+            identifier: "WM-901",
+            state: { name: "In Progress", type: "started" },
+            labels: { nodes: [{ name: "ai:agent-ready" }] },
+          },
+        ],
+      }),
+    ).toEqual([]);
+    expect(getInboxItem(db, "live-escalation").resolvedAt).toBeNull();
+    expect(getInboxItem(db, "live-ask").resolvedAt).toBeNull();
+  });
+
   test("a pending decision becomes moot when its event leaves human_needed", async () => {
     const db = openDb(":memory:");
     insertEvent(db, { eventId: "evt-2" });
@@ -1726,10 +1999,10 @@ describe("approving an expired proposal retargets its item (WM-714)", () => {
     });
     expect(again.id).toBe(id);
     expect(again.title).toBe(
-      `DECISION NEEDED proposal ${FRESH}: expired undecided`,
+      `Proposal expired: proposal ${FRESH} — The proposal expired before an operator approved or rejected it`,
     );
     expect(listInboxItems(db).map((item) => item.title)).toEqual([
-      `DECISION NEEDED proposal ${FRESH}: expired undecided`,
+      `Proposal expired: proposal ${FRESH} — The proposal expired before an operator approved or rejected it`,
     ]);
     expect(db.query("SELECT COUNT(*) AS n FROM inbox_items").get().n).toBe(1);
     // Supersession does not lose the retarget the operator already paid for.
