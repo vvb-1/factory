@@ -443,8 +443,10 @@ describe("registry", () => {
     // was captured.
     // Regenerated (#2144): added celld-smoke agent definition (re-pinned after
     // prettier formatting of the agent prose/schema).
+    // Regenerated (#2149): added the editorial agent definitions, their event
+    // types, and the editorial lifecycle edges.
     const expected =
-      "sha256:f375360959b4b535994eed455b7e47481f32e4132f31792b8ec6a69ae4e4214e";
+      "sha256:4935065888a9ef13e0a7aee5e528d5366c190f94874b90a3274074eda7520640";
     expect(registryDigest(loadRegistry({ packRoots: [] }))).toBe(expected);
   });
 

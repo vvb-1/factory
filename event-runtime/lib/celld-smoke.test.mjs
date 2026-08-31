@@ -1,6 +1,6 @@
 import { describe, it, beforeAll, afterAll, expect } from "bun:test";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -107,28 +107,19 @@ describe.skipIf(!CELLD_BIN)(
       }
       mkdirSync(TMP_TEST_DIR, { recursive: true });
 
-      // Copy cells project files into the test storage dir so celld dev finds wrangler.jsonc & src
-      mkdirSync(path.join(TMP_TEST_DIR, "src"), { recursive: true });
-      const wranglerContent = await Bun.file(
-        path.join(CELLS_DIR, "wrangler.jsonc"),
-      ).text();
-      const srcContent = await Bun.file(
-        path.join(CELLS_DIR, "src/index.mjs"),
-      ).text();
+      // Copy the whole cells project into the test storage dir so celld dev
+      // finds wrangler.jsonc and every module the worker entrypoint imports.
+      cpSync(CELLS_DIR, TMP_TEST_DIR, { recursive: true });
 
       // Inject the shared-secret binding the worker requires (see the deployment
       // warning in cells/src/index.mjs); the daemon reads it from wrangler vars.
-      const wranglerConfig = parseJsonc(wranglerContent);
+      const wranglerPath = path.join(TMP_TEST_DIR, "wrangler.jsonc");
+      const wranglerConfig = parseJsonc(await Bun.file(wranglerPath).text());
       wranglerConfig.vars = {
         ...(wranglerConfig.vars || {}),
         CELL_AUTH_TOKEN: TEST_TOKEN,
       };
-
-      await Bun.write(
-        path.join(TMP_TEST_DIR, "wrangler.jsonc"),
-        JSON.stringify(wranglerConfig, null, 2),
-      );
-      await Bun.write(path.join(TMP_TEST_DIR, "src/index.mjs"), srcContent);
+      await Bun.write(wranglerPath, JSON.stringify(wranglerConfig, null, 2));
 
       celldProcess = startCelld(TEST_PORT, TMP_TEST_DIR);
 

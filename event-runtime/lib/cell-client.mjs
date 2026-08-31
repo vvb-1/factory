@@ -39,11 +39,15 @@ export class CellClient {
   constructor({
     endpoint = "http://127.0.0.1:9876",
     cellId = null,
+    access = "malleable",
     fetch = globalThis.fetch,
     authToken = null,
   } = {}) {
     this.endpoint = endpoint.replace(/\/+$/, "");
     this.cellId = cellId;
+    // Coarse access tier advertised to the cell (malleable | read-write |
+    // data-only | read-only); the cell enforces it, this only declares it.
+    this.access = access;
     this._fetch = fetch;
     // Shared-secret bearer token for the loopback cell spike. Defaults to the
     // daemon's own CELL_AUTH_TOKEN so a client in the same environment works
@@ -59,6 +63,7 @@ export class CellClient {
     return new CellClient({
       endpoint: this.endpoint,
       cellId,
+      access: this.access,
       fetch: this._fetch,
       authToken: this.authToken,
     });
@@ -78,6 +83,8 @@ export class CellClient {
     const url = this._url(path);
     const reqHeaders = {
       Accept: "application/json",
+      "X-Cell-Type": "generic",
+      "X-Cell-Access": this.access,
       ...(this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {}),
       ...headers,
     };
