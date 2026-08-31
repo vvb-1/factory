@@ -232,18 +232,21 @@ export async function tick({
   subsystems = {},
   skipPlan = false,
   proposalSweepLimit,
+  onStep = () => {},
 } = {}) {
   const tickStart = Date.now();
   const stepMs = {};
   let expiredScheduledProposals = 0;
   const runStep = async (name, fn) => {
     const start = Date.now();
+    onStep({ name, startedAt: start });
     try {
       await (subsystems[name] ?? fn)();
     } catch (err) {
       logLine(`tick ${name}: ${err.message}`);
     } finally {
       stepMs[name] = Date.now() - start;
+      onStep({ name: null, finishedAt: Date.now() });
     }
   };
 
@@ -282,13 +285,17 @@ export async function tick({
   });
 
   await runStep("auto-approve-chains", async () => {
-    const { worktreeDispatchAutoEligibility } =
+    const { worktreeDispatchAutoEligibilityAsync, createAutoApprovalDispatch } =
       await import("../lib/planner.mjs");
+    // A real dispatch bag, not the raw DB handle: awaited readers memoised by
+    // `wrapLinearReads` (ticket/viewer/in-flight plus the rate-limit latch) and
+    // by `withPassInFlightCache` for the pass (#1064), each read bounded well
+    // under the tracker's own 15s request timeout.
     const auto = await autoApproveChains(db, registry, {
       now,
       policyVersion: pv,
-      dispatchEligibility: worktreeDispatchAutoEligibility,
-      dispatch: db ? db : null,
+      dispatchEligibility: worktreeDispatchAutoEligibilityAsync,
+      dispatch: createAutoApprovalDispatch(),
     });
     for (const a of auto.approved)
       logLine(
@@ -642,7 +649,16 @@ export default async function serve(args) {
   let tickOverruns = 0;
   let lastTickMs = 0;
   let lastOverrunAt = null;
+  let lastTickAt = null;
+  let currentTickStep = null;
+  let tickStartedAt = null;
   let plannerWorker = null;
+  // Chain approval has exactly one owner in this process: the tick step below,
+  // which runs it with awaited, memoised, per-row-bounded control-plane reads.
+  // Without this the planner would run the same pass again — inline under
+  // `--no-planner`, and in the worker thread otherwise (the worker inherits
+  // this env at creation) — concurrently against the same rows.
+  process.env.FACTORY_PLANNER_AUTO_APPROVE_CHAINS = "0";
 
   function getTickStats() {
     const queued =
@@ -650,8 +666,17 @@ export default async function serve(args) {
         .query(`SELECT 1 FROM events WHERE status = 'admitted' LIMIT 1`)
         .get() != null;
     return {
+      // `lastMs`/`overruns` are the published /health names (orchestrator
+      // watchdog and the web dashboard read them) — keep exactly one spelling.
       lastMs: lastTickMs,
       overruns: tickOverruns,
+      lastTickAt,
+      currentStep: currentTickStep,
+      // How long the in-progress tick has been running. Non-zero here with a
+      // stale `lastTickAt` distinguishes "wedged inside <currentStep>" from
+      // "idle" without waiting for the after-the-fact overrun log.
+      stallMs:
+        busy && tickStartedAt ? Math.max(0, Date.now() - tickStartedAt) : 0,
       ...(lastOverrunAt ? { lastOverrunAt } : {}),
       planner: plannerWorker?.state({ queued }) ?? null,
     };
@@ -668,6 +693,7 @@ export default async function serve(args) {
     }
     busy = true;
     const start = Date.now();
+    tickStartedAt = start;
     try {
       registryRef.poll();
       const result = await tick({
@@ -683,10 +709,14 @@ export default async function serve(args) {
         announceProposals,
         announceTransitions,
         skipPlan: !noPlanner,
+        onStep: ({ name }) => {
+          currentTickStep = name;
+        },
       });
       lastPrune = result.lastPrune;
       const duration = Date.now() - start;
       lastTickMs = duration;
+      lastTickAt = new Date().toISOString();
       if (duration > 1000) {
         tickOverruns++;
         lastOverrunAt = new Date().toISOString();
@@ -698,6 +728,8 @@ export default async function serve(args) {
       log(`tick error: ${err.message}`);
     } finally {
       busy = false;
+      currentTickStep = null;
+      tickStartedAt = null;
     }
   }
 
