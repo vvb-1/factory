@@ -37,6 +37,7 @@ import {
 import { DisplayOptions, exportJson } from "../components/DisplayOptions";
 import { CustomCell } from "../components/CustomCell";
 import { DecisionCard } from "../components/DecisionCard";
+import { InboxMessageCard } from "../components/InboxMessageCard";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { hasInboxPlainActions, InboxActions } from "../components/InboxActions";
 import {
@@ -349,7 +350,7 @@ const ISSUE_PREFIX_GITHUB: Record<string, string> = {
 function prNumber(ref: string | undefined): string | null {
   if (!ref) return null;
   return (
-    /^(?:PR\s*)?#(\d+)$/i.exec(ref.trim())?.[1] ??
+    /^(?:PR\s*)?#?(\d+)$/i.exec(ref.trim())?.[1] ??
     /\/pull\/(\d+)(?:[/?#]|$)/.exec(ref)?.[1] ??
     null
   );
@@ -377,13 +378,9 @@ export function prHref(item: InboxItem): string | null {
   return number && repo ? `https://github.com/${repo}/pull/${number}` : null;
 }
 
-/** Per-kind action chips may trust a digits-only refs.pr once refs.repo resolves. */
+/** Per-kind action chips resolve the same PR href as the reference list. */
 export function inboxActionPrHref(item: InboxItem): string | null {
-  const existing = prHref(item);
-  if (existing) return existing;
-  const number = /^\d+$/.exec(item.refs.pr?.trim() ?? "")?.[0];
-  const repo = githubRepo(item);
-  return number && repo ? `https://github.com/${repo}/pull/${number}` : null;
+  return prHref(item);
 }
 
 function refPrefixIsVisible(prefix: string, item: InboxItem): boolean {
@@ -1965,14 +1962,7 @@ export function Inbox({
             </Section>
 
             <Section title="Message" card={false}>
-              <div className="rounded-md border border-(--border) bg-(--surface-0) px-3 py-2 text-[12px] leading-relaxed">
-                <div className="font-medium text-(--text)">{sel.title}</div>
-                {sel.body && (
-                  <div className="mt-1.5 whitespace-pre-wrap break-words text-(--text-dim)">
-                    {sel.body}
-                  </div>
-                )}
-              </div>
+              <InboxMessageCard title={sel.title} body={sel.body} />
             </Section>
 
             {sel.decision && (
@@ -2053,7 +2043,7 @@ export function Inbox({
                   />
                 )}
                 {sel.refs.pr && <KV k="pr" v={<PrRef item={sel} />} />}
-                {sel.refs.repo && <KV k="repo" v={sel.refs.repo} />}
+                {sel.refs.repo && <KV k="repo" v={<RepoRef item={sel} />} />}
               </Section>
             )}
 
@@ -2230,6 +2220,18 @@ function ResolveReasonField({
         />
       </label>
     </div>
+  );
+}
+
+function RepoRef({ item }: { item: InboxItem }) {
+  const repo = item.refs.repo!;
+  const github = githubRepo(item);
+  return github ? (
+    <JumpLink href={`https://github.com/${github}`} title="Open repository">
+      {repo}
+    </JumpLink>
+  ) : (
+    <span className="mono">{repo}</span>
   );
 }
 
