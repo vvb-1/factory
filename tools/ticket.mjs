@@ -74,7 +74,11 @@ import {
   claimLabels,
   appendIssueDetail,
 } from "../lib/control-plane/index.mjs";
-import { releaseLabels } from "../lib/control-plane/labels.mjs";
+import {
+  clampGithubBody,
+  releaseLabels,
+  stampRun,
+} from "../lib/control-plane/labels.mjs";
 import {
   parseOwnedPaths,
   ownedPathsClosureGaps,
@@ -141,15 +145,46 @@ export async function retryControlPlaneMutation(
   throw new Error("unreachable: control-plane mutation retry loop exhausted");
 }
 
-function commentBodyMatches(body, expected) {
-  if (body === expected) return true;
-  const runId = process.env.FACTORY_RUN_ID;
-  return (
-    process.env.FACTORY_COMMENT_ATTRIBUTION === "1" &&
-    Boolean(runId) &&
-    !expected.includes(`run:${runId}`) &&
-    body === `${expected}\n\nrun:${runId}`
-  );
+function commentBodyMatches(comment, expected, actor) {
+  const body = String(comment?.body ?? "");
+  const landedBodies = new Set([
+    expected,
+    stampRun(expected),
+    clampGithubBody(expected),
+    clampGithubBody(stampRun(expected)),
+  ]);
+  if (!landedBodies.has(body)) return false;
+
+  // Author metadata REFINES the body match; it never vetoes it. Only a
+  // positive mismatch — we know who we write as, the timeline says someone
+  // else wrote this — is evidence that our own write never landed. Treating
+  // "no identity available" as a mismatch would be strictly worse than not
+  // checking at all: control planes that expose no actor (linear, memory, or a
+  // github adapter whose identity read failed) still populate `comment.user`,
+  // so every landed comment would be judged foreign and double-posted.
+  const authorId = comment?.user?.id == null ? null : String(comment.user.id);
+  const actorId = actor?.id == null ? null : String(actor.id);
+  if (!authorId || !actorId) return true;
+  return authorId === actorId;
+}
+
+/**
+ * The identity the control plane writes as, or null when it has none to give.
+ *
+ * Adapters may expose `actor` as a value (tests, fakes) or as an async verb
+ * that costs a request (github's viewer read). A failure resolves to null,
+ * which `commentBodyMatches` treats as "no refinement available" rather than
+ * as a mismatch — an identity lookup outage must not start duplicating
+ * comments.
+ */
+async function resolveCommentActor(cp) {
+  try {
+    const actor =
+      typeof cp?.actor === "function" ? await cp.actor() : cp?.actor;
+    return actor ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -158,13 +193,22 @@ function commentBodyMatches(body, expected) {
  * Comment creation is not idempotent: blindly replaying a request after its
  * response timed out can create a duplicate timeline entry. The check runs
  * only on the retry path, so ordinary comments remain one write.
+ *
+ * This is also where ticket item (c) — "a replayed transition must not re-post
+ * its rationale" — is satisfied: `transitionThenComment` and `triageTicket`
+ * retry the transition and the comment as two separate mutations, and their
+ * comment half is always routed through this function, so a transition replay
+ * cannot reach `cp.comment` without first passing the landed-check.
  */
 export async function commentWithRetry(cp, key, body) {
   let retrying = false;
   return retryControlPlaneMutation(cp, async () => {
     if (retrying) {
-      const comments = await getCommentsWithRetry(cp, key);
-      if (comments.some((comment) => commentBodyMatches(comment.body, body)))
+      const [comments, actor] = await Promise.all([
+        getCommentsWithRetry(cp, key),
+        resolveCommentActor(cp),
+      ]);
+      if (comments.some((comment) => commentBodyMatches(comment, body, actor)))
         return;
     }
     retrying = true;
