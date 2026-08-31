@@ -1,0 +1,29 @@
+{
+  "id": "celld-smoke",
+  "version": 1,
+  "prompt": "agents/celld-smoke.md",
+  "input_schema": "schemas/celld-smoke.input.json",
+  "output_schema": "schemas/celld-smoke.output.json",
+  "output_contract": "factory.celld-smoke/v1",
+  "model_tier": "strong",
+  "effort": "high",
+  "workspace": { "type": "ephemeral", "retainOnFailure": true },
+  "capabilities": {
+    "filesystem": "workspace-only",
+    "services": [],
+    "cells": [
+      {
+        "binding": "GENERIC_CELL",
+        "access": "read-write",
+        "description": "Durable cell storage via celld REST/RPC"
+      }
+    ]
+  },
+  "limits": { "timeout_seconds": 120, "attempts": 1 },
+  "mutating": false,
+  "pins": {
+    "agents/celld-smoke.md": "sha256:627867cbed98dad67bb826a442133944c79df92bd1043d146907f432bfcaa8d0",
+    "schemas/celld-smoke.input.json": "sha256:92a26727efcdaae87b169fb8869783f53c30f42929db5619746e6a614b5f700e",
+    "schemas/celld-smoke.output.json": "sha256:f4c3930dff0665c11e91a3fae3a72d1762e360316f2aaee27369f8116416a90f"
+  }
+}
