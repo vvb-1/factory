@@ -67,11 +67,42 @@ export {
 } from "./cli/supervise.mjs";
 export { COMMAND_NAMES, COMMANDS } from "./cli/commands.mjs";
 
-async function callControl(method, pathname, body) {
-  // Keep these top-level verbs on the same resolved target as COMMANDS. The
-  // factory --host/--remote flags arrive as FACTORY_EVENT_HOST, which the
+let controlClient;
+
+/**
+ * A CLI-side usage error, not a transport failure.
+ *
+ * `withClient` blames the control API for any error carrying no `status`, so a
+ * bare `new Error("usage: …")` thrown out of a command prints "control API not
+ * reachable" even with serve up (#2197). Tagging the error keeps withClient on
+ * its `fail(err.message)` path.
+ */
+function usageError(message) {
+  const error = new Error(message);
+  error.status = "usage";
+  return error;
+}
+
+/** Resolve the control target once so every leg of `decide` uses one client. */
+function getControlClient() {
+  // The factory --host/--remote flags arrive as FACTORY_EVENT_HOST, which the
   // client resolver validates before any bearer is sent.
-  const client = apiClient({ resolveTarget: true });
+  return (controlClient ??= apiClient({ resolveTarget: true }));
+}
+
+/**
+ * Run one control-API command under withClient's connection diagnostics, reusing
+ * the client withClient already resolved instead of building a second one.
+ */
+function withControlClient(run) {
+  return withClient((client) => {
+    controlClient = client;
+    return run();
+  });
+}
+
+async function callControl(method, pathname, body) {
+  const client = getControlClient();
   const res = await fetch(`${client.baseUrl}${pathname}`, {
     method,
     headers: {
@@ -128,7 +159,7 @@ export async function memosCommand(args = []) {
   }
   const [subjectType, subjectId] = positional;
   if (!subjectType || !subjectId) {
-    throw new Error("usage: memos <subjectType> <id> [--kind k] [--all]");
+    throw usageError("usage: memos <subjectType> <id> [--kind k] [--all]");
   }
   const query = new URLSearchParams({
     subjectType,
@@ -160,25 +191,30 @@ export async function memosCommand(args = []) {
 
 const INBOX_RESOLVE_USAGE = 'usage: inbox resolve <item-id> --reason "<text>"';
 
-/** `inbox resolve <item-id> --reason "<text>"` — POST /inbox/:id/resolve (AC3). */
-export async function inboxResolveCommand(args = []) {
+function parseInboxResolveArgs(args = []) {
   const [itemId, ...rest] = args;
-  if (!itemId) throw new Error(INBOX_RESOLVE_USAGE);
+  if (!itemId) throw usageError(INBOX_RESOLVE_USAGE);
   let reason;
   for (let index = 0; index < rest.length; index++) {
     if (rest[index] !== "--reason" || rest[index + 1] === undefined) {
-      throw new Error(`unexpected inbox resolve argument: ${rest[index]}`);
+      throw usageError(`unexpected inbox resolve argument: ${rest[index]}`);
     }
     reason = rest[++index];
   }
-  if (!reason || !reason.trim()) throw new Error(INBOX_RESOLVE_USAGE);
+  if (!reason || !reason.trim()) throw usageError(INBOX_RESOLVE_USAGE);
+  return { itemId, reason: reason.trim() };
+}
+
+/** `inbox resolve <item-id> --reason "<text>"` — POST /inbox/:id/resolve (AC3). */
+export async function inboxResolveCommand(args = []) {
+  const { itemId, reason } = parseInboxResolveArgs(args);
   const result = await callControl(
     "POST",
     `/inbox/${encodeURIComponent(itemId)}/resolve`,
-    { reason: reason.trim() },
+    { reason },
   );
   console.log(
-    `${result.item.id}: resolved (${result.item.resolvedReason ?? reason.trim()})`,
+    `${result.item.id}: resolved (${result.item.resolvedReason ?? reason})`,
   );
   return result;
 }
@@ -188,7 +224,7 @@ export async function inboxCommand(args = []) {
   const [sub, ...rest] = args;
   if (sub === "resolve") return inboxResolveCommand(rest);
   if (sub !== undefined) {
-    throw new Error(`unknown inbox subcommand: ${sub}`);
+    throw usageError(`unknown inbox subcommand: ${sub}`);
   }
   const body = await callControl("GET", "/inbox?status=open");
   if (body.items.length === 0) {
@@ -218,30 +254,25 @@ function parseDecisionField(field, raw) {
 }
 
 export async function decideCommand(args) {
-  const [itemId, optionId, ...rest] = args;
-  if (!itemId || !optionId) {
-    throw new Error(
-      "usage: decide <item-id> <option-id> [--field key=value]...",
-    );
-  }
+  const { itemId, optionId, rest } = parseDecideArgs(args);
   const detail = await callControl(
     "GET",
     `/inbox/${encodeURIComponent(itemId)}`,
   );
   if (!detail.item.decision)
-    throw new Error(`inbox item ${itemId} has no decision`);
+    throw usageError(`inbox item ${itemId} has no decision`);
   const declared = new Map(
     (detail.item.decision.fields ?? []).map((field) => [field.id, field]),
   );
   const fields = {};
   for (let index = 0; index < rest.length; index++) {
     if (rest[index] !== "--field" || !rest[index + 1]) {
-      throw new Error(`unexpected decide argument: ${rest[index]}`);
+      throw usageError(`unexpected decide argument: ${rest[index]}`);
     }
     const assignment = rest[++index];
     const equals = assignment.indexOf("=");
     if (equals <= 0)
-      throw new Error(`--field expects key=value, got ${assignment}`);
+      throw usageError(`--field expects key=value, got ${assignment}`);
     const key = assignment.slice(0, equals);
     const raw = assignment.slice(equals + 1);
     fields[key] = parseDecisionField(declared.get(key), raw);
@@ -266,6 +297,16 @@ export async function decideCommand(args) {
     );
   }
   return result;
+}
+
+function parseDecideArgs(args = []) {
+  const [itemId, optionId, ...rest] = args;
+  if (!itemId || !optionId) {
+    throw usageError(
+      "usage: decide <item-id> <option-id> [--field key=value]...",
+    );
+  }
+  return { itemId, optionId, rest };
 }
 
 /**
@@ -474,9 +515,13 @@ export async function dispatch(argv = process.argv.slice(2)) {
     return;
   }
   if (command === "init") return initCommand(args);
-  if (command === "decide") return decideCommand(args);
-  if (command === "inbox") return inboxCommand(args);
-  if (command === "memos") return memosCommand(args);
+  // approve, reject and inject reach the control API through COMMANDS below;
+  // each of those wraps its own withClient(), so apiClient({resolveTarget:true})
+  // — and with it the loopback pin and the plaintext-bearer refusal — applies to
+  // them exactly as it does here.
+  if (command === "decide") return withControlClient(() => decideCommand(args));
+  if (command === "inbox") return withControlClient(() => inboxCommand(args));
+  if (command === "memos") return withControlClient(() => memosCommand(args));
   if (command === "extensions") return extensionsCommand(args);
   if (command === "pack") return packCommand(args);
   if (command === "artifacts") return artifactsCommand(args);
