@@ -45,6 +45,7 @@ import { HEARTBEAT_STALE_MS } from "../event-runtime/lib/workers.mjs";
 import { ticketSlug } from "../lib/ticket-slug.mjs";
 import {
   assertLinearNetworkAllowed,
+  LINEAR_TELEMETRY,
   parseRateLimitReset,
 } from "../tools/ticket.mjs";
 
@@ -211,10 +212,20 @@ export async function gql(
       : retriesOrOptions instanceof AbortSignal
         ? { retries: 5, signal: retriesOrOptions }
         : (retriesOrOptions ?? {});
-  const { retries = 5, signal } = options;
+  const {
+    retries = 5,
+    signal,
+    caller = "orchestrator/reaper",
+    ticket = null,
+  } = options;
   // This must precede credential loading: offline/test invocations should
   // explain the deterministic network refusal, not report a missing key.
   assertLinearNetworkAllowed(LINEAR_API_URL);
+  // The global `fetch` hook is deliberately NOT installed here. Patching a
+  // process-wide global from the per-request path would put every serve tick
+  // one import away from a swapped `fetch`; entry points install it once
+  // (tools/ticket.mjs, orchestrator/doctor.mjs, event-runtime/lib/linear.mjs,
+  // linearControlPlane) and this transport only annotates the request.
   const apiKey = getApiKey();
   const headers = {
     "Content-Type": "application/json",
@@ -231,6 +242,7 @@ export async function gql(
         headers,
         body,
         signal,
+        [LINEAR_TELEMETRY]: { caller, ticket },
       });
 
       if (!res.ok) {
