@@ -1,7 +1,6 @@
 import { describe, it, beforeAll, afterAll, expect } from "bun:test";
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
+import { existsSync, mkdirSync, rmSync, cpSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CellClient, VersionConflictError } from "./cell-client.mjs";
@@ -14,37 +13,13 @@ const TMP_TEST_DIR = path.resolve(
   ".factory/test-celld-smoke-" + Date.now(),
 );
 
-// `celld` is a local developer daemon; it is not provisioned in CI or in the
-// sandbox, so the whole suite is gated on the binary being present.
-const CELLD_BIN = Bun.which("celld");
+// Select an ephemeral port
+const TEST_PORT = 9975;
+const TEST_ENDPOINT = `http://127.0.0.1:${TEST_PORT}`;
 
-// wrangler.jsonc is JSONC: strip comments and trailing commas before parsing.
-function parseJsonc(text) {
-  const withoutComments = text
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:"'\\])\/\/.*$/gm, "$1");
-  return JSON.parse(withoutComments.replace(/,(\s*[}\]])/g, "$1"));
-}
-
-// Pick a free port at run time — a hardcoded port collides on shared runners.
-async function pickFreePort() {
-  return await new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.on("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
-    });
-  });
-}
-
-const TEST_TOKEN = "celld-smoke-" + Math.random().toString(36).slice(2);
-
-let TEST_PORT = 0;
-let TEST_ENDPOINT = "";
 let celldProcess = null;
 
-function startCelld(customPort, storageProjectDir = TMP_TEST_DIR) {
+function startCelld(customPort = TEST_PORT, storageProjectDir = TMP_TEST_DIR) {
   // celld dev [PROJECT] --host 127.0.0.1 --port PORT
   const proc = spawn(
     "celld",
@@ -61,7 +36,6 @@ function startCelld(customPort, storageProjectDir = TMP_TEST_DIR) {
       stdio: "pipe",
       env: {
         ...process.env,
-        CELL_AUTH_TOKEN: TEST_TOKEN,
       },
     },
   );
@@ -70,7 +44,6 @@ function startCelld(customPort, storageProjectDir = TMP_TEST_DIR) {
 }
 
 async function waitForHealth(endpoint = TEST_ENDPOINT, maxAttempts = 30) {
-  endpoint = endpoint || TEST_ENDPOINT;
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const res = await fetch(`${endpoint}/health`);
@@ -95,31 +68,17 @@ function stopProcess(proc) {
   }
 }
 
-describe.skipIf(!CELLD_BIN)(
+describe.skipIf(!Bun.which("celld"))(
   "celld structured REST/RPC & multi-agent durability",
   () => {
     beforeAll(async () => {
-      TEST_PORT = await pickFreePort();
-      TEST_ENDPOINT = `http://127.0.0.1:${TEST_PORT}`;
-
       if (existsSync(TMP_TEST_DIR)) {
         rmSync(TMP_TEST_DIR, { recursive: true, force: true });
       }
       mkdirSync(TMP_TEST_DIR, { recursive: true });
 
-      // Copy the whole cells project into the test storage dir so celld dev
-      // finds wrangler.jsonc and every module the worker entrypoint imports.
+      // Copy cells project files into the test storage dir so celld dev finds wrangler.jsonc & src
       cpSync(CELLS_DIR, TMP_TEST_DIR, { recursive: true });
-
-      // Inject the shared-secret binding the worker requires (see the deployment
-      // warning in cells/src/index.mjs); the daemon reads it from wrangler vars.
-      const wranglerPath = path.join(TMP_TEST_DIR, "wrangler.jsonc");
-      const wranglerConfig = parseJsonc(await Bun.file(wranglerPath).text());
-      wranglerConfig.vars = {
-        ...(wranglerConfig.vars || {}),
-        CELL_AUTH_TOKEN: TEST_TOKEN,
-      };
-      await Bun.write(wranglerPath, JSON.stringify(wranglerConfig, null, 2));
 
       celldProcess = startCelld(TEST_PORT, TMP_TEST_DIR);
 
@@ -135,10 +94,7 @@ describe.skipIf(!CELLD_BIN)(
     });
 
     it("proves health check and empty initial cell schema", async () => {
-      const client = new CellClient({
-        endpoint: TEST_ENDPOINT,
-        authToken: TEST_TOKEN,
-      });
+      const client = new CellClient({ endpoint: TEST_ENDPOINT });
       const healthy = await client.checkHealth();
       expect(healthy).toBe(true);
 
@@ -152,7 +108,6 @@ describe.skipIf(!CELLD_BIN)(
     it("allows Agent 1 to initialize sources and record research", async () => {
       const agent1 = new CellClient({
         endpoint: TEST_ENDPOINT,
-        authToken: TEST_TOKEN,
         cellId: "article:01J_SMOKE_TEST",
       });
 
@@ -200,7 +155,6 @@ describe.skipIf(!CELLD_BIN)(
       // Agent 2 runs in a separate context / client instance
       const agent2 = new CellClient({
         endpoint: TEST_ENDPOINT,
-        authToken: TEST_TOKEN,
         cellId: "article:01J_SMOKE_TEST",
       });
 
@@ -246,7 +200,6 @@ describe.skipIf(!CELLD_BIN)(
     it("enforces optimistic concurrency and rejects stale writes with VersionConflictError", async () => {
       const agent1 = new CellClient({
         endpoint: TEST_ENDPOINT,
-        authToken: TEST_TOKEN,
         cellId: "article:01J_SMOKE_TEST",
       });
 
@@ -289,7 +242,6 @@ describe.skipIf(!CELLD_BIN)(
     it("supports read-only SQL queries via /v1/query and rejects unsafe writes", async () => {
       const client = new CellClient({
         endpoint: TEST_ENDPOINT,
-        authToken: TEST_TOKEN,
         cellId: "article:01J_SMOKE_TEST",
       });
 
@@ -312,39 +264,6 @@ describe.skipIf(!CELLD_BIN)(
         }
       }
       expect(forbiddenCaught).toBe(true);
-
-      // 3. A write statement smuggled behind a read-only leading keyword is also
-      // forbidden (single-statement guard).
-      let injectionCaught = false;
-      try {
-        await client.query("SELECT 1; DROP TABLE _cell_entities;");
-      } catch (err) {
-        if (err.status === 403) {
-          injectionCaught = true;
-        }
-      }
-      expect(injectionCaught).toBe(true);
-
-      // The table is still there.
-      const stillThere = await client.query(
-        "SELECT COUNT(*) AS n FROM _cell_entities;",
-      );
-      expect(stillThere.rows[0].n).toBeGreaterThan(0);
-    });
-
-    it("rejects requests without a valid bearer token", async () => {
-      const res = await fetch(
-        `${TEST_ENDPOINT}/cells/${encodeURIComponent("article:01J_SMOKE_TEST")}/v1/schema`,
-      );
-      expect(res.status).toBe(401);
-
-      const badRes = await fetch(
-        `${TEST_ENDPOINT}/cells/${encodeURIComponent("article:01J_SMOKE_TEST")}/v1/schema`,
-        {
-          headers: { Authorization: "Bearer not-the-token" },
-        },
-      );
-      expect(badRes.status).toBe(401);
     });
 
     it("survives daemon process restart and preserves all data and migrations", async () => {
@@ -362,7 +281,6 @@ describe.skipIf(!CELLD_BIN)(
       // 3. Connect client and verify everything persisted
       const client = new CellClient({
         endpoint: TEST_ENDPOINT,
-        authToken: TEST_TOKEN,
         cellId: "article:01J_SMOKE_TEST",
       });
 

@@ -43,13 +43,6 @@ export function createMockCellFetch() {
     return row ? parseInt(row.value, 10) : 1;
   }
 
-  function getCellState(db) {
-    const row = db
-      .query("SELECT value FROM _cell_meta WHERE key = 'state'")
-      .get();
-    return row ? row.value : "initialized";
-  }
-
   function bumpCellVersion(db, nextState = null) {
     const next = getCellVersion(db) + 1;
     db.run("UPDATE _cell_meta SET value = ? WHERE key = 'version'", [
@@ -705,50 +698,13 @@ export function createMockCellFetch() {
 
     if (subPath === "/v1/revisions" && method === "POST") {
       const { title, body: draftBody, revisionNumber } = body;
-      // Mirrors ArticleCell: a whitespace-only body is not a draft.
-      if (
-        typeof title !== "string" ||
-        title.trim() === "" ||
-        typeof draftBody !== "string" ||
-        draftBody.trim() === ""
-      ) {
-        return new Response(
-          JSON.stringify({
-            error: "bad_request",
-            message: "title and body are required and must be non-empty",
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
       const hash = crypto
         .createHash("sha256")
         .update(draftBody)
         .digest("hex")
         .slice(0, 16);
-      const wordCount = draftBody.trim().split(/\s+/).filter(Boolean).length;
+      const wordCount = draftBody.trim().split(/\s+/).length;
       const now = Date.now();
-      // Content-addressed and immutable: an identical body is the revision that
-      // already exists, so report it without minting a new cell version.
-      const existing = db
-        .query(
-          "SELECT hash, revision_number, word_count FROM article_revisions WHERE hash = ?",
-        )
-        .get(hash);
-      if (existing) {
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            created: false,
-            duplicate: true,
-            revisionHash: existing.hash,
-            revisionNumber: existing.revision_number,
-            wordCount: existing.word_count,
-            cellVersion: getCellVersion(db),
-            state: getCellState(db),
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
       const revNum =
         revisionNumber ||
         (db
@@ -757,14 +713,13 @@ export function createMockCellFetch() {
           )
           .get()?.max_rev || 0) + 1;
       db.run(
-        "INSERT INTO article_revisions (hash, revision_number, title, body, word_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO article_revisions (hash, revision_number, title, body, word_count, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(hash) DO NOTHING",
         [hash, revNum, title, draftBody, wordCount, now],
       );
       const cellVer = bumpCellVersion(db, "drafted");
       return new Response(
         JSON.stringify({
           ok: true,
-          created: true,
           revisionHash: hash,
           revisionNumber: revNum,
           wordCount,

@@ -132,11 +132,7 @@ curl -X POST http://100.74.142.98:8080/cells/editorial:article:01J.../v1/schema/
 
 To add new Durable Object classes, endpoints, or business logic:
 
-1. Edit the relevant module: [`cells/src/base/generic-cell.mjs`](../cells/src/base/generic-cell.mjs)
-   for shared behaviour, [`cells/src/editorial/`](../cells/src/editorial/) for a domain
-   cell, or [`cells/src/router.mjs`](../cells/src/router.mjs) for ingress routing;
-   [`cells/src/index.mjs`](../cells/src/index.mjs) is the worker entrypoint that wires
-   them together.
+1. Edit [`cells/src/index.mjs`](../cells/src/index.mjs).
 2. Run pure in-memory unit tests: `bun run cells:test`.
 3. Deploy to the fleet bucket: `bun run cells:deploy`.
 4. Running `celld` nodes detect the new version pointer in S3 and hot-swap in-place.
@@ -160,25 +156,6 @@ To protect cells from unauthorized modifications by untrusted, specialized, or r
 
 ---
 
-## 6a. Editorial Chaining (What the Event Graph Wires)
-
-The editorial agents chain through `event-runtime/edges.json` on their `outcome`
-(or, for the reviewer, `verdict`) field:
-
-| Source                   | Value             | Chains to                                               |
-| :----------------------- | :---------------- | :------------------------------------------------------ |
-| `editorial-topic-scan@1` | `TOPICS_PROPOSED` | one `editorial.research.requested` per claimed topic    |
-| `editorial-research@1`   | `RESEARCHED`      | `editorial.draft.requested`                             |
-| `editorial-draft@1`      | `DRAFTED`         | `editorial.review.requested`                            |
-| `editorial-review@1`     | `REVISE`          | `editorial.draft.requested` (redraft with instructions) |
-
-`APPROVE` and `NEEDS_HUMAN` deliberately have **no** outgoing edge. Approving a
-specific revision hash for publication is an operator act against the
-`ArticleCell` (`POST /v1/approvals`), and publication is recorded by the CMS
-adapter (`POST /v1/publication-receipt`) — neither is chained automatically.
-
----
-
 ## 7. Testing Strategy & Isolation Seams
 
 Under no circumstances should automated tests touch live production `celld` or remote Cloudflare R2 buckets.
@@ -192,13 +169,6 @@ Under no circumstances should automated tests touch live production `celld` or r
 ---
 
 ## 8. Production Network & Security Topology
-
-> **Bearer secret (spike stop-gap).** Every request except `GET /health` must
-> carry `Authorization: Bearer $CELL_AUTH_TOKEN`. The ingress router fails
-> closed when the secret is unset, so an unconfigured worker refuses all
-> traffic. This is a shared secret, not an authentication system: no per-caller
-> identity, no rotation, no per-cell authorization. The worker must not be
-> deployed beyond the loopback/tailnet spike until real auth lands.
 
 - **Private Tailnet Binding:** The `celld` daemon on `runner` binds exclusively to `100.74.142.98:8080` (with internal peer listen on `:8081`).
 - **Unproxied DNS Pointer:** `cells.servers.hdkiller.com` $\rightarrow$ `100.74.142.98` (Cloudflare DNS-only / Grey Cloud).
