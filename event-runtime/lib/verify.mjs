@@ -21,6 +21,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -1716,19 +1717,24 @@ export function verifyResult({
   registry,
   workspaceDir,
   attempt,
+  attemptStartedAt = null,
   journalHead = null,
   extraArtifacts = [],
   worktreeRecord = null,
+  checkoutPath = null,
+  onTrace = null,
   verifyTimeoutMs = repoVerifyTimeoutMs(),
   runHandoffCommandFn = runHandoffCommand,
   dependencyInstaller = defaultDependencyInstaller,
 }) {
-  let raw;
-  try {
-    raw = readFileSync(path.join(workspaceDir, "result.json"), "utf8");
-  } catch {
-    throw new ContractViolation(["missing_result"]);
-  }
+  const raw = readResultFile({
+    workspaceDir,
+    // The stray probe only needs the physical checkout. Callers that suppress
+    // worktree command verification still pass it explicitly.
+    checkout: checkoutPath ?? worktreeRecord?.path ?? null,
+    attemptStartedAt,
+    onTrace,
+  });
 
   let candidate;
   try {
@@ -1758,6 +1764,74 @@ export function verifyResult({
     runHandoffCommandFn,
     dependencyInstaller,
   });
+}
+
+/**
+ * Result authors work in `workspaceDir/repo`, which may be a symlink to the
+ * physical checkout. Recover the two historical stray locations only when
+ * their mtime proves they belong to this attempt; an old sibling ticket's
+ * envelope is never a valid substitute for this run's result.
+ */
+function readResultFile({ workspaceDir, checkout, attemptStartedAt, onTrace }) {
+  const resultPath = path.join(workspaceDir, "result.json");
+  try {
+    return readFileSync(resultPath, "utf8");
+  } catch {
+    // The workspace result is deliberately the only unconditional location.
+  }
+
+  const candidates = [];
+  if (checkout) {
+    candidates.push(path.join(checkout, "result.json"));
+    try {
+      candidates.push(path.join(realpathSync(checkout), "..", "result.json"));
+    } catch {
+      // The normal missing-result path will report the primary result path.
+    }
+  }
+
+  const startMs = Date.parse(attemptStartedAt);
+  const nowMs = Date.now();
+  const stalePaths = [];
+  for (const candidatePath of [...new Set(candidates)]) {
+    let stat;
+    try {
+      stat = statSync(candidatePath);
+    } catch {
+      continue;
+    }
+    const mtimeMs = stat.mtimeMs;
+    if (!Number.isFinite(startMs) || mtimeMs < startMs || mtimeMs > nowMs) {
+      stalePaths.push({ path: candidatePath, mtime: stat.mtime.toISOString() });
+      continue;
+    }
+    let raw;
+    try {
+      raw = readFileSync(candidatePath, "utf8");
+    } catch {
+      // A concurrent cleanup can remove a candidate between stat and read.
+      continue;
+    }
+    try {
+      JSON.parse(raw);
+    } catch {
+      // Adoption destroys the candidate, so only well-formed JSON is adopted:
+      // a truncated or foreign file is left in place for the next candidate
+      // (and for the operator) rather than deleted unread.
+      continue;
+    }
+    rmSync(candidatePath, { force: true });
+    onTrace?.("lifecycle", {
+      note: "result_recovered_from_stray_path",
+      path: candidatePath,
+    });
+    return raw;
+  }
+
+  const err = new ContractViolation(["missing_result"]);
+  if (stalePaths.length > 0) err.missingResultPaths = stalePaths;
+  if (candidates.length > 0) err.missingResultFallbacks = candidates;
+  throw err;
 }
 
 /**
