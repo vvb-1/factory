@@ -1800,6 +1800,18 @@ function readResultFile({ workspaceDir, checkout, attemptStartedAt, onTrace }) {
     } catch {
       continue;
     }
+    // A checkout can legitimately own a root result.json. Never adopt or
+    // delete that repository file; only untracked checkout output is a stray.
+    // Checked after the existence probe so git is not spawned for a candidate
+    // that does not exist.
+    if (
+      checkout &&
+      candidatePath === path.join(checkout, "result.json") &&
+      checkoutResultIsTracked(checkout)
+    ) {
+      stalePaths.push({ path: candidatePath, skipped: "tracked_in_checkout" });
+      continue;
+    }
     const mtimeMs = stat.mtimeMs;
     if (!Number.isFinite(startMs) || mtimeMs < startMs || mtimeMs > nowMs) {
       stalePaths.push({ path: candidatePath, mtime: stat.mtime.toISOString() });
@@ -1832,6 +1844,23 @@ function readResultFile({ workspaceDir, checkout, attemptStartedAt, onTrace }) {
   if (stalePaths.length > 0) err.missingResultPaths = stalePaths;
   if (candidates.length > 0) err.missingResultFallbacks = candidates;
   throw err;
+}
+
+function checkoutResultIsTracked(checkout) {
+  try {
+    execFileSync(
+      "git",
+      ["-C", checkout, "ls-files", "--error-unmatch", "result.json"],
+      { stdio: "ignore", timeout: 60_000 },
+    );
+    return true;
+  } catch (err) {
+    // Exit 1 is the definitive "not tracked" answer. Anything else (not a
+    // repository, dubious ownership, a locked index, no git on PATH, timeout)
+    // is ambiguous — fail closed and treat the file as tracked so a stray
+    // git failure can never make us adopt and delete a repository file.
+    return err?.status !== 1;
+  }
 }
 
 /**
