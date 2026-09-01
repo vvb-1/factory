@@ -462,6 +462,55 @@ function hasInFlightAgent(db, agent, { github, pr, headSha }) {
   return Boolean(proposal);
 }
 
+const MERGE_FIX_REFUSAL_COOLDOWN_MS = 15 * 60_000;
+const MERGE_FIX_DURABLE_REFUSAL_COOLDOWN_MS = 6 * 60 * 60_000;
+const DURABLE_MERGE_FIX_REFUSALS = new Set([
+  "merge_fix_ticket_escalated",
+  "merge_fix_ticket_security",
+]);
+
+/**
+ * A terminal merge-fix is normally safe to retry, but retrying the exact same
+ * refusal every scan turns a tracker outage or an escalated ticket into a
+ * dispatch storm. Keep the suppression scoped to the finding and pinned head:
+ * a new commit is fresh evidence and remains eligible for a new correction.
+ *
+ * Any refusal earns at least the transient cooldown — a per-code allowlist
+ * silently misses every reason code added later. Refusals that need a human to
+ * clear a blocker get a much longer cooldown, but never permanent suppression:
+ * the blocker can be lifted without a new push, and the scan must eventually
+ * re-notice that.
+ *
+ * Returns the suppressing reason code, or null when the item is dispatchable.
+ */
+function refusedMergeFixSuppressed(db, item, { github, now }) {
+  if (!db) return null;
+  const refused = db
+    .query(
+      `SELECT a.reason_code AS reasonCode, a.finished_at AS finishedAt
+         FROM runs r
+         JOIN attempts a ON a.run_id = r.run_id AND a.attempt = r.attempts
+        WHERE r.state = 'REFUSED'
+          AND a.terminal_state = 'REFUSED'
+          AND json_extract(r.spec_json, '$.agent') = 'merge-fix@1'
+          AND json_extract(r.spec_json, '$.input.pr') = ?
+          AND json_extract(r.spec_json, '$.input.headSha') = ?
+          AND json_extract(r.spec_json, '$.input.github') = ?
+          AND json_extract(r.spec_json, '$.input.findingHash') = ?
+        ORDER BY a.finished_at DESC, r.rowid DESC
+        LIMIT 1`,
+    )
+    .get(item.pr, item.headSha, github, item.findingHash);
+  if (!refused?.reasonCode) return null;
+  const cooldownMs = DURABLE_MERGE_FIX_REFUSALS.has(refused.reasonCode)
+    ? MERGE_FIX_DURABLE_REFUSAL_COOLDOWN_MS
+    : MERGE_FIX_REFUSAL_COOLDOWN_MS;
+  const finishedAt = Date.parse(refused.finishedAt ?? "");
+  if (!Number.isFinite(finishedAt)) return null;
+  if (Number(now) - finishedAt >= cooldownMs) return null;
+  return refused.reasonCode;
+}
+
 /**
  * Deterministic enumerator. Does not review diffs — it classifies live PRs
  * against the ledger and emits reviews for misses (or every selected PR).
@@ -663,7 +712,13 @@ function assemble({
         continue;
       }
       const item = rebaseFixItem(pr, hit, { forge, github });
-      if (item) fix.push(item);
+      if (!item) continue;
+      const suppressed = refusedMergeFixSuppressed(db, item, { github, now });
+      if (suppressed) {
+        rebaseSkipped.push({ pr: pr.number, reason: `refused_${suppressed}` });
+        continue;
+      }
+      fix.push(item);
       continue;
     }
     if (hit.verdict === "MERGE") mergeHits.push(hit);
