@@ -1061,13 +1061,13 @@ export function Chain({
                 )}
               </Section>
               <Section id="chain-envelope" title="Envelope">
-                {selectedEnvelope?.malformed === true ? (
+                {selectedEnvelope?.__malformed === true ? (
+                  /* No inline escape hatch here: the header "Open in Events" button already covers navigating to the raw event. */
                   <div
                     role="status"
                     className="text-[12px] text-(--text-faint)"
                   >
-                    Stored envelope is malformed; its raw envelope is
-                    unavailable.
+                    Stored envelope is malformed; its raw form cannot be shown.
                   </div>
                 ) : selectedEnvelope ? (
                   <Suspense
