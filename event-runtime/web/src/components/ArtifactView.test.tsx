@@ -4,8 +4,19 @@ import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { ArtifactView as ArtifactViewDoc } from "../types";
-import { ARTIFACT_RAW_KEY, ArtifactPanel, ArtifactView } from "./ArtifactView";
+import {
+  ARTIFACT_RAW_KEY,
+  ArtifactPanel,
+  ArtifactView,
+  EventPanel,
+} from "./ArtifactView";
 import { inputViewOf } from "../lib/artifactView";
+import {
+  createAgentsFixture,
+  createRunDetailFixture,
+  renderWithClient,
+  restoreApi,
+} from "../test-render";
 
 const AGENTS = path.resolve(import.meta.dir, "../../../agents");
 const readView = (name: string): ArtifactViewDoc =>
@@ -325,6 +336,181 @@ describe("input view (WM-897)", () => {
     expect(r2.queryByText(/WM-108/)).toBeNull();
     expect(r2.queryByText(/already-queued/)).toBeNull();
     expect(r2.getByText("Input")).toBeTruthy();
+  });
+});
+
+describe("EventPanel", () => {
+  test("renders a requested input view and Raw round-trips the full envelope", () => {
+    const dispatchView = readView("dispatch");
+    const r = renderWithClient(
+      <EventPanel
+        envelope={{
+          schemaVersion: "factory.event/v1",
+          eventId: "evt_dispatch",
+          type: "factory.work.requested",
+          source: "operator",
+          subject: "factory",
+          occurredAt: "2026-09-02T12:00:00.000Z",
+          correlationId: "evt_dispatch",
+          payload: { repo: "factory", ticket: "WM-856" },
+        }}
+        agents={
+          createAgentsFixture({
+            agents: [
+              {
+                ref: "dispatch@1",
+                outputView: dispatchView,
+                eventTypes: [{ type: "factory.work.requested" }],
+              },
+            ] as any,
+          }).agents
+        }
+      />,
+    );
+    expect(r.getByText("Input")).toBeTruthy();
+    expect(r.getByRole("link", { name: "WM-856" })).toBeTruthy();
+    fireEvent.click(
+      within(r.getByRole("group", { name: "Artifact rendering" })).getByRole(
+        "button",
+        { name: "Raw" },
+      ),
+    );
+    expect(r.container.querySelector("pre")?.textContent).toContain(
+      '"schemaVersion": "factory.event/v1"',
+    );
+    expect(r.container.querySelector("pre")?.textContent).toContain(
+      '"eventId": "evt_dispatch"',
+    );
+  });
+
+  test("renders the completed artifact through the run agent's output view", async () => {
+    const sha256 = "c".repeat(64);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(triageArtifact), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+    try {
+      const r = renderWithClient(
+        <EventPanel
+          envelope={{
+            type: "factory.work.completed",
+            source: "worker",
+            payload: { artifactHash: `sha256:${sha256}` },
+          }}
+          runId="run_complete"
+          agents={
+            createAgentsFixture({
+              agents: [
+                {
+                  ref: "triage-scan@1",
+                  outputView: triageView,
+                  eventTypes: [],
+                },
+              ] as any,
+            }).agents
+          }
+        />,
+        {
+          apiMocks: {
+            run: (async (id: string) =>
+              createRunDetailFixture({
+                run: {
+                  runId: id,
+                  state: "SUCCEEDED",
+                  spec: { agent: "triage-scan@1" },
+                } as any,
+              })) as any,
+          },
+        },
+      );
+      expect(await r.findByText(/Three issues moved/)).toBeTruthy();
+    } finally {
+      globalThis.fetch = realFetch;
+      restoreApi();
+    }
+  });
+
+  test("a 404 artifact degrades visibly and keeps the payload fields", async () => {
+    const sha256 = "d".repeat(64);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("nope", { status: 404 })) as unknown as typeof fetch;
+    try {
+      const r = renderWithClient(
+        <EventPanel
+          envelope={{
+            type: "factory.work.completed",
+            source: "worker",
+            payload: {
+              artifactHash: `sha256:${sha256}`,
+              repo: "watt-mind/factory",
+            },
+          }}
+          runId="run_degraded"
+        />,
+      );
+      expect((await r.findByRole("status")).textContent).toContain(
+        "Result artifact unavailable",
+      );
+      expect(r.getByRole("link", { name: "watt-mind/factory" })).toBeTruthy();
+    } finally {
+      globalThis.fetch = realFetch;
+      restoreApi();
+    }
+  });
+
+  test("payload fields keep the semantic FieldValue formatting", () => {
+    const r = renderWithClient(
+      <EventPanel
+        now={Date.parse("2025-01-01T01:00:00.000Z")}
+        envelope={{
+          type: "demo.type",
+          source: "operator",
+          payload: {
+            repo: "watt-mind/factory",
+            ticket: "WM-2122",
+            prNumber: 81,
+            headSha: "0123456789abcdef",
+            receivedAt: "2025-01-01T00:00:00.000Z",
+            optional: undefined,
+          },
+        }}
+      />,
+    );
+
+    expect(r.getByRole("link", { name: "WM-2122" }).getAttribute("href")).toBe(
+      "#/tickets/WM-2122",
+    );
+    expect(r.getByRole("link", { name: "#81" }).getAttribute("href")).toBe(
+      "https://github.com/watt-mind/factory/pull/81",
+    );
+    expect(r.getByRole("link", { name: "01234567" }).getAttribute("href")).toBe(
+      "https://github.com/watt-mind/factory/commit/0123456789abcdef",
+    );
+    expect(
+      r.getByText("receivedAt").closest("div")?.querySelector("dd")
+        ?.textContent,
+    ).toContain("1h");
+    expect(
+      r.getByText("optional").closest("div")?.querySelector("dd")?.textContent,
+    ).toBe("—");
+  });
+
+  test("does not fetch malformed artifact hashes and keeps Raw available", () => {
+    const r = renderWithClient(
+      <EventPanel
+        envelope={{
+          type: "factory.work.completed",
+          source: "worker",
+          payload: { artifactHash: "not-a-hash" },
+        }}
+        runId="run_1"
+      />,
+    );
+    expect(r.getByText("artifactHash")).toBeTruthy();
+    expect(r.getByRole("button", { name: "Raw" })).toBeTruthy();
   });
 });
 
