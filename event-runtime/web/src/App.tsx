@@ -50,6 +50,13 @@ import {
   copyLink,
   copyText,
 } from "./components/ui";
+// Lazy: the dropdown is chrome, not first paint — keeping it (and its
+// run-detail plumbing) out of the entry chunk protects the budget below.
+const WorkspaceDropdown = lazy(() =>
+  import("./components/WorkspaceDropdown").then((module) => ({
+    default: module.WorkspaceDropdown,
+  })),
+);
 import {
   NAV,
   navIsCurrent,
@@ -726,6 +733,9 @@ export function App() {
             </div>
           </div>
           <div className="flex-1 px-2">
+            <Suspense fallback={null}>
+              <WorkspaceDropdown />
+            </Suspense>
             {NAV.map((n, index) => {
               const prev = index > 0 ? NAV[index - 1] : null;
               const isGroupBoundary = prev && prev.group !== n.group;

@@ -30,6 +30,7 @@ import type {
   TicketSummary,
   TraceView,
   Worker,
+  WorkerCapacity,
 } from "./types";
 
 // Same contract as lib/client.mjs: one function per endpoint, an Error with
@@ -534,6 +535,14 @@ export const api = {
       `/workers/${encodeURIComponent(workerId)}/release`,
       { runId },
     ),
+  // Deliberately cancel a live workspace. This is distinct from stale-lease
+  // recovery above: using that recovery route on a live worker would retry it.
+  terminateWorkspace: (workerId: string, runId: string) =>
+    call<{ released: boolean; runId: string; terminated: true }>(
+      "POST",
+      `/workers/${encodeURIComponent(workerId)}/release?terminate=true`,
+      { runId },
+    ),
   // The agent registry, fully readable: definitions, prompts, schemas, pins.
   // Effective adapter/tier include the runtime overlay (WM-887).
   agents: () => call<AgentsView>("GET", "/agents"),
@@ -597,7 +606,8 @@ export const api = {
       apply,
     }),
   // The worker registry: which processes are alive, where, and what they run.
-  workers: () => call<{ workers: Worker[] }>("GET", "/workers"),
+  workers: () =>
+    call<{ workers: Worker[]; capacity?: WorkerCapacity }>("GET", "/workers"),
   // Human inbox ledger (WM-285): everything waiting on the operator, by status.
   inbox: (
     status: InboxStatus = "open",
