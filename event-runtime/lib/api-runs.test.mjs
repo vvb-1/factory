@@ -2856,6 +2856,55 @@ describe("webui surface: proposal linkage, history, journal, outbox, requeue (OP
     }
   });
 
+  test("releasing a live worker is refused; termination is a separate opt-in (GH-2311)", async () => {
+    const nowMs = 300_000;
+    const { db, server, port } = await makeServer({ now: () => nowMs });
+    const client = apiClient({ port, token: CONTROL_TOKEN });
+    try {
+      db.query(
+        `INSERT INTO runs (run_id, idempotency_key, spec_json, spec_hash, state, attempts, created_at, updated_at)
+         VALUES ('run-live', 'live-key', ?, 'sha256:live', 'RUNNING', 1, ?, ?)`,
+      ).run(
+        JSON.stringify({ timeoutSeconds: 60, maxAttempts: 2 }),
+        new Date(nowMs).toISOString(),
+        new Date(nowMs).toISOString(),
+      );
+      db.query(
+        `INSERT INTO attempts (run_id, attempt, fencing_token, lease_owner, lease_expires_at)
+         VALUES ('run-live', 1, 1, 'worker-live', ?)`,
+      ).run(new Date(nowMs + 60_000).toISOString());
+      registerWorker(db, { workerId: "worker-live", now: nowMs });
+      heartbeat(db, "worker-live", {
+        state: "busy",
+        runId: "run-live",
+        now: nowMs,
+      });
+
+      const refused = await rejection(
+        client.releaseWorker("worker-live", "run-live"),
+      );
+      expect(refused.status).toBe(409);
+      expect(String(refused.message)).toContain("not stalled");
+      expect(
+        db.query(`SELECT state FROM runs WHERE run_id = 'run-live'`).get(),
+      ).toEqual({
+        state: "RUNNING",
+      });
+      expect(
+        db
+          .query(
+            `SELECT terminal_state, lease_owner FROM attempts WHERE run_id = 'run-live'`,
+          )
+          .get(),
+      ).toEqual({
+        terminal_state: null,
+        lease_owner: "worker-live",
+      });
+    } finally {
+      server.close();
+    }
+  });
+
   test("requeueing a human_needed event supersedes its open proposal", async () => {
     const { db, server, port } = await makeServer();
     const client = apiClient({ port, token: CONTROL_TOKEN });

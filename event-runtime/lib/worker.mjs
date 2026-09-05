@@ -6541,6 +6541,102 @@ export function releaseStalledWorkerLease(
 }
 
 /**
+ * Terminate a live worker's current workspace at the operator's request.
+ *
+ * This is deliberately not a retry: the current attempt is fenced (its
+ * fencing token is advanced and the lease released) and the worker row is
+ * stopped in one transaction, then settlement and cleanup — the lifecycle
+ * transition, attempt finalization, open-proposal close, tier-escalation
+ * refusal/unclaim, and workspace destruction — are delegated to `cancelRun`.
+ * A late completion from the worker observes a stale token and cannot
+ * publish a result after the operator has settled the attempt.
+ */
+export function terminateLiveWorkerLease(
+  db,
+  { workerId, runId },
+  {
+    now = () => Date.now(),
+    policyVersion = "unknown",
+    actor = "operator",
+  } = {},
+) {
+  const currentNow = resolveNow(now);
+  const fenced = txImmediate(db, () => {
+    const worker = db
+      .query(`SELECT state, current_run FROM workers WHERE worker_id = ?`)
+      .get(workerId);
+    if (!worker) throw new Error(`unknown worker ${workerId}`);
+    if (worker.state === "stopped") {
+      // A stopped worker has nothing left to terminate, even when its row
+      // still points at a run: never settle that run on its behalf here.
+      return {
+        released: false,
+        runId: worker.current_run ?? runId ?? null,
+        reason: "already_terminal",
+      };
+    }
+    if (!worker.current_run)
+      throw new Error(`worker ${workerId} has no active run`);
+    if (runId && worker.current_run !== runId) {
+      throw new Error(
+        `worker ${workerId} holds ${worker.current_run}, not ${runId}`,
+      );
+    }
+
+    const heldRunId = worker.current_run;
+    const run = db
+      .query(`SELECT state, attempts FROM runs WHERE run_id = ?`)
+      .get(heldRunId);
+    if (!run)
+      throw new Error(`worker ${workerId} references unknown run ${heldRunId}`);
+    if (!["LEASED", "RUNNING", "VERIFYING"].includes(run.state)) {
+      return {
+        released: false,
+        runId: heldRunId,
+        reason: "already_terminal",
+        state: run.state,
+      };
+    }
+
+    const attempt = db
+      .query(
+        `SELECT lease_owner FROM attempts WHERE run_id = ? AND attempt = ?`,
+      )
+      .get(heldRunId, run.attempts);
+    if (!attempt) throw new Error(`run ${heldRunId} has no current attempt`);
+    if (attempt.lease_owner && attempt.lease_owner !== workerId) {
+      throw new Error(
+        `run ${heldRunId} is leased by ${attempt.lease_owner}, not ${workerId}`,
+      );
+    }
+
+    // Revoking the current token fences a concurrent executor before it can
+    // write a result. Keep the same attempt number: this operation settles it
+    // rather than creating a retryable attempt.
+    const fencingToken = nextCounter(db, "fencing");
+    db.query(
+      `UPDATE attempts
+          SET fencing_token = ?, lease_owner = NULL, lease_expires_at = ?
+        WHERE run_id = ? AND attempt = ?`,
+    ).run(fencingToken, iso(currentNow), heldRunId, run.attempts);
+    db.query(
+      `UPDATE workers SET state = 'stopped', current_run = NULL, stopped_at = ? WHERE worker_id = ?`,
+    ).run(iso(currentNow), workerId);
+    return { released: true, runId: heldRunId };
+  });
+  if (!fenced.released) return fenced;
+
+  cancelRun(db, fenced.runId, {
+    actor,
+    reason: "operator_terminated",
+    attemptReasonCode: "operator_terminated",
+    now: currentNow,
+    policyVersion,
+  });
+  return { released: true, runId: fenced.runId };
+}
+
+/**
  * Re-queue LEASED/RUNNING/VERIFYING runs whose current attempt's lease expired.
  * The stale attempt keeps its (now lower) fencing token, so a late publish from
  * it is fenced out. Lease loss spends only the dedicated environment budget.
@@ -6684,6 +6780,7 @@ export function cancelRun(
   {
     actor,
     reason = "operator_cancel",
+    attemptReasonCode = "cancelled",
     now = () => Date.now(),
     policyVersion,
     unclaimTierEscalation = defaultUnclaimTicket,
@@ -6712,7 +6809,14 @@ export function cancelRun(
         policyVersion,
         now: currentNow,
       });
-      finishAttempt(db, runId, run.attempts, "FAILED", "cancelled", currentNow);
+      finishAttempt(
+        db,
+        runId,
+        run.attempts,
+        "FAILED",
+        attemptReasonCode,
+        currentNow,
+      );
     } else {
       result = transition(db, {
         runId,
@@ -6728,7 +6832,7 @@ export function cancelRun(
           runId,
           run.attempts,
           "CANCELLED",
-          "cancelled",
+          attemptReasonCode,
           currentNow,
         );
       }
